@@ -32,7 +32,7 @@ def window(qapp, fake_install, tmp_path):
 
 def test_every_screen_loads(window):
     assert [window.steps.item(i).text() for i in range(window.steps.count())] == [
-        "1. Settings", "2. Unit set", "3. Validate", "4. Generate", "5. Test mod"]
+        "1. Settings", "2. Unit set", "3. Textures", "4. Validate", "5. Generate", "6. Test mod"]
     for i, page in enumerate(window.pages):
         window.steps.setCurrentRow(i)
         assert window.stack.currentWidget() is page
@@ -116,3 +116,51 @@ def test_clear_stage_refuses_foreign_files(tmp_path):
     with pytest.raises(ExportError, match="notes.txt"):
         clear_stage(tmp_path)
     assert (tmp_path / "notes.txt").is_file() and (tmp_path / "eu4unitgen_test_v1").is_dir()
+
+
+def _textures_window(window, fake_install, tmp_path):
+    from PIL import Image
+    from fakes import make_textures_decodable
+    make_textures_decodable(fake_install)
+    ref = Image.new("RGB", (40, 40), (150, 20, 30))
+    ref.paste((210, 170, 40), (25, 0, 40, 40))
+    ref.save(tmp_path / "ref.png")
+    window.unit_page.tags.setText("MAC")
+    page = window.textures_page
+    page.palette_image.setText(str(tmp_path / "ref.png"))
+    return page
+
+
+def test_textures_preview_and_guide(window, fake_install, tmp_path):
+    page = _textures_window(window, fake_install, tmp_path)
+    page.preview_btn.click()
+    assert "Base generic_01 (PdxMeshColor)" in page.message.text(), page.message.text()
+    assert all(not label.pixmap().isNull() for label in page.previews)
+    page.guide_btn.click()
+    assert "Wrote 3 PNGs" in page.message.text(), page.message.text()
+    assert (tmp_path / "out" / "texture_guides" / "mac" / "1_infantry_regions.png").is_file()
+    page.pattern_region.setCurrentText("hat")
+    page.pattern_image.setText(str(tmp_path / "ref.png"))
+    page.preview_btn.click()
+    assert "region 'hat'" in page.message.text()
+
+
+def test_textures_recipe_used_by_generate_and_saved(window, fake_install, tmp_path):
+    page = _textures_window(window, fake_install, tmp_path)
+    page.role.setCurrentText("horse")  # stores 1/infantry, switches to 1/horse
+    page.cloth_on.setChecked(True)
+    page.role.setCurrentText("infantry")
+    assert page.palette_image.text().endswith("ref.png")  # 1/infantry came back
+    assert "1/horse (recolour)" in page.slots_label.text() and "1/infantry (palette)" in page.slots_label.text()
+    page.use.setChecked(True)
+    window.generate_page.run.click()
+    assert "Wrote" in window.generate_page.message.text(), window.generate_page.message.text()
+    out = tmp_path / "out" / "mac" / "gfx" / "models" / "Units"
+    assert (out / "hr_mac_infantry_1_diffuse.dds").is_file() and (out / "hr_mac_horse_1_diffuse.dds").is_file()
+
+    page.save_file(tmp_path / "recipe.json")
+    page._clear_slot()
+    page.load_file(tmp_path / "recipe.json")
+    assert page.palette_image.text().endswith("ref.png") and page.use.isChecked()
+    page.use.setChecked(False)
+    assert page.recipe_for_spec() is None

@@ -117,6 +117,17 @@ class Naming:
             raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
         return f"{self.prefix}{check_set_name(set_name)}_{check_identifier(role, 'role')}_{_check_tier(tier)}_{kind}.dds"
 
+    @staticmethod
+    def texture_guide_dir(set_name: str) -> str:
+        """Mask-painting guides, under the output folder (not in the package): texture_guides/mac."""
+        return f"texture_guides/{check_set_name(set_name)}"
+
+    @staticmethod
+    def texture_guide(tier: int, role: str, kind: str) -> str:
+        if role not in MESH_ROLES or kind not in ("diffuse", "regions", "spec"):
+            raise NamingError(f"texture guide {role!r}/{kind!r}")
+        return f"{_check_tier(tier)}_{role}_{kind}.png"
+
     # ------------------------------------------------------------------ sprite packs
     def set_sprite_pack(self, set_name: str) -> str:
         """The TAG pack of a unit set: hr_mac_units, hr_macedonian_test_units."""

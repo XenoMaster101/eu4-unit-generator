@@ -247,7 +247,7 @@ def _issue_tree() -> QTreeWidget:
 # --------------------------------------------------------------------------- validate
 
 class ValidatePage(Page):
-    title = "3. Validate"
+    title = "4. Validate"
 
     def __init__(self, window):
         super().__init__(window)
@@ -268,7 +268,7 @@ class ValidatePage(Page):
 # --------------------------------------------------------------------------- generate
 
 class GeneratePage(Page):
-    title = "4. Generate"
+    title = "5. Generate"
 
     def __init__(self, window):
         super().__init__(window)
@@ -332,7 +332,7 @@ class GeneratePage(Page):
 # --------------------------------------------------------------------------- test mod
 
 class TestModPage(Page):
-    title = "5. Test mod"
+    title = "6. Test mod"
 
     def __init__(self, window):
         super().__init__(window)

@@ -538,7 +538,7 @@ Order (each step with tests and its validator rule; **stop and replan if step 3 
    - **Variant B (tier 2; full paths into `gfx/models/units/hr_macedonian_test/`): FAIL, all black.** error.log: the engine prefixes the mesh's folder to the names (§4). Variant B is dropped: names are bare, DDS beside the mesh.
    - Tiers 3–4 (control): normal.
    - **The whole-texture hue shift recoloured skin too.** Recolouring must be region-limited (below).
-4. **Region-limited recolouring** (`textures/regions.py`, `textures/recolour.py`). Regions are soft masks at the base texture's size:
+4. **Done.** **Region-limited recolouring** (`textures/regions.py`, `textures/recolour.py`). Regions are soft masks at the base texture's size:
    - `country1/2/3`: the spec map's R/G/B (PdxMeshColor bases only).
    - `metal`: spec alpha (gloss) ≥ 14 and low saturation, outside country regions (matches helmets, armour, buckles on the western bases).
    - `skin`: auto-detected (HSV: skin hue, saturation 35–190/255, value ≥ 80, outside country/metal; median, grow, shrink). A heuristic: it catches faces, necks and arms, with a few light-leather false hits.
@@ -547,10 +547,11 @@ Order (each step with tests and its validator rule; **stop and replan if step 3 
    - **Protect mask**, applied to every diffuse operation: `skin` on by default, `metal` optional; a base-provided protect PNG (per base, in the project) replaces the auto mask.
    - Operations, applied in order: `recolour` (region → colour, keeps each pixel's lightness detail), `hue_shift`, `pattern` (tiled PNG; normal/multiply/overlay; opacity), `spec_paint` (PNG mask → set/clear a country channel), `gloss` (mask or region → preset: matte 3%, cloth 8%, metal 13% of 255 alpha).
    - **Reference palette**: extract the reference image's dominant colours (median cut), assign them to the target regions by size (largest region ↔ most dominant colour) and recolour those regions. Default targets are the spec-masked regions; because the shader multiplies the diffuse there by the country colour, palette mode by default **clears that spec channel in the region** (fixed colours). Targeting `cloth` instead keeps country colours.
-   - Guide export: base diffuse PNG + a colour-coded region map, to paint masks over.
-5. **Texture recipes** (`core/recipe.py`, JSON): per slot `<tier>/<role>` (`infantry` incl. rider, `horse`, `cannon`): base (default: the base culture's generic pdxmesh for that tier; base game only), protect settings, operations. Paths are relative to the recipe file.
-6. **Generator + validator**: `generate(..., recipe=)` writes the retextured pdxmeshes (`interface/assets/<prefix><set>.gfx`), derived DDS (diffuse, and spec when changed) and points the TAG set's entities at them (gfx-culture defaults stay vanilla-based). Rules: `dds_format`, `mesh_settings`, `texture_paths`.
-7. **GUI Textures screen** (between Unit set and Validate): slot picker, protect toggles and mask, palette reference, recolour, pattern, spec masks, gloss; guide export; 2D preview that applies the shader's country-colour formula with the set's colour; load/save recipe.
+   - Guide export: base diffuse PNG + a colour-coded region map + the spec map, to paint masks over (`<output>/texture_guides/<set>/`; derived from base-game files, so user output only).
+   - Tuning on the real western bases (2026-10-14): the skin detector catches faces, necks and arms with a few light-leather hits; on horses the same hues down to value 20 are the whole hide, so a cloth recolour can't leave the coat patchy. Palette colours: fine median cut + k-means, then the most common colours at least 60 apart in RGB.
+5. **Done.** **Texture recipes** (`core/recipe.py`, JSON): per slot `<tier>/<role>` (`infantry` incl. rider, `horse`, `cannon`): base (default: the base culture's generic pdxmesh for that tier; base game only), protect settings, operations. Paths are relative to the recipe file.
+6. **Done.** **Generator + validator**: `generate(..., recipe=)` writes the retextured pdxmeshes (`interface/assets/<prefix><set>.gfx`), derived DDS (diffuse, and spec when changed) and points the TAG set's entities at them (gfx-culture defaults stay vanilla-based). Rules: `dds_format`, `mesh_settings`, `texture_paths`.
+7. **Done.** **GUI Textures screen** (between Unit set and Validate; `gui/textures_page.py`, form = `core.recipe.SimpleSlot`, previews and guides through `Session.texture_preview` / `export_texture_guide`): slot picker, protect toggles and mask, palette reference, recolour, pattern, spec masks, gloss; guide export; 2D preview that applies the shader's country-colour formula with the set's colour; load/save recipe.
 8. `blender/runner.py` (version check, timeout, log) + `check_addon.py`. The mesh copy job isn't needed for retextures (Phase 3 kitbash will use the runner).
 
 ### Phase 3: Blender mesh jobs

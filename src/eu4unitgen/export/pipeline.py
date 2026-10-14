@@ -9,6 +9,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from eu4unitgen.core.generator import GeneratedSet, GenerationError, generate
 from eu4unitgen.core.naming import TEST_MOD_NAME, NamingError, check_tag
@@ -62,7 +63,7 @@ class SetSpec:
     colour: tuple[int, int, int] | None = None
     tech_group: str = ""  # blank: the tag's 1444 tech group, else western
     gfx_set_base: str | None = None
-    texture_recipe: Path | None = None  # Phase 2: a core.recipe JSON file
+    texture_recipe: Any = None  # Phase 2: a core.recipe JSON file (Path) or a TextureRecipe
 
     @staticmethod
     def parse_tags(text: str) -> list[str]:
@@ -89,6 +90,19 @@ class TestModResult:
     checklist: str = ""
 
 
+@dataclass
+class TexturePreview:
+    base: str  # the base pdxmesh
+    shader: str
+    guide: Any  # PIL images: regions over the base diffuse, then base and edited as the shader tints them
+    before: Any
+    after: Any
+    notes: list[str]
+
+
+PREVIEW_COLOURS = [(40, 90, 200), (230, 230, 230), (30, 30, 30)]  # placeholders when the set has no colour
+
+
 STAGE_ENTRY = re.compile(rf"^{TEST_MOD_NAME}(_v\d+|_textures)?(\.mod)?$")
 
 
@@ -113,10 +127,11 @@ def clear_stage(stage_dir: Path) -> None:
 
 
 def load_recipe(spec: "SetSpec"):
+    """The spec's texture recipe: a TextureRecipe as it is (the GUI's), or loaded from a file."""
     from eu4unitgen.core.recipe import RecipeError, TextureRecipe
 
-    if spec.texture_recipe is None:
-        return None
+    if spec.texture_recipe is None or isinstance(spec.texture_recipe, TextureRecipe):
+        return spec.texture_recipe
     try:
         return TextureRecipe.load(spec.texture_recipe)
     except RecipeError as exc:
@@ -288,3 +303,56 @@ class Session:
         if built is not None:
             checklist = suite_checklist(built, sprite_techs)
         return TestModResult(stage, reports, written, warnings, checklist)
+
+    # ------------------------------------------------------------------ textures (Phase 2)
+    def _slot_base(self, spec: SetSpec, tier: int, role: str, base: str | None):
+        from eu4unitgen.core.generator import BaseChain
+        from eu4unitgen.core.retexture import base_textures, default_base
+
+        game, idx = self.game()
+        try:
+            name = base or default_base(BaseChain(idx, spec.base_gfx), role, tier)
+            return base_textures(name, game, idx)
+        except GenerationError as exc:
+            raise SpecError(str(exc)) from exc
+
+    def texture_preview(self, spec: SetSpec, tier: int, role: str, recipe, slot) -> TexturePreview:
+        """One slot's edit, before/after, tinted the way PdxMeshColor tints it with the set's
+        colour (secondary/tertiary: placeholders). Writes nothing."""
+        from eu4unitgen.core.recipe import RecipeError, apply_slot
+        from eu4unitgen.textures.recolour import shade
+        from eu4unitgen.textures.regions import guide
+
+        b = self._slot_base(spec, tier, role, slot.base)
+        try:
+            res = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role)
+        except RecipeError as exc:
+            raise SpecError(str(exc)) from exc
+        colours = [spec.colour or PREVIEW_COLOURS[0], *PREVIEW_COLOURS[1:]]
+        shader = b.shape["shader"]
+        return TexturePreview(b.pdxmesh, shader, guide(b.diffuse, res.regions),
+                              shade(b.diffuse, b.specular, colours, shader),
+                              shade(res.diffuse or b.diffuse, res.specular or b.specular, colours, shader), res.notes)
+
+    def export_texture_guide(self, spec: SetSpec, tier: int, role: str, base: str | None = None) -> list[Path]:
+        """Write PNGs to paint masks over (the base diffuse, its region map, its spec map) to
+        <output>/texture_guides/<set>/. Derived from base-game files: user output only, never the repo."""
+        from eu4unitgen.core.naming import Naming
+        from eu4unitgen.textures.regions import auto_regions, guide
+
+        b = self._slot_base(spec, tier, role, base)
+        naming = Naming(self.settings.prefix)
+        name = spec.set_name or (spec.tags[0].lower() if spec.tags else "")
+        try:
+            folder = self.settings.output_dir / naming.texture_guide_dir(name)
+        except NamingError as exc:
+            raise SpecError(str(exc)) from exc
+        folder.mkdir(parents=True, exist_ok=True)
+        regions = auto_regions(b.diffuse, b.specular, b.uses_country_colour, hide=role == "horse")
+        out = []
+        for kind, img in (("diffuse", b.diffuse.convert("RGB")), ("regions", guide(b.diffuse, regions)),
+                          ("spec", b.specular.convert("RGBA"))):
+            path = folder / naming.texture_guide(tier, role, kind)
+            img.save(path)
+            out.append(path)
+        return out

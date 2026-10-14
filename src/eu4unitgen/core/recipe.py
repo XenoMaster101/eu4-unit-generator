@@ -253,3 +253,83 @@ def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, sp
             s = rc.gloss(s, mask_or_region(op), pct)
             s_changed = True
     return SlotResult(d if d_changed else None, s if s_changed else None, regions, protect, notes)
+
+
+# --------------------------------------------------------------------------- the Textures screen's form
+
+@dataclass
+class SimpleSlot:
+    """One slot as the GUI's fixed form shows it. ``to_slot`` writes the operations in a fixed
+    order: palette, cloth recolour, pattern, spec masks, gloss, then any operations the form
+    can't show (``extra``, kept as they were)."""
+    base: str | None = None
+    protect_skin: bool = True
+    protect_metal: bool = False
+    protect_mask: str | None = None
+    palette_image: str | None = None
+    palette_targets: list[str] = field(default_factory=lambda: list(COUNTRY_REGIONS))
+    palette_fixed: bool = True
+    cloth_colour: tuple[int, int, int] | None = None
+    cloth_strength: float = 1.0
+    pattern_image: str | None = None
+    pattern_region: str = "cloth"
+    pattern_blend: str = "multiply"
+    pattern_opacity: float = 1.0
+    pattern_scale: float = 1.0
+    spec_masks: dict[str, str] = field(default_factory=dict)  # country1-3 -> PNG (set)
+    gloss_preset: str | None = None
+    gloss_region: str = "metal"
+    gloss_mask: str | None = None
+    extra: list[dict] = field(default_factory=list)
+
+    def to_slot(self) -> SlotRecipe:
+        ops: list[dict] = []
+        if self.palette_image:
+            ops.append({"op": "palette", "image": self.palette_image, "targets": list(self.palette_targets),
+                        "fixed": self.palette_fixed})
+        if self.cloth_colour is not None:
+            ops.append({"op": "recolour", "region": "cloth", "colour": list(self.cloth_colour),
+                        "strength": self.cloth_strength})
+        if self.pattern_image:
+            ops.append({"op": "pattern", "region": self.pattern_region, "image": self.pattern_image,
+                        "blend": self.pattern_blend, "opacity": self.pattern_opacity, "scale": self.pattern_scale})
+        for channel in COUNTRY_REGIONS:
+            if self.spec_masks.get(channel):
+                ops.append({"op": "spec_paint", "channel": channel, "mask": self.spec_masks[channel], "mode": "set"})
+        if self.gloss_preset:
+            g = {"op": "gloss", "preset": self.gloss_preset}
+            g.update({"mask": self.gloss_mask} if self.gloss_mask else {"region": self.gloss_region})
+            ops.append(g)
+        ops += self.extra
+        for op in ops:
+            check_op(op)
+        return SlotRecipe(self.base, self.protect_skin, self.protect_metal, self.protect_mask, ops)
+
+    @classmethod
+    def from_slot(cls, slot: SlotRecipe) -> "SimpleSlot":
+        f = cls(base=slot.base, protect_skin=slot.protect_skin, protect_metal=slot.protect_metal,
+                protect_mask=slot.protect_mask)
+        seen: set[str] = set()
+        for op in slot.ops:
+            kind = op.get("op")
+            if kind == "palette" and "palette" not in seen:
+                f.palette_image, f.palette_fixed = op["image"], bool(op.get("fixed", True))
+                f.palette_targets = list(op.get("targets", list(COUNTRY_REGIONS)))
+            elif kind == "recolour" and op.get("region") == "cloth" and "recolour" not in seen:
+                f.cloth_colour, f.cloth_strength = tuple(op["colour"]), float(op.get("strength", 1.0))
+            elif kind == "pattern" and "pattern" not in seen:
+                f.pattern_image, f.pattern_region = op["image"], op["region"]
+                f.pattern_blend, f.pattern_opacity = op.get("blend", "multiply"), float(op.get("opacity", 1.0))
+                f.pattern_scale = float(op.get("scale", 1.0))
+            elif (kind == "spec_paint" and op.get("mode", "set") == "set" and op.get("mask")
+                  and op["channel"] not in f.spec_masks):
+                f.spec_masks[op["channel"]] = op["mask"]
+                continue
+            elif kind == "gloss" and "gloss" not in seen and "preset" in op:
+                f.gloss_preset, f.gloss_mask = op["preset"], op.get("mask")
+                f.gloss_region = op.get("region", "metal")
+            else:
+                f.extra.append(op)
+                continue
+            seen.add(kind)
+        return f

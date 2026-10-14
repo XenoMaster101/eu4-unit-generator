@@ -222,3 +222,15 @@ def test_pipeline_takes_a_recipe_file(fake_install, tmp_path):
             s.validate(SetSpec(["MAC"], "hellenicgfx", texture_recipe=tmp_path / "bad.json"))
     finally:
         s.close()
+
+
+def test_simple_slot_round_trip_keeps_unknown_ops():
+    from eu4unitgen.core.recipe import SimpleSlot
+    f = SimpleSlot(palette_image="r.png", palette_targets=["country1", "cloth"], cloth_colour=(1, 2, 3),
+                   pattern_image="p.png", spec_masks={"country2": "m.png"}, gloss_preset="cloth",
+                   extra=[{"op": "hue_shift", "region": "cloth", "degrees": 10}])
+    slot = f.to_slot()
+    assert [op["op"] for op in slot.ops] == ["palette", "recolour", "pattern", "spec_paint", "gloss", "hue_shift"]
+    assert SimpleSlot.from_slot(slot) == f
+    with pytest.raises(RecipeError):
+        SimpleSlot(pattern_image="p.png", pattern_region="hat").to_slot()
