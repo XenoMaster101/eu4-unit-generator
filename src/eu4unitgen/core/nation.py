@@ -57,11 +57,14 @@ class Nation:
     tech_group: str | None = "western"  # unit_type on infantry/cavalry; artillery never has one
     units: list[UnitSpec] = field(default_factory=list)
     set_name: str = ""  # names the pack, files and unit keys; defaults to the tag in lowercase
+    gfx_set_base: str | None = None  # vanilla culture the gfx-culture default set copies; None: base_gfx
 
     def __post_init__(self) -> None:
         check_tag(self.tag)
         check_gfx(self.gfx_culture)
         check_gfx(self.base_gfx)
+        if self.gfx_set_base is not None:
+            check_gfx(self.gfx_set_base)
         if self.tech_group is not None:
             check_identifier(self.tech_group, "tech group")
         if self.colour is not None and (len(self.colour) != 3 or not all(0 <= c <= 255 for c in self.colour)):

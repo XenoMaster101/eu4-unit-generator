@@ -64,7 +64,7 @@ The game shows **one model per army**, chosen by the dominant unit type, so ever
 - Graphical-culture defaults: `<gfx>_INFANTRY_n`, `<gfx>_CAVALRY_n`, `<gfx>_CAVALRY_n_rider`, `<gfx>_ARTILLERY_n`; cannons `<gfx>_ARTILLERY_n_cannon`. Western artillery tiers 2–4 clone `westerngfx_ARTILLERY_1` as `westerngfx_ARTILLERY_n_generic`.
 - DLC variants carry suffixes (e.g. `_evup`, `_generic`).
 - Cloning: `entity = { clone = "SRC" name = "NEW" ... }`. Fields given on the clone override the source (e.g. `pdxmesh`). DLC116 combines `clone` and `version` in one entity.
-  **UNVERIFIED:** whether a clone's `attach` blocks replace the source's by attach `name` or are added. Vanilla always restates the named attach (`name = "rider"`, `name = "gunman"`) on clones.
+  **UNVERIFIED, moot for the generator** (it emits no clones): whether a clone's `attach` blocks replace the source's by attach `name` or are added. Vanilla always restates the named attach (`name = "rider"`, `name = "gunman"`) on clones.
 - **Clones resolve at load time, in load order (confirmed in game, 2026-10-14).** The parent must already be loaded when the engine reaches the `clone =` line. Load order for `gfx/entities/*.asset` is file name order (base game and DLC files interleaved; a mod file takes its own name's slot), then top to bottom in each file. A mod file named `hr_*.asset` loads before `western_units.asset`, so `clone = "westerngfx_CAVALRY_1"` fails with `Couldn't find parent clone entity`. This model fits all 4,760 vanilla + DLC clones on 1.37.5; the 7 whose parent lives in another file all point at an earlier-sorting file (`wonup.asset` → `western_units.asset`, `_musup_units.asset` → `_hindup_units.asset`). Paradox names some files `_*.asset` so they load first. **UNVERIFIED:** whether the name order is case-sensitive (no vanilla file name tells them apart; the validator uses lowercase).
 - `attach` targets and `pdxmesh` names are **not** resolved at load: infantry attaching `western_musket` (defined in `weapons.asset`, after `hr_*`) works in game.
 - **The generator never emits `clone =`.** Every generated entity is a full definition: the base entity's resolved `pdxmesh`, live states and attaches, with the named attach (`rider`, `gunman`) swapped for ours. The `clone_order` validator rule rejects any generated clone whose parent isn't loaded before it.
@@ -73,7 +73,7 @@ The game shows **one model per army**, chosen by the dominant unit type, so ever
 - Vanilla base-game entities have **no** `version` line.
 - DLC116 redefines `DAN_INFANTRY_1`, `DAN_CAVALRY_1`, etc. with `version = 4` to replace the base-game definitions. `weapons.asset` uses `version = -1` on an entity it deliberately duplicates.
 - The project uses a project-wide `version` (default 20) on every generated entity. Collisions log `Set a higher version on entity X`.
-- **UNVERIFIED:** that a missing version counts as 0, and which definition wins on a tie.
+- **UNVERIFIED, not covered by the Phase 1 tests:** that a missing version counts as 0 (Phase 0 only shows `version = 4` beating no version), and which definition wins on a tie. Generated entity names are new (`version_collisions` checks), so neither affects Phase 1 output.
 
 ### Sprite packs
 - **Since 1.30, sprite packs assign entities to tags** via `country_trigger`. Indices `0–3` = tiers 1–4.
@@ -91,12 +91,15 @@ The game shows **one model per army**, chosen by the dominant unit type, so ever
 - **Pack order.** Base-game packs (including `dan_base_sprite_pack` and all gfx packs) have **no** entry in `sprite_packs_order`. The vanilla order file says the default is 0 and *"anything higher will take priority"*. Its bands are 0 gfx culture, 10 culture groups, 20 culture group, 30 primary cultures, 40 primary culture, 50 tags, 60 tag, 70 more specific. DLC goes up to 100 (`dlc116_DAN_sprite_pack = 100`).
   - The generator writes an order entry for every **tag** pack. The default is 110 (configurable), so a tag pack beats any vanilla or DLC pack whose trigger might also match a total-conversion nation. The validator warns when a vanilla or DLC pack with a higher number could match the same country.
   - gfx-culture packs get no order entry, matching vanilla.
-  - **UNVERIFIED (Phase 1 in-game test):** that a higher number wins, which is Paradox's comment and has not been tested.
-- **UNVERIFIED (Phase 1 in-game test):** the engine's fallback order (tag sprite pack → TAG entity names → gfx culture pack/entities).
+  - **Confirmed in game (2026-10-14, test 3): the higher order wins.** Two packs with the same trigger (`tag = HDA`): at A 110 / B 111 HDA showed B (asiangfx); swapped to A 111 / B 110 it showed A (western). File and pack names didn't decide (`hr_macedonian_test_*` vs `hr_priority_test_*`, same result both ways).
+- **Fallback order, confirmed in game (2026-10-14, test 3, 1.37.5):** a country uses the highest-order sprite pack whose `country_trigger` matches it; failing that, **its graphical culture's pack** (`graphical_cultures = { ... }`). **`TAG_*` entity names alone do nothing**: BAL with full `BAL_INFANTRY/CAVALRY/ARTILLERY_1–4` entities and no pack showed its graphical culture's (indiangfx) models. So every generated TAG set needs its tag pack, which the generator always writes.
+  - (a) BTS, no pack and no `BTS_*`: its own africangfx models (gfx-culture pack).
+  - (b) BAL, `BAL_*` entities, no pack: indiangfx, not the entities.
+  - (c) QTO switched to the new `hellenicgfx`, covered only by the generated `hellenicgfx_sprite_pack`: showed the hellenicgfx default set (muslimgfx copies in that test). **A new graphical culture with its own default set and gfx pack works.**
 
 ### Graphical culture list
 `common/graphicalculturetype.txt` is a bare list of names, one per line, with no braces or keys (e.g. `westerngfx`). It is a single file, not a folder. At export the generator writes it into the mod by reading the user's vanilla list and adding the new names. It is never stored in the repo.
-**UNVERIFIED:** that the mod's copy replaces the vanilla file (expected Clausewitz behaviour for a single file) rather than merging with it.
+The mod's copy (vanilla list + `hellenicgfx`) works in game: QTO used `hellenicgfx` (test 3), and error.log had nothing about graphical cultures. **UNVERIFIED, moot:** whether the copy replaces vanilla's file or merges with it. Both give the same list, because the copy contains every vanilla name.
 
 ---
 
@@ -128,7 +131,7 @@ Shaders (code in `gfx/FX/pdxmesh.lua`):
 
 - **States:** `idle`, `walk`, `attack`, `retreat`. `death` and `extra_state_1–3` are commented out in every vanilla unit entity. Do not template them.
 - **State → animation id → type → file.** `state = { name = "idle" animation = "idle" }` names an **id** in the entity's pdxmesh (`animation = { id = "idle" type = "rifleman_idle_animation" }`). The type resolves through `animation.asset` to an `.anim` file.
-- **Infantry pdxmesh animation ids (all 11 always defined in vanilla):** `idle walk attack death retreat` (on foot), `horse_idle horse_walk horse_attack horse_death horse_retreat` (as a cavalry rider), `artillery_attack` (as artillery crew). The generator always emits all 11. **UNVERIFIED:** how `artillery_attack` is triggered on the crew.
+- **Western infantry pdxmesh animation ids (all 11 defined in vanilla):** `idle walk attack death retreat` (on foot), `horse_idle horse_walk horse_attack horse_death horse_retreat` (as a cavalry rider), `artillery_attack` (as artillery crew). The generator always emits all 11 for its own meshes. **Other cultures differ:** every base-game crew pdxmesh outside westerngfx (eastern, muslim, indian, asian, african, both american sets) lacks `artillery_attack`, and vanilla ships it that way. **UNVERIFIED:** how `artillery_attack` is triggered on the crew, and what a crew without it does.
 - **Infantry:** root entity = infantry pdxmesh. Weapon attach node depends on the weapon: **melee on `Right_hand_node`** (halberd), **muskets on `Left_hand_node`**.
 - **Cavalry:** root entity = **horse** pdxmesh (`cavalry_horse` for tiers 1–2, `cavalry_horse_3_mesh` for tiers 3–4 in western). Horse states use ids `horse_idle`, `horse_walk`, `horse_attack`, and `retreat` → `horse_walk`. It carries `attach = { name = "rider" Saddle_Node = "<rider entity>" }`.
   The **rider** entity uses a pdxmesh for the **same `.mesh` file as that tier's infantry**. Sometimes the rider's pdxmesh is the same one the infantry uses, and sometimes it's a separately named pdxmesh for the same file (DAN tier 2: entity `DAN_INFANTRY_2` uses pdxmesh `western_generic_02_type1`, while `DAN_CAVALRY_2_rider` uses pdxmesh `DAN_INFANTRY_2`; both point to `western_generic_02_type1.mesh`). The rider's states use the `horse_*` ids, and it attaches its weapon with `Right_hand_node` (`cavalry_saber`).
@@ -155,7 +158,7 @@ Log path: `Documents/Paradox Interactive/Europa Universalis IV/logs/error.log`
 | `Couldn't find parent clone entity X, in file "...", near line N` | Clone parent not loaded yet (defined in a later-sorting file, later in the same file, or nowhere). The unit falls back to the country's graphical-culture model | `clone_order`: parent defined earlier in load order (§3) |
 | `Could not find mesh file gfx/models/...mesh` | pdxmesh `file =` wrong | Every pdxmesh file exists (mod, vanilla or DLC) |
 | Black/untextured model in-game | Textures in .mesh missing or wrong format | Mesh texture refs resolve in the mesh's folder; DDS format matches base |
-| (no log; frozen/T-posed unit) | State names an animation id the pdxmesh lacks | Every state animation id exists in the resolved pdxmesh; every type exists; rider pdxmesh has `horse_*`; crew pdxmesh has `artillery_attack` |
+| (no log; frozen/T-posed unit) | State names an animation id the pdxmesh lacks | Every state animation id exists in the resolved pdxmesh; every type exists; rider pdxmesh has `horse_*`; crew pdxmesh has `artillery_attack` unless vanilla already uses that pdxmesh as a crew |
 
 ---
 
@@ -459,7 +462,7 @@ Edited meshes keep the vanilla skeleton, so they **reuse vanilla animation types
   2. Animation indirection: state → id → type → `.anim` (§2, §5).
   3. States are `idle walk attack retreat`; no `death` (§5).
   4. Muskets on `Left_hand_node`, melee on `Right_hand_node` (§5).
-  5. Riders use a pdxmesh for the tier's infantry `.mesh` and need the `horse_*` ids; crew needs `artillery_attack` (§5).
+  5. Riders use a pdxmesh for the tier's infantry `.mesh` and need the `horse_*` ids; crew needs `artillery_attack` (§5; western only, see §5 for other cultures).
   6. Vanilla entities have no `version`; DLC uses `version = 4` / `-1` (§3).
   7. `graphicalculturetype.txt` is a bare name list (§3).
   8. gfx-culture defaults are wired by a `graphical_cultures` sprite pack (§3, §7.4).
@@ -470,7 +473,7 @@ Edited meshes keep the vanilla skeleton, so they **reuse vanilla animation types
 - Moved out of Phase 0: bone **parenting** (hierarchy) is deferred to Phase 3. The Blender import of one infantry, horse+rider and artillery mesh moves with it; bone names, locators, shaders, texture names and DDS headers are already done.
 
 ### Phase 1: Scaffolder + validator (no meshes) — IN PROGRESS
-Done (2026-10-14): parser/writer, naming, templates, generator, validator, export dry-run/manifest, CLI. MAC/hellenicgfx validates clean against 1.37.5 + DLC116. Remaining: nation wizard (GUI) and the in-game tests below.
+Done (2026-10-14): parser/writer, naming, templates, generator, validator, export dry-run/manifest, CLI, and all in-game tests below. MAC/hellenicgfx validates clean against 1.37.5 + DLC116. **Remaining: nation wizard (GUI).**
 - **Mod checks are off by default** (`Project.check_mod_collisions`, CLI `--check-mod`) until the Hellenistic Revolution folder exists. Off means the mod folder is not read for collisions or shared-file copies. Export ownership checks always run.
 - **Test mod.** `cli test-mod` writes `<EU4 mod dir>/eu4unitgen_test.mod` + `eu4unitgen_test/` (descriptor keys copied from the user's own `.mod` files: `version tags name supported_version path`). It contains the package plus the tag's vanilla country file with INTEGRATION.md applied. It reads no other mod.
 - **Test tag.** `cli pick-test-tag` checks every tag that owns land on 1444.11.11 against every vanilla and DLC sprite-pack trigger (tag, was_tag, primary_culture, culture, culture_group, colonial flags, has_reform at the start date, AND/OR/NOT; anything else counts as "might match") and against vanilla/DLC `TAG_*` unit entities. On 1.37.5 exactly one tag passes: **HDA (Haida)**, 1 province, north_american tech, northamericagfx. DLC unit packs cover every other 1444 culture. Test set: `macedonian_test` on HDA, graphical culture overridden to hellenicgfx.
@@ -486,11 +489,19 @@ Done (2026-10-14): parser/writer, naming, templates, generator, validator, expor
   - **Infantry tiers 1–4: pass.** The TAG pack's `HDA_INFANTRY_n` shows at each tier.
   - **The map model follows the country's `sprite_level` (from MIL tech), not the unit selected for the regiment.** So the sprite-pack tier index comes from tech, and a tier's unit files don't pick its model.
   - **Cavalry and artillery: fail.** error.log had `Couldn't find parent clone entity westerngfx_CAVALRY_1_rider / westerngfx_CAVALRY_n / westerngfx_ARTILLERY_1` for every clone in both `hr_macedonian_test_units.asset` and `hr_hellenicgfx_units.asset`. The parents exist with exactly those names in `western_units.asset`, which loads after `hr_*` (§3). Both fell back to HDA's native northamericagfx models. Fix: full entity definitions plus the `clone_order` rule.
-- **In-game test 2 (2026-10-14, same setup, full entity definitions): pass.** Cavalry and artillery show the western models at multiple tiers. error.log has no clone, entity or `hr_` errors. What's left in it isn't ours: Workshop `.mod` descriptor parse warnings (`ugc_*.mod`), vanilla GUI warnings (`unitpanel_card.gui`, `countrygovernmentview.gui`, `macrobuild_mapicons.gui`) and a vanilla `economic_ideas` scope error. Not yet confirmed one by one: cavalry and artillery at all 4 tiers (the report says "multiple").
+- **In-game test 2 (2026-10-14, same setup, full entity definitions): pass.** Cavalry and artillery show the western models at multiple tiers. error.log has no clone, entity or `hr_` errors. What's left in it isn't ours: Workshop `.mod` descriptor parse warnings (`ugc_*.mod`), vanilla GUI warnings (`unitpanel_card.gui`, `countrygovernmentview.gui`, `macrobuild_mapicons.gui`) and a vanilla `economic_ideas` scope error. Cavalry and artillery at all 4 tiers were confirmed in test 3.
   - The EU4 launcher rewrites `<mod dir>/<name>.mod` and drops its final newline. The exporter treats that one change as unedited for launcher descriptors only.
+- **In-game test 3 (2026-10-14): `test-mod --suite`.** Two variant mods, `eu4unitgen_test_v1` and `_v2`, enable one per launch. Both hold the same files except two order entries. The CLI prints the pass/fail checklist.
+  - **Pack priority on HDA:** pack A `hr_macedonian_test_units` (western copies) against rival pack B `hr_priority_test_units` (`tag = HDA`, lists vanilla `asiangfx_*`). v1: A 110, B 111. v2: A 111, B 110. HDA tiers 1–4 are checked in whichever launch shows A.
+  - **Fallback tags** come from pick-test-tag's coverage check, run on facts after the patch. Each gets HDA's culture (`haida`) through a patched copy of its `history/countries` file (the `primary_culture` lines in effect at 1444.11.11; nothing else changes), so no culture-based vanilla or DLC pack can match it, whichever DLC is owned. On 1.37.5 the picker chooses (largest by provinces within the preferred look):
+    - (a) **BTS** (africangfx): no pack, no `BTS_*`. Expect africangfx.
+    - (b) **BAL** (indiangfx): `BAL_*` entities (western copies, `hr_bal_fallback_units.asset`), no pack. western = the engine still looks up `TAG_*` names; indian = it doesn't.
+    - (c) **QTO** (southamericagfx), `graphical_culture = hellenicgfx`: only the hellenicgfx gfx pack. In the suite the hellenicgfx defaults copy **muslimgfx** (`--gfx-set-base`), so a pass can't be confused with a westerngfx fallback.
+  - The `test_fixtures` validator rule re-reads every suite file: patched cultures, no pack can match a fallback tag, only case b has `TAG_*` entities, case c's country file, the rival trigger and the one-step order gap.
+  - **Results (2026-10-14): all pass.** v1: HDA asiangfx (rival, higher order); BTS africangfx; BAL indiangfx; QTO muslimgfx (the hellenicgfx defaults). v2: HDA western; tiers 1–4 pass for infantry, cavalry and artillery. error.log after both launches: no clone, entity or `hr_` lines, and nothing about the fallback tags. The only lines were Workshop `ugc_*.mod` descriptor parse warnings, the news banner (`steam_depot_id`, JSON) and vanilla GUI warnings. Findings are in §3 (pack order, fallback order, graphical culture list).
 - **Done when:**
-  - a nation generated by the app shows correct models in all 4 tiers in-game with a clean error.log;
-  - **in-game test of fallback order and pack priority** is done and §3's UNVERIFIED items are resolved:
+  - ~~a nation generated by the app shows correct models in all 4 tiers in-game with a clean error.log;~~ done (tests 1–3);
+  - ~~**in-game test of fallback order and pack priority** is done and §3's UNVERIFIED items are resolved:~~ done (test 3). §3 items still open (version default/ties, clone attach merging, case-sensitive load order, gfx list replace vs merge) don't affect generated output and stay marked;
     - Fallback: (a) a tag with no sprite pack and no TAG entities; (b) a tag with `TAG_*` entities but no pack; (c) a tag whose gfx culture has only a gfx pack. Record which models show.
     - Priority: two packs for the same tag with different entities at orders N and N+1, then swapped. Record which wins. DLC116 + DAN is a second, free check (order 100, `version = 4`).
 

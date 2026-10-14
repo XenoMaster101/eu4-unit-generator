@@ -179,6 +179,28 @@ class Naming:
         only files meant for the mod."""
         return f"{TOOL_DIR}/{check_set_name(set_name)}.manifest.json"
 
+    # ------------------------------------------------------------------ in-game test suite (test mod only)
+    def priority_test_pack(self) -> str:
+        """The rival TAG pack of the pack-priority test (SPEC §10)."""
+        return f"{self.prefix}priority_test_units"
+
+    def priority_test_pack_file(self) -> str:
+        return f"gfx/sprite_packs/{self.prefix}priority_test_pack.txt"
+
+    def priority_test_order_file(self) -> str:
+        return f"gfx/sprite_packs_order/{self.prefix}priority_test_order.txt"
+
+    def fallback_entities_file(self, tag: str) -> str:
+        """TAG_* entities with no sprite pack (fallback case b)."""
+        return f"gfx/entities/{self.prefix}{check_tag(tag).lower()}_fallback_units.asset"
+
+    @staticmethod
+    def test_variant_mod(variant: int) -> str:
+        """eu4unitgen_test_v1, _v2: one mod per pack-priority variant; enable one at a time."""
+        if variant not in (1, 2):
+            raise NamingError(f"test variant {variant!r} must be 1 or 2")
+        return f"{TEST_MOD_NAME}_v{variant}"
+
     @staticmethod
     def mil_tech_file() -> str:
         return "common/technologies/mil.txt"

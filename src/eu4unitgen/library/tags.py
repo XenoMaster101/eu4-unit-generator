@@ -41,6 +41,7 @@ def _history_entries(doc: Block, date: tuple[int, int, int]) -> list[Pair]:
 class TagFacts:
     tag: str
     country_file: str | None = None  # e.g. common/countries/Epirus.txt
+    history_file: str | None = None  # e.g. history/countries/EPI - Epirus.txt
     graphical_culture: str | None = None
     primary_culture: str | None = None
     accepted_cultures: list[str] = field(default_factory=list)
@@ -92,10 +93,10 @@ def tag_facts(files: GameFiles, date: tuple[int, int, int] = START_DATE) -> dict
     owners = province_owners(files, date)
     groups = culture_groups(files)
     cfiles = country_files(files)
-    history = {}
+    history: dict[str, tuple[str, bytes]] = {}
     for path, _, data in files.iter_files("history/countries", (".txt",)):
         tag = path.rsplit("/", 1)[-1][:3].upper()
-        history.setdefault(tag, data)
+        history.setdefault(tag, (path, data))
     out = {}
     for tag, n in sorted(owners.items()):
         f = TagFacts(tag, cfiles.get(tag), provinces=n)
@@ -104,25 +105,38 @@ def tag_facts(files: GameFiles, date: tuple[int, int, int] = START_DATE) -> dict
             if raw:
                 f.graphical_culture = parse_bytes(raw).get_str("graphical_culture")
         if tag in history:
-            for p in _history_entries(parse_bytes(history[tag]), date):
-                if not isinstance(p.value, Scalar):
-                    continue
-                k, v = p.key.value, p.value.value
-                if k == "primary_culture":
-                    f.primary_culture = v
-                elif k == "add_accepted_culture":
-                    f.accepted_cultures.append(v)
-                elif k == "remove_accepted_culture" and v in f.accepted_cultures:
-                    f.accepted_cultures.remove(v)
-                elif k == "religion":
-                    f.religion = v
-                elif k == "technology_group":
-                    f.technology_group = v
-                elif k == "add_government_reform":
-                    f.reforms.append(v)
-        f.culture_group = groups.get(f.primary_culture or "")
+            f.history_file = history[tag][0]
+            apply_history(f, history[tag][1], groups, date)
+        else:
+            f.culture_group = groups.get(f.primary_culture or "")
         out[tag] = f
     return out
+
+
+def apply_history(f: TagFacts, data: bytes, groups: dict[str, str],
+                  date: tuple[int, int, int] = START_DATE) -> TagFacts:
+    """Fill ``f``'s history facts from a history/countries file at ``date`` (in place).
+    The history fields are reset first, so this also re-reads a patched copy."""
+    f.primary_culture, f.religion, f.technology_group = None, None, None
+    f.accepted_cultures, f.reforms = [], []
+    for p in _history_entries(parse_bytes(data), date):
+        if not isinstance(p.value, Scalar):
+            continue
+        k, v = p.key.value, p.value.value
+        if k == "primary_culture":
+            f.primary_culture = v
+        elif k == "add_accepted_culture":
+            f.accepted_cultures.append(v)
+        elif k == "remove_accepted_culture" and v in f.accepted_cultures:
+            f.accepted_cultures.remove(v)
+        elif k == "religion":
+            f.religion = v
+        elif k == "technology_group":
+            f.technology_group = v
+        elif k == "add_government_reform":
+            f.reforms.append(v)
+    f.culture_group = groups.get(f.primary_culture or "")
+    return f
 
 
 def start_level(files: GameFiles, tech_group: str | None) -> int | None:

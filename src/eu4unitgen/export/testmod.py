@@ -10,22 +10,32 @@ Layout, inside the EU4 user mod directory:
     eu4unitgen_test/INTEGRATION.md      what was applied (from the package)
     eu4unitgen_test/.eu4unitgen/        manifest
 
+``build_suite`` builds the in-game test suite instead: two variant mods
+(eu4unitgen_test_v1, _v2; enable one at a time) that differ only in the pack-priority
+orders, each holding the main tag's set plus the fallback cases (SPEC §10).
+
 INTEGRATION.md changes are applied here only, never to a real mod. The test mod reads
 nothing from any other mod. Export rules are the same as for a real mod: dry run first,
 and files the tool didn't write are never overwritten.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import dataclasses
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from eu4unitgen import __version__
-from eu4unitgen.core.generator import PATCHED, GeneratedFile, GeneratedSet, GenerationError, generate, patch_country
-from eu4unitgen.core.naming import MANIFEST_FILE, TEST_MOD_NAME
+from eu4unitgen.core.generator import (
+    OWNED, PATCHED, BaseChain, FallbackCase, GeneratedFile, GeneratedSet, GenerationError, TestFixtures, generate,
+    patch_country, patch_country_gfx, patch_history_culture, unit_entities,
+)
+from eu4unitgen.core.naming import MANIFEST_FILE, TEST_MOD_NAME, UNIT_TYPES
 from eu4unitgen.core.nation import Nation
 from eu4unitgen.core.project import Project
 from eu4unitgen.export.writer import ExportPlan, plan_export
-from eu4unitgen.library.scanner import GameFiles, Index
+from eu4unitgen.library.scanner import GameFiles, Index, find_pack
+from eu4unitgen.library.tags import TagFacts, coverage
+from eu4unitgen.pdxscript.render import render
 from eu4unitgen.validate import Report, validate
 from eu4unitgen.validate.rules import ERROR, check_descriptor
 
@@ -56,10 +66,9 @@ class TestMod:
     plan: ExportPlan  # paths relative to the EU4 mod directory
 
 
-def build_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path,
-                   name: str = TEST_MOD_NAME, test_sprite_techs: dict[int, int] | None = None) -> TestMod:
-    """``test_sprite_techs`` (e.g. {2: 2, 3: 3, 4: 4}) moves sprite levels 2-4 to early MIL techs in
-    this test mod's mil.txt only, so every tier can be seen in minutes."""
+def _main_package(project: Project, nation: Nation, game: GameFiles, idx: Index,
+                  test_sprite_techs: dict[int, int] | None) -> GeneratedSet:
+    """The unit set plus the main tag's country file with INTEGRATION.md applied."""
     package = generate(project, nation, game, idx, mod=None, test_sprite_techs=test_sprite_techs)
     integ = package.integration
     if not integ or not integ.country_file:
@@ -68,7 +77,12 @@ def build_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index
     if original is None:
         raise GenerationError(f"{integ.country_file} not found in the EU4 install")
     package.add(GeneratedFile(integ.country_file, patch_country(original, integ), PATCHED, "vanilla"))
+    return package
 
+
+def _wrap(project: Project, nation: Nation, package: GeneratedSet, game: GameFiles, idx: Index, mod_dir: Path,
+          name: str) -> TestMod:
+    """Validate the package, then put it in a mod folder with both descriptors and plan the export."""
     report = validate(project, nation, package, game, idx, mod=None)
     folder = Path(mod_dir) / name
     supported = supported_version(idx)
@@ -77,7 +91,8 @@ def build_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index
     report.issues += [i for i in check_descriptor(outer, folder.as_posix())]
     report.issues += [i for i in check_descriptor(inner)]
 
-    wrapped = GeneratedSet(nation, notes=list(package.notes), integration=integ)
+    wrapped = GeneratedSet(nation, notes=list(package.notes), integration=package.integration,
+                           fixtures=package.fixtures)
     for f in package.files.values():
         wrapped.add(GeneratedFile(f"{name}/{f.path}", f.data, f.role, f.based_on, game_path=f.game_path or f.path))
     wrapped.add(GeneratedFile(f"{name}.mod", outer.encode("utf-8"), DESCRIPTOR))
@@ -85,3 +100,142 @@ def build_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index
     plan = plan_export(mod_dir, wrapped, game, [str(i) for i in report.issues if i.severity == ERROR],
                        manifest_rel=f"{name}/{MANIFEST_FILE}")
     return TestMod(package, report, plan)
+
+
+def build_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path,
+                   name: str = TEST_MOD_NAME, test_sprite_techs: dict[int, int] | None = None) -> TestMod:
+    """``test_sprite_techs`` (e.g. {2: 2, 3: 3, 4: 4}) moves sprite levels 2-4 to early MIL techs in
+    this test mod's mil.txt only, so every tier can be seen in minutes."""
+    package = _main_package(project, nation, game, idx, test_sprite_techs)
+    return _wrap(project, nation, package, game, idx, mod_dir, name)
+
+
+# --------------------------------------------------------------------------- test suite
+
+# Vanilla looks each fallback tag should start from, so every outcome on the map can be told
+# apart from the main set (western), the rival pack and the gfx default set.
+CASE_GFX = {"a": ("africangfx",), "b": ("indiangfx",), "c": ("southamericagfx",)}
+CASES = ("a", "b", "c")
+
+
+@dataclass
+class Suite:
+    variants: list[TestMod]
+    fixtures: TestFixtures
+    main: TagFacts
+    nation: Nation
+    notes: list[str] = field(default_factory=list)
+
+
+def _patched_facts(f: TagFacts, culture: str, groups: dict[str, str]) -> TagFacts:
+    return dataclasses.replace(f, primary_culture=culture, culture_group=groups.get(culture))
+
+
+def pick_fallback_tags(idx: Index, facts: dict[str, TagFacts], culture: str, groups: dict[str, str],
+                       exclude: set[str], avoid_gfx: set[str]) -> dict[str, TagFacts]:
+    """One tag per fallback case that no sprite pack or TAG_* entity can touch once its primary
+    culture is ``culture`` (the clean main tag's): pick-test-tag's test, after the patch.
+    Prefers the CASE_GFX look, then a look not in ``avoid_gfx`` or already picked, then size."""
+    usable = [f for t, f in sorted(facts.items())
+              if t not in exclude and f.history_file and f.country_file and f.primary_culture
+              and coverage(idx, _patched_facts(f, culture, groups)).clean]
+    out: dict[str, TagFacts] = {}
+    for case in CASES:
+        taken = {f.tag for f in out.values()}
+        used = avoid_gfx | {f.graphical_culture for f in out.values()}
+
+        def rank(f: TagFacts) -> tuple:
+            return (f.graphical_culture not in CASE_GFX[case], f.graphical_culture in used, -f.provinces, f.tag)
+        pool = sorted((f for f in usable if f.tag not in taken), key=rank)
+        if not pool:
+            raise GenerationError(f"no tag left for fallback case {case}")
+        out[case] = pool[0]
+    return out
+
+
+def build_suite(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path,
+                facts: dict[str, TagFacts], groups: dict[str, str], *, rival_gfx: str = "asiangfx",
+                test_sprite_techs: dict[int, int] | None = None,
+                fallback_tags: dict[str, str] | None = None) -> Suite:
+    """The in-game test suite (SPEC §10), as two variant mods for at most two launches.
+
+    Both hold the same files except the pack orders:
+      * the main tag (``nation``, a clean tag such as HDA) with its full set and pack A, plus a
+        rival pack B for the same tag listing the vanilla ``rival_gfx`` set.
+        v1: A = N, B = N + 1.  v2: A = N + 1, B = N.  (N = project.tag_pack_order)
+      * fallback case a: a tag with no pack and no TAG_* entities;
+        case b: a tag with generated TAG_* entities (copies of base_gfx) and no pack;
+        case c: a tag switched to the nation's graphical culture, covered only by its gfx pack.
+        Each fallback tag gets the main tag's primary culture, so no culture pack matches it.
+    """
+    main = facts.get(nation.tag)
+    if main is None or not coverage(idx, main).clean:
+        raise GenerationError(f"{nation.tag} isn't clean (see pick-test-tag); the suite needs a clean main tag")
+    culture = main.primary_culture
+    if not culture:
+        raise GenerationError(f"{nation.tag} has no primary culture at the start date")
+    rival = find_pack(idx, gfx=rival_gfx)
+    if rival is None:
+        raise GenerationError(f"no base-game sprite pack for rival graphical culture {rival_gfx!r}")
+    looks = {nation.base_gfx, nation.gfx_set_base or nation.base_gfx, rival_gfx, main.graphical_culture}
+    if fallback_tags:
+        picked = {}
+        for case, tag in fallback_tags.items():
+            f = facts.get(tag)
+            if f is None or not f.history_file or not f.country_file:
+                raise GenerationError(f"fallback tag {tag} owns no land at the start date or has no history/country file")
+            if not coverage(idx, _patched_facts(f, culture, groups)).clean:
+                raise GenerationError(f"fallback tag {tag} is still matched by a sprite pack or has TAG_* entities "
+                                      f"with primary culture {culture}")
+            picked[case] = f
+    else:
+        picked = pick_fallback_tags(idx, facts, culture, groups, {nation.tag}, looks)
+
+    naming = project.naming
+    cases = [FallbackCase(case, f.tag, f.history_file, f.graphical_culture,
+                          nation.gfx_culture if case == "c" else f.graphical_culture,
+                          f.country_file if case == "c" else None)
+             for case, f in sorted(picked.items())]
+    shown = {"the main set": nation.base_gfx, "the rival pack": rival_gfx,
+             f"the {nation.gfx_culture} defaults": nation.gfx_set_base or nation.base_gfx,
+             f"{nation.tag}'s native set": main.graphical_culture,
+             **{f"case {c.case} ({c.tag}) native": c.vanilla_gfx for c in cases}}
+    by_look: dict[str, list[str]] = {}
+    for what, look in shown.items():
+        by_look.setdefault(str(look), []).append(what)
+    notes = [f"{' and '.join(whats)} share the {look} look; those outcomes can't be told apart on the map"
+             for look, whats in sorted(by_look.items()) if len(whats) > 1]
+
+    base_chain = BaseChain(idx, nation.base_gfx)
+    sprites = [(u, sorted((int(i), e) for i, e in rival.get(u, {}).items())) for u in UNIT_TYPES]
+    variants = []
+    n = project.tag_pack_order
+    for variant, (order_a, order_b) in ((1, (n, n + 1)), (2, (n + 1, n))):
+        proj = dataclasses.replace(project, tag_pack_order=order_a)
+        package = _main_package(proj, nation, game, idx, test_sprite_techs)
+        package.add(GeneratedFile(naming.priority_test_pack_file(), render(
+            "sprite_pack.txt.j2", pack=naming.priority_test_pack(), trigger=f"tag = {nation.tag}",
+            graphical_cultures=None, sprites=sprites).encode("utf-8")))
+        package.add(GeneratedFile(naming.priority_test_order_file(), render(
+            "pack_order.txt.j2", orders=[(naming.priority_test_pack(), order_b)]).encode("utf-8")))
+        for case in cases:
+            raw = game.read(case.history_file)
+            if raw is None:
+                raise GenerationError(f"{case.history_file} not found in the EU4 install")
+            package.add(GeneratedFile(case.history_file, patch_history_culture(raw, culture), PATCHED, "vanilla"))
+            if case.case == "b":
+                package.add(GeneratedFile(naming.fallback_entities_file(case.tag), render(
+                    "entities.asset.j2", entities=unit_entities(case.tag, base_chain, naming,
+                                                                proj.entity_version)).encode("utf-8"), OWNED))
+            if case.country_file:
+                raw = game.read(case.country_file)
+                if raw is None:
+                    raise GenerationError(f"{case.country_file} not found in the EU4 install")
+                package.add(GeneratedFile(case.country_file, patch_country_gfx(raw, nation.gfx_culture),
+                                          PATCHED, "vanilla"))
+        package.fixtures = TestFixtures(culture, cases, naming.set_sprite_pack(nation.set_name), naming.priority_test_pack(),
+                                        rival_gfx, order_a, order_b)
+        package.notes += [f"TEST ONLY: variant {variant}: {naming.set_sprite_pack(nation.set_name)} = {order_a}, "
+                          f"{naming.priority_test_pack()} ({rival_gfx}) = {order_b}"] + notes
+        variants.append(_wrap(proj, nation, package, game, idx, mod_dir, naming.test_variant_mod(variant)))
+    return Suite(variants, variants[0].package.fixtures, main, nation, notes)

@@ -29,7 +29,7 @@ from eu4unitgen.core.naming import TIERS, UNIT_TYPES, Naming
 from eu4unitgen.core.nation import STAT_KEYS, Nation, UnitSpec, default_units
 from eu4unitgen.core.project import Project
 from eu4unitgen.library.scanner import GameFiles, Index, find_pack, pack_tiers, resolved
-from eu4unitgen.library.tags import country_files
+from eu4unitgen.library.tags import START_DATE, country_files, parse_date
 from eu4unitgen.pdxscript.parser import Block, Pair, Scalar, pair, parse_bytes
 from eu4unitgen.pdxscript.render import render
 
@@ -64,6 +64,7 @@ class GeneratedSet:
     files: dict[str, GeneratedFile] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     integration: "Integration | None" = None
+    fixtures: "TestFixtures | None" = None  # in-game test suite only
 
     def add(self, f: GeneratedFile) -> None:
         if f.path in self.files:
@@ -275,6 +276,63 @@ class Integration:
     graphical_cultures_added: list[str]
 
 
+def patch_history_culture(data: bytes, culture: str, date: tuple[int, int, int] = START_DATE) -> bytes:
+    """TEST ONLY: set every ``primary_culture`` in effect at ``date`` (undated, and in dated
+    blocks up to ``date``) to ``culture``, so no culture-based sprite pack matches the tag.
+    Later dated changes and everything else stay byte-for-byte."""
+    doc = parse_bytes(data)
+    found = 0
+    for p in doc.pairs():
+        when = parse_date(p.key.value)
+        targets = [p] if when is None else (list(p.value.pairs()) if isinstance(p.value, Block) and when <= date else [])
+        for t in targets:
+            if t.key.value == "primary_culture":
+                t.value = Scalar(culture)
+                found += 1
+    if not found:
+        raise GenerationError("history file has no primary_culture in effect at the start date")
+    return doc.to_bytes()
+
+
+def patch_country_gfx(data: bytes, gfx: str) -> bytes:
+    """TEST ONLY: set a country file's graphical_culture; everything else stays byte-for-byte."""
+    doc = parse_bytes(data)
+    found = list(doc.pairs("graphical_culture"))
+    if not found:
+        raise GenerationError("country file has no graphical_culture")
+    for p in found:
+        p.value = Scalar(gfx)
+    return doc.to_bytes()
+
+
+@dataclass
+class FallbackCase:
+    """One fallback check of the in-game test suite (SPEC §10)."""
+    case: str  # "a": no pack, no TAG entities; "b": TAG entities, no pack; "c": new gfx culture, gfx pack only
+    tag: str
+    history_file: str  # vanilla path, patched to the suite culture
+    vanilla_gfx: str | None
+    gfx: str | None  # the graphical culture in effect in the test mod
+    country_file: str | None = None  # set when the test mod patches it (case c)
+
+
+@dataclass
+class TestFixtures:
+    """What the in-game test suite deliberately adds around a unit set, so the validator can
+    check it and tell deliberate oddities (an unpacked TAG set, a rival pack) from mistakes."""
+    culture: str  # primary culture given to every fallback tag
+    cases: list[FallbackCase]
+    main_pack: str
+    rival_pack: str
+    rival_gfx: str
+    main_order: int
+    rival_order: int
+
+    @property
+    def unpacked_owners(self) -> list[str]:
+        return [c.tag for c in self.cases if c.case == "b"]
+
+
 def patch_country(data: bytes, integ: Integration) -> bytes:
     """Apply the country-file part of an Integration: graphical_culture, color (if set),
     historical_units. Everything else in the file is kept byte-for-byte."""
@@ -321,8 +379,9 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
     # Entities: TAG set + gfx-culture defaults (SPEC §3: both, always).
     out.add(GeneratedFile(naming.set_entities_file(set_name), _utf8(render(
         "entities.asset.j2", entities=unit_entities(tag, chain, naming, version)))))
+    gfx_chain = BaseChain(idx, nation.gfx_set_base) if nation.gfx_set_base else chain
     out.add(GeneratedFile(naming.gfx_entities_file(gfx), _utf8(render(
-        "entities.asset.j2", entities=unit_entities(gfx, chain, naming, version)))))
+        "entities.asset.j2", entities=unit_entities(gfx, gfx_chain, naming, version)))))
 
     # Sprite packs + order (order entry for the TAG pack only, SPEC §3).
     out.add(GeneratedFile(naming.set_pack_file(set_name), _utf8(render(

@@ -236,11 +236,13 @@ def check_writable(root: Path) -> None:
         raise ExportError(f"can't write to {root}: {exc.strerror or exc}{hint}") from exc
 
 
-def stage_plan(plan: ExportPlan, stage_root: Path) -> ExportPlan:
+def stage_plan(plan: ExportPlan, stage_root: Path, require_empty: bool = True) -> ExportPlan:
     """The same export written under ``stage_root`` instead, for copying into place by hand.
-    The stage folder must be empty: staging never overwrites anything."""
+    The stage folder must be empty: staging never overwrites anything. ``require_empty=False``
+    stages a further plan into a folder this run already staged into; its files must not
+    exist yet (apply_export refuses any that do)."""
     stage_root = Path(stage_root)
-    if stage_root.exists() and any(stage_root.iterdir()):
+    if require_empty and stage_root.exists() and any(stage_root.iterdir()):
         raise ExportError(f"stage folder {stage_root} isn't empty; empty it or pick another")
     if not plan.can_apply:
         raise ExportError(f"export blocked: {plan.summary()}")

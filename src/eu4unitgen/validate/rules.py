@@ -14,6 +14,7 @@ from eu4unitgen.core.generator import SNIPPET, GeneratedSet
 from eu4unitgen.core.naming import TIERS, UNIT_TYPES, Naming
 from eu4unitgen.core.nation import MANEUVER, Nation
 from eu4unitgen.core.project import Project
+from eu4unitgen.library.tags import TagFacts, apply_history, coverage, culture_groups
 from eu4unitgen.pdxscript.parser import Block, Scalar, parse_bytes
 from eu4unitgen.validate.graph import GENERATED, MOD, VANILLA, Graph, Node, World
 
@@ -107,7 +108,8 @@ def naming(ctx: Context) -> list[Issue]:
     """Generated entity and pack names are exactly the ones naming.py produces."""
     n, tag, gfx = ctx.naming, ctx.nation.tag, ctx.nation.gfx_culture
     expected = set()
-    for owner in (tag, gfx):
+    fx = ctx.generated.fixtures
+    for owner in (tag, gfx, *(fx.unpacked_owners if fx else [])):
         for t in TIERS:
             expected |= {n.unit_entity(owner, u, t) for u in UNIT_TYPES} | {n.rider_entity(owner, t)}
     out = []
@@ -200,14 +202,36 @@ def state_animations(ctx: Context) -> list[Issue]:
         if name.endswith("_rider") and not RIDER_IDS <= ids:
             out.append(Issue(ERROR, "state_animations",
                              f"{name}: rider pdxmesh {pdx_name!r} lacks {sorted(RIDER_IDS - ids)}", subject=name))
+    # Vanilla ships crews without artillery_attack: every base-game culture except westerngfx
+    # (1.37.5). A pdxmesh vanilla already uses as a crew is accepted as it is.
+    vanilla_crews = None
     for name in sorted(ctx.gen_entities()):
         for attach in w.resolve(name, "attach") or []:
             crew = attach.get("infantry_node")
             if crew:
-                crew_pdx = w.pdxmesh(w.resolve(crew, "pdxmesh") or "")
+                crew_pdx_name = w.resolve(crew, "pdxmesh") or ""
+                crew_pdx = w.pdxmesh(crew_pdx_name)
                 if crew_pdx is not None and "artillery_attack" not in (crew_pdx.get("animations") or {}):
+                    if vanilla_crews is None:
+                        vanilla_crews = _vanilla_crew_pdxmeshes(w)
+                    if crew_pdx_name in vanilla_crews:
+                        continue
                     out.append(Issue(ERROR, "state_animations",
-                                     f"{name}: crew {crew!r} pdxmesh lacks animation id 'artillery_attack'", subject=name))
+                                     f"{name}: crew {crew!r} pdxmesh {crew_pdx_name!r} lacks animation id "
+                                     "'artillery_attack' and vanilla never uses it as a crew", subject=name))
+    return out
+
+
+def _vanilla_crew_pdxmeshes(w: World) -> set[str]:
+    out = set()
+    for name, defs in w.idx.entities.items():
+        if not any(d["origin"] == VANILLA and w.loaded(d) for d in defs):
+            continue
+        for attach in w.resolve(name, "attach") or []:
+            crew = attach.get("infantry_node")
+            if crew and all(d["origin"] == VANILLA for d in w.defs("entities", crew)):
+                out.add(w.resolve(crew, "pdxmesh") or "")
+    out.discard("")
     return out
 
 
@@ -252,7 +276,10 @@ def version_collisions(ctx: Context) -> list[Issue]:
 
 @rule("orphan_entities")
 def orphan_entities(ctx: Context) -> list[Issue]:
-    """Generated entities no sprite pack reaches (directly, or as rider/crew)."""
+    """Generated entities no sprite pack reaches (directly, or as rider/crew). The test suite's
+    case-b TAG set is unpacked on purpose and is checked by test_fixtures instead."""
+    fx = ctx.generated.fixtures
+    unpacked = tuple(f"{t}_" for t in (fx.unpacked_owners if fx else []))
     from_packs, todo = set(), [r for r in ctx.graph.roots if r.kind == "pack"]
     while todo:
         n = todo.pop()
@@ -261,7 +288,8 @@ def orphan_entities(ctx: Context) -> list[Issue]:
         from_packs.add(n)
         todo += [e.dst for e in ctx.graph.edges_from(n) if e.ok and e.dst.kind == "entity"]
     return [Issue(WARNING, "orphan_entities", f"{name} is not used by any sprite pack", subject=name)
-            for name in sorted(ctx.gen_entities()) if Node("entity", name) not in from_packs]
+            for name in sorted(ctx.gen_entities())
+            if Node("entity", name) not in from_packs and not (unpacked and name.startswith(unpacked))]
 
 
 # --------------------------------------------------------------------------- packs
@@ -324,8 +352,13 @@ def pack_order(ctx: Context) -> list[Issue]:
         order = odefs[-1]["order"] if odefs else 0  # vanilla: no entry means 0
         if order < ours:
             continue
+        fx = ctx.generated.fixtures
         for p in pdefs:
             if ctx.world.loaded(p) and not _excludes_tag(p.get("country_trigger"), tag):
+                if fx and other == fx.rival_pack:
+                    out.append(Issue(INFO, "pack_order", f"{other} (order {order}) is the pack-priority test's "
+                                                         f"deliberate rival of {pack} (order {ours})", p["defined_in"]))
+                    continue
                 out.append(Issue(WARNING, "pack_order",
                                  f"{other} (order {order}, trigger '{p.get('country_trigger')}') may match {tag} "
                                  f"and is not below {pack} (order {ours})", p["defined_in"]))
@@ -522,6 +555,64 @@ def check_descriptor(text: str, expect_path: str | None = None) -> list[Issue]:
     return out
 
 
+# --------------------------------------------------------------------------- in-game test suite
+
+@rule("test_fixtures")
+def test_fixtures(ctx: Context) -> list[Issue]:
+    """The test suite's extra files do what each check needs (SPEC §10), re-read from the files:
+    every fallback tag's patched history leaves no sprite pack able to match it; case b's
+    TAG_* entities exist and are all generated; case c's country file uses the nation's gfx
+    culture; the rival pack targets the main tag one order step from its pack."""
+    fx = ctx.generated.fixtures
+    if fx is None:
+        return []
+    w, out = ctx.world, []
+    groups = culture_groups(w.game)
+    for case in fx.cases:
+        f = ctx.generated.files.get(case.history_file)
+        if f is None:
+            out.append(Issue(ERROR, "test_fixtures", f"case {case.case}: {case.history_file} was not generated"))
+            continue
+        facts = apply_history(TagFacts(case.tag, graphical_culture=case.gfx), f.data, groups)
+        if facts.primary_culture != fx.culture:
+            out.append(Issue(ERROR, "test_fixtures", f"case {case.case}: {case.tag} has primary culture "
+                                                     f"{facts.primary_culture!r} at the start, not {fx.culture!r}", f.path))
+        cov = coverage(w.idx, facts)
+        if cov.packs:
+            out.append(Issue(ERROR, "test_fixtures", f"case {case.case}: {case.tag} may still be matched by "
+                                                     f"{sorted({p for p, _, _ in cov.packs})}", f.path))
+        theirs = [e for e in cov.entities if any(d["origin"] != GENERATED for d in w.defs("entities", e))]
+        if theirs:
+            out.append(Issue(ERROR, "test_fixtures", f"case {case.case}: vanilla/DLC entities exist for {case.tag}: "
+                                                     f"{theirs[:4]}", f.path))
+        if case.case == "b":
+            want = {ctx.naming.unit_entity(case.tag, u, t) for u in UNIT_TYPES for t in TIERS}
+            missing = sorted(want - set(cov.entities))
+            if missing:
+                out.append(Issue(ERROR, "test_fixtures", f"case b: {case.tag} lacks {missing[:4]}"))
+        elif cov.entities:
+            out.append(Issue(ERROR, "test_fixtures", f"case {case.case}: {case.tag} has TAG_* entities "
+                                                     f"{cov.entities[:4]}; only case b may"))
+        if case.country_file:
+            cf = ctx.generated.files.get(case.country_file)
+            gfx = parse_bytes(cf.data).get_str("graphical_culture") if cf else None
+            if gfx != case.gfx:
+                out.append(Issue(ERROR, "test_fixtures", f"case {case.case}: {case.country_file} has graphical_culture "
+                                                         f"{gfx!r}, expected {case.gfx!r}", case.country_file))
+    rival = ctx.gen_defs("sprite_packs").get(fx.rival_pack)
+    if rival is None:
+        out.append(Issue(ERROR, "test_fixtures", f"rival pack {fx.rival_pack} was not generated"))
+    elif rival.get("country_trigger") != f"tag = {ctx.nation.tag}":
+        out.append(Issue(ERROR, "test_fixtures", f"{fx.rival_pack}: country_trigger should be 'tag = {ctx.nation.tag}'",
+                         rival["defined_in"]))
+    orders = {p: [d["order"] for d in w.idx.pack_order.get(p, []) if d["origin"] == GENERATED]
+              for p in (fx.rival_pack, ctx.naming.set_sprite_pack(ctx.nation.set_name))}
+    (rival_o, main_o) = orders.values()
+    if len(rival_o) != 1 or len(main_o) != 1 or abs(rival_o[0] - main_o[0]) != 1:
+        out.append(Issue(ERROR, "test_fixtures", f"pack orders {orders} should be one step apart, one entry each"))
+    return out
+
+
 # --------------------------------------------------------------------------- notes
 
 @rule("generator_notes")
@@ -541,6 +632,7 @@ COVERAGE = {
     r"^common/graphicalculturetype\.txt$": ["parse_clean", "graphical_culture"],
     r"^INTEGRATION\.md$": ["integration"],
     r"^common/countries/.+\.txt$": ["parse_clean", "country_files"],
+    r"^history/countries/.+\.txt$": ["parse_clean", "test_fixtures"],
     r"\.mod$": ["descriptor"],
 }
 

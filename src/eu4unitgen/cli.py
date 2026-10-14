@@ -3,6 +3,7 @@
     python -m eu4unitgen.cli generate --tag MAC --gfx hellenicgfx [--out output] [--dry-run]
     python -m eu4unitgen.cli pick-test-tag
     python -m eu4unitgen.cli test-mod --tag HDA --gfx hellenicgfx --set macedonian_test [--stage-dir DIR]
+    python -m eu4unitgen.cli test-mod --suite --tag HDA --gfx hellenicgfx --gfx-set-base muslimgfx [--stage-dir DIR]
 
 generate writes a drop-in package to <out>/<set>/ (new files + INTEGRATION.md) and never
 writes into a mod folder. test-mod is a dry run unless --apply (into the EU4 mod
@@ -18,10 +19,10 @@ from eu4unitgen.core.generator import generate
 from eu4unitgen.core.naming import TEST_MOD_NAME
 from eu4unitgen.core.nation import Nation
 from eu4unitgen.core.project import DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_mod_dir
-from eu4unitgen.export.testmod import build_test_mod
+from eu4unitgen.export.testmod import Suite, build_suite, build_test_mod
 from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
 from eu4unitgen.library.scanner import GameFiles, build_index
-from eu4unitgen.library.tags import coverage, start_level, tag_facts
+from eu4unitgen.library.tags import coverage, culture_groups, start_level, tag_facts
 from eu4unitgen.validate import Report, validate
 
 NATIVE_TECH = {"north_american", "mesoamerican", "south_american", "andean", "high_american",
@@ -129,6 +130,96 @@ def cmd_pick_test_tag(args: argparse.Namespace) -> int:
     return 0 if clean else 1
 
 
+def suite_checklist(suite: Suite, sprite_techs: dict[int, int] | None) -> str:
+    """What to play and what to expect, per check, for the person running the suite."""
+    fx, nation, tag = suite.fixtures, suite.nation, suite.nation.tag
+    v1, v2 = (tm.plan.manifest_rel.split("/", 1)[0] for tm in suite.variants)
+    techs = (", ".join(f"tier {lvl} at MIL {t}" for lvl, t in sorted(sprite_techs.items())) if sprite_techs
+             else "vanilla sprite techs")
+    base, rival = nation.base_gfx, fx.rival_gfx
+    default_look = nation.gfx_set_base or nation.base_gfx
+    lines = [
+        "IN-GAME TEST CHECKLIST",
+        f"Disable every other eu4unitgen mod (including {TEST_MOD_NAME}). Launch 1 with only {v1}, launch 2 with only {v2}.",
+        f"Sprite tiers: tier 1 at start, {techs}. Look at other tags in observe mode or by switching tag; "
+        "raise MIL tech the way you did in test 1.",
+        "Mark each line PASS/FAIL and note what you actually saw.",
+        "",
+        f"LAUNCH 1 ({v1}): {fx.main_pack} order {fx.main_order}, {fx.rival_pack} order {fx.rival_order}",
+        f"[ ] P1  {tag}: armies show the {rival} look (rival pack, higher order).",
+        f"        If they show {base}: the higher order does NOT win -> do the tier checks below in launch 1.",
+    ]
+    for case in fx.cases:
+        if case.case == "a":
+            lines.append(f"[ ] Fa  {case.tag} (was {case.vanilla_gfx}, culture now {fx.culture}; no pack, no {case.tag}_* "
+                         f"entities): expect its own {case.vanilla_gfx} look (graphical-culture pack fallback).")
+        elif case.case == "b":
+            lines.append(f"[ ] Fb  {case.tag} (was {case.vanilla_gfx}; {case.tag}_* entities copied from {base}, no pack): "
+                         f"{base} look = engine still falls back to TAG_* names; {case.vanilla_gfx} look = it doesn't. "
+                         "Record which.")
+        else:
+            lines.append(f"[ ] Fc  {case.tag} (was {case.vanilla_gfx}, now graphical_culture {case.gfx}, only the "
+                         f"{case.gfx} gfx pack): expect the {default_look} look (the {case.gfx} default set). "
+                         f"{case.vanilla_gfx} or {base} = the gfx pack isn't used.")
+    lines += [
+        "        Fallback lines only need checking in one launch; they don't change between variants.",
+        "",
+        f"LAUNCH 2 ({v2}): {fx.main_pack} order {fx.rival_order}, {fx.rival_pack} order {fx.main_order}",
+        f"[ ] P2  {tag}: armies show the {base} look (main pack, now the higher order).",
+        f"[ ] T1  {tag} tier 1: infantry, cavalry (horse + rider) and artillery (cannon + crew) all {base}.",
+        f"[ ] T2  {tag} tier 2: same, after the tier-2 MIL tech.",
+        f"[ ] T3  {tag} tier 3: same; the horse changes to the tier-3 horse.",
+        f"[ ] T4  {tag} tier 4: same.",
+        f"        Make one army per type (or mostly one type): the map shows one model per army.",
+        "[ ] E   error.log after each launch: no clone/entity/hr_ lines, nothing mentioning the fallback tags' files.",
+        "",
+        "Result meanings: P1+P2 pass = higher order wins. P1 fails, P2 passes = the main pack always wins; "
+        "P1 passes, P2 fails = the rival always wins (so file or pack name decides, not the order). "
+        "Anything else: note exactly what showed.",
+    ]
+    lines += [f"NOTE: {n}" for n in suite.notes]
+    return "\n".join(lines)
+
+
+def cmd_test_suite(args: argparse.Namespace, project: Project, nation: Nation, game: GameFiles, idx, facts,
+                   sprite_techs: dict[int, int] | None, mod_dir: Path) -> int:
+    fallback = dict(zip("abc", args.fallback_tags)) if args.fallback_tags else None
+    suite = build_suite(project, nation, game, idx, mod_dir, facts, culture_groups(game), rival_gfx=args.rival_gfx,
+                        test_sprite_techs=sprite_techs, fallback_tags=fallback)
+    code = 0
+    for i, tm in enumerate(suite.variants):
+        print(f"=== variant {i + 1}: {tm.plan.manifest_rel.split('/', 1)[0]}")
+        print(f"validator: {tm.report.summary()}")
+        for issue in tm.report.issues:
+            print(f"  {issue}")
+        if args.diff_out:
+            out = args.diff_out.with_name(f"{args.diff_out.stem}_v{i + 1}{args.diff_out.suffix}")
+            out.write_text(tm.plan.diff_text(), encoding="utf-8")
+            print(f"diff written to {out}")
+        print(tm.plan.summary())
+        if not tm.plan.can_apply:
+            print(tm.plan.diff_text())
+            code = 1
+    if code == 0 and (args.apply or args.stage_dir):
+        targets = []
+        try:
+            for i, tm in enumerate(suite.variants):
+                targets.append(stage_plan(tm.plan, args.stage_dir, require_empty=i == 0) if args.stage_dir else tm.plan)
+            for target in targets:
+                written = apply_export(target)
+                print(f"wrote {len(written)} files and the manifest under {target.mod_root / target.manifest_rel.split('/')[0]}")
+        except ExportError as exc:
+            print(f"EXPORT FAILED: {exc}")
+            return 1
+        if args.stage_dir:
+            print(f"staged: copy everything inside {args.stage_dir} into {mod_dir}")
+    elif code == 0:
+        print("dry run: nothing written")
+    print()
+    print(suite_checklist(suite, sprite_techs))
+    return code
+
+
 def cmd_test_mod(args: argparse.Namespace) -> int:
     mod_dir = args.mod_dir or default_mod_dir()
     project = Project(mod_root=mod_dir / TEST_MOD_NAME, eu4_path=args.eu4, prefix=args.prefix,
@@ -146,13 +237,16 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
                   "the map may not show the generated set")
         nation = Nation(args.tag, args.gfx, base_gfx=args.base_gfx, name=args.name, adjective=args.adjective,
                         colour=tuple(args.colour) if args.colour else None,
-                        tech_group=args.tech_group or facts.technology_group, set_name=args.set_name)
+                        tech_group=args.tech_group or facts.technology_group, set_name=args.set_name,
+                        gfx_set_base=args.gfx_set_base)
         sprite_techs = None
         if args.test_sprite_techs:
             sprite_techs = dict(zip((2, 3, 4), args.test_sprite_techs))
             start = start_level(game, facts.technology_group)
             if start is not None and min(sprite_techs.values()) <= start:
                 print(f"WARNING: {args.tag} starts at MIL {start}; tiers at MIL <= {start} show from day one")
+        if args.suite:
+            return cmd_test_suite(args, project, nation, game, idx, tag_facts(game), sprite_techs, mod_dir)
         tm = build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
     finally:
         game.close()
@@ -190,6 +284,15 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--apply", action="store_true", help="write into the EU4 mod directory (default is a dry run)")
     t.add_argument("--test-sprite-techs", type=int, nargs=3, metavar=("T2", "T3", "T4"),
                    help="TEST ONLY: MIL techs for sprite levels 2-4 in the test mod's mil.txt, e.g. 2 3 4")
+    t.add_argument("--suite", action="store_true",
+                   help="build the in-game test suite: two variant mods (pack priority swapped) with fallback "
+                        "cases a/b/c on extra tags, and print the checklist")
+    t.add_argument("--fallback-tags", nargs=3, metavar=("A", "B", "C"),
+                   help="suite: tags for fallback cases a, b, c (default: picked automatically)")
+    t.add_argument("--rival-gfx", default="asiangfx", help="suite: vanilla set the rival priority pack lists")
+    t.add_argument("--gfx-set-base", default=None,
+                   help="vanilla culture the --gfx default set copies (default: --base-gfx). The suite "
+                        "uses a different look here so case c can be told apart from a westerngfx fallback")
     t.set_defaults(func=cmd_test_mod)
 
     args = ap.parse_args(argv)
