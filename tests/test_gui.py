@@ -96,7 +96,7 @@ def test_texture_test_checkbox_builds_the_texture_test(window, tmp_path, fake_in
     window.test_page.run.click()
     assert "Staged" in window.test_page.message.text(), window.test_page.message.text()
     assert (tmp_path / "stage" / "eu4unitgen_test_textures.mod").is_file()
-    assert "VARIANT A" in window.test_page.checklist.toPlainText()
+    assert "TIER 1" in window.test_page.checklist.toPlainText()
 
 
 def test_blender_path_is_pinned_and_editable(window, tmp_path, monkeypatch):

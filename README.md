@@ -43,7 +43,7 @@ python -m eu4unitgen.cli test-mod --tag HDA --gfx hellenicgfx --stage-dir build/
 python -m eu4unitgen.cli test-mod --textures --tag HDA --gfx hellenicgfx --set macedonian_test --test-sprite-techs 2 3 4 --stage-dir build/test_mod
 ```
 
-`--textures` builds in-game test 4 (Phase 2): tiers 1–2 retextured through a `meshsettings` texture override, with a checklist. In the GUI: Test mod → "Texture test".
+`--textures` builds the texture test (Phase 2): tier 1 retextured through a `meshsettings` texture override, with a checklist. In the GUI: Test mod → "Texture test".
 
 Add `--help` to any command for its options.
 

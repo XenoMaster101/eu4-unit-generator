@@ -12,7 +12,7 @@ from PIL import Image
 
 from eu4unitgen.core.generator import GeneratedFile, GenerationError
 from eu4unitgen.core.nation import Nation
-from eu4unitgen.core.retexture import BESIDE_MESH, OWN_DIR, Retexture, retextured_mesh
+from eu4unitgen.core.retexture import Edited, Retexture, retextured_mesh
 from eu4unitgen.export.testmod import build_texture_test, texture_checklist
 from eu4unitgen.export.writer import apply_export, stage_plan
 from eu4unitgen.library.scanner import GameFiles, build_index, read_dds_header
@@ -119,11 +119,13 @@ def tex_game(tex_install):
     files.close()
 
 
-def test_retextured_mesh_beside_and_own_dir(project, tex_game):
+def _shift(base):
+    return Edited(diffuse=hue_shift(base.diffuse, 120))
+
+
+def test_retextured_mesh_bare_names_beside_the_mesh(project, tex_game):
     files, idx = tex_game
-    shift = lambda im: hue_shift(im, 120)  # noqa: E731
-    mesh, made = retextured_mesh(project.naming, "mac", Retexture("infantry", 1, "generic_01", BESIDE_MESH, shift),
-                                 files, idx)
+    mesh, made = retextured_mesh(project.naming, "mac", Retexture("infantry", 1, "generic_01", _shift), files, idx)
     assert mesh["name"] == "hr_mac_infantry_1_mesh" and mesh["file"] == "gfx/models/Units/generic_01.mesh"
     assert mesh["settings"][0] == {"shape": "bodyShape", "index": 0, "diffuse": "hr_mac_infantry_1_diffuse.dds",
                                    "normal": "g_n.dds", "specular": "g_s.dds", "shader": "PdxMeshColor",
@@ -132,18 +134,15 @@ def test_retextured_mesh_beside_and_own_dir(project, tex_game):
     assert made[0].derived_from == "gfx/models/Units/g1_d.dds"
     assert read_dds(made[0].data).getpixel((0, 0))[1] > 150  # red-ish base shifted to green
 
-    mesh, made = retextured_mesh(project.naming, "mac", Retexture("horse", 2, "horse_3", OWN_DIR, shift), files, idx)
-    assert made[0].path == "gfx/models/units/hr_mac/hr_mac_horse_2_diffuse.dds"
-    s = mesh["settings"][0]
-    assert s["diffuse"] == made[0].path and s["normal"] == "gfx/models/Units/h_n.dds"
 
-
-def test_retexture_refuses_non_base_meshes(project, tex_game):
+def test_retexture_refuses_non_base_meshes_and_no_op_edits(project, tex_game):
     files, idx = tex_game
     with pytest.raises(GenerationError, match="isn't a base-game pdxmesh"):
-        retextured_mesh(project.naming, "mac", Retexture("infantry", 1, "nope", BESIDE_MESH, lambda im: im), files, idx)
+        retextured_mesh(project.naming, "mac", Retexture("infantry", 1, "nope", _shift), files, idx)
+    with pytest.raises(GenerationError, match="changed no texture"):
+        retextured_mesh(project.naming, "mac", Retexture("infantry", 1, "generic_01", lambda b: Edited()), files, idx)
     with pytest.raises(GenerationError):
-        Retexture("rider", 1, "generic_01", BESIDE_MESH, lambda im: im)
+        Retexture("rider", 1, "generic_01", _shift)
 
 
 @pytest.fixture
@@ -161,34 +160,33 @@ def test_texture_test_mod_is_clean_and_complete(texture_test):
     paths = {f.path for f in tm.plan.files}
     for p in (f"{T}.mod", f"{T}/interface/assets/hr_macedonian_test.gfx",
               f"{T}/gfx/models/Units/hr_macedonian_test_infantry_1_diffuse.dds",
-              f"{T}/gfx/models/Units/hr_macedonian_test_cannon_1_diffuse.dds",
-              f"{T}/gfx/models/units/hr_macedonian_test/hr_macedonian_test_horse_2_diffuse.dds"):
+              f"{T}/gfx/models/Units/hr_macedonian_test_horse_1_diffuse.dds",
+              f"{T}/gfx/models/Units/hr_macedonian_test_cannon_1_diffuse.dds"):
         assert p in paths, p
+    assert not any("_2_diffuse" in p for p in paths)
     gfx = parse_bytes(tm.package.files["interface/assets/hr_macedonian_test.gfx"].data)
     assert gfx.warnings == []
     meshes = {p.get_str("name"): p for p in gfx.get_block("objectTypes").get_all("pdxmesh")}
-    assert sorted(meshes) == sorted(f"hr_macedonian_test_{r}_{t}_mesh" for r in ("infantry", "horse", "cannon")
-                                    for t in (1, 2))
-    ms = meshes["hr_macedonian_test_horse_2_mesh"].get_block("meshsettings")
-    assert ms.get_str("texture_diffuse") == "gfx/models/units/hr_macedonian_test/hr_macedonian_test_horse_2_diffuse.dds"
-    assert meshes["hr_macedonian_test_horse_2_mesh"].get_str("file") == "gfx/models/Units/horse_3.mesh"
+    assert sorted(meshes) == sorted(f"hr_macedonian_test_{r}_1_mesh" for r in ("infantry", "horse", "cannon"))
+    ms = meshes["hr_macedonian_test_horse_1_mesh"].get_block("meshsettings")
+    assert ms.get_str("texture_diffuse") == "hr_macedonian_test_horse_1_diffuse.dds"
+    assert ms.get_str("texture_normal") == "h_n.dds"
 
     ents = {e.get_str("name"): e for e in parse_bytes(
         tm.package.files["gfx/entities/hr_macedonian_test_units.asset"].data).get_all("entity")}
     assert ents["AAA_INFANTRY_1"].get_str("pdxmesh") == "hr_macedonian_test_infantry_1_mesh"
     assert ents["AAA_CAVALRY_1_rider"].get_str("pdxmesh") == "hr_macedonian_test_infantry_1_mesh"
-    assert ents["AAA_CAVALRY_2"].get_str("pdxmesh") == "hr_macedonian_test_horse_2_mesh"
-    assert ents["AAA_INFANTRY_3"].get_str("pdxmesh") == "generic_03"  # control tiers untouched
+    assert ents["AAA_CAVALRY_1"].get_str("pdxmesh") == "hr_macedonian_test_horse_1_mesh"
+    assert ents["AAA_INFANTRY_2"].get_str("pdxmesh") == "generic_02"  # control tiers untouched
     cannon = ents["AAA_ARTILLERY_1_cannon"]
     assert cannon.get_str("pdxmesh") == "hr_macedonian_test_cannon_1_mesh"
     attack = next(s for s in cannon.get_all("state") if s.get_str("name") == "attack")
     assert attack.get_block("event").get_str("node") == "cannon_muzzle"  # muzzle event restated
-    gunman = ents["AAA_ARTILLERY_1"].get_block("attach")
-    assert gunman.get_str("cannon_node") == "AAA_ARTILLERY_1_cannon"
-    assert "AAA_ARTILLERY_3_cannon" not in ents
+    assert ents["AAA_ARTILLERY_1"].get_block("attach").get_str("cannon_node") == "AAA_ARTILLERY_1_cannon"
+    assert "AAA_ARTILLERY_2_cannon" not in ents
 
     text = texture_checklist(texture_test, {2: 2, 3: 3, 4: 4})
-    assert "VARIANT A = tier 1" in text and "VARIANT B = tier 2" in text and T in text
+    assert "TIER 1" in text and T in text
 
 
 def test_texture_test_stages_binary_files(texture_test, tmp_path):
@@ -222,7 +220,7 @@ def test_dds_format_rule(project, tex_game, texture_test):
     msgs = [i.message for i in report.errors if i.rule == "dds_format"]
     assert any("format DXT5, base is DXT1" in m for m in msgs)
     assert any("missing from the install" in m for m in msgs)
-    assert any(i.rule == "mesh_settings" and "isn't named" in i.message for i in report.warnings)
+    assert any(i.rule == "texture_paths" and "isn't in the folder" in i.message for i in report.errors)
 
 
 def test_mesh_settings_rule(project, tex_game, texture_test):
@@ -238,3 +236,26 @@ def test_mesh_settings_rule(project, tex_game, texture_test):
     assert any("not 'wrongShape'" in m for m in msgs)
     assert any("missing.dds" in m and "doesn't exist" in m for m in msgs)
     assert any(i.rule == "missing_nodes" for i in report.errors)
+
+
+def test_texture_paths_rule(project, tex_game, texture_test):
+    """In-game test 4: full paths are prefixed with the mesh folder (black unit); a generated
+    texture with a vanilla name would replace it for every nation."""
+    rel = "interface/assets/hr_macedonian_test.gfx"
+    dds = "gfx/models/Units/hr_macedonian_test_horse_1_diffuse.dds"
+
+    def tamper(pkg):
+        f = pkg.files[rel]
+        text = f.data.decode().replace('"hr_macedonian_test_infantry_1_diffuse.dds"',
+                                       '"gfx/models/Units/hr_macedonian_test_infantry_1_diffuse.dds"')
+        text = text.replace('"hr_macedonian_test_horse_1_diffuse.dds"', '"h_d.dds"')
+        pkg.files[rel] = GeneratedFile(f.path, text.encode(), f.role)
+        old = pkg.files.pop(dds)
+        pkg.files["gfx/models/Units/h_d.dds"] = GeneratedFile("gfx/models/Units/h_d.dds", old.data, old.role,
+                                                               derived_from=old.derived_from)
+    report = _revalidate(project, tex_game, texture_test, tamper)
+    msgs = [(i.path, i.message) for i in report.errors if i.rule == "texture_paths"]
+    assert any("must be a bare file name" in m for _, m in msgs)
+    assert any(p == "gfx/models/Units/h_d.dds" and "same path as a base-game texture" in m for p, m in msgs)
+    assert any(p == "gfx/models/Units/hr_macedonian_test_infantry_1_diffuse.dds" and "isn't in the folder" in m
+               for p, m in msgs)

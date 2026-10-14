@@ -110,14 +110,12 @@ class Naming:
 
     # ------------------------------------------------------------------ textures (Phase 2)
     def texture(self, set_name: str, role: str, tier: int, kind: str) -> str:
-        """hr_mac_infantry_1_diffuse.dds. The prefix keeps it apart from vanilla names in a shared folder."""
+        """hr_mac_infantry_1_diffuse.dds: a bare file name. It sits in the mod's copy of the vanilla
+        mesh's folder (the engine prefixes that folder, SPEC §4); the prefix keeps it apart from
+        vanilla names there."""
         if kind not in TEXTURE_KINDS:
             raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
         return f"{self.prefix}{check_set_name(set_name)}_{check_identifier(role, 'role')}_{_check_tier(tier)}_{kind}.dds"
-
-    def texture_dir(self, set_name: str) -> str:
-        """The set's own texture folder (SPEC §2): gfx/models/units/hr_mac."""
-        return f"gfx/models/units/{self.prefix}{check_set_name(set_name)}"
 
     # ------------------------------------------------------------------ sprite packs
     def set_sprite_pack(self, set_name: str) -> str:

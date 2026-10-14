@@ -27,10 +27,10 @@ def _norm(rel: str) -> str:
 
 
 def meshsettings_texture_path(mesh_file: str, texture: str) -> str:
-    """Where a meshsettings texture name points: a bare name resolves in the mesh's folder
-    (as the mesh's own texture names do, SPEC §4); a name with a '/' is taken as a game path.
-    UNVERIFIED (in-game test 4): both readings."""
-    return texture if "/" in texture else str(PurePosixPath(mesh_file).parent / texture)
+    """Where the engine looks for a meshsettings texture: the mesh's folder + the name, always.
+    In-game test 4 (2026-10-14): a full path is prefixed too ("gfx/models/Units/gfx/models/...")
+    and the unit renders black. Rule texture_paths requires bare names."""
+    return f"{PurePosixPath(mesh_file).parent}/{texture}"
 
 
 class MemoryFiles:

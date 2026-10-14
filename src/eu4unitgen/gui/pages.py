@@ -338,7 +338,7 @@ class TestModPage(Page):
         super().__init__(window)
         form = QFormLayout()
         self.suite = QCheckBox("In-game test suite (two variant mods: pack priority + fallback cases)")
-        self.textures = QCheckBox("Texture test (in-game test 4: tiers 1-2 retextured through meshsettings)")
+        self.textures = QCheckBox("Texture test (tier 1 retextured through meshsettings)")
         self.suite.toggled.connect(lambda on: on and self.textures.setChecked(False))
         self.textures.toggled.connect(lambda on: on and self.suite.setChecked(False))
         self.rival = QComboBox()

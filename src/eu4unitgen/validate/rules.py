@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Callable
 
 from eu4unitgen.core.generator import BINARY_SUFFIXES, SNIPPET, GeneratedSet
@@ -103,6 +104,7 @@ def file_encoding(ctx: Context) -> list[Issue]:
 
 # --------------------------------------------------------------------------- textures
 
+TEXTURE_KEYS = ("texture_diffuse", "texture_normal", "texture_specular")
 SHADERS = {"PdxMeshColor", "PdxMeshStandard", "PdxMeshTextureAtlas", "PdxMeshSnow", "PdxMeshAlphaBlend",
            "PdxMeshAlphaBlendNoZWrite", "PdxMesh_NoFoW_NoTI", "Collision"}  # SPEC §4
 
@@ -145,10 +147,10 @@ def dds_format(ctx: Context) -> list[Issue]:
 def mesh_settings(ctx: Context) -> list[Issue]:
     """Generated pdxmeshes with a meshsettings block: the mesh is base game, the block names
     a shape the mesh has at that index, a known shader (the mesh's own), the vanilla shader
-    file and three textures that resolve; every generated texture is named by one of them."""
+    file and three textures that resolve."""
     from eu4unitgen.validate.graph import meshsettings_texture_path
 
-    out, named = [], set()
+    out = []
     w = ctx.world
     for name, rec in sorted(ctx.gen_defs("pdxmeshes").items()):
         settings = rec.get("meshsettings") or []
@@ -180,19 +182,53 @@ def mesh_settings(ctx: Context) -> list[Issue]:
             if not ms.get("shader_file") or not w.exists(ms["shader_file"]):
                 out.append(Issue(ERROR, "mesh_settings", f"{name}: shader_file {ms.get('shader_file')!r} not found",
                                  where, name))
-            for key in ("texture_diffuse", "texture_normal", "texture_specular"):
+            for key in TEXTURE_KEYS:
                 if not ms.get(key):
                     out.append(Issue(ERROR, "mesh_settings", f"{name}: no {key}", where, name))
                     continue
                 rel = meshsettings_texture_path(mesh_file, ms[key])
-                named.add(rel.lower())
                 if not w.exists(rel):
                     out.append(Issue(ERROR, "mesh_settings", f"{name}: {key} {ms[key]!r} resolves to {rel}, "
                                                              "which doesn't exist", where, name))
+    return out
+
+
+@rule("texture_paths")
+def texture_paths(ctx: Context) -> list[Issue]:
+    """The engine prefixes the mesh's folder to every meshsettings texture name (in-game test 4:
+    full paths render black). So (1) meshsettings textures are bare file names; (2) every
+    generated DDS sits in the folder of a mesh whose generated pdxmesh names it; (3) a generated
+    texture never takes the path of a vanilla, DLC or mod file: in the shared folder, the mod's
+    file would replace that texture for every nation."""
+    from eu4unitgen.validate.graph import meshsettings_texture_path
+
+    out, named = [], set()
+    w = ctx.world
+    for name, rec in sorted(ctx.gen_defs("pdxmeshes").items()):
+        mesh_file = rec.get("file") or ""
+        for ms in rec.get("meshsettings") or []:
+            for key in TEXTURE_KEYS:
+                tex = ms.get(key)
+                if not tex:
+                    continue
+                if "/" in tex or "\\" in tex:
+                    out.append(Issue(ERROR, "texture_paths", f"{name}: {key} {tex!r} must be a bare file name; the "
+                                     f"engine prefixes the mesh's folder ({PurePosixPath(mesh_file).parent})",
+                                     rec["defined_in"], name))
+                    continue
+                named.add(meshsettings_texture_path(mesh_file, tex).lower())
     for f in ctx.generated.files.values():
-        if f.path.lower().endswith(".dds") and f.path.lower() not in named:
-            out.append(Issue(WARNING, "mesh_settings", "generated texture isn't named by any generated pdxmesh",
-                             f.path))
+        if not f.path.lower().endswith(".dds"):
+            continue
+        if f.path.lower() not in named:
+            out.append(Issue(ERROR, "texture_paths", "generated texture isn't in the folder of a mesh whose generated "
+                                                     "pdxmesh names it by bare file name", f.path))
+        if w.game.exists(f.path):
+            where = "base-game" if w.game.in_base_game(f.path) else "DLC"
+            out.append(Issue(ERROR, "texture_paths", f"same path as a {where} texture: the mod's file would replace "
+                                                     "it for every nation", f.path))
+        elif w.mod is not None and w.mod.exists(f.path):
+            out.append(Issue(ERROR, "texture_paths", "same path as a file already in the mod", f.path))
     return out
 
 

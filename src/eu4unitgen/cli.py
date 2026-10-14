@@ -247,8 +247,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="build the in-game test suite: two variant mods (pack priority swapped) with fallback "
                         "cases a/b/c on extra tags, and print the checklist")
     t.add_argument("--textures", action="store_true",
-                   help="build in-game test 4 instead (eu4unitgen_test_textures): tiers 1-2 retextured through "
-                        "pdxmesh meshsettings, two texture-path variants, and print the checklist")
+                   help="build the texture test instead (eu4unitgen_test_textures): tier 1 retextured through "
+                        "pdxmesh meshsettings, and print the checklist")
     t.add_argument("--fallback-tags", nargs=3, metavar=("A", "B", "C"),
                    help="suite: tags for fallback cases a, b, c (default: picked automatically)")
     t.add_argument("--rival-gfx", default="asiangfx", help="suite: vanilla set the rival priority pack lists")

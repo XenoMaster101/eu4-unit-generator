@@ -1,22 +1,22 @@
-"""Retextured meshes without copying a mesh (SPEC §10 Phase 2).
+"""Retextured meshes without copying a mesh (SPEC §4, §10 Phase 2).
 
 A retextured slot gets its own pdxmesh whose ``file`` is the vanilla ``.mesh`` and whose
-``meshsettings`` block names new textures for the mesh's shape. The syntax is vanilla
-(``interface/assets/dharma_mapitems.gfx``), but there it only restates the mesh's own
-textures, so whether it overrides a unit mesh's textures is UNVERIFIED until in-game test 4.
+``meshsettings`` block names new textures for the mesh's shape (syntax from vanilla
+``interface/assets/dharma_mapitems.gfx``).
 
-Two ways to name the new textures, both under test:
-  * ``BESIDE_MESH``: bare file names, like vanilla; the DDS goes into the mod at the vanilla
-    mesh's own folder (where the mesh's bare texture names resolve, SPEC §4).
-  * ``OWN_DIR``: full paths into the set's texture folder (``naming.texture_dir``). UNVERIFIED
-    whether texture names in meshsettings may be paths at all.
+Confirmed in-game (test 4, 2026-10-14): the override works on unit meshes, and the engine
+**prefixes the mesh's folder to every meshsettings texture name**, so names must be bare file
+names and the DDS goes into the mod's copy of the vanilla mesh's folder
+(``gfx/models/Units/hr_mac_infantry_1_diffuse.dds``). Textures we don't change keep their
+vanilla bare names. A generated name must never equal a vanilla/DLC texture's name in that
+folder: the mod's file would replace it for every nation (rule ``texture_paths``).
 
 Bases are base-game pdxmeshes only; derived textures are made from base-game files only and
 go to generated mod output only (CLAUDE.md rule 2, SPEC §9).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Callable
 
@@ -27,9 +27,51 @@ from eu4unitgen.core.naming import MESH_ROLES, Naming
 from eu4unitgen.library.scanner import GameFiles, Index, parse_pdx_mesh, summarize_mesh
 from eu4unitgen.textures.dds import DDSFormat, read_dds, read_header, write_dds
 
-BESIDE_MESH, OWN_DIR = "beside_mesh", "own_dir"
-PATH_MODES = (BESIDE_MESH, OWN_DIR)
 SHADER_FILE = "gfx/FX/pdxmesh.shader"  # as in every vanilla meshsettings block
+
+
+@dataclass
+class BaseTextures:
+    """The base mesh's shape and its decoded textures (base game only)."""
+    pdxmesh: str
+    mesh_file: str
+    folder: str
+    shape: dict  # summarize_mesh shape: shape, shader, diffuse, normal, specular (bare names)
+    game: GameFiles
+    _cache: dict = field(default_factory=dict, repr=False)
+
+    def path(self, kind: str) -> str:
+        return f"{self.folder}/{self.shape[kind]}"
+
+    def raw(self, kind: str) -> bytes:
+        rel = self.path(kind)
+        if not self.game.in_base_game(rel):
+            raise GenerationError(f"{rel} isn't in the base game")
+        return self.game.read(rel)
+
+    def image(self, kind: str) -> Image.Image:
+        if kind not in self._cache:
+            self._cache[kind] = read_dds(self.raw(kind))
+        return self._cache[kind]
+
+    @property
+    def diffuse(self) -> Image.Image:
+        return self.image("diffuse")
+
+    @property
+    def specular(self) -> Image.Image:
+        return self.image("specular")
+
+    @property
+    def uses_country_colour(self) -> bool:
+        return self.shape.get("shader") == "PdxMeshColor"
+
+
+@dataclass
+class Edited:
+    """New images for a slot; None keeps the vanilla texture."""
+    diffuse: Image.Image | None = None
+    specular: Image.Image | None = None
 
 
 @dataclass
@@ -37,54 +79,57 @@ class Retexture:
     role: str  # MESH_ROLES
     tier: int  # the sprite tier whose entities use the new pdxmesh
     base_pdxmesh: str  # vanilla, base game
-    path_mode: str  # PATH_MODES
-    edit: Callable[[Image.Image], Image.Image]  # applied to the base diffuse
+    edit: Callable[[BaseTextures], Edited]
 
     def __post_init__(self) -> None:
         if self.role not in MESH_ROLES:
             raise GenerationError(f"retexture role {self.role!r} must be one of {MESH_ROLES}")
-        if self.path_mode not in PATH_MODES:
-            raise GenerationError(f"path mode {self.path_mode!r} must be one of {PATH_MODES}")
 
 
-def retextured_mesh(naming: Naming, set_name: str, r: Retexture, game: GameFiles,
-                    idx: Index) -> tuple[dict, list[GeneratedFile]]:
-    """The template record of the new pdxmesh, and the derived DDS file(s) it names."""
-    rec = idx.pdxmesh(r.base_pdxmesh, base_only=True)
+def base_textures(pdxmesh: str, game: GameFiles, idx: Index) -> BaseTextures:
+    rec = idx.pdxmesh(pdxmesh, base_only=True)
     if rec is None:
-        raise GenerationError(f"{r.base_pdxmesh!r} isn't a base-game pdxmesh (DLC meshes are never a base, SPEC §9)")
+        raise GenerationError(f"{pdxmesh!r} isn't a base-game pdxmesh (DLC meshes are never a base, SPEC §9)")
     if rec.get("meshsettings"):
-        raise GenerationError(f"{r.base_pdxmesh!r} already has meshsettings; retexturing it isn't supported")
+        raise GenerationError(f"{pdxmesh!r} already has meshsettings; retexturing it isn't supported")
     file = rec.get("file")
     if not file or not game.in_base_game(file):
-        raise GenerationError(f"{r.base_pdxmesh!r}: mesh {file!r} isn't in the base game")
+        raise GenerationError(f"{pdxmesh!r}: mesh {file!r} isn't in the base game")
     shapes = summarize_mesh(parse_pdx_mesh(game.read(file)))["shapes"]
     if len(shapes) != 1:
         raise GenerationError(f"{file} has {len(shapes)} shapes; only one-shape meshes can be retextured yet")
     shape = shapes[0]
     if not all(shape.get(k) for k in ("diffuse", "normal", "specular", "shader", "shape")):
         raise GenerationError(f"{file}: shape {shape} doesn't name all three textures and a shader")
-    folder = str(PurePosixPath(file).parent)
-    base_diffuse = f"{folder}/{shape['diffuse']}"
-    if not game.in_base_game(base_diffuse):
-        raise GenerationError(f"{base_diffuse} isn't in the base game")
-    data = game.read(base_diffuse)
-    new = write_dds(r.edit(read_dds(data)), DDSFormat.of(read_header(data)))
+    return BaseTextures(pdxmesh, file, str(PurePosixPath(file).parent), shape, game)
 
-    name = naming.texture(set_name, r.role, r.tier, "diffuse")
-    if r.path_mode == BESIDE_MESH:
-        path, diffuse = f"{folder}/{name}", name
-        normal, specular = shape["normal"], shape["specular"]
-    else:
-        path = diffuse = f"{naming.texture_dir(set_name)}/{name}"
-        normal, specular = f"{folder}/{shape['normal']}", f"{folder}/{shape['specular']}"
+
+def retextured_mesh(naming: Naming, set_name: str, r: Retexture, game: GameFiles,
+                    idx: Index) -> tuple[dict, list[GeneratedFile]]:
+    """The template record of the new pdxmesh, and the derived DDS files it names (written
+    into the mod at the vanilla mesh's folder, named by bare file name)."""
+    base = base_textures(r.base_pdxmesh, game, idx)
+    rec = idx.pdxmesh(r.base_pdxmesh, base_only=True)
+    edited = r.edit(base)
+    names = {"diffuse": base.shape["diffuse"], "normal": base.shape["normal"], "specular": base.shape["specular"]}
+    files = []
+    for kind, img in (("diffuse", edited.diffuse), ("specular", edited.specular)):
+        if img is None:
+            continue
+        raw = base.raw(kind)
+        name = naming.texture(set_name, r.role, r.tier, kind)
+        files.append(GeneratedFile(f"{base.folder}/{name}", write_dds(img, DDSFormat.of(read_header(raw))), OWNED,
+                                   derived_from=base.path(kind)))
+        names[kind] = name
+    if not files:
+        raise GenerationError(f"{r.role} tier {r.tier}: the edit changed no texture")
     mesh = {
-        "name": naming.pdxmesh(set_name, r.role, r.tier), "file": file, "base": r.base_pdxmesh,
+        "name": naming.pdxmesh(set_name, r.role, r.tier), "file": base.mesh_file, "base": r.base_pdxmesh,
         "animations": dict(rec.get("animations") or {}), "scale": rec.get("scale"), "extra": dict(rec.get("extra") or {}),
-        "settings": [{"shape": shape["shape"], "index": 0, "diffuse": diffuse, "normal": normal,
-                      "specular": specular, "shader": shape["shader"], "shader_file": SHADER_FILE}],
+        "settings": [{"shape": base.shape["shape"], "index": 0, "diffuse": names["diffuse"], "normal": names["normal"],
+                      "specular": names["specular"], "shader": base.shape["shader"], "shader_file": SHADER_FILE}],
     }
-    return mesh, [GeneratedFile(path, new, OWNED, derived_from=base_diffuse)]
+    return mesh, files
 
 
 def apply_retextures(entities: list[dict], owner: str, tier: int, meshes: dict[str, str], chain: BaseChain,
