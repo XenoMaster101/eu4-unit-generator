@@ -19,7 +19,7 @@ from eu4unitgen.core.generator import generate
 from eu4unitgen.core.naming import TEST_MOD_NAME
 from eu4unitgen.core.nation import Nation
 from eu4unitgen.core.project import DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_mod_dir
-from eu4unitgen.export.testmod import Suite, build_suite, build_test_mod
+from eu4unitgen.export.testmod import build_suite, build_test_mod, suite_checklist
 from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
 from eu4unitgen.library.scanner import GameFiles, build_index
 from eu4unitgen.library.tags import coverage, culture_groups, start_level, tag_facts
@@ -128,57 +128,6 @@ def cmd_pick_test_tag(args: argparse.Namespace) -> int:
             print(f"  {f.tag}  {f.provinces:3} prov  {f.primary_culture}  {f.technology_group}  <- "
                   + ", ".join(sorted({dlc for _, dlc, _ in cov.packs})))
     return 0 if clean else 1
-
-
-def suite_checklist(suite: Suite, sprite_techs: dict[int, int] | None) -> str:
-    """What to play and what to expect, per check, for the person running the suite."""
-    fx, nation, tag = suite.fixtures, suite.nation, suite.nation.tag
-    v1, v2 = (tm.plan.manifest_rel.split("/", 1)[0] for tm in suite.variants)
-    techs = (", ".join(f"tier {lvl} at MIL {t}" for lvl, t in sorted(sprite_techs.items())) if sprite_techs
-             else "vanilla sprite techs")
-    base, rival = nation.base_gfx, fx.rival_gfx
-    default_look = nation.gfx_set_base or nation.base_gfx
-    lines = [
-        "IN-GAME TEST CHECKLIST",
-        f"Disable every other eu4unitgen mod (including {TEST_MOD_NAME}). Launch 1 with only {v1}, launch 2 with only {v2}.",
-        f"Sprite tiers: tier 1 at start, {techs}. Look at other tags in observe mode or by switching tag; "
-        "raise MIL tech the way you did in test 1.",
-        "Mark each line PASS/FAIL and note what you actually saw.",
-        "",
-        f"LAUNCH 1 ({v1}): {fx.main_pack} order {fx.main_order}, {fx.rival_pack} order {fx.rival_order}",
-        f"[ ] P1  {tag}: armies show the {rival} look (rival pack, higher order).",
-        f"        If they show {base}: the higher order does NOT win -> do the tier checks below in launch 1.",
-    ]
-    for case in fx.cases:
-        if case.case == "a":
-            lines.append(f"[ ] Fa  {case.tag} (was {case.vanilla_gfx}, culture now {fx.culture}; no pack, no {case.tag}_* "
-                         f"entities): expect its own {case.vanilla_gfx} look (graphical-culture pack fallback).")
-        elif case.case == "b":
-            lines.append(f"[ ] Fb  {case.tag} (was {case.vanilla_gfx}; {case.tag}_* entities copied from {base}, no pack): "
-                         f"{base} look = engine still falls back to TAG_* names; {case.vanilla_gfx} look = it doesn't. "
-                         "Record which.")
-        else:
-            lines.append(f"[ ] Fc  {case.tag} (was {case.vanilla_gfx}, now graphical_culture {case.gfx}, only the "
-                         f"{case.gfx} gfx pack): expect the {default_look} look (the {case.gfx} default set). "
-                         f"{case.vanilla_gfx} or {base} = the gfx pack isn't used.")
-    lines += [
-        "        Fallback lines only need checking in one launch; they don't change between variants.",
-        "",
-        f"LAUNCH 2 ({v2}): {fx.main_pack} order {fx.rival_order}, {fx.rival_pack} order {fx.main_order}",
-        f"[ ] P2  {tag}: armies show the {base} look (main pack, now the higher order).",
-        f"[ ] T1  {tag} tier 1: infantry, cavalry (horse + rider) and artillery (cannon + crew) all {base}.",
-        f"[ ] T2  {tag} tier 2: same, after the tier-2 MIL tech.",
-        f"[ ] T3  {tag} tier 3: same; the horse changes to the tier-3 horse.",
-        f"[ ] T4  {tag} tier 4: same.",
-        f"        Make one army per type (or mostly one type): the map shows one model per army.",
-        "[ ] E   error.log after each launch: no clone/entity/hr_ lines, nothing mentioning the fallback tags' files.",
-        "",
-        "Result meanings: P1+P2 pass = higher order wins. P1 fails, P2 passes = the main pack always wins; "
-        "P1 passes, P2 fails = the rival always wins (so file or pack name decides, not the order). "
-        "Anything else: note exactly what showed.",
-    ]
-    lines += [f"NOTE: {n}" for n in suite.notes]
-    return "\n".join(lines)
 
 
 def cmd_test_suite(args: argparse.Namespace, project: Project, nation: Nation, game: GameFiles, idx, facts,

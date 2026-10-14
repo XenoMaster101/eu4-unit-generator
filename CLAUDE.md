@@ -32,4 +32,4 @@ Desktop GUI app that generates complete Europa Universalis IV **land unit** sets
 - When you run or suggest terminal commands, explain in plain language what each one does, and mention the GUI equivalent when one exists.
 
 ## Current phase
-Phase 1 (scaffolder + validator, no meshes). Phase 0 is done; see docs/SPEC.md §10. Update this line as phases complete.
+Phase 2 (texture pipeline). Phases 0 and 1 are done; see docs/SPEC.md §10. Update this line as phases complete.

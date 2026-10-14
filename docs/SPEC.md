@@ -400,7 +400,8 @@ src/eu4unitgen/
     errorlog.py       # parse error.log after a test launch, map lines back to generated files
   export/
     writer.py         # dry-run diff, atomic writes, manifest (.eu4unitgen/manifest.json: path → sha256, role, tags)
-  export/testmod.py   # throwaway in-game test mod (eu4unitgen_test) around one unit set
+  export/testmod.py   # throwaway in-game test mod (eu4unitgen_test) around one unit set, and the two-variant test suite
+  export/pipeline.py  # Session: load the install once; validate / generate / build test mod for a unit-set form (GUI + tests)
   library/tags.py     # 1444 tag facts (owners, culture, group, reforms) + 3-valued sprite-pack trigger evaluation
   cli.py              # generate (-> output/<set>/) | pick-test-tag | test-mod (dry run unless --apply / --stage-dir)
   gui/                # PySide6: Project setup, Nation wizard, Template picker, Texture editor, Validator, Export
@@ -472,8 +473,8 @@ Edited meshes keep the vanilla skeleton, so they **reuse vanilla animation types
   12. Sprite tiers confirmed at MIL 0/12/21/26 (§2).
 - Moved out of Phase 0: bone **parenting** (hierarchy) is deferred to Phase 3. The Blender import of one infantry, horse+rider and artillery mesh moves with it; bone names, locators, shaders, texture names and DDS headers are already done.
 
-### Phase 1: Scaffolder + validator (no meshes) — IN PROGRESS
-Done (2026-10-14): parser/writer, naming, templates, generator, validator, export dry-run/manifest, CLI, and all in-game tests below. MAC/hellenicgfx validates clean against 1.37.5 + DLC116. **Remaining: nation wizard (GUI).**
+### Phase 1: Scaffolder + validator (no meshes) — DONE (2026-10-14)
+Done (2026-10-14): parser/writer, naming, templates, generator, validator, export dry-run/manifest, CLI, all in-game tests below, and the nation wizard (`python -m eu4unitgen.gui`: Settings, Unit set, Validate, Generate, Test mod; it only calls `export/pipeline.py`). MAC/hellenicgfx validates clean against 1.37.5 + DLC116.
 - **Mod checks are off by default** (`Project.check_mod_collisions`, CLI `--check-mod`) until the Hellenistic Revolution folder exists. Off means the mod folder is not read for collisions or shared-file copies. Export ownership checks always run.
 - **Test mod.** `cli test-mod` writes `<EU4 mod dir>/eu4unitgen_test.mod` + `eu4unitgen_test/` (descriptor keys copied from the user's own `.mod` files: `version tags name supported_version path`). It contains the package plus the tag's vanilla country file with INTEGRATION.md applied. It reads no other mod.
 - **Test tag.** `cli pick-test-tag` checks every tag that owns land on 1444.11.11 against every vanilla and DLC sprite-pack trigger (tag, was_tag, primary_culture, culture, culture_group, colonial flags, has_reform at the start date, AND/OR/NOT; anything else counts as "might match") and against vanilla/DLC `TAG_*` unit entities. On 1.37.5 exactly one tag passes: **HDA (Haida)**, 1 province, north_american tech, northamericagfx. DLC unit packs cover every other 1444 culture. Test set: `macedonian_test` on HDA, graphical culture overridden to hellenicgfx.
@@ -505,7 +506,7 @@ Done (2026-10-14): parser/writer, naming, templates, generator, validator, expor
     - Fallback: (a) a tag with no sprite pack and no TAG entities; (b) a tag with `TAG_*` entities but no pack; (c) a tag whose gfx culture has only a gfx pack. Record which models show.
     - Priority: two packs for the same tag with different entities at orders N and N+1, then swapped. Record which wins. DLC116 + DAN is a second, free check (order 100, `version = 4`).
 
-### Phase 2: Texture pipeline
+### Phase 2: Texture pipeline — NEXT
 - DDS read/write, spec-mask painter (R/G/B = country colour regions, A = gloss presets), diffuse pattern overlays.
 - Blender job to copy a base mesh (from `recolour_bases`) and re-point its material to new textures.
 
