@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eu4unitgen"
+version = "0.0.1"
+description = "Generates Europa Universalis IV land-unit sets for a nation."
+requires-python = ">=3.11"
+license = { text = "GPL-3.0" }
+dependencies = []  # Phase 1 adds PySide6, Jinja2, Pillow>=11.2.1
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"eu4unitgen.library" = ["base_models.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = ["vanilla: needs EU4_PATH set to a real EU4 install; skipped otherwise"]

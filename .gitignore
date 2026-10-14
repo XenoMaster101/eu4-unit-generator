@@ -1,0 +1,14 @@
+# Virtual environment
+.venv/
+
+# Python build / cache junk
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Claude Code binaries that live in this folder (not part of the project)
+claude.exe
+claude.exe.old.*

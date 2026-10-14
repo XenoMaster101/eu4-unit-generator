@@ -1,0 +1,1929 @@
+{
+  "schema_version": 2,
+  "generated_by": "eu4unitgen.library.scanner",
+  "game_version": {
+    "eu4_branch": "release_1.37.5",
+    "eu4_rev": "835bfdf8ca24c291a1b3f1b5bc72d47e7df1ae18"
+  },
+  "legal_note": "Metadata only (names, paths, bone names, texture header facts). No game files or script text.",
+  "sprite_levels": {
+    "1": {
+      "mil_tech": 0,
+      "year": 1350
+    },
+    "2": {
+      "mil_tech": 12,
+      "year": 1557
+    },
+    "3": {
+      "mil_tech": 21,
+      "year": 1674
+    },
+    "4": {
+      "mil_tech": 26,
+      "year": 1745
+    }
+  },
+  "graphical_cultures": [
+    "westerngfx",
+    "easterngfx",
+    "muslimgfx",
+    "indiangfx",
+    "asiangfx",
+    "africangfx",
+    "northamericagfx",
+    "southamericagfx",
+    "inuitgfx",
+    "aboriginalgfx",
+    "polynesiangfx",
+    "southeastasiangfx"
+  ],
+  "reference_nation": {
+    "tag": "DAN",
+    "graphical_culture": "westerngfx",
+    "sprite_pack": {
+      "name": "dan_base_sprite_pack",
+      "file": "gfx/sprite_packs/+01_western_base_sprites.txt",
+      "country_trigger": "tag = DAN",
+      "order": null
+    },
+    "tiers": {
+      "1": {
+        "infantry": {
+          "entity": "DAN_INFANTRY_1",
+          "clones": null,
+          "pdxmesh": "DAN_INFANTRY_1",
+          "weapon_node": "Right_hand_node",
+          "weapon_entity": "western_halbard"
+        },
+        "cavalry": {
+          "entity": "DAN_CAVALRY_1",
+          "clones": "westerngfx_CAVALRY_1",
+          "horse_pdxmesh": "cavalry_horse",
+          "rider_entity": "DAN_CAVALRY_1_rider",
+          "rider_pdxmesh": "DAN_INFANTRY_1",
+          "rider_weapon_entity": "cavalry_saber"
+        },
+        "artillery": {
+          "entity": "DAN_ARTILLERY_1",
+          "clones": "westerngfx_ARTILLERY_1",
+          "base_pdxmesh": "artillery_base_mesh",
+          "crew_entity": "DAN_INFANTRY_1",
+          "cannon_entity": "westerngfx_ARTILLERY_1_cannon",
+          "cannon_pdxmesh": "artillery_mesh"
+        }
+      },
+      "2": {
+        "infantry": {
+          "entity": "DAN_INFANTRY_2",
+          "clones": null,
+          "pdxmesh": "western_generic_02_type1",
+          "weapon_node": "Left_hand_node",
+          "weapon_entity": "western_musket"
+        },
+        "cavalry": {
+          "entity": "DAN_CAVALRY_2",
+          "clones": "westerngfx_CAVALRY_1",
+          "horse_pdxmesh": "cavalry_horse",
+          "rider_entity": "DAN_CAVALRY_2_rider",
+          "rider_pdxmesh": "DAN_INFANTRY_2",
+          "rider_weapon_entity": "cavalry_saber"
+        },
+        "artillery": {
+          "entity": "DAN_ARTILLERY_2",
+          "clones": "westerngfx_ARTILLERY_2_generic",
+          "base_pdxmesh": "artillery_base_mesh",
+          "crew_entity": "DAN_INFANTRY_2",
+          "cannon_entity": "westerngfx_ARTILLERY_2_cannon",
+          "cannon_pdxmesh": "artillery_mesh"
+        }
+      },
+      "3": {
+        "infantry": {
+          "entity": "DAN_INFANTRY_3",
+          "clones": null,
+          "pdxmesh": "western_generic_03_type1",
+          "weapon_node": "Left_hand_node",
+          "weapon_entity": "western_musket_2"
+        },
+        "cavalry": {
+          "entity": "DAN_CAVALRY_3",
+          "clones": "westerngfx_CAVALRY_3",
+          "horse_pdxmesh": "cavalry_horse_3_mesh",
+          "rider_entity": "DAN_CAVALRY_3_rider",
+          "rider_pdxmesh": "DAN_INFANTRY_3",
+          "rider_weapon_entity": "cavalry_saber"
+        },
+        "artillery": {
+          "entity": "DAN_ARTILLERY_3",
+          "clones": "westerngfx_ARTILLERY_3_generic",
+          "base_pdxmesh": "artillery_base_mesh",
+          "crew_entity": "DAN_INFANTRY_3",
+          "cannon_entity": "westerngfx_ARTILLERY_3_cannon",
+          "cannon_pdxmesh": "artillery_mesh"
+        }
+      },
+      "4": {
+        "infantry": {
+          "entity": "DAN_INFANTRY_4",
+          "clones": null,
+          "pdxmesh": "DAN_INFANTRY_4_mesh",
+          "weapon_node": "Left_hand_node",
+          "weapon_entity": "western_musket_2"
+        },
+        "cavalry": {
+          "entity": "DAN_CAVALRY_4",
+          "clones": "westerngfx_CAVALRY_4",
+          "horse_pdxmesh": "cavalry_horse_3_mesh",
+          "rider_entity": "DAN_CAVALRY_4_rider",
+          "rider_pdxmesh": "DAN_INFANTRY_4_mesh",
+          "rider_weapon_entity": "cavalry_saber"
+        },
+        "artillery": {
+          "entity": "DAN_ARTILLERY_4",
+          "clones": "westerngfx_ARTILLERY_4_generic",
+          "base_pdxmesh": "artillery_base_mesh",
+          "crew_entity": "DAN_INFANTRY_4",
+          "cannon_entity": "westerngfx_ARTILLERY_4_cannon",
+          "cannon_pdxmesh": "artillery_mesh"
+        }
+      }
+    },
+    "dlc_overrides": [
+      {
+        "dlc": "dlc116_scandinavian_unit_pack",
+        "pack": "dlc116_DAN_sprite_pack",
+        "pack_order": 100,
+        "country_trigger": "primary_culture = danish",
+        "partial": {
+          "infantry": [
+            0,
+            2,
+            3
+          ],
+          "cavalry": [
+            0,
+            2,
+            3
+          ],
+          "artillery": [
+            0,
+            2,
+            3
+          ]
+        },
+        "redefined_entities": [
+          {
+            "name": "DAN_ARTILLERY_1",
+            "version": 4
+          },
+          {
+            "name": "DAN_ARTILLERY_3",
+            "version": 4
+          },
+          {
+            "name": "DAN_ARTILLERY_4",
+            "version": 4
+          },
+          {
+            "name": "DAN_CAVALRY_1",
+            "version": 4
+          },
+          {
+            "name": "DAN_CAVALRY_1_rider",
+            "version": 4
+          },
+          {
+            "name": "DAN_CAVALRY_3",
+            "version": 4
+          },
+          {
+            "name": "DAN_CAVALRY_3_rider",
+            "version": 4
+          },
+          {
+            "name": "DAN_CAVALRY_4",
+            "version": 4
+          },
+          {
+            "name": "DAN_CAVALRY_4_rider",
+            "version": 4
+          },
+          {
+            "name": "DAN_INFANTRY_1",
+            "version": 4
+          },
+          {
+            "name": "DAN_INFANTRY_3",
+            "version": 4
+          },
+          {
+            "name": "DAN_INFANTRY_4",
+            "version": 4
+          }
+        ]
+      }
+    ]
+  },
+  "graphical_culture_defaults": {
+    "graphical_culture": "westerngfx",
+    "sprite_pack": {
+      "name": "westerngfx_sprite_pack",
+      "file": "gfx/sprite_packs/+00_base_sprites.txt",
+      "country_trigger": "always = no",
+      "graphical_cultures": [
+        "westerngfx"
+      ]
+    },
+    "tiers": {
+      "1": {
+        "infantry": {
+          "entity": "westerngfx_INFANTRY_1",
+          "clones": null,
+          "pdxmesh": "western_generic_01_type1",
+          "weapon_node": "Right_hand_node",
+          "weapon_entity": "western_halbard"
+        },
+        "cavalry": {
+          "entity": "westerngfx_CAVALRY_1",
+          "clones": null,
+          "horse_pdxmesh": "cavalry_horse",
+          "rider_entity": "westerngfx_CAVALRY_1_rider",
+          "rider_pdxmesh": "western_generic_01_type1",
+          "rider_weapon_entity": "cavalry_saber"
+        },
+        "artillery": {
+          "entity": "westerngfx_ARTILLERY_1",
+          "clones": null,
+          "base_pdxmesh": "artillery_base_mesh",
+          "crew_entity": "westerngfx_INFANTRY_1",
+          "cannon_entity": "westerngfx_ARTILLERY_1_cannon",
+          "cannon_pdxmesh": "artillery_mesh"
+        }
+      },
+      "2": {
+        "infantry": {
+          "entity": "westerngfx_INFANTRY_2",
+          "clones": null,
+          "pdxmesh": "western_generic_02_type1",
+          "weapon_node": "Left_hand_node",
+          "weapon_entity": "western_musket"
+        },
+        "cavalry": {
+          "entity": "westerngfx_CAVALRY_2",
+          "clones": "westerngfx_CAVALRY_1",
+          "horse_pdxmesh": "cavalry_horse",
+          "rider_entity": "westerngfx_CAVALRY_2_rider",
+          "rider_pdxmesh": "western_generic_02_type1",
+          "rider_weapon_entity": "cavalry_saber"
+        },
+        "artillery": {
+          "entity": "westerngfx_ARTILLERY_2",
+          "clones": "westerngfx_ARTILLERY_2_generic",
+          "base_pdxmesh": "artillery_base_mesh",
+          "crew_entity": "westerngfx_INFANTRY_2",
+          "cannon_entity": "westerngfx_ARTILLERY_2_cannon",
+          "cannon_pdxmesh": "artillery_mesh"
+        }
+      },
+      "3": {
+        "infantry": {
+          "entity": "westerngfx_INFANTRY_3",
+          "clones": null,
+          "pdxmesh": "western_generic_03_type1",
+          "weapon_node": "Left_hand_node",
+          "weapon_entity": "western_musket_2"
+        },
+        "cavalry": {
+          "entity": "westerngfx_CAVALRY_3",
+          "clones": "westerngfx_CAVALRY_1",
+          "horse_pdxmesh": "cavalry_horse_3_mesh",
+          "rider_entity": "westerngfx_CAVALRY_3_rider",
+          "rider_pdxmesh": "western_generic_03_type1",
+          "rider_weapon_entity": "cavalry_saber"
+        },
+        "artillery": {
+          "entity": "westerngfx_ARTILLERY_3",
+          "clones": "westerngfx_ARTILLERY_3_generic",
+          "base_pdxmesh": "artillery_base_mesh",
+          "crew_entity": "westerngfx_INFANTRY_3",
+          "cannon_entity": "westerngfx_ARTILLERY_3_cannon",
+          "cannon_pdxmesh": "artillery_mesh"
+        }
+      },
+      "4": {
+        "infantry": {
+          "entity": "westerngfx_INFANTRY_4",
+          "clones": null,
+          "pdxmesh": "western_generic_04_type1",
+          "weapon_node": "Left_hand_node",
+          "weapon_entity": "western_musket_2"
+        },
+        "cavalry": {
+          "entity": "westerngfx_CAVALRY_4",
+          "clones": "westerngfx_CAVALRY_1",
+          "horse_pdxmesh": "cavalry_horse_3_mesh",
+          "rider_entity": "westerngfx_CAVALRY_4_rider",
+          "rider_pdxmesh": "western_generic_04_type1",
+          "rider_weapon_entity": "cavalry_saber"
+        },
+        "artillery": {
+          "entity": "westerngfx_ARTILLERY_4",
+          "clones": "westerngfx_ARTILLERY_4_generic",
+          "base_pdxmesh": "artillery_base_mesh",
+          "crew_entity": "westerngfx_INFANTRY_4",
+          "cannon_entity": "westerngfx_ARTILLERY_4_cannon",
+          "cannon_pdxmesh": "artillery_mesh"
+        }
+      }
+    }
+  },
+  "recolour_bases": {
+    "note": "Default base meshes for recolour/kitbash: the westerngfx generic set. Only meshes with uses_country_colour=true pick up country colours.",
+    "tiers": {
+      "1": {
+        "infantry": {
+          "pdxmesh": "western_generic_01_type1",
+          "uses_country_colour": true
+        },
+        "cavalry_horse": {
+          "pdxmesh": "cavalry_horse",
+          "uses_country_colour": true
+        },
+        "cavalry_rider": {
+          "pdxmesh": "western_generic_01_type1",
+          "uses_country_colour": true
+        },
+        "artillery_cannon": {
+          "pdxmesh": "artillery_mesh",
+          "uses_country_colour": false
+        }
+      },
+      "2": {
+        "infantry": {
+          "pdxmesh": "western_generic_02_type1",
+          "uses_country_colour": true
+        },
+        "cavalry_horse": {
+          "pdxmesh": "cavalry_horse",
+          "uses_country_colour": true
+        },
+        "cavalry_rider": {
+          "pdxmesh": "western_generic_02_type1",
+          "uses_country_colour": true
+        },
+        "artillery_cannon": {
+          "pdxmesh": "artillery_mesh",
+          "uses_country_colour": false
+        }
+      },
+      "3": {
+        "infantry": {
+          "pdxmesh": "western_generic_03_type1",
+          "uses_country_colour": true
+        },
+        "cavalry_horse": {
+          "pdxmesh": "cavalry_horse_3_mesh",
+          "uses_country_colour": true
+        },
+        "cavalry_rider": {
+          "pdxmesh": "western_generic_03_type1",
+          "uses_country_colour": true
+        },
+        "artillery_cannon": {
+          "pdxmesh": "artillery_mesh",
+          "uses_country_colour": false
+        }
+      },
+      "4": {
+        "infantry": {
+          "pdxmesh": "western_generic_04_type1",
+          "uses_country_colour": true
+        },
+        "cavalry_horse": {
+          "pdxmesh": "cavalry_horse_3_mesh",
+          "uses_country_colour": true
+        },
+        "cavalry_rider": {
+          "pdxmesh": "western_generic_04_type1",
+          "uses_country_colour": true
+        },
+        "artillery_cannon": {
+          "pdxmesh": "artillery_mesh",
+          "uses_country_colour": false
+        }
+      }
+    }
+  },
+  "skeletons": {
+    "artillery_base": {
+      "bones": [
+        "root",
+        "infantry_node",
+        "cannon_node"
+      ],
+      "attach_bones": [
+        "infantry_node",
+        "cannon_node"
+      ],
+      "used_by": [
+        "artillery_base_mesh"
+      ]
+    },
+    "artillery": {
+      "bones": [
+        "Root",
+        "Cannon",
+        "wheels"
+      ],
+      "attach_bones": [],
+      "used_by": [
+        "artillery_mesh"
+      ]
+    },
+    "cavalry_horse": {
+      "bones": [
+        "Root",
+        "HorseSpineTop",
+        "HorseNeckBase",
+        "HorseNeckMiddle",
+        "HorseHead",
+        "HorseSpineMiddle",
+        "HorseSpineEnd",
+        "HorseTailTop",
+        "HorseTailMiddle",
+        "HorseTailTip",
+        "HorseTailEnd",
+        "HorseBackLeftUp",
+        "HorseBackLeftDown",
+        "HorseBackLeftKnee",
+        "HorseBackLeftHeel",
+        "HorseBackRightUp",
+        "HorseBackRightDown",
+        "HorseBackRightKnee",
+        "HorseBackRightHeel",
+        "HorseFrontLeftUp",
+        "HorseFrontLeftDown",
+        "HorseFrontLeftKnee",
+        "HorseFrontLeftHeel",
+        "HorseFrontRightUp",
+        "HorseFrontRightDown",
+        "HorseFrontRightKnee",
+        "HorseFrontRightHeel",
+        "Saddle_Node",
+        "Stigbyglar",
+        "Rem"
+      ],
+      "attach_bones": [
+        "Saddle_Node"
+      ],
+      "used_by": [
+        "cavalry_horse",
+        "cavalry_horse_3_mesh"
+      ]
+    },
+    "western_generic_01_type1": {
+      "bones": [
+        "root",
+        "lower_spine",
+        "mid_spine",
+        "top_spine",
+        "head",
+        "L_shoulder",
+        "L_arm",
+        "L_elbow",
+        "L_hand",
+        "Left_hand_node",
+        "L_wrist",
+        "R_shoulder",
+        "R_arm",
+        "R_elbow",
+        "R_hand",
+        "Right_hand_node",
+        "R_wrist",
+        "attach_back",
+        "hip",
+        "L_thigh",
+        "L_knee",
+        "L_foot",
+        "L_toe",
+        "R_thigh",
+        "R_knee",
+        "R_foot",
+        "R_toe",
+        "attach_free"
+      ],
+      "attach_bones": [
+        "Left_hand_node",
+        "Right_hand_node"
+      ],
+      "used_by": [
+        "DAN_INFANTRY_1",
+        "DAN_INFANTRY_2",
+        "DAN_INFANTRY_3",
+        "DAN_INFANTRY_4_mesh",
+        "western_generic_01_type1",
+        "western_generic_02_type1",
+        "western_generic_03_type1",
+        "western_generic_04_type1"
+      ]
+    },
+    "western_halbard": {
+      "bones": [
+        "joint1"
+      ],
+      "attach_bones": [],
+      "used_by": [
+        "western_halbard"
+      ]
+    }
+  },
+  "pdxmeshes": {
+    "DAN_INFANTRY_1": {
+      "defined_in": "interface/assets/western.gfx",
+      "file": "gfx/models/Units/DAN_01.mesh",
+      "scale": 0.5,
+      "animations": {
+        "attack": "polearm_twohanded_attack_animation",
+        "idle": "polearm_twohanded_idle_animation",
+        "walk": "polearm_twohanded_moving_animation",
+        "death": "polearm_twohanded_death_animation",
+        "retreat": "polearm_twohanded_retreat_animation",
+        "horse_attack": "cavalry_rider_attack_animation",
+        "horse_idle": "cavalry_rider_idle_animation",
+        "horse_walk": "cavalry_rider_moving_animation",
+        "horse_death": "cavalry_rider_death_animation",
+        "horse_retreat": "cavalry_rider_retreat_animation",
+        "artillery_attack": "polearm_twohanded_attack_animation"
+      },
+      "shader": "PdxMeshStandard",
+      "uses_country_colour": false,
+      "shape": "western_generic_01_type1Shape",
+      "textures": {
+        "diffuse": "DAN_01_diffuse.dds",
+        "normal": "western_generic_01_type1_normals.dds",
+        "specular": "western_generic_01_type1_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "L_attach_hand_ctrl": "L_hand",
+        "R_attach_hand_ctrl": "R_hand",
+        "L_elbow_aim_ctrl": "top_spine",
+        "R_elbow_aim_ctrl": "top_spine",
+        "attack_spine_ctrl": null,
+        "L_knee_aim_ctrl": "root",
+        "R_knee_aim_ctrl": "root",
+        "attack_free_ctrl": "root"
+      },
+      "skeleton": "western_generic_01_type1"
+    },
+    "DAN_INFANTRY_2": {
+      "defined_in": "interface/assets/western.gfx",
+      "file": "gfx/models/Units/western_generic_02_type1.mesh",
+      "scale": 0.5,
+      "animations": {
+        "idle": "musketeer_02_idle_animation",
+        "walk": "musketeer_02_moving_animation",
+        "attack": "rifleman_attack_animation",
+        "death": "rifleman_death_animation",
+        "retreat": "rifleman_retreat_animation",
+        "horse_attack": "cavalry_rider_attack_animation",
+        "horse_idle": "cavalry_rider_idle_animation",
+        "horse_walk": "cavalry_rider_moving_animation",
+        "horse_death": "cavalry_rider_death_animation",
+        "horse_retreat": "cavalry_rider_retreat_animation",
+        "artillery_attack": "rifleman_attack_animation"
+      },
+      "shader": "PdxMeshColor",
+      "uses_country_colour": true,
+      "shape": "western_generic_02_type1Shape",
+      "textures": {
+        "diffuse": "western_generic_02_type1_diffuse.dds",
+        "normal": "western_generic_02_type1_normal.dds",
+        "specular": "western_generic_02_type1_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "L_attach_hand_ctrl": "L_hand",
+        "R_attach_hand_ctrl": "R_hand",
+        "L_elbow_aim_ctrl": "top_spine",
+        "R_elbow_aim_ctrl": "top_spine",
+        "attack_spine_ctrl": null,
+        "L_knee_aim_ctrl": "root",
+        "R_knee_aim_ctrl": "root",
+        "attack_free_ctrl": "root"
+      },
+      "skeleton": "western_generic_01_type1"
+    },
+    "DAN_INFANTRY_3": {
+      "defined_in": "interface/assets/western.gfx",
+      "file": "gfx/models/Units/western_generic_03_type1.mesh",
+      "scale": 0.5,
+      "animations": {
+        "idle": "rifleman_idle_animation",
+        "walk": "rifleman_moving_animation",
+        "attack": "rifleman_attack_animation",
+        "death": "rifleman_death_animation",
+        "retreat": "rifleman_retreat_animation",
+        "horse_attack": "cavalry_rider_attack_animation",
+        "horse_idle": "cavalry_rider_idle_animation",
+        "horse_walk": "cavalry_rider_moving_animation",
+        "horse_death": "cavalry_rider_death_animation",
+        "horse_retreat": "cavalry_rider_retreat_animation",
+        "artillery_attack": "rifleman_attack_animation"
+      },
+      "shader": "PdxMeshColor",
+      "uses_country_colour": true,
+      "shape": "western_generic_03_type1Shape",
+      "textures": {
+        "diffuse": "western_generic_03_type1_diffuse.dds",
+        "normal": "western_generic_03_type1_normals.dds",
+        "specular": "western_generic_03_type1_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "L_attach_hand_ctrl": "L_hand",
+        "R_attach_hand_ctrl": "R_hand",
+        "L_elbow_aim_ctrl": "top_spine",
+        "R_elbow_aim_ctrl": "top_spine",
+        "attack_spine_ctrl": null,
+        "L_knee_aim_ctrl": "root",
+        "R_knee_aim_ctrl": "root",
+        "attack_free_ctrl": "root"
+      },
+      "skeleton": "western_generic_01_type1"
+    },
+    "DAN_INFANTRY_4_mesh": {
+      "defined_in": "interface/assets/western.gfx",
+      "file": "gfx/models/Units/DAN_04.mesh",
+      "scale": 0.5,
+      "animations": {
+        "idle": "rifleman_idle_animation",
+        "walk": "rifleman_moving_animation",
+        "attack": "rifleman_attack_animation",
+        "death": "rifleman_death_animation",
+        "retreat": "rifleman_retreat_animation",
+        "horse_attack": "cavalry_rider_attack_animation",
+        "horse_idle": "cavalry_rider_idle_animation",
+        "horse_walk": "cavalry_rider_moving_animation",
+        "horse_death": "cavalry_rider_death_animation",
+        "horse_retreat": "cavalry_rider_retreat_animation",
+        "artillery_attack": "rifleman_attack_animation"
+      },
+      "shader": "PdxMeshStandard",
+      "uses_country_colour": false,
+      "shape": "western_generic_04_type1Shape",
+      "textures": {
+        "diffuse": "DAN_04_diffuse.dds",
+        "normal": "western_generic_04_type1_normals.dds",
+        "specular": "western_generic_04_type1_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "L_attach_hand_ctrl": "L_hand",
+        "R_attach_hand_ctrl": "R_hand",
+        "L_elbow_aim_ctrl": "top_spine",
+        "R_elbow_aim_ctrl": "top_spine",
+        "attack_spine_ctrl": null,
+        "L_knee_aim_ctrl": "root",
+        "R_knee_aim_ctrl": "root",
+        "attack_free_ctrl": "root"
+      },
+      "skeleton": "western_generic_01_type1"
+    },
+    "artillery_base_mesh": {
+      "defined_in": "interface/assets/weapons.gfx",
+      "file": "gfx/models/Units/artillery_base.mesh",
+      "scale": 1.0,
+      "animations": {
+        "artillery_base_attack": "artillery_base_moving_animation",
+        "artillery_base_idle": "artillery_base_idle_animation",
+        "artillery_base_moving": "artillery_base_moving_animation"
+      },
+      "shader": "PdxMeshStandard",
+      "uses_country_colour": false,
+      "shape": "pPlaneShape1",
+      "textures": {
+        "diffuse": "nospec.dds",
+        "normal": "nonormal.dds",
+        "specular": "nospec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {},
+      "skeleton": "artillery_base"
+    },
+    "artillery_mesh": {
+      "defined_in": "interface/assets/weapons.gfx",
+      "file": "gfx/models/Units/artillery.mesh",
+      "scale": 1.1,
+      "animations": {
+        "artillery_attack": "artillery_attack_animation",
+        "artillery_idle": "artillery_idle_animation",
+        "artillery_moving": "artillery_moving_animation"
+      },
+      "shader": "PdxMeshStandard",
+      "uses_country_colour": false,
+      "shape": "siegecannon_exp:MeshShape",
+      "textures": {
+        "diffuse": "siege_cannon_diffuse.dds",
+        "normal": "siege_cannon_normal.dds",
+        "specular": "siege_cannon_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "cannon_muzzle": "Cannon"
+      },
+      "skeleton": "artillery"
+    },
+    "cavalry_horse": {
+      "defined_in": "interface/assets/weapons.gfx",
+      "file": "gfx/models/Units/cavalry_horse.mesh",
+      "scale": 0.48,
+      "animations": {
+        "horse_attack": "cavalry_horse_attack_animation",
+        "horse_idle": "cavalry_horse_idle_animation",
+        "horse_walk": "cavalry_horse_moving_animation",
+        "horse_retreat": "cavalry_horse_moving_animation"
+      },
+      "shader": "PdxMeshColor",
+      "uses_country_colour": true,
+      "shape": "polySurfaceShape10",
+      "textures": {
+        "diffuse": "cavalry_horse_diffuse.dds",
+        "normal": "cavalry_horse_normal.dds",
+        "specular": "cavalry_horse_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {},
+      "skeleton": "cavalry_horse"
+    },
+    "cavalry_horse_3_mesh": {
+      "defined_in": "interface/assets/weapons.gfx",
+      "file": "gfx/models/Units/cavalry_horse_03.mesh",
+      "scale": 0.48,
+      "animations": {
+        "horse_attack": "cavalry_horse_attack_animation",
+        "horse_idle": "cavalry_horse_idle_animation",
+        "horse_walk": "cavalry_horse_moving_animation"
+      },
+      "shader": "PdxMeshColor",
+      "uses_country_colour": true,
+      "shape": "Horse01:polySurfaceShape1",
+      "textures": {
+        "diffuse": "cavalry_horse_03_diffuse.dds",
+        "normal": "cavalry_horse_03_normal.dds",
+        "specular": "cavalry_horse_03_specular.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {},
+      "skeleton": "cavalry_horse"
+    },
+    "cavalry_saber": {
+      "defined_in": "interface/assets/weapons.gfx",
+      "file": "gfx/models/Units/cavalry_saber.mesh",
+      "scale": 0.5,
+      "animations": {},
+      "shader": "PdxMeshStandard",
+      "uses_country_colour": false,
+      "shape": "saberShape",
+      "textures": {
+        "diffuse": "cavalry_horse_diffuse.dds",
+        "normal": "cavalry_horse_normal_.dds",
+        "specular": "cavalry_horse_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {},
+      "skeleton": null
+    },
+    "western_generic_01_type1": {
+      "defined_in": "interface/assets/western.gfx",
+      "file": "gfx/models/Units/western_generic_01_type1.mesh",
+      "scale": 0.5,
+      "animations": {
+        "attack": "polearm_twohanded_attack_animation",
+        "idle": "polearm_twohanded_idle_animation",
+        "walk": "polearm_twohanded_moving_animation",
+        "death": "polearm_twohanded_death_animation",
+        "retreat": "polearm_twohanded_retreat_animation",
+        "horse_attack": "cavalry_rider_attack_animation",
+        "horse_idle": "cavalry_rider_idle_animation",
+        "horse_walk": "cavalry_rider_moving_animation",
+        "horse_death": "cavalry_rider_death_animation",
+        "horse_retreat": "cavalry_rider_retreat_animation",
+        "artillery_attack": "polearm_twohanded_attack_animation"
+      },
+      "shader": "PdxMeshColor",
+      "uses_country_colour": true,
+      "shape": "western_generic_01_type1Shape",
+      "textures": {
+        "diffuse": "western_generic_01_type1_diffuse.dds",
+        "normal": "western_generic_01_type1_normals.dds",
+        "specular": "western_generic_01_type1_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "L_attach_hand_ctrl": "L_hand",
+        "R_attach_hand_ctrl": "R_hand",
+        "L_elbow_aim_ctrl": "top_spine",
+        "R_elbow_aim_ctrl": "top_spine",
+        "attack_spine_ctrl": null,
+        "L_knee_aim_ctrl": "root",
+        "R_knee_aim_ctrl": "root",
+        "attack_free_ctrl": "root"
+      },
+      "skeleton": "western_generic_01_type1"
+    },
+    "western_generic_02_type1": {
+      "defined_in": "interface/assets/western.gfx",
+      "file": "gfx/models/Units/western_generic_02_type1.mesh",
+      "scale": 0.5,
+      "animations": {
+        "idle": "musketeer_02_idle_animation",
+        "walk": "musketeer_02_moving_animation",
+        "attack": "rifleman_attack_animation",
+        "death": "rifleman_death_animation",
+        "retreat": "rifleman_retreat_animation",
+        "horse_attack": "cavalry_rider_attack_animation",
+        "horse_idle": "cavalry_rider_idle_animation",
+        "horse_walk": "cavalry_rider_moving_animation",
+        "horse_death": "cavalry_rider_death_animation",
+        "horse_retreat": "cavalry_rider_retreat_animation",
+        "artillery_attack": "rifleman_attack_animation"
+      },
+      "shader": "PdxMeshColor",
+      "uses_country_colour": true,
+      "shape": "western_generic_02_type1Shape",
+      "textures": {
+        "diffuse": "western_generic_02_type1_diffuse.dds",
+        "normal": "western_generic_02_type1_normal.dds",
+        "specular": "western_generic_02_type1_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "L_attach_hand_ctrl": "L_hand",
+        "R_attach_hand_ctrl": "R_hand",
+        "L_elbow_aim_ctrl": "top_spine",
+        "R_elbow_aim_ctrl": "top_spine",
+        "attack_spine_ctrl": null,
+        "L_knee_aim_ctrl": "root",
+        "R_knee_aim_ctrl": "root",
+        "attack_free_ctrl": "root"
+      },
+      "skeleton": "western_generic_01_type1"
+    },
+    "western_generic_03_type1": {
+      "defined_in": "interface/assets/western.gfx",
+      "file": "gfx/models/Units/western_generic_03_type1.mesh",
+      "scale": 0.5,
+      "animations": {
+        "idle": "rifleman_idle_animation",
+        "walk": "rifleman_moving_animation",
+        "attack": "rifleman_attack_animation",
+        "death": "rifleman_death_animation",
+        "retreat": "rifleman_retreat_animation",
+        "horse_attack": "cavalry_rider_attack_animation",
+        "horse_idle": "cavalry_rider_idle_animation",
+        "horse_walk": "cavalry_rider_moving_animation",
+        "horse_death": "cavalry_rider_death_animation",
+        "horse_retreat": "cavalry_rider_retreat_animation",
+        "artillery_attack": "rifleman_attack_animation"
+      },
+      "shader": "PdxMeshColor",
+      "uses_country_colour": true,
+      "shape": "western_generic_03_type1Shape",
+      "textures": {
+        "diffuse": "western_generic_03_type1_diffuse.dds",
+        "normal": "western_generic_03_type1_normals.dds",
+        "specular": "western_generic_03_type1_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "L_attach_hand_ctrl": "L_hand",
+        "R_attach_hand_ctrl": "R_hand",
+        "L_elbow_aim_ctrl": "top_spine",
+        "R_elbow_aim_ctrl": "top_spine",
+        "attack_spine_ctrl": null,
+        "L_knee_aim_ctrl": "root",
+        "R_knee_aim_ctrl": "root",
+        "attack_free_ctrl": "root"
+      },
+      "skeleton": "western_generic_01_type1"
+    },
+    "western_generic_04_type1": {
+      "defined_in": "interface/assets/western.gfx",
+      "file": "gfx/models/Units/western_generic_04_type1.mesh",
+      "scale": 0.5,
+      "animations": {
+        "idle": "rifleman_idle_animation",
+        "walk": "rifleman_moving_animation",
+        "attack": "rifleman_attack_animation",
+        "death": "rifleman_death_animation",
+        "retreat": "rifleman_retreat_animation",
+        "horse_attack": "cavalry_rider_attack_animation",
+        "horse_idle": "cavalry_rider_idle_animation",
+        "horse_walk": "cavalry_rider_moving_animation",
+        "horse_death": "cavalry_rider_death_animation",
+        "horse_retreat": "cavalry_rider_retreat_animation",
+        "artillery_attack": "rifleman_attack_animation"
+      },
+      "shader": "PdxMeshColor",
+      "uses_country_colour": true,
+      "shape": "western_generic_04_type1Shape",
+      "textures": {
+        "diffuse": "western_generic_04_type1_diffuse.dds",
+        "normal": "western_generic_04_type1_normals.dds",
+        "specular": "western_generic_04_type1_spec.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "L_attach_hand_ctrl": "L_hand",
+        "R_attach_hand_ctrl": "R_hand",
+        "L_elbow_aim_ctrl": "top_spine",
+        "R_elbow_aim_ctrl": "top_spine",
+        "attack_spine_ctrl": null,
+        "L_knee_aim_ctrl": "root",
+        "R_knee_aim_ctrl": "root",
+        "attack_free_ctrl": "root"
+      },
+      "skeleton": "western_generic_01_type1"
+    },
+    "western_halbard": {
+      "defined_in": "interface/assets/weapons.gfx",
+      "file": "gfx/models/Units/western_halbard.mesh",
+      "scale": 0.5,
+      "animations": {},
+      "shader": "PdxMeshStandard",
+      "uses_country_colour": false,
+      "shape": "western_generic_halbardShape",
+      "textures": {
+        "diffuse": "western_generic_weapons_diffuse.dds",
+        "normal": "western_generic_weapons_normal.dds",
+        "specular": "western_generic_weapons_specular.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {},
+      "skeleton": "western_halbard"
+    },
+    "western_musket": {
+      "defined_in": "interface/assets/weapons.gfx",
+      "file": "gfx/models/Units/western_musket.mesh",
+      "scale": 0.47,
+      "animations": {},
+      "shader": "PdxMeshStandard",
+      "uses_country_colour": false,
+      "shape": "western_generic_musket_01Shape",
+      "textures": {
+        "diffuse": "western_generic_weapons_diffuse.dds",
+        "normal": "western_generic_weapons_normal.dds",
+        "specular": "western_generic_weapons_specular.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "muzzle": "joint1",
+        "trigger": null
+      },
+      "skeleton": null
+    },
+    "western_musket_2": {
+      "defined_in": "interface/assets/weapons.gfx",
+      "file": "gfx/models/Units/western_musket_2.mesh",
+      "scale": 0.47,
+      "animations": {},
+      "shader": "PdxMeshStandard",
+      "uses_country_colour": false,
+      "shape": "western_generic_musket_02Shape",
+      "textures": {
+        "diffuse": "western_generic_weapons_diffuse.dds",
+        "normal": "western_generic_weapons_normal.dds",
+        "specular": "western_generic_weapons_specular.dds"
+      },
+      "texture_dir": "gfx/models/Units",
+      "mesh_locators": {
+        "muzzle": "joint1",
+        "trigger": null
+      },
+      "skeleton": null
+    }
+  },
+  "animation_types": {
+    "artillery_attack_animation": {
+      "file": "gfx/models/Units/animation/artillery_attack.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "artillery_base_idle_animation": {
+      "file": "gfx/models/Units/animation/artillery_base_idle.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "artillery_base_moving_animation": {
+      "file": "gfx/models/Units/animation/artillery_base_moving.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "artillery_idle_animation": {
+      "file": "gfx/models/Units/animation/artillery_idle.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "artillery_moving_animation": {
+      "file": "gfx/models/Units/animation/artillery_moving.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "cavalry_horse_attack_animation": {
+      "file": "gfx/models/Units/animation/cavalry_horse_attack.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "cavalry_horse_idle_animation": {
+      "file": "gfx/models/Units/animation/cavalry_horse_idle.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "cavalry_horse_moving_animation": {
+      "file": "gfx/models/Units/animation/cavalry_horse_moving.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "cavalry_rider_attack_animation": {
+      "file": "gfx/models/Units/animation/cavalry_rider_attack.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "cavalry_rider_death_animation": {
+      "file": "gfx/models/Units/animation/cavalry_rider_death.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "cavalry_rider_idle_animation": {
+      "file": "gfx/models/Units/animation/cavalry_rider_idle.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "cavalry_rider_moving_animation": {
+      "file": "gfx/models/Units/animation/cavalry_rider_moving.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "cavalry_rider_retreat_animation": {
+      "file": "gfx/models/Units/animation/cavalry_rider_retreat.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "musketeer_02_idle_animation": {
+      "file": "gfx/models/Units/animation/musketeer_02_idle.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "musketeer_02_moving_animation": {
+      "file": "gfx/models/Units/animation/musketeer_02_moving.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "polearm_twohanded_attack_animation": {
+      "file": "gfx/models/Units/animation/polearm_twohanded_attack.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "polearm_twohanded_death_animation": {
+      "file": "gfx/models/Units/animation/polearm_twohanded_death.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "polearm_twohanded_idle_animation": {
+      "file": "gfx/models/Units/animation/polearm_twohanded_idle.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "polearm_twohanded_moving_animation": {
+      "file": "gfx/models/Units/animation/polearm_twohanded_moving.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "polearm_twohanded_retreat_animation": {
+      "file": "gfx/models/Units/animation/polearm_twohanded_retreat.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "rifleman_attack_animation": {
+      "file": "gfx/models/Units/animation/rifleman_attack.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "rifleman_death_animation": {
+      "file": "gfx/models/Units/animation/polearm_twohanded_death.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "rifleman_idle_animation": {
+      "file": "gfx/models/Units/animation/rifleman_idle.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "rifleman_moving_animation": {
+      "file": "gfx/models/Units/animation/rifleman_moving.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    },
+    "rifleman_retreat_animation": {
+      "file": "gfx/models/Units/animation/rifleman_retreat.anim",
+      "file_exists": true,
+      "defined_in": "gfx/models/Units/animation/animation.asset"
+    }
+  },
+  "entities": {
+    "DAN_ARTILLERY_1": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_1",
+      "attach": [
+        {
+          "name": "gunman",
+          "infantry_node": "DAN_INFANTRY_1",
+          "cannon_node": "westerngfx_ARTILLERY_1_cannon"
+        }
+      ]
+    },
+    "DAN_ARTILLERY_2": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_2_generic",
+      "attach": [
+        {
+          "name": "gunman",
+          "infantry_node": "DAN_INFANTRY_2",
+          "cannon_node": "westerngfx_ARTILLERY_2_cannon"
+        }
+      ]
+    },
+    "DAN_ARTILLERY_3": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_3_generic",
+      "attach": [
+        {
+          "name": "gunman",
+          "infantry_node": "DAN_INFANTRY_3",
+          "cannon_node": "westerngfx_ARTILLERY_3_cannon"
+        }
+      ]
+    },
+    "DAN_ARTILLERY_4": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_4_generic",
+      "attach": [
+        {
+          "name": "gunman",
+          "infantry_node": "DAN_INFANTRY_4",
+          "cannon_node": "westerngfx_ARTILLERY_4_cannon"
+        }
+      ]
+    },
+    "DAN_CAVALRY_1": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1",
+      "attach": [
+        {
+          "name": "rider",
+          "Saddle_Node": "DAN_CAVALRY_1_rider"
+        }
+      ]
+    },
+    "DAN_CAVALRY_1_rider": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1_rider",
+      "pdxmesh": "DAN_INFANTRY_1"
+    },
+    "DAN_CAVALRY_2": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1",
+      "attach": [
+        {
+          "name": "rider",
+          "Saddle_Node": "DAN_CAVALRY_2_rider"
+        }
+      ]
+    },
+    "DAN_CAVALRY_2_rider": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1_rider",
+      "pdxmesh": "DAN_INFANTRY_2"
+    },
+    "DAN_CAVALRY_3": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_3",
+      "attach": [
+        {
+          "name": "rider",
+          "Saddle_Node": "DAN_CAVALRY_3_rider"
+        }
+      ]
+    },
+    "DAN_CAVALRY_3_rider": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1_rider",
+      "pdxmesh": "DAN_INFANTRY_3"
+    },
+    "DAN_CAVALRY_4": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_4",
+      "attach": [
+        {
+          "name": "rider",
+          "Saddle_Node": "DAN_CAVALRY_4_rider"
+        }
+      ]
+    },
+    "DAN_CAVALRY_4_rider": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1_rider",
+      "pdxmesh": "DAN_INFANTRY_4_mesh"
+    },
+    "DAN_INFANTRY_1": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "DAN_INFANTRY_1",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "idle"
+        },
+        {
+          "name": "walk",
+          "animation": "walk"
+        },
+        {
+          "name": "attack",
+          "animation": "attack"
+        },
+        {
+          "name": "retreat",
+          "animation": "retreat"
+        }
+      ],
+      "attach": [
+        {
+          "Right_hand_node": "western_halbard"
+        }
+      ]
+    },
+    "DAN_INFANTRY_2": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "western_generic_02_type1",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "idle"
+        },
+        {
+          "name": "walk",
+          "animation": "walk"
+        },
+        {
+          "name": "attack",
+          "animation": "attack"
+        },
+        {
+          "name": "retreat",
+          "animation": "retreat"
+        }
+      ],
+      "attach": [
+        {
+          "Left_hand_node": "western_musket"
+        }
+      ]
+    },
+    "DAN_INFANTRY_3": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "western_generic_03_type1",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "idle"
+        },
+        {
+          "name": "walk",
+          "animation": "walk"
+        },
+        {
+          "name": "attack",
+          "animation": "attack"
+        },
+        {
+          "name": "retreat",
+          "animation": "retreat"
+        }
+      ],
+      "attach": [
+        {
+          "Left_hand_node": "western_musket_2"
+        }
+      ]
+    },
+    "DAN_INFANTRY_4": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "DAN_INFANTRY_4_mesh",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "idle"
+        },
+        {
+          "name": "walk",
+          "animation": "walk"
+        },
+        {
+          "name": "attack",
+          "animation": "attack"
+        },
+        {
+          "name": "retreat",
+          "animation": "retreat"
+        }
+      ],
+      "attach": [
+        {
+          "Left_hand_node": "western_musket_2"
+        }
+      ]
+    },
+    "cavalry_saber": {
+      "defined_in": "gfx/entities/weapons.asset",
+      "pdxmesh": "cavalry_saber"
+    },
+    "western_halbard": {
+      "defined_in": "gfx/entities/weapons.asset",
+      "pdxmesh": "western_halbard"
+    },
+    "western_musket": {
+      "defined_in": "gfx/entities/weapons.asset",
+      "pdxmesh": "western_musket",
+      "states": [
+        {
+          "name": "attack",
+          "events": [
+            {
+              "time": 0.9,
+              "node": "muzzle",
+              "particle": "musket_muzzle"
+            },
+            {
+              "time": 0.9,
+              "node": "muzzle",
+              "particle": "musket_smoke_residue"
+            },
+            {
+              "time": 0.9,
+              "node": "trigger",
+              "particle": "musket_trigger_smoke"
+            }
+          ]
+        }
+      ]
+    },
+    "western_musket_2": {
+      "defined_in": "gfx/entities/weapons.asset",
+      "pdxmesh": "western_musket_2",
+      "states": [
+        {
+          "name": "attack",
+          "events": [
+            {
+              "time": 0.9,
+              "node": "muzzle",
+              "particle": "musket_muzzle"
+            }
+          ]
+        }
+      ]
+    },
+    "westerngfx_ARTILLERY_1": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "artillery_base_mesh",
+      "states": [
+        {
+          "name": "attack",
+          "animation": "artillery_base_attack"
+        },
+        {
+          "name": "idle",
+          "animation": "artillery_base_idle"
+        },
+        {
+          "name": "walk",
+          "animation": "artillery_base_moving"
+        },
+        {
+          "name": "retreat",
+          "animation": "artillery_base_moving"
+        }
+      ],
+      "attach": [
+        {
+          "name": "gunman",
+          "infantry_node": "westerngfx_INFANTRY_1",
+          "cannon_node": "westerngfx_ARTILLERY_1_cannon"
+        }
+      ]
+    },
+    "westerngfx_ARTILLERY_1_cannon": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "artillery_mesh",
+      "states": [
+        {
+          "name": "attack",
+          "animation": "artillery_attack",
+          "events": [
+            {
+              "time": 0.0,
+              "node": "cannon_muzzle",
+              "particle": "artillery_cannon"
+            }
+          ]
+        },
+        {
+          "name": "idle",
+          "animation": "artillery_idle"
+        },
+        {
+          "name": "walk",
+          "animation": "artillery_moving"
+        },
+        {
+          "name": "retreat",
+          "animation": "artillery_moving"
+        }
+      ]
+    },
+    "westerngfx_ARTILLERY_2": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_2_generic",
+      "attach": [
+        {
+          "name": "gunman",
+          "infantry_node": "westerngfx_INFANTRY_2",
+          "cannon_node": "westerngfx_ARTILLERY_2_cannon"
+        }
+      ]
+    },
+    "westerngfx_ARTILLERY_2_cannon": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_1_cannon"
+    },
+    "westerngfx_ARTILLERY_2_generic": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_1"
+    },
+    "westerngfx_ARTILLERY_3": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_3_generic",
+      "attach": [
+        {
+          "name": "gunman",
+          "infantry_node": "westerngfx_INFANTRY_3",
+          "cannon_node": "westerngfx_ARTILLERY_3_cannon"
+        }
+      ]
+    },
+    "westerngfx_ARTILLERY_3_cannon": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_1_cannon"
+    },
+    "westerngfx_ARTILLERY_3_generic": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_1"
+    },
+    "westerngfx_ARTILLERY_4": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_4_generic",
+      "attach": [
+        {
+          "name": "gunman",
+          "infantry_node": "westerngfx_INFANTRY_4",
+          "cannon_node": "westerngfx_ARTILLERY_4_cannon"
+        }
+      ]
+    },
+    "westerngfx_ARTILLERY_4_cannon": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_1_cannon"
+    },
+    "westerngfx_ARTILLERY_4_generic": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_ARTILLERY_1"
+    },
+    "westerngfx_CAVALRY_1": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "cavalry_horse",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "horse_idle"
+        },
+        {
+          "name": "walk",
+          "animation": "horse_walk"
+        },
+        {
+          "name": "retreat",
+          "animation": "horse_walk"
+        },
+        {
+          "name": "attack",
+          "animation": "horse_attack"
+        }
+      ],
+      "attach": [
+        {
+          "name": "rider",
+          "Saddle_Node": "westerngfx_CAVALRY_1_rider"
+        }
+      ]
+    },
+    "westerngfx_CAVALRY_1_rider": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "western_generic_01_type1",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "horse_idle"
+        },
+        {
+          "name": "walk",
+          "animation": "horse_walk"
+        },
+        {
+          "name": "attack",
+          "animation": "horse_attack"
+        },
+        {
+          "name": "retreat",
+          "animation": "horse_retreat"
+        }
+      ],
+      "attach": [
+        {
+          "Right_hand_node": "cavalry_saber"
+        }
+      ]
+    },
+    "westerngfx_CAVALRY_2": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1",
+      "attach": [
+        {
+          "name": "rider",
+          "Saddle_Node": "westerngfx_CAVALRY_2_rider"
+        }
+      ]
+    },
+    "westerngfx_CAVALRY_2_rider": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1_rider",
+      "pdxmesh": "western_generic_02_type1"
+    },
+    "westerngfx_CAVALRY_3": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1",
+      "pdxmesh": "cavalry_horse_3_mesh",
+      "attach": [
+        {
+          "name": "rider",
+          "Saddle_Node": "westerngfx_CAVALRY_3_rider"
+        }
+      ]
+    },
+    "westerngfx_CAVALRY_3_rider": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1_rider",
+      "pdxmesh": "western_generic_03_type1"
+    },
+    "westerngfx_CAVALRY_4": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1",
+      "pdxmesh": "cavalry_horse_3_mesh",
+      "attach": [
+        {
+          "name": "rider",
+          "Saddle_Node": "westerngfx_CAVALRY_4_rider"
+        }
+      ]
+    },
+    "westerngfx_CAVALRY_4_rider": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "clone": "westerngfx_CAVALRY_1_rider",
+      "pdxmesh": "western_generic_04_type1"
+    },
+    "westerngfx_INFANTRY_1": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "western_generic_01_type1",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "idle"
+        },
+        {
+          "name": "walk",
+          "animation": "walk"
+        },
+        {
+          "name": "attack",
+          "animation": "attack"
+        },
+        {
+          "name": "retreat",
+          "animation": "retreat"
+        }
+      ],
+      "attach": [
+        {
+          "Right_hand_node": "western_halbard"
+        }
+      ]
+    },
+    "westerngfx_INFANTRY_2": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "western_generic_02_type1",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "idle"
+        },
+        {
+          "name": "walk",
+          "animation": "walk"
+        },
+        {
+          "name": "attack",
+          "animation": "attack"
+        },
+        {
+          "name": "retreat",
+          "animation": "retreat"
+        }
+      ],
+      "attach": [
+        {
+          "Left_hand_node": "western_musket"
+        }
+      ]
+    },
+    "westerngfx_INFANTRY_3": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "western_generic_03_type1",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "idle"
+        },
+        {
+          "name": "walk",
+          "animation": "walk"
+        },
+        {
+          "name": "attack",
+          "animation": "attack"
+        },
+        {
+          "name": "retreat",
+          "animation": "retreat"
+        }
+      ],
+      "attach": [
+        {
+          "Left_hand_node": "western_musket_2"
+        }
+      ]
+    },
+    "westerngfx_INFANTRY_4": {
+      "defined_in": "gfx/entities/western_units.asset",
+      "pdxmesh": "western_generic_04_type1",
+      "states": [
+        {
+          "name": "idle",
+          "animation": "idle"
+        },
+        {
+          "name": "walk",
+          "animation": "walk"
+        },
+        {
+          "name": "attack",
+          "animation": "attack"
+        },
+        {
+          "name": "retreat",
+          "animation": "retreat"
+        }
+      ],
+      "attach": [
+        {
+          "Left_hand_node": "western_musket_2"
+        }
+      ]
+    }
+  },
+  "textures": {
+    "DAN_01_diffuse.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "DAN_04_diffuse.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "cavalry_horse_03_diffuse.dds": {
+      "width": 256,
+      "height": 256,
+      "mips": 9,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "cavalry_horse_03_normal.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "cavalry_horse_03_specular.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT5",
+      "dx10_header": false
+    },
+    "cavalry_horse_diffuse.dds": {
+      "width": 256,
+      "height": 256,
+      "mips": 9,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "cavalry_horse_normal.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "cavalry_horse_normal_.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "cavalry_horse_spec.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT5",
+      "dx10_header": false
+    },
+    "nonormal.dds": {
+      "width": 4,
+      "height": 4,
+      "mips": 3,
+      "format": "DXT5",
+      "dx10_header": false
+    },
+    "nospec.dds": {
+      "width": 4,
+      "height": 4,
+      "mips": 3,
+      "format": "DXT5",
+      "dx10_header": false
+    },
+    "siege_cannon_diffuse.dds": {
+      "width": 256,
+      "height": 256,
+      "mips": 9,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "siege_cannon_normal.dds": {
+      "width": 256,
+      "height": 256,
+      "mips": 9,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "siege_cannon_spec.dds": {
+      "width": 256,
+      "height": 256,
+      "mips": 9,
+      "format": "DXT5",
+      "dx10_header": false
+    },
+    "western_generic_01_type1_diffuse.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_01_type1_normals.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_01_type1_spec.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT5",
+      "dx10_header": false
+    },
+    "western_generic_02_type1_diffuse.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_02_type1_normal.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_02_type1_spec.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT5",
+      "dx10_header": false
+    },
+    "western_generic_03_type1_diffuse.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_03_type1_normals.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_03_type1_spec.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT5",
+      "dx10_header": false
+    },
+    "western_generic_04_type1_diffuse.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_04_type1_normals.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_04_type1_spec.dds": {
+      "width": 512,
+      "height": 512,
+      "mips": 10,
+      "format": "DXT5",
+      "dx10_header": false
+    },
+    "western_generic_weapons_diffuse.dds": {
+      "width": 512,
+      "height": 256,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_weapons_normal.dds": {
+      "width": 512,
+      "height": 256,
+      "mips": 10,
+      "format": "DXT1",
+      "dx10_header": false
+    },
+    "western_generic_weapons_specular.dds": {
+      "width": 512,
+      "height": 256,
+      "mips": 10,
+      "format": "DXT5",
+      "dx10_header": false
+    }
+  }
+}
