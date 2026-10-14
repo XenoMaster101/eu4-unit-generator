@@ -50,7 +50,7 @@ class UnitSpec:
 class Nation:
     tag: str
     gfx_culture: str  # the nation's graphical culture; new ones get a default set + gfx pack
-    base_gfx: str = "westerngfx"  # vanilla culture whose entities the Phase 1 set clones
+    base_gfx: str = "westerngfx"  # vanilla culture whose entities the Phase 1 set copies
     name: str = ""
     adjective: str = ""
     colour: tuple[int, int, int] | None = None  # None: leave the country file's color alone

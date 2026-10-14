@@ -1,6 +1,6 @@
 """Render the Jinja2 script templates in pdxscript/templates.
 
-Templates only lay text out. What goes into them (names, clone sources, nodes) is
+Templates only lay text out. What goes into them (names, base entities, nodes) is
 decided by the generator; names come from core.naming.
 """
 from __future__ import annotations

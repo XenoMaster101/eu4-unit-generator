@@ -1,7 +1,7 @@
 """Phase 1 generator: every script file for one nation's land units, no new meshes.
 
 Output (SPEC §10 Phase 1):
-  * 12 TAG entities and 12 graphical-culture default entities (+ riders), clone-based
+  * 12 TAG entities and 12 graphical-culture default entities (+ riders), full definitions
   * TAG sprite pack, gfx-culture sprite pack, pack-order entry for the TAG pack
   * unit files, localisation, ``enable =`` lines in mil.txt
   * graphicalculturetype.txt with the new culture added
@@ -11,6 +11,14 @@ Output (SPEC §10 Phase 1):
 Entities point at the base culture's vanilla pdxmeshes, weapons and cannons. Their
 names come from the vanilla index, never from string-building; generated names come
 from core.naming.
+
+No generated entity uses ``clone =``. The engine resolves a clone while it loads the
+files, so the parent must be defined earlier in load order (file name order), and every
+vanilla culture file (``western_units.asset``) sorts after a prefixed mod file. The 1.37.5
+in-game test logged "Couldn't find parent clone entity" for every clone. Instead each
+entity spells out the pdxmesh, states and attaches it would have inherited. Attaches
+and pdxmesh names are looked up when the unit is built, not at load, so they may point
+at entities and pdxmeshes in later files (the infantry's weapon attach already does).
 """
 from __future__ import annotations
 
@@ -26,7 +34,6 @@ from eu4unitgen.pdxscript.parser import Block, Pair, Scalar, pair, parse_bytes
 from eu4unitgen.pdxscript.render import render
 
 STATES = ("idle", "walk", "attack", "retreat")  # SPEC §5: the only live states on vanilla units
-_RECORD_META = {"name", "clone", "defined_in", "dlc"}
 
 # File roles
 OWNED = "owned"  # written entirely by the tool
@@ -86,7 +93,7 @@ def _utf8_bom(text: str) -> bytes:
 class BaseChain:
     """The vanilla base-game set of one graphical culture (e.g. westerngfx), per tier.
 
-    Base game only: DLC entities are never used as clone sources or meshes (SPEC §9).
+    Base game only: DLC entities are never copied or used as meshes (SPEC §9).
     """
 
     def __init__(self, idx: Index, gfx: str):
@@ -106,32 +113,46 @@ class BaseChain:
         found = resolved(self.idx, entity, "states") or []
         return [s for s in found if s.get("name") in STATES and s.get("animation")]
 
-    def clone_source(self, entity: str, overridden: set[str]) -> str:
-        """Follow the vanilla clone chain while the entity only sets fields we override anyway.
+    def attaches(self, entity: str) -> list[dict]:
+        """The attach blocks ``entity`` ends up with, following its clone chain."""
+        return [_attach(a) for a in resolved(self.idx, entity, "attach") or []]
 
-        westerngfx_CAVALRY_2 (clone of _1 + its own rider attach) -> westerngfx_CAVALRY_1
-        westerngfx_CAVALRY_3 (sets its own horse pdxmesh)          -> westerngfx_CAVALRY_3
-        This keeps clone chains as short as vanilla allows.
+    def flat(self, entity: str) -> dict:
+        """What a full copy of ``entity`` needs: pdxmesh, live states, attaches.
+
+        Raises when the vanilla entity carries anything the template can't restate
+        (state events, extra keys), rather than dropping it silently.
         """
-        name, seen = entity, set()
-        while name not in seen:
-            seen.add(name)
-            rec = self.idx.entity(name)
-            if rec is None:
-                raise GenerationError(f"base entity {name!r} not found in the base game")
-            own = set(rec) - _RECORD_META
-            if not rec.get("clone") or not own <= overridden:
-                return name
-            name = rec["clone"]
-        raise GenerationError(f"clone loop at {entity!r}")
+        pdxmesh = resolved(self.idx, entity, "pdxmesh")
+        if not pdxmesh:
+            raise GenerationError(f"base entity {entity!r} has no pdxmesh along its clone chain")
+        states = self.states(entity)
+        if any(st.get("events") for st in states):
+            raise GenerationError(f"base entity {entity!r} has state events; the entity template can't copy them yet")
+        if resolved(self.idx, entity, "extra"):
+            raise GenerationError(f"base entity {entity!r} sets keys the entity template can't copy: "
+                                  f"{sorted(resolved(self.idx, entity, 'extra'))}")
+        return {"pdxmesh": pdxmesh, "states": states, "attaches": self.attaches(entity)}
 
 
 # --------------------------------------------------------------------------- entities
 
-def _entity(name: str, *, version: int, clone: str | None = None, pdxmesh: str | None = None,
-            states: list[dict] | None = None, attaches: list[dict] | None = None) -> dict[str, Any]:
-    return {"name": name, "clone": clone, "pdxmesh": pdxmesh, "version": version,
-            "states": states or [], "attaches": attaches or []}
+def _attach(raw: dict) -> dict:
+    """Scanner attach record ({"name": ..., bone: entity}) -> template form."""
+    return {"name": raw.get("name"), "nodes": [(k, v) for k, v in raw.items() if k != "name"]}
+
+
+def _override_attaches(inherited: list[dict], ours: list[dict]) -> list[dict]:
+    """Our attaches replace inherited ones with the same ``name``; the rest are kept in order.
+    UNVERIFIED (SPEC §3): whether clones replace attaches by name; vanilla restates the named
+    attach on every clone, so a full copy with the named one swapped matches what it gets."""
+    by_name = {a["name"]: a for a in ours if a["name"]}
+    out = [by_name.pop(a["name"]) if a["name"] in by_name else a for a in inherited]
+    return out + [a for a in ours if not a["name"] or a["name"] in by_name]
+
+
+def _entity(name: str, *, version: int, pdxmesh: str, states: list[dict], attaches: list[dict]) -> dict[str, Any]:
+    return {"name": name, "pdxmesh": pdxmesh, "version": version, "states": states, "attaches": attaches}
 
 
 def unit_entities(owner: str, chain: BaseChain, naming: Naming, version: int) -> list[dict]:
@@ -148,19 +169,22 @@ def unit_entities(owner: str, chain: BaseChain, naming: Naming, version: int) ->
             infantry, version=version, pdxmesh=inf["pdxmesh"], states=chain.states(inf["entity"]),
             attaches=[{"name": None, "nodes": [(inf["weapon_node"], inf["weapon_entity"])]}]))
 
-        # Rider: same .mesh as this tier's infantry, horse_* states and saber inherited (SPEC §5, §7.2).
+        # Rider: the vanilla rider's horse_* states and weapon, on this tier's infantry pdxmesh
+        # (same .mesh as the infantry, SPEC §5, §7.2).
+        base = chain.flat(cav["rider_entity"])
+        out.append(_entity(rider, version=version, pdxmesh=inf["pdxmesh"], states=base["states"],
+                           attaches=base["attaches"]))
+        base = chain.flat(cav["entity"])
         out.append(_entity(
-            rider, version=version, clone=chain.clone_source(cav["rider_entity"], {"pdxmesh"}),
-            pdxmesh=inf["pdxmesh"]))
+            naming.unit_entity(owner, "cavalry", tier), version=version, pdxmesh=base["pdxmesh"],
+            states=base["states"], attaches=_override_attaches(
+                base["attaches"], [{"name": "rider", "nodes": [("Saddle_Node", rider)]}])))
+        base = chain.flat(art["entity"])
         out.append(_entity(
-            naming.unit_entity(owner, "cavalry", tier), version=version,
-            clone=chain.clone_source(cav["entity"], {"attach"}),
-            attaches=[{"name": "rider", "nodes": [("Saddle_Node", rider)]}]))
-        out.append(_entity(
-            naming.unit_entity(owner, "artillery", tier), version=version,
-            clone=chain.clone_source(art["entity"], {"attach"}),
-            attaches=[{"name": "gunman", "nodes": [("infantry_node", infantry),
-                                                   ("cannon_node", art["cannon_entity"])]}]))
+            naming.unit_entity(owner, "artillery", tier), version=version, pdxmesh=base["pdxmesh"],
+            states=base["states"], attaches=_override_attaches(
+                base["attaches"], [{"name": "gunman", "nodes": [("infantry_node", infantry),
+                                                                ("cannon_node", art["cannon_entity"])]}])))
     return out
 
 

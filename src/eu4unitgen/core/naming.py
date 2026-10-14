@@ -2,7 +2,7 @@
 
 Entity names, pdxmesh names, sprite pack names, unit keys, localisation keys and the
 mod-relative paths of generated files are all built here and nowhere else. Names of
-*vanilla* things the generator points at (clone sources, weapons, cannons) come from
+*vanilla* things the generator points at (base entities, weapons, cannons) come from
 the base chain data, not from here.
 """
 from __future__ import annotations

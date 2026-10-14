@@ -8,16 +8,23 @@ from eu4unitgen.pdxscript.parser import parse
 from eu4unitgen.pdxscript.render import RenderError, render
 from golden import check_golden
 
-INFANTRY = {"name": "MAC_INFANTRY_2", "clone": None, "pdxmesh": "western_generic_02_type1", "version": 20,
+INFANTRY = {"name": "MAC_INFANTRY_2", "pdxmesh": "western_generic_02_type1", "version": 20,
             "states": [{"name": n, "animation": n} for n in ("idle", "walk", "attack", "retreat")],
             "attaches": [{"name": None, "nodes": [("Left_hand_node", "western_musket")]}]}
-RIDER = {"name": "MAC_CAVALRY_1_rider", "clone": "westerngfx_CAVALRY_1_rider",
-         "pdxmesh": "western_generic_01_type1", "version": 20, "states": [], "attaches": []}
-HORSE = {"name": "MAC_CAVALRY_1", "clone": "westerngfx_CAVALRY_1", "pdxmesh": None, "version": 20, "states": [],
+RIDER = {"name": "MAC_CAVALRY_1_rider", "pdxmesh": "western_generic_01_type1", "version": 20,
+         "states": [{"name": n, "animation": f"horse_{n}"} for n in ("idle", "walk", "attack", "retreat")],
+         "attaches": [{"name": None, "nodes": [("Right_hand_node", "cavalry_saber")]}]}
+HORSE = {"name": "MAC_CAVALRY_1", "pdxmesh": "cavalry_horse", "version": 20,
+         "states": [{"name": "idle", "animation": "horse_idle"}, {"name": "walk", "animation": "horse_walk"},
+                    {"name": "retreat", "animation": "horse_walk"}, {"name": "attack", "animation": "horse_attack"}],
          "attaches": [{"name": "rider", "nodes": [("Saddle_Node", "MAC_CAVALRY_1_rider")]}]}
-ARTILLERY = {"name": "MAC_ARTILLERY_1", "clone": "westerngfx_ARTILLERY_1", "pdxmesh": None, "version": 20,
-             "states": [], "attaches": [{"name": "gunman", "nodes": [("infantry_node", "MAC_INFANTRY_1"),
-                                                                     ("cannon_node", "westerngfx_ARTILLERY_1_cannon")]}]}
+ARTILLERY = {"name": "MAC_ARTILLERY_1", "pdxmesh": "artillery_base_mesh", "version": 20,
+             "states": [{"name": "attack", "animation": "artillery_base_attack"},
+                        {"name": "idle", "animation": "artillery_base_idle"},
+                        {"name": "walk", "animation": "artillery_base_moving"},
+                        {"name": "retreat", "animation": "artillery_base_moving"}],
+             "attaches": [{"name": "gunman", "nodes": [("infantry_node", "MAC_INFANTRY_1"),
+                                                       ("cannon_node", "westerngfx_ARTILLERY_1_cannon")]}]}
 SPRITES = [(u, [(i, f"MAC_{u.upper()}_{i + 1}") for i in range(4)]) for u in ("infantry", "cavalry", "artillery")]
 
 

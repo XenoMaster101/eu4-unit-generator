@@ -37,7 +37,7 @@ def _set_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tag", required=True)
     p.add_argument("--gfx", required=True, help="the nation's graphical culture, e.g. hellenicgfx")
     p.add_argument("--set", dest="set_name", default="", help="unit set name (default: the tag in lowercase)")
-    p.add_argument("--base-gfx", default="westerngfx", help="vanilla culture whose set is cloned")
+    p.add_argument("--base-gfx", default="westerngfx", help="vanilla culture whose set is copied")
     p.add_argument("--name", default="")
     p.add_argument("--adjective", default="")
     p.add_argument("--colour", type=int, nargs=3, default=None, metavar=("R", "G", "B"))

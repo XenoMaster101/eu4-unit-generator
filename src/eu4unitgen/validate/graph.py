@@ -129,6 +129,25 @@ class World:
     def entity(self, name: str) -> dict | None:
         return self.pick("entities", name)
 
+    @staticmethod
+    def load_key(rec: dict) -> tuple[str, int]:
+        """Where an entity definition sits in the engine's load order: ``gfx/entities`` files
+        by path (base game and DLC interleaved, mod files in their own name's slot), then
+        top to bottom in the file. Fits all 4,760 vanilla + DLC clones on 1.37.5, including
+        the 7 whose parent is only in another file (``wonup.asset`` -> ``western_units.asset``,
+        ``_musup_units.asset`` -> ``_hindup_units.asset``, each later file -> earlier one),
+        and the in-game failure of ``hr_*.asset`` cloning ``westerngfx_*`` (SPEC §6).
+        UNVERIFIED: case-sensitive vs case-insensitive name order (no vanilla file tells
+        them apart); this uses lowercase."""
+        return _norm(rec["defined_in"]), rec.get("seq", 0)
+
+    def clone_parent_loaded_before(self, rec: dict) -> dict | None:
+        """The parent definition the engine can see when it reaches ``rec``'s clone line,
+        or None ("Couldn't find parent clone entity")."""
+        key = self.load_key(rec)
+        earlier = [d for d in self.defs("entities", rec["clone"]) if self.loaded(d) and self.load_key(d) < key]
+        return max(earlier, key=self.load_key) if earlier else None
+
     def pdxmesh(self, name: str) -> dict | None:
         return self.pick("pdxmeshes", name)
 

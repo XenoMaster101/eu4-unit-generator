@@ -55,15 +55,29 @@ def test_every_script_file_parses_cleanly(generated):
         assert parse_bytes(f.data).warnings == [], f.path
 
 
-def test_clone_sources_follow_shortest_vanilla_chain(generated):
+def test_entities_are_full_definitions_without_clones(generated):
+    """Clones of vanilla entities fail in game: hr_*.asset loads before western_units.asset."""
+    for rel in ("gfx/entities/hr_mac_units.asset", "gfx/entities/hr_hellenicgfx_units.asset"):
+        ents = _entities(generated, rel)
+        assert len(ents) == 16  # 4 tiers x (infantry, rider, horse, artillery)
+        assert all(e.get_str("clone") is None and e.get_str("pdxmesh") for e in ents.values()), rel
     ents = _entities(generated, "gfx/entities/hr_mac_units.asset")
-    assert len(ents) == 16  # 4 tiers x (infantry, rider, horse, artillery)
-    assert ents["MAC_CAVALRY_2"].get_str("clone") == "westerngfx_CAVALRY_1"  # _2 only adds an attach
-    assert ents["MAC_CAVALRY_3"].get_str("clone") == "westerngfx_CAVALRY_3"  # _3 sets its own horse mesh
-    assert ents["MAC_CAVALRY_4_rider"].get_str("clone") == "westerngfx_CAVALRY_1_rider"
+    assert ents["MAC_CAVALRY_2"].get_str("pdxmesh") == "horse"  # inherited by westerngfx_CAVALRY_2
+    assert ents["MAC_CAVALRY_3"].get_str("pdxmesh") == "horse_3"  # westerngfx_CAVALRY_3's own horse
     assert ents["MAC_CAVALRY_4_rider"].get_str("pdxmesh") == "generic_04"
     for t in range(1, 5):
-        assert ents[f"MAC_ARTILLERY_{t}"].get_str("clone") == "westerngfx_ARTILLERY_1"
+        assert ents[f"MAC_ARTILLERY_{t}"].get_str("pdxmesh") == "artillery_base"
+
+
+def test_full_entities_restate_inherited_states_and_attaches(generated):
+    ents = _entities(generated, "gfx/entities/hr_mac_units.asset")
+    states = lambda e: [(s.get_str("name"), s.get_str("animation")) for s in e.get_all("state")]
+    assert states(ents["MAC_CAVALRY_2_rider"]) == [("idle", "horse_idle"), ("walk", "horse_walk"),
+                                                   ("attack", "horse_attack"), ("retreat", "horse_retreat")]
+    assert ents["MAC_CAVALRY_2_rider"].get_block("attach").scalar_map() == {"Right_hand_node": "w_saber"}
+    assert ("retreat", "horse_walk") in states(ents["MAC_CAVALRY_4"])
+    assert ("attack", "artillery_base_attack") in states(ents["MAC_ARTILLERY_3"])
+    assert len(ents["MAC_ARTILLERY_3"].get_all("attach")) == 1  # the gunman attach is replaced, not added
 
 
 def test_attachments_wire_the_set_together(generated):
@@ -180,7 +194,9 @@ def test_generate_mac_against_real_install(tmp_path):
         files.close()
     ents = _entities(gs, "gfx/entities/hr_mac_units.asset")
     assert ents["MAC_INFANTRY_1"].get_str("pdxmesh") == "western_generic_01_type1"
-    assert ents["MAC_CAVALRY_3"].get_str("clone") == "westerngfx_CAVALRY_3"
+    assert ents["MAC_CAVALRY_3"].get_str("pdxmesh") == "cavalry_horse_3_mesh"
+    assert ents["MAC_CAVALRY_3_rider"].get_block("attach").scalar_map() == {"Right_hand_node": "cavalry_saber"}
+    assert all(e.get_str("clone") is None for e in ents.values())
     assert ents["MAC_ARTILLERY_4"].get_block("attach").scalar_map()["cannon_node"] == "westerngfx_ARTILLERY_4_cannon"
     mil = parse_bytes(gs.files["common/technologies/mil.txt"].data)
     techs = mil.get_all("technology")

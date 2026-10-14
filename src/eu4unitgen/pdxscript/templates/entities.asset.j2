@@ -2,13 +2,8 @@
 {% for e in entities %}
 
 entity = {
-{% if e.clone %}
-	clone = {{ e.clone | q }}
-{% endif %}
 	name = {{ e.name | q }}
-{% if e.pdxmesh %}
 	pdxmesh = {{ e.pdxmesh | q }}
-{% endif %}
 	version = {{ e.version }}
 {% for s in e.states %}
 	state = { name = {{ (s.name | q).ljust(9) }} animation = {{ s.animation | q }} }

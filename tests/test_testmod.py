@@ -112,6 +112,23 @@ def test_never_touches_other_mods(built, mod_dir):
     assert {f.action for f in built.plan.files} == {CREATE}
 
 
+def test_launcher_stripping_the_final_newline_is_not_an_edit(built, project, game, mod_dir):
+    """The EU4 launcher rewrites <name>.mod without its final newline."""
+    apply_export(built.plan)
+    desc = mod_dir / f"{T}.mod"
+    desc.write_bytes(desc.read_bytes().rstrip(b"\n"))
+    (mod_dir / T / "descriptor.mod").write_bytes((mod_dir / T / "descriptor.mod").read_bytes().rstrip(b"\n"))
+    files, idx = game
+    nation = Nation("AAA", "hellenicgfx", set_name="macedonian_test", adjective="Macedonian Test")
+    again = build_test_mod(project, nation, files, idx, mod_dir)
+    by_path = {f.path: f.action for f in again.plan.files}
+    assert by_path[f"{T}.mod"] != BLOCKED
+    assert by_path[f"{T}/descriptor.mod"] == BLOCKED  # only the launcher descriptor gets the allowance
+    desc.write_bytes(desc.read_bytes() + b'\nuser_dir="x"')
+    third = build_test_mod(project, nation, files, idx, mod_dir)
+    assert f"{T}.mod" in [f.path for f in third.plan.by(BLOCKED)]
+
+
 def test_foreign_descriptor_is_blocked(project, game, mod_dir):
     (mod_dir / f"{T}.mod").write_text('name="someone else"\n')
     files, idx = game

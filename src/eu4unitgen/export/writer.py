@@ -37,6 +37,17 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def unedited(path: str, current: bytes, recorded: str | None) -> bool:
+    """``current`` is still what the tool wrote (hash ``recorded``). One allowance: the EU4
+    launcher rewrites launcher descriptors (``<mod dir>/<name>.mod``) and drops the final
+    newline (seen 2026-10-14); that alone doesn't count as an edit."""
+    if sha256(current) == recorded:
+        return True
+    if "/" not in path and path.endswith(".mod"):
+        return sha256(current.rstrip(b"\r\n") + b"\n") == recorded
+    return False
+
+
 def _decode(data: bytes) -> str:
     if data.startswith(b"\xef\xbb\xbf"):
         return data[3:].decode("utf-8")
@@ -139,7 +150,7 @@ def plan_export(mod_root: Path, generated: GeneratedSet, game: GameFiles | None 
             if gf.role == PATCHED:
                 pf.reason += "; merge by hand using INTEGRATION.md"
             pf.diff = _diff(gf.path, current, gf.data, f"a/{gf.path}")
-        elif sha256(current) != entry.get("sha256"):
+        elif not unedited(gf.path, current, entry.get("sha256")):
             pf.action, pf.reason = BLOCKED, "edited since eu4unitgen wrote it"
             pf.diff = _diff(gf.path, current, gf.data, f"a/{gf.path}")
         elif current == gf.data:
@@ -252,7 +263,7 @@ def apply_export(plan: ExportPlan) -> list[str]:
         target = plan.mod_root / pf.path
         if pf.action == CREATE and target.exists():
             raise ExportError(f"{pf.path} appeared after the dry run; plan again")
-        if pf.action == UPDATE and sha256(target.read_bytes()) != fresh.get(pf.path, {}).get("sha256"):
+        if pf.action == UPDATE and not unedited(pf.path, target.read_bytes(), fresh.get(pf.path, {}).get("sha256")):
             raise ExportError(f"{pf.path} changed after the dry run; plan again")
         _atomic_write(target, pf.data)
         written.append(pf.path)

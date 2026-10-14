@@ -64,7 +64,10 @@ The game shows **one model per army**, chosen by the dominant unit type, so ever
 - Graphical-culture defaults: `<gfx>_INFANTRY_n`, `<gfx>_CAVALRY_n`, `<gfx>_CAVALRY_n_rider`, `<gfx>_ARTILLERY_n`; cannons `<gfx>_ARTILLERY_n_cannon`. Western artillery tiers 2–4 clone `westerngfx_ARTILLERY_1` as `westerngfx_ARTILLERY_n_generic`.
 - DLC variants carry suffixes (e.g. `_evup`, `_generic`).
 - Cloning: `entity = { clone = "SRC" name = "NEW" ... }`. Fields given on the clone override the source (e.g. `pdxmesh`). DLC116 combines `clone` and `version` in one entity.
-  **UNVERIFIED:** whether a clone's `attach` blocks replace the source's by attach `name` or are added. Vanilla always restates the named attach (`name = "rider"`, `name = "gunman"`) on clones, and the generator does the same.
+  **UNVERIFIED:** whether a clone's `attach` blocks replace the source's by attach `name` or are added. Vanilla always restates the named attach (`name = "rider"`, `name = "gunman"`) on clones.
+- **Clones resolve at load time, in load order (confirmed in game, 2026-10-14).** The parent must already be loaded when the engine reaches the `clone =` line. Load order for `gfx/entities/*.asset` is file name order (base game and DLC files interleaved; a mod file takes its own name's slot), then top to bottom in each file. A mod file named `hr_*.asset` loads before `western_units.asset`, so `clone = "westerngfx_CAVALRY_1"` fails with `Couldn't find parent clone entity`. This model fits all 4,760 vanilla + DLC clones on 1.37.5; the 7 whose parent lives in another file all point at an earlier-sorting file (`wonup.asset` → `western_units.asset`, `_musup_units.asset` → `_hindup_units.asset`). Paradox names some files `_*.asset` so they load first. **UNVERIFIED:** whether the name order is case-sensitive (no vanilla file name tells them apart; the validator uses lowercase).
+- `attach` targets and `pdxmesh` names are **not** resolved at load: infantry attaching `western_musket` (defined in `weapons.asset`, after `hr_*`) works in game.
+- **The generator never emits `clone =`.** Every generated entity is a full definition: the base entity's resolved `pdxmesh`, live states and attaches, with the named attach (`rider`, `gunman`) swapped for ours. The `clone_order` validator rule rejects any generated clone whose parent isn't loaded before it.
 
 ### version
 - Vanilla base-game entities have **no** `version` line.
@@ -149,6 +152,7 @@ Log path: `Documents/Paradox Interactive/Europa Universalis IV/logs/error.log`
 | `Failed to find entity "X" for attachment in gunman` | Artillery crew/attach target missing | Every attach target resolves |
 | `Failed to find entity "..." for attachment` | Weapon/rider entity missing (often absent DLC asset) | Same; flag DLC-only targets |
 | `Set a higher version on entity X` | Duplicate name, version collision | Scan vanilla + DLC + mod for name clashes |
+| `Couldn't find parent clone entity X, in file "...", near line N` | Clone parent not loaded yet (defined in a later-sorting file, later in the same file, or nowhere). The unit falls back to the country's graphical-culture model | `clone_order`: parent defined earlier in load order (§3) |
 | `Could not find mesh file gfx/models/...mesh` | pdxmesh `file =` wrong | Every pdxmesh file exists (mod, vanilla or DLC) |
 | Black/untextured model in-game | Textures in .mesh missing or wrong format | Mesh texture refs resolve in the mesh's folder; DDS format matches base |
 | (no log; frozen/T-posed unit) | State names an animation id the pdxmesh lacks | Every state animation id exists in the resolved pdxmesh; every type exists; rider pdxmesh has `horse_*`; crew pdxmesh has `artillery_attack` |
@@ -160,7 +164,7 @@ Log path: `Documents/Paradox Interactive/Europa Universalis IV/logs/error.log`
 `hr_` and `MAC` are placeholders; the prefix and tag are configurable. Generated entities always carry the project `version`.
 
 ### 7.0 Phase 1 form (no new meshes)
-Phase 1 entities point at **vanilla pdxmeshes** by name and define no pdxmesh or animation blocks. A TAG infantry entity is a full entity, the way vanilla `DAN_INFANTRY_2` is:
+Phase 1 entities point at **vanilla pdxmeshes** by name and define no pdxmesh or animation blocks. Every entity is a full definition, with no `clone =` (§3: clones of vanilla entities fail from a mod file that sorts first). A TAG infantry entity looks like vanilla `DAN_INFANTRY_2`:
 ```
 # gfx/entities/hr_mac_units.asset
 entity = {
@@ -174,7 +178,7 @@ entity = {
     attach = { Left_hand_node = "western_musket" }
 }
 ```
-Cavalry and artillery use the clone forms in 7.2 and 7.3.
+Cavalry and artillery use the full forms in 7.2 and 7.3.
 
 ### 7.1 Infantry with its own mesh (Phase 2+)
 ```
@@ -246,32 +250,17 @@ animation = {
 ```
 
 ### 7.2 Cavalry
-Clone form (Phase 1 default, the same pattern as vanilla `DAN_CAVALRY_n`):
+Full form (Phase 1 default). The rider copies the base culture's rider (`westerngfx_CAVALRY_n_rider`, resolved along its vanilla clone chain): its `horse_*` states and weapon attach, on this tier's infantry pdxmesh. The horse copies `westerngfx_CAVALRY_n`: `cavalry_horse` at tiers 1–2, `cavalry_horse_3_mesh` at 3–4, and the vanilla state order (`retreat` → `horse_walk`), with the `rider` attach swapped for ours.
 ```
 entity = {
-    clone = "westerngfx_CAVALRY_1_rider"     # inherits horse_* states and the cavalry_saber attach
     name = "MAC_CAVALRY_1_rider"
     pdxmesh = "western_generic_01_type1"     # Phase 2+: hr_mac_infantry_1_mesh (needs horse_* ids)
-    version = 20
-}
-entity = {
-    clone = "westerngfx_CAVALRY_1"           # horse: cavalry_horse; tiers 3-4 clone westerngfx_CAVALRY_3/4
-    name = "MAC_CAVALRY_1"
-    version = 20
-    attach = { name = "rider" Saddle_Node = "MAC_CAVALRY_1_rider" }
-}
-```
-Full form (own rider weapon or horse):
-```
-entity = {
-    name = "MAC_CAVALRY_1_rider"
-    pdxmesh = "hr_mac_infantry_1_mesh"
     version = 20
     state = { name = "idle"    animation = "horse_idle" }
     state = { name = "walk"    animation = "horse_walk" }
     state = { name = "attack"  animation = "horse_attack" }
     state = { name = "retreat" animation = "horse_retreat" }
-    attach = { Right_hand_node = "hr_xyston_entity" }
+    attach = { Right_hand_node = "cavalry_saber" }   # Phase 2+: e.g. hr_xyston_entity
 }
 entity = {
     name = "MAC_CAVALRY_1"
@@ -279,18 +268,23 @@ entity = {
     version = 20
     state = { name = "idle"    animation = "horse_idle" }
     state = { name = "walk"    animation = "horse_walk" }
-    state = { name = "attack"  animation = "horse_attack" }
     state = { name = "retreat" animation = "horse_walk" }
+    state = { name = "attack"  animation = "horse_attack" }
     attach = { name = "rider" Saddle_Node = "MAC_CAVALRY_1_rider" }
 }
 ```
 
-### 7.3 Artillery (clone-based, Phase 1 default)
+### 7.3 Artillery
+Full form (Phase 1 default), copied from `westerngfx_ARTILLERY_n` (which resolves to `westerngfx_ARTILLERY_1`'s base mesh and states at every tier), with the `gunman` attach swapped for ours:
 ```
 entity = {
-    clone = "westerngfx_ARTILLERY_1"         # all tiers: see clone-source rule below
     name = "MAC_ARTILLERY_1"
+    pdxmesh = "artillery_base_mesh"
     version = 20
+    state = { name = "attack"  animation = "artillery_base_attack" }
+    state = { name = "idle"    animation = "artillery_base_idle" }
+    state = { name = "walk"    animation = "artillery_base_moving" }
+    state = { name = "retreat" animation = "artillery_base_moving" }
     attach = {
         name = "gunman"
         infantry_node = "MAC_INFANTRY_1"
@@ -300,7 +294,7 @@ entity = {
 ```
 For the Hellenistic mod, `cannon_node` will later point to a lithobolos or torsion-engine entity.
 
-**Clone-source rule (generator).** Follow the vanilla clone chain while the vanilla entity only sets fields the generated entity overrides anyway (`attach` for horse/artillery, `pdxmesh` for riders). Result for westerngfx: riders clone `westerngfx_CAVALRY_1_rider`; horses clone `westerngfx_CAVALRY_1` (tiers 1–2) or `westerngfx_CAVALRY_3`/`_4` (own horse mesh); artillery clones `westerngfx_ARTILLERY_1` at every tier (`_n` and `_n_generic` only add the gunman attach, which is restated). This keeps clone chains one level deep.
+**Copy rule (generator).** Resolve the base entity's `pdxmesh`, states and attaches along its vanilla clone chain and write them out in full. Commented `death`/`extra_state_*` states are dropped (§5). The generator stops with an error if a base entity has state events or other keys the template can't restate, rather than dropping them.
 
 ### 7.4 Sprite packs + order
 `gfx/sprite_packs/hr_mac_pack.txt`
@@ -399,7 +393,7 @@ src/eu4unitgen/
     jobs/             # import_mesh.py, retarget_textures.py, kitbash.py, render_thumb.py, export_mesh.py
   validate/
     graph.py          # World (vanilla+DLC < mod < generated, same-path replaces) + dependency graph: pack → entity → pdxmesh → mesh → textures; state id → anim type → .anim; attaches
-    rules.py          # naming, missing nodes, version collisions, DDS format, loc keys, tech enables, anim ids, pack-order shadowing
+    rules.py          # naming, missing nodes, clone load order, version collisions, DDS format, loc keys, tech enables, anim ids, pack-order shadowing
     errorlog.py       # parse error.log after a test launch, map lines back to generated files
   export/
     writer.py         # dry-run diff, atomic writes, manifest (.eu4unitgen/manifest.json: path → sha256, role, tags)
@@ -435,7 +429,7 @@ Metadata only: names, paths, bone names, header facts. No game files or script t
 - **License**: GPL-3.0.
 
 ### Mesh approaches (ranked)
-1. Entity clone / re-point (no mesh work). Covers all 12 slots immediately.
+1. Entity copy / re-point onto vanilla pdxmeshes (no mesh work). Covers all 12 slots immediately.
 2. Texture swap/recolour on a copy of a base mesh (default base: `recolour_bases`), re-exported to point at new DDS files.
 3. Kitbash in headless Blender: attach pre-weighted accessories (helmets, shields) to vanilla skeleton bones, then export.
 4. Procedural variants on the same armature (needs human QC).
@@ -449,7 +443,7 @@ Edited meshes keep the vanilla skeleton, so they **reuse vanilla animation types
 
 - Paradox EULA: mods may be made and shared; you may not distribute the game with the mod, nor charge or take donations for mods.
 - DLC assets: only usable if steps are taken so only DLC owners can use them. **Never bundle DLC assets.** Read them from the user's install and gate with `has_dlc` where possible. Never use a DLC mesh as a recolour/kitbash base.
-- Prefer `clone =` and vanilla path references over copying base-game files.
+- Prefer references to vanilla names and paths over copying base-game files. Generated entities restate a vanilla entity's fields (names of pdxmeshes, animations, attach targets), which copies no Paradox asset; `clone =` can't be used on vanilla parents from a mod file that sorts first (§3).
 - Not legal advice. Paradox can remove mods at its discretion.
 
 ---
@@ -485,9 +479,15 @@ Done (2026-10-14): parser/writer, naming, templates, generator, validator, expor
 - **Test-only sprite levels.** `test-mod --test-sprite-techs 2 3 4` moves `sprite_level` 2–4 to those MIL techs in the test mod's `mil.txt` only, unlocks each tier's units there and all tier-1 units at MIL 1. HDA's tech group (north_american) starts at MIL 1, so tier 1 shows at start and tiers 2–4 are one MIL tech apart. The validator requires sprite levels 1–4 exactly once, rising with the tech.
 - Clausewitz parser/writer with round-trip tests on vanilla files; replace the stopgap reader in `scanner.py`.
 - `naming.py`, Jinja2 templates, nation wizard (GUI).
-- Generate: clone-based 12 TAG entities; gfx-culture default set; **TAG sprite pack and gfx-culture sprite pack (`graphical_cultures` block)**; pack-order entry for the TAG pack; `graphicalculturetype.txt` (vanilla list + new names, at export); units; mil.txt enables; localisation; country snippet.
+- Generate: 12 TAG entities (full definitions, no clones); gfx-culture default set; **TAG sprite pack and gfx-culture sprite pack (`graphical_cultures` block)**; pack-order entry for the TAG pack; `graphicalculturetype.txt` (vanilla list + new names, at export); units; mil.txt enables; localisation; country snippet.
 - Validator: dependency graph, missing nodes, version collisions (vanilla + DLC + mod), orphan entities, missing loc keys, state animation ids, pack-order shadowing.
 - Export with dry-run diff + manifest.
+- **In-game test 1 (2026-10-14, HDA / `macedonian_test` / hellenicgfx, 1.37.5 + DLC116, test sprite techs 2 3 4):**
+  - **Infantry tiers 1–4: pass.** The TAG pack's `HDA_INFANTRY_n` shows at each tier.
+  - **The map model follows the country's `sprite_level` (from MIL tech), not the unit selected for the regiment.** So the sprite-pack tier index comes from tech, and a tier's unit files don't pick its model.
+  - **Cavalry and artillery: fail.** error.log had `Couldn't find parent clone entity westerngfx_CAVALRY_1_rider / westerngfx_CAVALRY_n / westerngfx_ARTILLERY_1` for every clone in both `hr_macedonian_test_units.asset` and `hr_hellenicgfx_units.asset`. The parents exist with exactly those names in `western_units.asset`, which loads after `hr_*` (§3). Both fell back to HDA's native northamericagfx models. Fix: full entity definitions plus the `clone_order` rule.
+- **In-game test 2 (2026-10-14, same setup, full entity definitions): pass.** Cavalry and artillery show the western models at multiple tiers. error.log has no clone, entity or `hr_` errors. What's left in it isn't ours: Workshop `.mod` descriptor parse warnings (`ugc_*.mod`), vanilla GUI warnings (`unitpanel_card.gui`, `countrygovernmentview.gui`, `macrobuild_mapicons.gui`) and a vanilla `economic_ideas` scope error. Not yet confirmed one by one: cavalry and artillery at all 4 tiers (the report says "multiple").
+  - The EU4 launcher rewrites `<mod dir>/<name>.mod` and drops its final newline. The exporter treats that one change as unedited for launcher descriptors only.
 - **Done when:**
   - a nation generated by the app shows correct models in all 4 tiers in-game with a clean error.log;
   - **in-game test of fallback order and pack priority** is done and §3's UNVERIFIED items are resolved:

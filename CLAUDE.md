@@ -14,7 +14,7 @@ Desktop GUI app that generates complete Europa Universalis IV **land unit** sets
 
 ## Hard rules
 1. **Never copy, bundle or commit Paradox game assets** (meshes, textures, anims, vanilla script files) into this repo or the template library. Read them from the user's EU4 install path at runtime. DLC assets must never be redistributed.
-2. Prefer `clone =` and references to vanilla paths over copying files into the mod.
+2. Reference vanilla names and paths; never copy files into the mod. Generated files never `clone =` a vanilla entity: clones resolve in load order and vanilla's files load after ours (SPEC §3). Write full entity definitions that reference vanilla pdxmesh, animation and attach names instead.
 3. All generated entity, sprite pack and pdxmesh names come from `core/naming.py`. No string-building of names anywhere else.
 4. Every generator must have a matching validator rule. Generated output must pass `validate/` before export.
 5. Export is non-destructive: dry-run diff first, write a manifest of generated files, and never overwrite files the tool didn't generate.

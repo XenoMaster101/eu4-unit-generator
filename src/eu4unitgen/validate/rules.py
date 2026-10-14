@@ -144,6 +144,29 @@ def missing_nodes(ctx: Context) -> list[Issue]:
     return out
 
 
+@rule("clone_order")
+def clone_order(ctx: Context) -> list[Issue]:
+    """A clone's parent must be defined earlier in load order (file name order, then file
+    order), as the engine resolves clones while loading. Otherwise error.log has
+    "Couldn't find parent clone entity X" and the unit falls back to another culture's model.
+    Errors for generated entities, warnings for the mod's own (they break the same way)."""
+    w, out = ctx.world, []
+    for name, defs in sorted(w.idx.entities.items()):
+        for rec in defs:
+            if not rec.get("clone") or rec["origin"] == VANILLA or not w.loaded(rec):
+                continue
+            if w.clone_parent_loaded_before(rec) is not None:
+                continue
+            later = sorted({d["defined_in"] for d in w.defs("entities", rec["clone"]) if w.loaded(d)})
+            why = (f"it is only defined after it in load order ({', '.join(later)})" if later
+                   else "it is not defined anywhere")
+            out.append(Issue(ERROR if rec["origin"] == GENERATED else WARNING, "clone_order",
+                             f"{name} clones {rec['clone']!r}, but {why}  "
+                             f"[error.log: Couldn't find parent clone entity {rec['clone']}]",
+                             rec["defined_in"], name))
+    return out
+
+
 @rule("dlc_dependency")
 def dlc_dependency(ctx: Context) -> list[Issue]:
     """References that resolve only through a DLC: they break for players without it."""
@@ -508,7 +531,7 @@ def generator_notes(ctx: Context) -> list[Issue]:
 
 # Which rules cover each generated output (CLAUDE.md rule 4: every generator has a validator rule).
 COVERAGE = {
-    r"^gfx/entities/.+\.asset$": ["parse_clean", "naming", "missing_nodes", "state_animations", "event_nodes",
+    r"^gfx/entities/.+\.asset$": ["parse_clean", "naming", "missing_nodes", "clone_order", "state_animations", "event_nodes",
                                   "version_collisions", "orphan_entities", "dlc_dependency"],
     r"^gfx/sprite_packs/.+\.txt$": ["parse_clean", "naming", "sprite_packs"],
     r"^gfx/sprite_packs_order/.+\.txt$": ["parse_clean", "pack_order"],

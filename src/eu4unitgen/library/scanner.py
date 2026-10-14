@@ -319,9 +319,10 @@ def build_index(files: GameFiles) -> Index:
     idx = Index()
 
     for path, dlc, data in files.iter_files("gfx/entities", (".asset",)):
-        for val in _blocks(parse_bytes(data), "entity"):
+        for seq, val in enumerate(_blocks(parse_bytes(data), "entity")):
             if val.get_str("name"):
                 rec = _entity_record(val, path, dlc)
+                rec["seq"] = seq  # position in the file: load order within it (clone resolution)
                 idx.entities.setdefault(rec["name"], []).append(rec)
 
     for path, dlc, data in files.iter_files("interface", (".gfx",), recursive=True):
@@ -446,7 +447,7 @@ def pack_tiers(idx: Index, pack: dict) -> dict:
 
 
 def _strip(rec: dict) -> dict:
-    return {k: v for k, v in rec.items() if k not in ("name", "dlc")}
+    return {k: v for k, v in rec.items() if k not in ("name", "dlc", "seq")}
 
 
 def build_base_models(files: GameFiles, idx: Index, tag: str, gfx: str) -> dict:
