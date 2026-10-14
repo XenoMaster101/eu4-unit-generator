@@ -24,7 +24,7 @@ python -m eu4unitgen.gui
 
 The wizard has five screens, left to right:
 
-1. **Settings**: your EU4 install folder (pre-filled from the `EU4_PATH` environment variable), the output folder, optionally your mod folder for collision checks, and the test-mod staging folder. Press **Load EU4 install**, then tick the DLC you own.
+1. **Settings**: your EU4 install folder (pre-filled from the `EU4_PATH` environment variable), the output folder, optionally your mod folder for collision checks, the test-mod staging folder, and Blender (pinned to 4.2.23 LTS with io_pdx_mesh 0.91; used from Phase 2 on, only as a background process). Press **Load EU4 install**, then tick the DLC you own.
 2. **Unit set**: tag(s), set name, graphical culture (pick one or type a new one such as `hellenicgfx`), the vanilla culture to copy units from, adjective, colour.
 3. **Validate**: runs every validator rule and lists errors, warnings and notes.
 4. **Generate**: writes the drop-in package to `<output>/<set>/` and shows its files and `INTEGRATION.md` (the lines you merge by hand). **Open output folder** opens it in Explorer/your file manager.

@@ -83,6 +83,18 @@ def test_test_mod_button_stages_into_the_staging_folder(window, tmp_path):
     assert "Staged" in window.test_page.message.text()
 
 
+def test_blender_path_is_pinned_and_editable(window, tmp_path, monkeypatch):
+    from eu4unitgen.core.project import WINDOWS_BLENDER_PATH, default_blender_path
+    monkeypatch.delenv("BLENDER_PATH", raising=False)
+    if os.name == "nt":
+        assert default_blender_path() == WINDOWS_BLENDER_PATH
+        assert Settings().blender_path == WINDOWS_BLENDER_PATH
+    monkeypatch.setenv("BLENDER_PATH", str(tmp_path / "blender"))
+    assert Settings().blender_path == tmp_path / "blender"
+    window.settings_page.blender.setText(str(tmp_path / "b.exe"))
+    assert window.settings_page.settings().blender_path == tmp_path / "b.exe"
+
+
 def test_clear_stage_refuses_foreign_files(tmp_path):
     from eu4unitgen.export.pipeline import clear_stage
     from eu4unitgen.export.writer import ExportError

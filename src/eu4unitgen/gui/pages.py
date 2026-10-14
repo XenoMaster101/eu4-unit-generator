@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from eu4unitgen.core.project import BLENDER_VERSION, IO_PDX_MESH_VERSION
 from eu4unitgen.export.pipeline import SetSpec, Settings
 from eu4unitgen.validate.rules import ERROR, INFO, WARNING
 
@@ -54,7 +55,11 @@ def _path_row(edit: QLineEdit, pick_dir: bool = True) -> QWidget:
     browse = QPushButton("Browse…")
 
     def pick() -> None:
-        path = QFileDialog.getExistingDirectory(row, "Choose folder", edit.text() or str(Path.cwd()))
+        start = edit.text() or str(Path.cwd())
+        if pick_dir:
+            path = QFileDialog.getExistingDirectory(row, "Choose folder", start)
+        else:
+            path, _ = QFileDialog.getOpenFileName(row, "Choose file", start)
         if path:
             edit.setText(path)
     browse.clicked.connect(pick)
@@ -79,12 +84,16 @@ class SettingsPage(Page):
         self.user_mods = QLineEdit(str(settings.user_mod_dir()))
         self.user_mods.setToolTip("Where the launcher looks for mods; test mod descriptors point here. Read only.")
         self.prefix = QLineEdit(settings.prefix)
+        self.blender = QLineEdit(str(settings.blender_path or ""))
+        self.blender.setPlaceholderText("blender.exe / blender (4.2 LTS); only run as a background subprocess")
+        self.blender.setToolTip(f"Pinned: Blender {BLENDER_VERSION} LTS with io_pdx_mesh {IO_PDX_MESH_VERSION}")
         form.addRow("EU4 install", _path_row(self.eu4))
         form.addRow("Output folder", _path_row(self.output))
         form.addRow("Mod folder (checks)", _path_row(self.mod_folder))
         form.addRow("Test mod staging", _path_row(self.stage))
         form.addRow("EU4 mod directory", _path_row(self.user_mods))
         form.addRow("Name prefix", self.prefix)
+        form.addRow(f"Blender {BLENDER_VERSION} LTS", _path_row(self.blender, pick_dir=False))
         self.layout_.addLayout(form)
 
         self.load = QPushButton("Load EU4 install")
@@ -121,7 +130,8 @@ class SettingsPage(Page):
                         mod_folder=Path(self.mod_folder.text().strip()) if self.mod_folder.text().strip() else None,
                         stage_dir=Path(self.stage.text().strip() or "build/test_mod"),
                         mod_dir=Path(self.user_mods.text().strip()) if self.user_mods.text().strip() else None,
-                        prefix=self.prefix.text().strip() or "hr_")
+                        prefix=self.prefix.text().strip() or "hr_",
+                        blender_path=Path(self.blender.text().strip()) if self.blender.text().strip() else None)
 
 
 # --------------------------------------------------------------------------- unit set

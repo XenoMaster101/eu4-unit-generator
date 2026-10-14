@@ -20,7 +20,7 @@ from eu4unitgen.export.writer import ExportError
 from eu4unitgen.gui.pages import GeneratePage, SettingsPage, TestModPage, UnitSetPage, ValidatePage
 
 EXPECTED = (SpecError, ExportError, GenerationError, NamingError, OSError)
-KEYS = ("eu4_path", "output_dir", "mod_folder", "stage_dir", "mod_dir", "prefix")
+KEYS = ("eu4_path", "output_dir", "mod_folder", "stage_dir", "mod_dir", "prefix", "blender_path")
 
 
 class _Signals(QObject):

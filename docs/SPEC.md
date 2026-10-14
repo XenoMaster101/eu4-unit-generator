@@ -428,7 +428,7 @@ Metadata only: names, paths, bone names, header facts. No game files or script t
 - **Python + PySide6**: same language as bpy/io_pdx_mesh, cross-platform Qt, LGPL.
 - **Pillow ≥ 11.2.1** writes DXT1/DXT3/DXT5/BC2/BC3/BC5 via `im.save("x.dds", pixel_format="DXT5")`.
 - **texconv** (optional, Windows): `texconv -ft DDS -f BC3_UNORM in.png` gives better quality and a full mip chain. Linux fallback: Compressonator or ImageMagick.
-- **Blender** only as a subprocess. Pin Blender + io_pdx_mesh versions in settings. Known addon issues: animation export errors, custom normals ignored on re-export, `No module named 'imp'` on newer Blender.
+- **Blender** only as a subprocess. Pinned: **Blender 4.2.23 LTS + io_pdx_mesh 0.91** (`core/project.py` `BLENDER_VERSION`, `IO_PDX_MESH_VERSION`). Default path `C:\Program Files\Blender Foundation\Blender 4.2\blender.exe` on Windows, `blender` on PATH on Linux, overridable with `$BLENDER_PATH` or the GUI Settings screen. Verified on the user's machine (2026-10-14): a vanilla eastern infantry mesh imports with its skeleton. Known addon issues: animation export errors, custom normals ignored on re-export, `No module named 'imp'` on newer Blender.
 - **3D preview**: Blender-rendered thumbnails (no custom renderer in MVP).
 - **License**: GPL-3.0.
 

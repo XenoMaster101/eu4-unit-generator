@@ -13,7 +13,7 @@ from pathlib import Path
 from eu4unitgen.core.generator import GeneratedSet, GenerationError, generate
 from eu4unitgen.core.naming import TEST_MOD_NAME, NamingError, check_tag
 from eu4unitgen.core.nation import Nation
-from eu4unitgen.core.project import Project, default_mod_dir
+from eu4unitgen.core.project import Project, default_blender_path, default_mod_dir
 from eu4unitgen.export.testmod import Suite, build_suite, build_test_mod, suite_checklist
 from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
 from eu4unitgen.library.scanner import GameFiles, Index, build_index, find_pack
@@ -34,11 +34,14 @@ class Settings:
     stage_dir: Path = Path("build") / "test_mod"
     mod_dir: Path | None = None  # EU4 user mod directory; default: the one under Documents
     prefix: str = "hr_"
+    blender_path: Path | None = None  # default: the pinned Blender 4.2 LTS (core.project.default_blender_path)
 
     def __post_init__(self) -> None:
         if self.eu4_path is None and os.environ.get("EU4_PATH"):
             self.eu4_path = Path(os.environ["EU4_PATH"])
-        for name in ("eu4_path", "output_dir", "mod_folder", "stage_dir", "mod_dir"):
+        if self.blender_path is None:
+            self.blender_path = default_blender_path()
+        for name in ("eu4_path", "output_dir", "mod_folder", "stage_dir", "mod_dir", "blender_path"):
             value = getattr(self, name)
             if value is not None and not isinstance(value, Path):
                 setattr(self, name, Path(value))

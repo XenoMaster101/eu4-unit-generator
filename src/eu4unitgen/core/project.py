@@ -10,6 +10,11 @@ from eu4unitgen.core.naming import Naming
 DEFAULT_ENTITY_VERSION = 20  # SPEC §3: project-wide version on every generated entity
 DEFAULT_TAG_PACK_ORDER = 110  # SPEC §3: beats vanilla (0-70) and DLC (up to 100)
 
+# Pinned Blender toolchain (SPEC §8). Blender only ever runs as a subprocess.
+BLENDER_VERSION = "4.2.23"  # LTS
+IO_PDX_MESH_VERSION = "0.91"
+WINDOWS_BLENDER_PATH = Path(r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe")
+
 
 @dataclass
 class Project:
@@ -41,6 +46,19 @@ class Project:
         if not self.check_mod_collisions or not self.mod_root.is_dir():
             return None
         return GameFiles(self.mod_root, include_dlc=False)
+
+
+def default_blender_path() -> Path | None:
+    """The pinned Blender 4.2 executable: $BLENDER_PATH, else the standard Windows install
+    location, else ``blender`` on PATH (Linux). None if nothing is found off Windows."""
+    if os.environ.get("BLENDER_PATH"):
+        return Path(os.environ["BLENDER_PATH"])
+    if os.name == "nt":
+        return WINDOWS_BLENDER_PATH
+    import shutil
+
+    found = shutil.which("blender")
+    return Path(found) if found else None
 
 
 def default_mod_dir() -> Path:
