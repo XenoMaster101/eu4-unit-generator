@@ -195,6 +195,10 @@ class GameFiles:
             return self.zips[dlc].read(member)
         return None
 
+    def in_base_game(self, rel: str) -> bool:
+        """The file is in the base game folder (not only in a DLC zip)."""
+        return self._resolve_base(rel) is not None
+
     def exists(self, rel: str) -> bool:
         if self._resolve_base(rel) is not None:
             return True
@@ -298,6 +302,13 @@ def _pdxmesh_record(items: Block, path: str, dlc: str | None) -> dict:
     rec = {"name": items.get_str("name"), "defined_in": path, "dlc": dlc, "file": items.get_str("file"),
            "scale": _num(items.get_str("scale")),
            "animations": {a.get_str("id"): a.get_str("type") for a in _blocks(items, "animation")}}
+    known = {"name", "file", "scale", "animation", "meshsettings"}
+    extra = {p.key.value: p.value.value for p in items.pairs() if p.key.value not in known and isinstance(p.value, Scalar)}
+    if extra:
+        rec["extra"] = extra  # e.g. cull_distance
+    settings = [m.scalar_map() for m in _blocks(items, "meshsettings")]
+    if settings:
+        rec["meshsettings"] = settings  # per-shape texture/shader override (vanilla: dharma_mapitems.gfx)
     return rec
 
 

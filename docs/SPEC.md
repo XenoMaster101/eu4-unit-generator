@@ -123,7 +123,7 @@ Shaders (code in `gfx/FX/pdxmesh.lua`):
 - Spec map **alpha = gloss**. Existing spec maps contain zero-alpha areas that still hold colour, so don't treat alpha 0 as empty.
 - Gloss presets from community trial and error: ~1–4% matte, 5–10% cloth, 10–16% metal, 17–20% mirror; above that, extreme shine. UI presets: 3%, 8%, 13%.
 - Because PdxMeshColor paints country colours automatically, recolouring a nation on a PdxMeshColor base often needs **no texture work**. Texture work is for new uniform patterns, insignia or fixed colours.
-- New textures need a copy of the mesh whose material names them (Phase 2: re-export or patch). Verify on the first test unit.
+- New textures need a pdxmesh whose material names them. Phase 2 tries a `meshsettings` override on the vanilla `.mesh` first (no mesh copy); a Blender mesh copy is the fallback (§10, in-game test 4).
 
 ---
 
@@ -158,6 +158,7 @@ Log path: `Documents/Paradox Interactive/Europa Universalis IV/logs/error.log`
 | `Couldn't find parent clone entity X, in file "...", near line N` | Clone parent not loaded yet (defined in a later-sorting file, later in the same file, or nowhere). The unit falls back to the country's graphical-culture model | `clone_order`: parent defined earlier in load order (§3) |
 | `Could not find mesh file gfx/models/...mesh` | pdxmesh `file =` wrong | Every pdxmesh file exists (mod, vanilla or DLC) |
 | Black/untextured model in-game | Textures in .mesh missing or wrong format | Mesh texture refs resolve in the mesh's folder; DDS format matches base |
+| (none known yet; in-game test 4) | meshsettings texture not found / override ignored | `mesh_settings`: shape, shader, textures resolve; `dds_format`: base-game base, header matches |
 | (no log; frozen/T-posed unit) | State names an animation id the pdxmesh lacks | Every state animation id exists in the resolved pdxmesh; every type exists; rider pdxmesh has `horse_*`; crew pdxmesh has `artillery_attack` unless vanilla already uses that pdxmesh as a crew |
 
 ---
@@ -401,6 +402,7 @@ src/eu4unitgen/
   export/
     writer.py         # dry-run diff, atomic writes, manifest (.eu4unitgen/manifest.json: path → sha256, role, tags)
   export/testmod.py   # throwaway in-game test mod (eu4unitgen_test) around one unit set, and the two-variant test suite
+  core/retexture.py   # Phase 2: retextured pdxmesh (vanilla .mesh + meshsettings) and derived DDS; entities pointed at it
   export/pipeline.py  # Session: load the install once; validate / generate / build test mod for a unit-set form (GUI + tests)
   library/tags.py     # 1444 tag facts (owners, culture, group, reforms) + 3-valued sprite-pack trigger evaluation
   cli.py              # generate (-> output/<set>/) | pick-test-tag | test-mod (dry run unless --apply / --stage-dir)
@@ -506,9 +508,27 @@ Done (2026-10-14): parser/writer, naming, templates, generator, validator, expor
     - Fallback: (a) a tag with no sprite pack and no TAG entities; (b) a tag with `TAG_*` entities but no pack; (c) a tag whose gfx culture has only a gfx pack. Record which models show.
     - Priority: two packs for the same tag with different entities at orders N and N+1, then swapped. Record which wins. DLC116 + DAN is a second, free check (order 100, `version = 4`).
 
-### Phase 2: Texture pipeline — NEXT
-- DDS read/write, spec-mask painter (R/G/B = country colour regions, A = gloss presets), diffuse pattern overlays.
-- Blender job to copy a base mesh (from `recolour_bases`) and re-point its material to new textures.
+### Phase 2: Texture pipeline — IN PROGRESS
+Scope: DDS read/write, spec-mask painter (R/G/B = country colour regions, A = gloss presets), diffuse pattern overlays, reference-palette recolour. Retextured units use a new pdxmesh on the **vanilla `.mesh` with a `meshsettings` texture override** (found in vanilla `interface/assets/dharma_mapitems.gfx`, map items only; UNVERIFIED on units). The Blender copy-and-re-point job is only a fallback if `meshsettings` fails on units.
+
+Decisions (user, 2026-10-14):
+- Derived textures from **base-game** files are allowed in generated mod output; never in the repo or app, never DLC-derived (CLAUDE.md rule 2).
+- `meshsettings` first; Blender mesh copy only as fallback.
+- v1 masks are external PNGs (painted in GIMP/Krita over an exported guide), plus a **reference-palette mode**: load a reference image, extract its dominant colours, and recolour the existing spec-masked regions of the diffuse with them (no hand-painting).
+
+Facts found while planning:
+- Pillow 12.3 reads vanilla DXT1/DXT5 maps but writes one mip level only; vanilla maps have full chains (10 at 512²). The writer builds the chain itself.
+- texconv is not installed on the user's machine: Pillow is the default encoder, texconv used only if on PATH.
+
+Order (each step with tests and its validator rule; **stop and replan if step 3 shows `meshsettings` fails on units**):
+1. **Done.** `textures/dds.py`: read (Pillow), write the base's format/size with a full mip chain (each level encoded by Pillow, header written by us with vanilla's flags `0xa1007`, caps `0x401008`), no DX10 header, not sRGB. Mip levels are downsampled per channel so spec areas with alpha 0 keep their colour. Re-encoding a vanilla 512² diffuse/spec gives the same byte size and header (except the reserved NVTT tag), mean error ~0.3/255. Rule `dds_format`: every generated DDS records its base (`GeneratedFile.derived_from`), the base is a base-game file (not DLC), and the header matches it.
+2. **Done.** `textures/recolour.hue_shift`. `core/retexture.py`: `retextured_mesh` (new pdxmesh on the vanilla `.mesh`, all animation ids, scale and extra keys restated, one `meshsettings` block for the mesh's single shape) and `apply_retextures` (points a tier's infantry + rider, horse, and an own `TAG_ARTILLERY_n_cannon` entity at them; the entity template now restates state events such as the cannon's muzzle flash). Rule `mesh_settings`: base-game mesh, shape name at that index, known shader (warning if not the mesh's own), shader file exists, all three textures resolve, every generated DDS is named by a pdxmesh. The graph adds meshsettings texture edges (bare name = mesh folder, a name with `/` = game path; both UNVERIFIED).
+3. **In-game test 4 — STAGED, waiting for the user** (`test-mod --textures`, GUI "Texture test"; mod `eu4unitgen_test_textures`, HDA, test sprite techs 2 3 4, one launch). Tier 1 = variant A: tier-1 infantry/rider, horse and cannon, diffuse hue +120°, bare names, DDS in the mod at `gfx/models/Units/`. Tier 2 = variant B: tier-2 infantry, tier-3 horse (another file than tier 1's), cannon, hue +240°, full paths into `gfx/models/units/<prefix><set>/`. Tiers 3–4 plain (control). Normal/spec stay vanilla. The checklist also covers country colours on the spec map, vanilla western units sharing the `.mesh` (no leak) and error.log.
+4. `textures/recolour.py`: spec-mask painter, gloss presets, pattern overlays, reference palette, mask guide export.
+5. Texture recipes per slot (base from `recolour_bases`, never DLC) + names in `naming.py`.
+6. Generator: retextured pdxmeshes (all animation ids restated, `meshsettings`), entities point at them; validator: shape exists, textures resolve, base not DLC.
+7. GUI Textures screen (2D preview).
+8. `blender/runner.py` (version check, timeout, log) + `check_addon.py`; mesh copy job only if needed.
 
 ### Phase 3: Blender mesh jobs
 - Headless import/export, kitbash of pre-weighted accessories, thumbnail rendering for GUI preview.

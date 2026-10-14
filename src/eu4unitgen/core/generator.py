@@ -39,6 +39,7 @@ STATES = ("idle", "walk", "attack", "retreat")  # SPEC §5: the only live states
 OWNED = "owned"  # written entirely by the tool
 PATCHED = "patched"  # an existing game/mod file plus the tool's additions
 SNIPPET = "snippet"  # for the user to read or merge by hand; not loaded by the game
+BINARY_SUFFIXES = (".dds",)  # generated files that aren't script text
 
 
 class GenerationError(ValueError):
@@ -52,6 +53,7 @@ class GeneratedFile:
     role: str = OWNED
     based_on: str | None = None  # PATCHED: "vanilla" or "mod"
     game_path: str | None = None  # PATCHED from vanilla: the game path it copies, when it differs from ``path``
+    derived_from: str | None = None  # derived texture: the base-game file it was made from (never DLC, CLAUDE.md rule 2)
 
     @property
     def text(self) -> str:
@@ -119,17 +121,16 @@ class BaseChain:
         return [_attach(a) for a in resolved(self.idx, entity, "attach") or []]
 
     def flat(self, entity: str) -> dict:
-        """What a full copy of ``entity`` needs: pdxmesh, live states, attaches.
+        """What a full copy of ``entity`` needs: pdxmesh, live states (with their events),
+        attaches.
 
         Raises when the vanilla entity carries anything the template can't restate
-        (state events, extra keys), rather than dropping it silently.
+        (extra keys), rather than dropping it silently.
         """
         pdxmesh = resolved(self.idx, entity, "pdxmesh")
         if not pdxmesh:
             raise GenerationError(f"base entity {entity!r} has no pdxmesh along its clone chain")
         states = self.states(entity)
-        if any(st.get("events") for st in states):
-            raise GenerationError(f"base entity {entity!r} has state events; the entity template can't copy them yet")
         if resolved(self.idx, entity, "extra"):
             raise GenerationError(f"base entity {entity!r} sets keys the entity template can't copy: "
                                   f"{sorted(resolved(self.idx, entity, 'extra'))}")

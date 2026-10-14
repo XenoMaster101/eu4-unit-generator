@@ -338,6 +338,9 @@ class TestModPage(Page):
         super().__init__(window)
         form = QFormLayout()
         self.suite = QCheckBox("In-game test suite (two variant mods: pack priority + fallback cases)")
+        self.textures = QCheckBox("Texture test (in-game test 4: tiers 1-2 retextured through meshsettings)")
+        self.suite.toggled.connect(lambda on: on and self.textures.setChecked(False))
+        self.textures.toggled.connect(lambda on: on and self.suite.setChecked(False))
         self.rival = QComboBox()
         self.rival.addItem("asiangfx")
         self.sprites_on = QCheckBox("Move sprite tiers 2-4 to early MIL techs (test only)")
@@ -356,6 +359,7 @@ class TestModPage(Page):
         self.clear = QCheckBox("Empty the staging folder first (only if it holds nothing but staged test mods)")
         self.clear.setChecked(True)
         form.addRow(self.suite)
+        form.addRow(self.textures)
         form.addRow("Rival pack copies", self.rival)
         form.addRow(srow)
         form.addRow(self.clear)
@@ -374,7 +378,7 @@ class TestModPage(Page):
         self.issues = _issue_tree()
         self.checklist = QPlainTextEdit()
         self.checklist.setReadOnly(True)
-        self.checklist.setPlaceholderText("The suite's checklist appears here.")
+        self.checklist.setPlaceholderText("The test suite's or texture test's checklist appears here.")
         split.addWidget(self.issues)
         split.addWidget(self.checklist)
         self.layout_.addWidget(split, 1)
@@ -387,7 +391,7 @@ class TestModPage(Page):
     def options(self) -> dict:
         techs = dict(zip((2, 3, 4), (b.value() for b in self.sprite_techs))) if self.sprites_on.isChecked() else None
         return {"suite": self.suite.isChecked(), "sprite_techs": techs, "rival_gfx": self.rival.currentText(),
-                "clear": self.clear.isChecked()}
+                "clear": self.clear.isChecked(), "textures": self.textures.isChecked()}
 
     def fill(self, bases: list[str]) -> None:
         keep = self.rival.currentText()

@@ -290,3 +290,113 @@ def suite_checklist(suite: Suite, sprite_techs: dict[int, int] | None) -> str:
     ]
     lines += [f"NOTE: {n}" for n in suite.notes]
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- texture test (Phase 2, in-game test 4)
+
+# Hue shifts make every outcome readable on the map: vanilla colours = override ignored,
+# black/untextured = the texture name didn't resolve, shifted = the override works.
+TEXTURE_TEST_HUES = {"A": 120, "B": 240}  # A: greenish skin and cloth; B: blue/purple
+
+
+@dataclass
+class TextureCase:
+    variant: str  # "A" (bare names beside the vanilla mesh) or "B" (full paths, own folder)
+    tier: int
+    path_mode: str
+    hue: int
+    meshes: dict[str, tuple[str, str]]  # role -> (our pdxmesh, vanilla base pdxmesh)
+    textures: list[str]  # generated DDS paths
+
+
+@dataclass
+class TextureTest:
+    mod: TestMod
+    cases: list[TextureCase]
+    nation: Nation
+
+
+def build_texture_test(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path,
+                       test_sprite_techs: dict[int, int] | None = None) -> TextureTest:
+    """In-game test 4 (SPEC §10 Phase 2): does a pdxmesh ``meshsettings`` block retexture a unit
+    mesh, and how do its texture names resolve? One mod (eu4unitgen_test_textures), one launch:
+
+      * tier 1 = variant A: the tier-1 infantry (and rider), horse and cannon meshes, diffuse
+        hue-shifted by TEXTURE_TEST_HUES["A"]; bare texture names, the DDS beside the vanilla mesh.
+      * tier 2 = variant B: the tier-2 infantry, the tier-3 horse (another file than tier 1's) and
+        the cannon, shifted by TEXTURE_TEST_HUES["B"]; full paths into the set's texture folder.
+      * tiers 3-4: the plain Phase 1 set (control).
+    Normal and spec maps stay vanilla (named in the same style as the diffuse)."""
+    from eu4unitgen.core.retexture import BESIDE_MESH, OWN_DIR, Retexture, apply_retextures, retextured_mesh
+    from eu4unitgen.textures.recolour import hue_shift
+
+    naming, set_name = project.naming, nation.set_name
+    package = _main_package(project, nation, game, idx, test_sprite_techs)
+    chain = BaseChain(idx, nation.base_gfx)
+    plan = {
+        "A": (1, BESIDE_MESH, {"infantry": chain.slot("infantry", 1)["pdxmesh"],
+                               "horse": chain.slot("cavalry", 1)["horse_pdxmesh"],
+                               "cannon": chain.slot("artillery", 1)["cannon_pdxmesh"]}),
+        "B": (2, OWN_DIR, {"infantry": chain.slot("infantry", 2)["pdxmesh"],
+                           "horse": chain.slot("cavalry", 3)["horse_pdxmesh"],
+                           "cannon": chain.slot("artillery", 2)["cannon_pdxmesh"]}),
+    }
+    entities = unit_entities(nation.tag, chain, naming, project.entity_version)
+    meshes, cases = [], []
+    for variant, (tier, mode, bases) in plan.items():
+        hue = TEXTURE_TEST_HUES[variant]
+        made, textures = {}, []
+        for role, base in bases.items():
+            mesh, files = retextured_mesh(naming, set_name, Retexture(role, tier, base, mode,
+                                                                      lambda im, h=hue: hue_shift(im, h)), game, idx)
+            meshes.append(mesh)
+            made[role] = (mesh["name"], base)
+            for f in files:
+                package.add(f)
+                textures.append(f.path)
+        apply_retextures(entities, nation.tag, tier, {r: m for r, (m, _) in made.items()}, chain, naming,
+                         project.entity_version)
+        cases.append(TextureCase(variant, tier, mode, hue, made, textures))
+    # The retextured TAG set replaces the plain one; the gfx-culture defaults stay as generated.
+    rel = naming.set_entities_file(set_name)
+    package.files[rel] = GeneratedFile(rel, render("entities.asset.j2", entities=entities).encode("utf-8"), OWNED)
+    package.add(GeneratedFile(naming.pdxmesh_file(set_name), render("pdxmeshes.gfx.j2", meshes=meshes).encode("utf-8"),
+                              OWNED))
+    package.notes.append("TEST ONLY: tiers 1-2 retextured through pdxmesh meshsettings (in-game test 4)")
+    return TextureTest(_wrap(project, nation, package, game, idx, mod_dir, naming.texture_test_mod()), cases, nation)
+
+
+def texture_checklist(test: TextureTest, sprite_techs: dict[int, int] | None) -> str:
+    tag, base = test.nation.tag, test.nation.base_gfx
+    name = test.mod.plan.manifest_rel.split("/", 1)[0]
+    techs = (", ".join(f"tier {lvl} at MIL {t}" for lvl, t in sorted(sprite_techs.items())) if sprite_techs
+             else "vanilla sprite techs")
+    lines = [
+        "IN-GAME TEST 4 CHECKLIST (meshsettings retexture)",
+        f"Enable only {name} (disable every other eu4unitgen mod). Play {tag}. Sprite tiers: tier 1 at start, {techs}.",
+        "Make one army per type: infantry, cavalry, artillery. Mark each line PASS/FAIL and note what you saw.",
+        "",
+    ]
+    for c in test.cases:
+        how = ("bare texture names, DDS in the vanilla mesh folder" if c.path_mode == "beside_mesh"
+               else "full texture paths, DDS in the set's own folder")
+        lines.append(f"VARIANT {c.variant} = tier {c.tier} ({how}); diffuse hue shifted {c.hue} degrees")
+        for role, (mesh, vbase) in c.meshes.items():
+            what = {"infantry": "infantry (and the cavalry rider)", "horse": "cavalry horse",
+                    "cannon": "artillery cannon"}[role]
+            lines.append(f"[ ] {c.variant}-{role:8} {what}: shifted colours = PASS; normal {base} colours = override "
+                         f"ignored; black/white/untextured = texture didn't resolve. (base {vbase})")
+        lines.append("")
+    lines += [
+        "[ ] C-country  tier 1 infantry: the country-colour areas still show HDA's colour (spec map untouched).",
+        "[ ] C-control  tiers 3-4: plain western units, unshifted (after the MIL techs above).",
+        f"[ ] C-vanilla  another western country's tier-1/2 units (observe mode or tag switch) are unshifted: "
+        "our textures don't leak onto the vanilla meshes that share the .mesh file.",
+        "[ ] E          error.log: note any line with hr_, meshsettings, .dds, texture or mesh.",
+        "",
+        "Meanings: A and B pass = both naming styles work. Only A passes = keep textures beside the mesh. "
+        "Only B passes = full paths only. Both show vanilla colours = meshsettings doesn't override unit "
+        "textures -> stop, Phase 2 is replanned. The cannon uses the same .mesh in A and B: if tier 2's cannon "
+        "shows A's hue, the engine shares textures per mesh file.",
+    ]
+    return "\n".join(lines)

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from eu4unitgen import __version__
-from eu4unitgen.core.generator import PATCHED, GeneratedFile, GeneratedSet
+from eu4unitgen.core.generator import BINARY_SUFFIXES, PATCHED, GeneratedFile, GeneratedSet
 from eu4unitgen.core.naming import MANIFEST_FILE
 from eu4unitgen.library.scanner import GameFiles
 
@@ -114,7 +114,12 @@ def read_manifest(mod_root: Path, manifest_rel: str = MANIFEST_FILE) -> dict:
 
 
 def _diff(path: str, old: bytes | None, new: bytes, old_label: str) -> str:
-    a = _decode(old).splitlines(keepends=True) if old is not None else []
+    if path.lower().endswith(BINARY_SUFFIXES):
+        if old == new:
+            return ""
+        was = f"{len(old)} bytes, sha256 {sha256(old)[:12]}" if old is not None else "new"
+        return f"Binary {path}: {was} -> {len(new)} bytes, sha256 {sha256(new)[:12]}\n"
+    a =_decode(old).splitlines(keepends=True) if old is not None else []
     b = _decode(new).splitlines(keepends=True)
     lines = difflib.unified_diff(a, b, fromfile=old_label, tofile=f"b/{path}", n=3)
     return "".join(ln if ln.endswith("\n") else ln + "\n\\ No newline at end of file\n" for ln in lines)

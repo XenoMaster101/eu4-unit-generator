@@ -26,6 +26,13 @@ def _norm(rel: str) -> str:
     return rel.replace("\\", "/").lower()
 
 
+def meshsettings_texture_path(mesh_file: str, texture: str) -> str:
+    """Where a meshsettings texture name points: a bare name resolves in the mesh's folder
+    (as the mesh's own texture names do, SPEC §4); a name with a '/' is taken as a game path.
+    UNVERIFIED (in-game test 4): both readings."""
+    return texture if "/" in texture else str(PurePosixPath(mesh_file).parent / texture)
+
+
 class MemoryFiles:
     """GameFiles-compatible reader over an in-memory {path: bytes} map (the generated set)."""
 
@@ -266,6 +273,12 @@ def build_graph(world: World, generated: GeneratedSet) -> Graph:
             pdx = world.pdxmesh(node.name)
             if pdx and pdx.get("file"):
                 edge(node, Node("file", pdx["file"]), "file", world.exists(pdx["file"]), world.origin_of_file(pdx["file"]))
+                for ms in pdx.get("meshsettings") or []:
+                    for key in ("texture_diffuse", "texture_normal", "texture_specular"):
+                        if ms.get(key):
+                            rel = meshsettings_texture_path(pdx["file"], ms[key])
+                            edge(node, Node("file", rel), f"meshsettings:{key}", world.exists(rel),
+                                 world.origin_of_file(rel))
         elif node.kind == "file" and node.name.lower().endswith(".mesh"):
             summary = world.mesh_summary(node.name)
             folder = PurePosixPath(node.name).parent

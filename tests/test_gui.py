@@ -83,6 +83,22 @@ def test_test_mod_button_stages_into_the_staging_folder(window, tmp_path):
     assert "Staged" in window.test_page.message.text()
 
 
+def test_texture_test_checkbox_builds_the_texture_test(window, tmp_path, fake_install):
+    from test_textures import _real_dds
+    for tex in ("g1_d", "g2_d", "h_d", "c_d"):
+        (fake_install / "gfx/models/Units" / f"{tex}.dds").write_bytes(_real_dds())
+    (fake_install / "gfx/FX").mkdir(parents=True, exist_ok=True)
+    (fake_install / "gfx/FX/pdxmesh.shader").write_bytes(b"# stand-in\n")
+    window.unit_page.tags.setText("AAA")
+    window.test_page.suite.setChecked(True)
+    window.test_page.textures.setChecked(True)
+    assert not window.test_page.suite.isChecked()  # one or the other
+    window.test_page.run.click()
+    assert "Staged" in window.test_page.message.text(), window.test_page.message.text()
+    assert (tmp_path / "stage" / "eu4unitgen_test_textures.mod").is_file()
+    assert "VARIANT A" in window.test_page.checklist.toPlainText()
+
+
 def test_blender_path_is_pinned_and_editable(window, tmp_path, monkeypatch):
     from eu4unitgen.core.project import WINDOWS_BLENDER_PATH, default_blender_path
     monkeypatch.delenv("BLENDER_PATH", raising=False)

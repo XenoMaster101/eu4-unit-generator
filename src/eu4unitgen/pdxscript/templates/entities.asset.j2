@@ -6,7 +6,7 @@ entity = {
 	pdxmesh = {{ e.pdxmesh | q }}
 	version = {{ e.version }}
 {% for s in e.states %}
-	state = { name = {{ (s.name | q).ljust(9) }} animation = {{ s.animation | q }} }
+	state = { name = {{ (s.name | q).ljust(9) }} animation = {{ s.animation | q }}{% for ev in s.get('events', []) %} event = { {% for k, v in ev.items() %}{{ k }} = {{ v if v is number else (v | q) }} {% endfor %}}{% endfor %} }
 {% endfor %}
 {% for a in e.attaches %}
 {% if a.name and a.nodes | length > 1 %}

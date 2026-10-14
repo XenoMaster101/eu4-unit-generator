@@ -28,7 +28,7 @@ The wizard has five screens, left to right:
 2. **Unit set**: tag(s), set name, graphical culture (pick one or type a new one such as `hellenicgfx`), the vanilla culture to copy units from, adjective, colour.
 3. **Validate**: runs every validator rule and lists errors, warnings and notes.
 4. **Generate**: writes the drop-in package to `<output>/<set>/` and shows its files and `INTEGRATION.md` (the lines you merge by hand). **Open output folder** opens it in Explorer/your file manager.
-5. **Test mod**: builds a throwaway test mod (or the two-launch in-game test suite) into the staging folder, default `build\test_mod`. **Open staging folder**, then copy its contents into your EU4 `mod` folder.
+5. **Test mod**: builds a throwaway test mod (or the two-launch in-game test suite, or the texture test) into the staging folder, default `build\test_mod`. **Open staging folder**, then copy its contents into your EU4 `mod` folder.
 
 Settings are remembered between runs. Nothing is ever written into the EU4 install or your mod folder.
 
@@ -40,7 +40,10 @@ The same steps without the GUI:
 python -m eu4unitgen.cli generate --tag MAC --gfx hellenicgfx      # package to output/mac/
 python -m eu4unitgen.cli pick-test-tag                              # tags no sprite pack touches
 python -m eu4unitgen.cli test-mod --tag HDA --gfx hellenicgfx --stage-dir build/test_mod
+python -m eu4unitgen.cli test-mod --textures --tag HDA --gfx hellenicgfx --set macedonian_test --test-sprite-techs 2 3 4 --stage-dir build/test_mod
 ```
+
+`--textures` builds in-game test 4 (Phase 2): tiers 1–2 retextured through a `meshsettings` texture override, with a checklist. In the GUI: Test mod → "Texture test".
 
 Add `--help` to any command for its options.
 

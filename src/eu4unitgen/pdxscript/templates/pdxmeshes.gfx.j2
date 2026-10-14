@@ -1,0 +1,29 @@
+{{ header }}
+objectTypes = {
+{% for m in meshes %}
+	pdxmesh = {
+		name = {{ m.name | q }}
+		file = {{ m.file | q }}
+{% for id, type in m.animations.items() %}
+		animation = { id = {{ id | q }} type = {{ type | q }} }
+{% endfor %}
+{% if m.scale is not none %}
+		scale = {{ m.scale }}
+{% endif %}
+{% for k, v in m.extra.items() %}
+		{{ k }} = {{ v }}
+{% endfor %}
+{% for s in m.settings %}
+		meshsettings = {
+			name = {{ s.shape | q }}
+			index = {{ s.index }}
+			texture_diffuse = {{ s.diffuse | q }}
+			texture_normal = {{ s.normal | q }}
+			texture_specular = {{ s.specular | q }}
+			shader = {{ s.shader | q }}
+			shader_file = {{ s.shader_file | q }}
+		}
+{% endfor %}
+	}
+{% endfor %}
+}

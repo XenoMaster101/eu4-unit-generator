@@ -3,6 +3,7 @@
     python -m eu4unitgen.cli generate --tag MAC --gfx hellenicgfx [--out output] [--dry-run]
     python -m eu4unitgen.cli pick-test-tag
     python -m eu4unitgen.cli test-mod --tag HDA --gfx hellenicgfx --set macedonian_test [--stage-dir DIR]
+    python -m eu4unitgen.cli test-mod --textures --tag HDA --gfx hellenicgfx --set macedonian_test --test-sprite-techs 2 3 4
     python -m eu4unitgen.cli test-mod --suite --tag HDA --gfx hellenicgfx --gfx-set-base muslimgfx [--stage-dir DIR]
 
 generate writes a drop-in package to <out>/<set>/ (new files + INTEGRATION.md) and never
@@ -19,7 +20,7 @@ from eu4unitgen.core.generator import generate
 from eu4unitgen.core.naming import TEST_MOD_NAME
 from eu4unitgen.core.nation import Nation
 from eu4unitgen.core.project import DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_mod_dir
-from eu4unitgen.export.testmod import build_suite, build_test_mod, suite_checklist
+from eu4unitgen.export.testmod import build_suite, build_test_mod, build_texture_test, suite_checklist, texture_checklist
 from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
 from eu4unitgen.library.scanner import GameFiles, build_index
 from eu4unitgen.library.tags import coverage, culture_groups, start_level, tag_facts
@@ -196,11 +197,20 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
                 print(f"WARNING: {args.tag} starts at MIL {start}; tiers at MIL <= {start} show from day one")
         if args.suite:
             return cmd_test_suite(args, project, nation, game, idx, tag_facts(game), sprite_techs, mod_dir)
-        tm = build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
+        checklist = ""
+        if args.textures:
+            tt = build_texture_test(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
+            tm, checklist = tt.mod, texture_checklist(tt, sprite_techs)
+        else:
+            tm = build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
     finally:
         game.close()
     print(f"test mod for {args.tag} ({facts.primary_culture}, {facts.technology_group}, was {facts.graphical_culture})")
-    return _print_result(tm.report, tm.plan, args, write=args.apply)
+    code = _print_result(tm.report, tm.plan, args, write=args.apply)
+    if checklist:
+        print()
+        print(checklist)
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -236,6 +246,9 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--suite", action="store_true",
                    help="build the in-game test suite: two variant mods (pack priority swapped) with fallback "
                         "cases a/b/c on extra tags, and print the checklist")
+    t.add_argument("--textures", action="store_true",
+                   help="build in-game test 4 instead (eu4unitgen_test_textures): tiers 1-2 retextured through "
+                        "pdxmesh meshsettings, two texture-path variants, and print the checklist")
     t.add_argument("--fallback-tags", nargs=3, metavar=("A", "B", "C"),
                    help="suite: tags for fallback cases a, b, c (default: picked automatically)")
     t.add_argument("--rival-gfx", default="asiangfx", help="suite: vanilla set the rival priority pack lists")

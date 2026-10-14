@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 UNIT_TYPES = ("infantry", "cavalry", "artillery")
 TIERS = (1, 2, 3, 4)
+MESH_ROLES = ("infantry", "horse", "cannon")  # retexturable meshes per tier; the rider uses the infantry's
+TEXTURE_KINDS = ("diffuse", "normal", "specular")
 
 _TAG = re.compile(r"^[A-Z][A-Z0-9]{2}$")
 _GFX = re.compile(r"^[a-z][a-z0-9_]*gfx$")
@@ -105,6 +107,17 @@ class Naming:
     def pdxmesh(self, set_name: str, role: str, tier: int) -> str:
         """Phase 2+: hr_mac_infantry_1_mesh. The _mesh suffix keeps pdxmesh and entity names apart."""
         return f"{self.prefix}{check_set_name(set_name)}_{check_identifier(role, 'role')}_{_check_tier(tier)}_mesh"
+
+    # ------------------------------------------------------------------ textures (Phase 2)
+    def texture(self, set_name: str, role: str, tier: int, kind: str) -> str:
+        """hr_mac_infantry_1_diffuse.dds. The prefix keeps it apart from vanilla names in a shared folder."""
+        if kind not in TEXTURE_KINDS:
+            raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
+        return f"{self.prefix}{check_set_name(set_name)}_{check_identifier(role, 'role')}_{_check_tier(tier)}_{kind}.dds"
+
+    def texture_dir(self, set_name: str) -> str:
+        """The set's own texture folder (SPEC §2): gfx/models/units/hr_mac."""
+        return f"gfx/models/units/{self.prefix}{check_set_name(set_name)}"
 
     # ------------------------------------------------------------------ sprite packs
     def set_sprite_pack(self, set_name: str) -> str:
@@ -200,6 +213,11 @@ class Naming:
         if variant not in (1, 2):
             raise NamingError(f"test variant {variant!r} must be 1 or 2")
         return f"{TEST_MOD_NAME}_v{variant}"
+
+    @staticmethod
+    def texture_test_mod() -> str:
+        """eu4unitgen_test_textures: the meshsettings / texture-path test (SPEC §10 Phase 2)."""
+        return f"{TEST_MOD_NAME}_textures"
 
     @staticmethod
     def mil_tech_file() -> str:

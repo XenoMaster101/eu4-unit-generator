@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
-from eu4unitgen.core.generator import SNIPPET, GeneratedSet
+from eu4unitgen.core.generator import BINARY_SUFFIXES, SNIPPET, GeneratedSet
 from eu4unitgen.core.naming import TIERS, UNIT_TYPES, Naming
 from eu4unitgen.core.nation import MANEUVER, Nation
 from eu4unitgen.core.project import Project
@@ -73,7 +73,7 @@ def parse_clean(ctx: Context) -> list[Issue]:
     """Generated script must parse with no warnings (no stray or missing braces)."""
     out = []
     for f in ctx.generated.files.values():
-        if f.path.endswith((".yml", ".md")):
+        if f.path.endswith((".yml", ".md")) or is_binary(f.path):
             continue
         for w in parse_bytes(f.data).warnings:
             out.append(Issue(ERROR, "parse_clean", w, f.path))
@@ -93,11 +93,106 @@ def file_encoding(ctx: Context) -> list[Issue]:
             lang = re.search(r"_l_([a-z_]+)\.yml$", f.path)
             if lang and first != f"l_{lang.group(1)}:".encode():
                 out.append(Issue(ERROR, "file_encoding", f"first line must be l_{lang.group(1)}:", f.path))
-        elif f.role != SNIPPET and f.based_on is None:
+        elif f.role != SNIPPET and f.based_on is None and not is_binary(f.path):
             try:
                 f.data.decode("utf-8")
             except UnicodeDecodeError:
                 out.append(Issue(ERROR, "file_encoding", "generated script is not valid UTF-8", f.path))
+    return out
+
+
+# --------------------------------------------------------------------------- textures
+
+SHADERS = {"PdxMeshColor", "PdxMeshStandard", "PdxMeshTextureAtlas", "PdxMeshSnow", "PdxMeshAlphaBlend",
+           "PdxMeshAlphaBlendNoZWrite", "PdxMesh_NoFoW_NoTI", "Collision"}  # SPEC §4
+
+
+def is_binary(path: str) -> bool:
+    return path.lower().endswith(BINARY_SUFFIXES)
+
+
+@rule("dds_format")
+def dds_format(ctx: Context) -> list[Issue]:
+    """Every generated DDS is derived from a base-game texture (never DLC, CLAUDE.md rule 2) and
+    matches its format, size and mip count (SPEC §4: a mismatch shows as a black/wrong unit)."""
+    from eu4unitgen.textures.dds import DDSError, DDSFormat, check_matches, read_header
+
+    out = []
+    game = ctx.world.game
+    for f in ctx.generated.files.values():
+        if not f.path.lower().endswith(".dds"):
+            continue
+        base = f.derived_from
+        if not base:
+            out.append(Issue(ERROR, "dds_format", "generated texture doesn't record the base texture it came from", f.path))
+            continue
+        if not game.in_base_game(base):
+            what = "a DLC file" if game.exists(base) else "missing from the install"
+            out.append(Issue(ERROR, "dds_format", f"base texture {base} is {what}; derived textures come from "
+                                                  "base-game files only", f.path))
+            continue
+        try:
+            target = DDSFormat.of(read_header(game.read(base)))
+        except (DDSError, ValueError) as exc:
+            out.append(Issue(ERROR, "dds_format", f"base texture {base}: {exc}", f.path))
+            continue
+        for problem in check_matches(f.data, target):
+            out.append(Issue(ERROR, "dds_format", f"{problem} (base {base})", f.path))
+    return out
+
+
+@rule("mesh_settings")
+def mesh_settings(ctx: Context) -> list[Issue]:
+    """Generated pdxmeshes with a meshsettings block: the mesh is base game, the block names
+    a shape the mesh has at that index, a known shader (the mesh's own), the vanilla shader
+    file and three textures that resolve; every generated texture is named by one of them."""
+    from eu4unitgen.validate.graph import meshsettings_texture_path
+
+    out, named = [], set()
+    w = ctx.world
+    for name, rec in sorted(ctx.gen_defs("pdxmeshes").items()):
+        settings = rec.get("meshsettings") or []
+        if not settings:
+            continue
+        where = rec["defined_in"]
+        mesh_file = rec.get("file") or ""
+        if not w.game.in_base_game(mesh_file) or w.origin_of_file(mesh_file) != VANILLA:
+            out.append(Issue(ERROR, "mesh_settings", f"{name}: mesh {mesh_file} must be a base-game file "
+                                                     "(no DLC, no mod copy)", where, name))
+            continue
+        shapes = (w.mesh_summary(mesh_file) or {}).get("shapes", [])
+        for ms in settings:
+            shape_name, index = ms.get("name"), ms.get("index")
+            try:
+                shape = shapes[int(index)]
+            except (TypeError, ValueError, IndexError):
+                out.append(Issue(ERROR, "mesh_settings", f"{name}: index {index!r} isn't a shape of {mesh_file} "
+                                                         f"({len(shapes)} shapes)", where, name))
+                continue
+            if shape.get("shape") != shape_name:
+                out.append(Issue(ERROR, "mesh_settings", f"{name}: shape {index} of {mesh_file} is "
+                                                         f"{shape.get('shape')!r}, not {shape_name!r}", where, name))
+            if ms.get("shader") not in SHADERS:
+                out.append(Issue(ERROR, "mesh_settings", f"{name}: unknown shader {ms.get('shader')!r}", where, name))
+            elif ms.get("shader") != shape.get("shader"):
+                out.append(Issue(WARNING, "mesh_settings", f"{name}: shader {ms.get('shader')} differs from the "
+                                                           f"mesh's own {shape.get('shader')}", where, name))
+            if not ms.get("shader_file") or not w.exists(ms["shader_file"]):
+                out.append(Issue(ERROR, "mesh_settings", f"{name}: shader_file {ms.get('shader_file')!r} not found",
+                                 where, name))
+            for key in ("texture_diffuse", "texture_normal", "texture_specular"):
+                if not ms.get(key):
+                    out.append(Issue(ERROR, "mesh_settings", f"{name}: no {key}", where, name))
+                    continue
+                rel = meshsettings_texture_path(mesh_file, ms[key])
+                named.add(rel.lower())
+                if not w.exists(rel):
+                    out.append(Issue(ERROR, "mesh_settings", f"{name}: {key} {ms[key]!r} resolves to {rel}, "
+                                                             "which doesn't exist", where, name))
+    for f in ctx.generated.files.values():
+        if f.path.lower().endswith(".dds") and f.path.lower() not in named:
+            out.append(Issue(WARNING, "mesh_settings", "generated texture isn't named by any generated pdxmesh",
+                             f.path))
     return out
 
 
@@ -114,7 +209,9 @@ def naming(ctx: Context) -> list[Issue]:
             expected |= {n.unit_entity(owner, u, t) for u in UNIT_TYPES} | {n.rider_entity(owner, t)}
     out = []
     names = set(ctx.gen_entities())
-    for name in sorted(names - expected):
+    # Optional: an owner's own cannon entity, made only when its cannon is retextured (Phase 2).
+    optional = {n.cannon_entity(owner, t) for owner in (tag, gfx) for t in TIERS}
+    for name in sorted(names - expected - optional):
         out.append(Issue(ERROR, "naming", f"unexpected generated entity name {name!r}", subject=name))
     for name in sorted(expected - names):
         out.append(Issue(ERROR, "naming", f"expected entity {name!r} was not generated", subject=name))

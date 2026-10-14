@@ -14,7 +14,7 @@ from eu4unitgen.core.generator import GeneratedSet, GenerationError, generate
 from eu4unitgen.core.naming import TEST_MOD_NAME, NamingError, check_tag
 from eu4unitgen.core.nation import Nation
 from eu4unitgen.core.project import Project, default_blender_path, default_mod_dir
-from eu4unitgen.export.testmod import Suite, build_suite, build_test_mod, suite_checklist
+from eu4unitgen.export.testmod import Suite, build_suite, build_test_mod, build_texture_test, suite_checklist, texture_checklist
 from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
 from eu4unitgen.library.scanner import GameFiles, Index, build_index, find_pack
 from eu4unitgen.library.tags import TagFacts, coverage, culture_groups, start_level, tag_facts
@@ -88,7 +88,7 @@ class TestModResult:
     checklist: str = ""
 
 
-STAGE_ENTRY = re.compile(rf"^{TEST_MOD_NAME}(_v\d+)?(\.mod)?$")
+STAGE_ENTRY = re.compile(rf"^{TEST_MOD_NAME}(_v\d+|_textures)?(\.mod)?$")
 
 
 def clear_stage(stage_dir: Path) -> None:
@@ -220,9 +220,11 @@ class Session:
         return results
 
     def build_test_mod(self, spec: SetSpec, *, suite: bool = False, sprite_techs: dict[int, int] | None = None,
-                       rival_gfx: str = "asiangfx", clear: bool = False) -> TestModResult:
-        """Stage the test mod (or the two-variant suite) in settings.stage_dir, for copying into
-        the EU4 mod folder by hand. One tag only."""
+                       rival_gfx: str = "asiangfx", clear: bool = False, textures: bool = False) -> TestModResult:
+        """Stage the test mod (or the two-variant suite, or the texture test) in settings.stage_dir,
+        for copying into the EU4 mod folder by hand. One tag only."""
+        if suite and textures:
+            raise SpecError("pick either the test suite or the texture test, not both")
         if len(spec.tags) != 1:
             raise SpecError("the test mod takes exactly one tag")
         game, idx = self.game()
@@ -243,13 +245,17 @@ class Session:
         nation = self.nations(SetSpec(**{**spec.__dict__, "tech_group": spec.tech_group or f.technology_group or ""}))[0]
         mod_dir = self.settings.user_mod_dir()
         project = self.project(mod_root=mod_dir / TEST_MOD_NAME)
+        checklist = ""
+        built: Suite | None = None
         try:
-            if suite:
-                built: Suite | None = build_suite(project, nation, game, idx, mod_dir, facts, culture_groups(game),
-                                                  rival_gfx=rival_gfx, test_sprite_techs=sprite_techs)
+            if textures:
+                tt = build_texture_test(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
+                mods, checklist = [tt.mod], texture_checklist(tt, sprite_techs)
+            elif suite:
+                built = build_suite(project, nation, game, idx, mod_dir, facts, culture_groups(game),
+                                    rival_gfx=rival_gfx, test_sprite_techs=sprite_techs)
                 mods = built.variants
             else:
-                built = None
                 mods = [build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)]
         except GenerationError as exc:
             raise SpecError(str(exc)) from exc
@@ -262,5 +268,6 @@ class Session:
             targets = [stage_plan(tm.plan, stage, require_empty=i == 0) for i, tm in enumerate(mods)]
             for t in targets:
                 written += apply_export(t)
-        checklist = suite_checklist(built, sprite_techs) if built is not None else ""
+        if built is not None:
+            checklist = suite_checklist(built, sprite_techs)
         return TestModResult(stage, reports, written, warnings, checklist)
