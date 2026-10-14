@@ -20,6 +20,7 @@ from eu4unitgen.pdxscript.parser import parse_bytes
 from eu4unitgen.textures.dds import DDSError, DDSFormat, check_matches, full_mip_count, mip_chain, read_dds, write_dds
 from eu4unitgen.textures.recolour import hue_shift
 from eu4unitgen.validate import validate
+from fakes import make_textures_decodable
 
 T = "eu4unitgen_test_textures"
 
@@ -103,13 +104,8 @@ def _real_dds(fmt: str = "DXT1", colour=(200, 60, 40)) -> bytes:
 
 @pytest.fixture
 def tex_install(fake_install: Path) -> Path:
-    """The fake install with decodable diffuse maps and the shader file meshsettings names."""
-    units = fake_install / "gfx/models/Units"
-    for tex in ("g1_d", "g2_d", "h_d", "c_d"):
-        (units / f"{tex}.dds").write_bytes(_real_dds())
-    (fake_install / "gfx/FX").mkdir(parents=True, exist_ok=True)
-    (fake_install / "gfx/FX/pdxmesh.shader").write_bytes(b"# made-up stand-in\n")
-    return fake_install
+    """The fake install with decodable diffuse/spec maps and the shader file meshsettings names."""
+    return make_textures_decodable(fake_install)
 
 
 @pytest.fixture
@@ -132,7 +128,8 @@ def test_retextured_mesh_bare_names_beside_the_mesh(project, tex_game):
                                    "shader_file": "gfx/FX/pdxmesh.shader"}
     assert [f.path for f in made] == ["gfx/models/Units/hr_mac_infantry_1_diffuse.dds"]
     assert made[0].derived_from == "gfx/models/Units/g1_d.dds"
-    assert read_dds(made[0].data).getpixel((0, 0))[1] > 150  # red-ish base shifted to green
+    px = read_dds(made[0].data).getpixel((0, 0))
+    assert px[1] > px[0]  # skin-toned base shifted towards green
 
 
 def test_retexture_refuses_non_base_meshes_and_no_op_edits(project, tex_game):

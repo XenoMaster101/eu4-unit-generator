@@ -62,6 +62,7 @@ class SetSpec:
     colour: tuple[int, int, int] | None = None
     tech_group: str = ""  # blank: the tag's 1444 tech group, else western
     gfx_set_base: str | None = None
+    texture_recipe: Path | None = None  # Phase 2: a core.recipe JSON file
 
     @staticmethod
     def parse_tags(text: str) -> list[str]:
@@ -109,6 +110,17 @@ def clear_stage(stage_dir: Path) -> None:
             shutil.rmtree(e)
         else:
             e.unlink()
+
+
+def load_recipe(spec: "SetSpec"):
+    from eu4unitgen.core.recipe import RecipeError, TextureRecipe
+
+    if spec.texture_recipe is None:
+        return None
+    try:
+        return TextureRecipe.load(spec.texture_recipe)
+    except RecipeError as exc:
+        raise SpecError(str(exc)) from exc
 
 
 class Session:
@@ -192,10 +204,14 @@ class Session:
         game, idx = self.game()
         project = self.project()
         mod = project.mod_files()
+        recipe = load_recipe(spec)
         try:
             out = []
             for nation in self.nations(spec):
-                generated = generate(project, nation, game, idx, mod)
+                try:
+                    generated = generate(project, nation, game, idx, mod, recipe=recipe)
+                except GenerationError as exc:
+                    raise SpecError(str(exc)) from exc
                 out.append(SetResult(nation, generated, validate(project, nation, generated, game, idx, mod)))
             return out
         finally:
@@ -256,7 +272,8 @@ class Session:
                                     rival_gfx=rival_gfx, test_sprite_techs=sprite_techs)
                 mods = built.variants
             else:
-                mods = [build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)]
+                mods = [build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs,
+                                       recipe=load_recipe(spec))]
         except GenerationError as exc:
             raise SpecError(str(exc)) from exc
         reports = [(tm.plan.manifest_rel.split("/", 1)[0], tm.report) for tm in mods]

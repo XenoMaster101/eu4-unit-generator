@@ -16,7 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from eu4unitgen.core.generator import generate
+from eu4unitgen.core.generator import GenerationError, generate
 from eu4unitgen.core.naming import TEST_MOD_NAME
 from eu4unitgen.core.nation import Nation
 from eu4unitgen.core.project import DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_mod_dir
@@ -47,6 +47,13 @@ def _set_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--version", type=int, default=DEFAULT_ENTITY_VERSION, help="entity version")
     p.add_argument("--pack-order", type=int, default=DEFAULT_TAG_PACK_ORDER)
     p.add_argument("--diff-out", type=Path, help="also write the diff to this file")
+    p.add_argument("--texture-recipe", type=Path, help="Phase 2: texture recipe JSON (retextures the TAG set)")
+
+
+def _recipe(args: argparse.Namespace):
+    from eu4unitgen.core.recipe import TextureRecipe
+
+    return TextureRecipe.load(args.texture_recipe) if args.texture_recipe else None
 
 
 def _print_result(report: Report, plan: ExportPlan, args: argparse.Namespace, write: bool) -> int:
@@ -87,7 +94,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
     mod = project.mod_files()
     try:
         idx = build_index(game)
-        generated = generate(project, nation, game, idx, mod)
+        generated = generate(project, nation, game, idx, mod, recipe=_recipe(args))
         report = validate(project, nation, generated, game, idx, mod)
         try:
             plan = plan_package(args.out, generated, game, [str(i) for i in report.errors],
@@ -202,7 +209,8 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
             tt = build_texture_test(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
             tm, checklist = tt.mod, texture_checklist(tt, sprite_techs)
         else:
-            tm = build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
+            tm = build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs,
+                                recipe=_recipe(args))
     finally:
         game.close()
     print(f"test mod for {args.tag} ({facts.primary_culture}, {facts.technology_group}, was {facts.graphical_culture})")
@@ -263,7 +271,13 @@ def main(argv: list[str] | None = None) -> int:
         if project.eu4_path is None:
             ap.error("pass --eu4 or set EU4_PATH")
         args.eu4 = project.eu4_path
-    return args.func(args)
+    from eu4unitgen.core.recipe import RecipeError
+
+    try:
+        return args.func(args)
+    except (GenerationError, RecipeError) as exc:
+        print(f"error: {exc}")
+        return 1
 
 
 if __name__ == "__main__":

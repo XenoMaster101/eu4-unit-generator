@@ -358,12 +358,15 @@ def patch_country(data: bytes, integ: Integration) -> bytes:
 # --------------------------------------------------------------------------- top level
 
 def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod: GameFiles | None = None,
-             test_sprite_techs: dict[int, int] | None = None) -> GeneratedSet:
+             test_sprite_techs: dict[int, int] | None = None, recipe=None) -> GeneratedSet:
     """Build every Phase 1 file for ``nation``. Reads vanilla through ``game``/``idx`` and, when
     given, the mod's current copies of shared files through ``mod``. Writes nothing.
 
     ``test_sprite_techs`` (test mod only) moves sprite levels to the given MIL techs, e.g.
-    {2: 2, 3: 3, 4: 4}, unlocks each tier's units there and all tier-1 units at MIL 1."""
+    {2: 2, 3: 3, 4: 4}, unlocks each tier's units there and all tier-1 units at MIL 1.
+
+    ``recipe`` (a core.recipe.TextureRecipe, Phase 2) retextures the TAG set's slots through
+    pdxmesh meshsettings (core.retexture); the gfx-culture defaults stay on vanilla meshes."""
     naming, version = project.naming, project.entity_version
     chain = BaseChain(idx, nation.base_gfx)
     if not nation.units:
@@ -378,8 +381,17 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
     tag, gfx, set_name = nation.tag, nation.gfx_culture, nation.set_name
 
     # Entities: TAG set + gfx-culture defaults (SPEC §3: both, always).
+    tag_entities = unit_entities(tag, chain, naming, version)
+    if recipe is not None and recipe.active():
+        from eu4unitgen.core.retexture import retexture_set
+
+        meshes, textures, notes = retexture_set(naming, set_name, tag, tag_entities, recipe, chain, game, idx, version)
+        out.add(GeneratedFile(naming.pdxmesh_file(set_name), _utf8(render("pdxmeshes.gfx.j2", meshes=meshes))))
+        for f in textures:
+            out.add(f)
+        out.notes += notes
     out.add(GeneratedFile(naming.set_entities_file(set_name), _utf8(render(
-        "entities.asset.j2", entities=unit_entities(tag, chain, naming, version)))))
+        "entities.asset.j2", entities=tag_entities))))
     gfx_chain = BaseChain(idx, nation.gfx_set_base) if nation.gfx_set_base else chain
     out.add(GeneratedFile(naming.gfx_entities_file(gfx), _utf8(render(
         "entities.asset.j2", entities=unit_entities(gfx, gfx_chain, naming, version)))))

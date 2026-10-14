@@ -84,11 +84,8 @@ def test_test_mod_button_stages_into_the_staging_folder(window, tmp_path):
 
 
 def test_texture_test_checkbox_builds_the_texture_test(window, tmp_path, fake_install):
-    from test_textures import _real_dds
-    for tex in ("g1_d", "g2_d", "h_d", "c_d"):
-        (fake_install / "gfx/models/Units" / f"{tex}.dds").write_bytes(_real_dds())
-    (fake_install / "gfx/FX").mkdir(parents=True, exist_ok=True)
-    (fake_install / "gfx/FX/pdxmesh.shader").write_bytes(b"# stand-in\n")
+    from fakes import make_textures_decodable
+    make_textures_decodable(fake_install)
     window.unit_page.tags.setText("AAA")
     window.test_page.suite.setChecked(True)
     window.test_page.textures.setChecked(True)

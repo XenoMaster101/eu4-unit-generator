@@ -67,9 +67,9 @@ class TestMod:
 
 
 def _main_package(project: Project, nation: Nation, game: GameFiles, idx: Index,
-                  test_sprite_techs: dict[int, int] | None) -> GeneratedSet:
+                  test_sprite_techs: dict[int, int] | None, recipe=None) -> GeneratedSet:
     """The unit set plus the main tag's country file with INTEGRATION.md applied."""
-    package = generate(project, nation, game, idx, mod=None, test_sprite_techs=test_sprite_techs)
+    package = generate(project, nation, game, idx, mod=None, test_sprite_techs=test_sprite_techs, recipe=recipe)
     integ = package.integration
     if not integ or not integ.country_file:
         raise GenerationError(f"{nation.tag} has no vanilla country file; the test mod needs a vanilla tag")
@@ -103,10 +103,12 @@ def _wrap(project: Project, nation: Nation, package: GeneratedSet, game: GameFil
 
 
 def build_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path,
-                   name: str = TEST_MOD_NAME, test_sprite_techs: dict[int, int] | None = None) -> TestMod:
+                   name: str = TEST_MOD_NAME, test_sprite_techs: dict[int, int] | None = None,
+                   recipe=None) -> TestMod:
     """``test_sprite_techs`` (e.g. {2: 2, 3: 3, 4: 4}) moves sprite levels 2-4 to early MIL techs in
-    this test mod's mil.txt only, so every tier can be seen in minutes."""
-    package = _main_package(project, nation, game, idx, test_sprite_techs)
+    this test mod's mil.txt only, so every tier can be seen in minutes. ``recipe``: a texture
+    recipe (the set as generate() would write it)."""
+    package = _main_package(project, nation, game, idx, test_sprite_techs, recipe)
     return _wrap(project, nation, package, game, idx, mod_dir, name)
 
 

@@ -252,3 +252,39 @@ def build_fake_install(root: Path) -> Path:
         zf.writestr("gfx/sprite_packs/999_sprites.txt", DLC_PACK + DLC_GROUP_PACK)
         zf.writestr("gfx/sprite_packs_order/999_order.txt", DLC_ORDER)
     return root
+
+
+# --------------------------------------------------------------------------- decodable textures (Phase 2)
+
+def synthetic_diffuse(size: int = 64):
+    """Left half skin-toned, right half neutral grey (made up)."""
+    from PIL import Image
+    im = Image.new("RGBA", (size, size), (128, 128, 128, 255))
+    im.paste((210, 150, 120, 255), (0, 0, size // 2, size))
+    return im
+
+
+def synthetic_spec(size: int = 64):
+    """Right half: top quarter-band R (primary), lower band G (secondary); a gloss 40 'metal'
+    strip across the top rows of the grey half; everything else 0 (made up)."""
+    from PIL import Image
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    h = size // 2
+    im.paste((255, 0, 0, 2), (h, 8, size, h))
+    im.paste((0, 255, 0, 2), (h, h, size, size))
+    im.paste((0, 0, 0, 40), (h, 0, size, 8))
+    return im
+
+
+def make_textures_decodable(root: Path) -> Path:
+    """Replace the header-only DDS files the retexture bases use with real (tiny) ones, and add
+    the shader file meshsettings names."""
+    from eu4unitgen.textures.dds import DDSFormat, write_dds
+    units = root / "gfx/models/Units"
+    for tex in ("g1_d", "g2_d", "g3_d", "g4_d", "h_d", "c_d"):
+        (units / f"{tex}.dds").write_bytes(write_dds(synthetic_diffuse(), DDSFormat("DXT1", 64, 64, 7)))
+    for tex in ("g_s", "h_s", "c_s"):
+        (units / f"{tex}.dds").write_bytes(write_dds(synthetic_spec(), DDSFormat("DXT5", 64, 64, 7)))
+    (root / "gfx/FX").mkdir(parents=True, exist_ok=True)
+    (root / "gfx/FX/pdxmesh.shader").write_bytes(b"# made-up stand-in\n")
+    return root

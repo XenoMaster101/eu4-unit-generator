@@ -153,3 +153,41 @@ def apply_retextures(entities: list[dict], owner: str, tier: int, meshes: dict[s
             if a["name"] == "gunman":
                 a["nodes"] = [(node, cannon if node == "cannon_node" else target) for node, target in a["nodes"]]
     return entities
+
+
+def default_base(chain: BaseChain, role: str, tier: int) -> str:
+    """The base culture's own pdxmesh for a slot (base game only; SPEC §4 recolour bases)."""
+    if role == "infantry":
+        return chain.slot("infantry", tier)["pdxmesh"]
+    if role == "horse":
+        return chain.slot("cavalry", tier)["horse_pdxmesh"]
+    return chain.slot("artillery", tier)["cannon_pdxmesh"]
+
+
+def retexture_set(naming: Naming, set_name: str, owner: str, entities: list[dict], recipe, chain: BaseChain,
+                  game: GameFiles, idx: Index, version: int) -> tuple[list[dict], list[GeneratedFile], list[str]]:
+    """Apply a TextureRecipe to ``owner``'s entities: one retextured pdxmesh per active slot,
+    its derived DDS files, and notes. ``entities`` is changed in place."""
+    from eu4unitgen.core.recipe import RecipeError, apply_slot
+
+    meshes, files, notes = [], [], []
+    by_tier: dict[int, dict[str, str]] = {}
+    for (tier, role), slot in recipe.active().items():
+        base = slot.base or default_base(chain, role, tier)
+        holder: dict = {}
+
+        def edit(b: BaseTextures, slot=slot, role=role, holder=holder) -> Edited:
+            result = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role)
+            holder["notes"] = result.notes
+            return Edited(result.diffuse, result.specular)
+        try:
+            mesh, made = retextured_mesh(naming, set_name, Retexture(role, tier, base, edit), game, idx)
+        except RecipeError as exc:
+            raise GenerationError(f"texture recipe slot {tier}/{role}: {exc}") from exc
+        meshes.append(mesh)
+        files += made
+        by_tier.setdefault(tier, {})[role] = mesh["name"]
+        notes += [f"textures {tier}/{role} (base {base}): {n}" for n in holder.get("notes", [])]
+    for tier, roles in sorted(by_tier.items()):
+        apply_retextures(entities, owner, tier, roles, chain, naming, version)
+    return meshes, files, notes
