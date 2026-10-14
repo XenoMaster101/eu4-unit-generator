@@ -1,0 +1,10 @@
+{{ header }}
+type = {{ unit.type }}
+{% if unit.type != "artillery" and tech_group %}
+unit_type = {{ tech_group }}
+{% endif %}
+
+maneuver = {{ unit.maneuver }}
+{% for key in stat_keys %}
+{{ key }} = {{ unit.stats[key] }}
+{% endfor %}

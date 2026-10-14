@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "Generates Europa Universalis IV land-unit sets for a nation."
 requires-python = ">=3.11"
 license = { text = "GPL-3.0" }
-dependencies = []  # Phase 1 adds PySide6, Jinja2, Pillow>=11.2.1
+dependencies = ["PySide6", "Jinja2", "Pillow>=11.2.1"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
@@ -18,6 +18,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "eu4unitgen.library" = ["base_models.json"]
+"eu4unitgen.pdxscript" = ["templates/*.j2"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

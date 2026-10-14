@@ -1,0 +1,9 @@
+graphical_culture = {{ gfx }}
+{% if colour %}
+color = { {{ colour | join(" ") }} }
+{% endif %}
+historical_units = {
+{% for unit in units %}
+	{{ unit }}
+{% endfor %}
+}

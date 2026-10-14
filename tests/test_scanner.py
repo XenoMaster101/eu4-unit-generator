@@ -8,68 +8,18 @@ from __future__ import annotations
 
 import json
 import os
-import struct
 import zipfile
 from pathlib import Path
 
 import pytest
 
 from eu4unitgen.library import scanner
+from fakes import make_dds, make_mesh
 from eu4unitgen.library.scanner import (
-    GameFiles, build_base_models, build_index, dump_script, parse_pdx_mesh, parse_script,
-    read_dds_header, summarize_mesh,
+    GameFiles, build_base_models, build_index, parse_pdx_mesh, read_dds_header, summarize_mesh,
 )
 
 COMMITTED = Path(scanner.__file__).with_name("base_models.json")
-
-
-# --------------------------------------------------------------------------- binary builders
-
-def _prop(name: str, dtype: str, vals: list) -> bytes:
-    out = b"!" + bytes([len(name)]) + name.encode() + dtype.encode() + struct.pack("<i", len(vals))
-    if dtype == "i":
-        return out + struct.pack(f"<{len(vals)}i", *vals)
-    if dtype == "f":
-        return out + struct.pack(f"<{len(vals)}f", *vals)
-    for s in vals:
-        raw = s.encode() + b"\0"
-        out += struct.pack("<i", len(raw)) + raw
-    return out
-
-
-def _obj(depth: int, name: str) -> bytes:
-    return b"[" * depth + name.encode() + b"\0"
-
-
-def make_mesh(shader: str, diff: str, normal: str, spec: str, bones=(), locators=None) -> bytes:
-    out = b"@@b@" + _prop("pdxasset", "i", [1, 0]) + _obj(1, "object") + _obj(2, "bodyShape")
-    out += _obj(3, "mesh") + _prop("p", "f", [0.0, 1.0, 2.0])
-    out += _obj(4, "material") + _prop("shader", "s", [shader]) + _prop("diff", "s", [diff])
-    out += _prop("n", "s", [normal]) + _prop("spec", "s", [spec])
-    if bones:
-        out += _obj(3, "skeleton")
-        for i, bone in enumerate(bones):
-            out += _obj(4, bone) + _prop("ix", "i", [i])
-    if locators:
-        out += _obj(1, "locator")
-        for name, parent in locators.items():
-            out += _obj(2, name) + _prop("p", "f", [0.0, 0.0, 0.0])
-            if parent:
-                out += _prop("pa", "s", [parent])
-    return out
-
-
-def make_dds(width: int, height: int, mips: int, fourcc: bytes = b"DXT1") -> bytes:
-    hdr = bytearray(128)
-    hdr[0:4] = b"DDS "
-    struct.pack_into("<I", hdr, 4, 124)
-    struct.pack_into("<2I", hdr, 12, height, width)
-    struct.pack_into("<I", hdr, 28, mips)
-    struct.pack_into("<I", hdr, 80, 0x4)
-    hdr[84:88] = fourcc
-    if fourcc == b"DX10":
-        hdr += struct.pack("<I", 71) + bytes(16)
-    return bytes(hdr)
 
 
 # --------------------------------------------------------------------------- fake install
@@ -290,25 +240,6 @@ def built(fake_eu4: Path) -> dict:
         return build_base_models(files, build_index(files), "TST", "westerngfx")
     finally:
         files.close()
-
-
-# --------------------------------------------------------------------------- Clausewitz text
-
-def test_parse_script_nesting_comments_and_quotes():
-    items = parse_script('a = { b = "x y" # note\n c = { 1 2 } }  d >= 3  # tail')
-    assert items == [("a", "=", [("b", "=", "x y"), ("c", "=", [(None, "", "1"), (None, "", "2")])]), ("d", ">=", "3")]
-
-
-def test_parse_script_survives_stray_closing_brace():
-    assert [k for k, _, _ in parse_script("a = 1 } b = 2")] == ["a", "b"]
-
-
-def test_parse_script_keeps_hyphenated_bare_words():
-    assert parse_script("dlc085_cnn_2-4_sprite_pack = 50") == [("dlc085_cnn_2-4_sprite_pack", "=", "50")]
-
-
-def test_dump_script_renders_triggers():
-    assert dump_script(parse_script("OR = { tag = POL tag = PLC }")) == "OR = { tag = POL tag = PLC }"
 
 
 # --------------------------------------------------------------------------- mesh + DDS

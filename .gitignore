@@ -12,3 +12,4 @@ dist/
 # Claude Code binaries that live in this folder (not part of the project)
 claude.exe
 claude.exe.old.*
+output/

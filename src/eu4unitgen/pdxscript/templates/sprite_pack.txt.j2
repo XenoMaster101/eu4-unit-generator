@@ -1,0 +1,12 @@
+{{ header }}
+{{ pack }} = {
+{% if trigger %}
+	country_trigger = { {{ trigger }} }
+{% endif %}
+{% if graphical_cultures %}
+	graphical_cultures = { {{ graphical_cultures | join(" ") }} }
+{% endif %}
+{% for utype, slots in sprites %}
+	{{ ("sprite_" ~ utype).ljust(16) }} = { {% for index, entity in slots %}{{ index }} = {{ entity }} {% endfor %}}
+{% endfor %}
+}

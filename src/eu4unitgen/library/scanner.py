@@ -3,8 +3,7 @@
 Everything is read in place. Nothing from the game is copied: the output holds only
 names, paths, bone names and texture-header facts.
 
-The Clausewitz reader below is a stopgap for this module only. Phase 1 replaces it
-with pdxscript.parser (which must round-trip); don't build on it elsewhere.
+Script text is read with pdxscript.parser.
 
 Usage:
     python -m eu4unitgen.library.scanner --eu4 "<EU4 install>" --out base_models.json
@@ -14,80 +13,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import struct
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
+from eu4unitgen.pdxscript.parser import Block, Scalar, compact, parse_bytes
+
 SCHEMA_VERSION = 2
 COLOUR_SHADER = "PdxMeshColor"
 UNIT_TYPES = ("infantry", "cavalry", "artillery")
-
-
-# --------------------------------------------------------------------------- Clausewitz text
-
-Item = tuple  # (key | None, op, value); value is str or list[Item]
-
-_TOKEN = re.compile(r'#[^\n]*|"[^"]*"|[{}]|[<>!]=|==|[<>=]|[^\s={}"#<>!]+')
-_OPS = {"=", "==", "<", ">", "<=", ">=", "!="}
-
-
-def _unquote(tok: str) -> str:
-    return tok[1:-1] if tok.startswith('"') else tok
-
-
-def parse_script(text: str) -> list[Item]:
-    """Parse Clausewitz text into nested (key, op, value) items. Bare list entries have key None."""
-    toks = [t for t in _TOKEN.findall(text) if not t.startswith("#")]
-    pos = 0
-
-    def block() -> list[Item]:
-        nonlocal pos
-        items: list[Item] = []
-        while pos < len(toks):
-            tok = toks[pos]
-            pos += 1
-            if tok == "}":
-                return items
-            if tok == "{":
-                items.append((None, "", block()))
-            elif pos < len(toks) and toks[pos] in _OPS:
-                op = toks[pos]
-                pos += 1
-                if pos < len(toks) and toks[pos] == "{":
-                    pos += 1
-                    items.append((_unquote(tok), op, block()))
-                elif pos < len(toks):
-                    items.append((_unquote(tok), op, _unquote(toks[pos])))
-                    pos += 1
-            else:
-                items.append((None, "", _unquote(tok)))
-        return items
-
-    result: list[Item] = []
-    while pos < len(toks):  # a stray top-level "}" ends block() early; keep going
-        result.extend(block())
-    return result
-
-
-def values(items: list[Item], key: str) -> list[Any]:
-    return [v for k, _, v in items if k == key]
-
-
-def first(items: list[Item], key: str, default: Any = None) -> Any:
-    found = values(items, key)
-    return found[0] if found else default
-
-
-def dump_script(items: list[Item]) -> str:
-    """Compact one-line rendering, used to record triggers in the output."""
-    parts = []
-    for k, op, v in items:
-        rendered = "{ " + dump_script(v) + " }" if isinstance(v, list) else str(v)
-        parts.append(rendered if k is None else f"{k} {op} {rendered}")
-    return " ".join(parts)
 
 
 def _num(s: Any) -> int | float | None:
@@ -294,11 +230,6 @@ class GameFiles:
         return cur if cur.is_dir() else None
 
 
-def _text(data: bytes) -> str:
-    # Game script files are Windows-1252; latin-1 never fails and keeps ASCII identifiers intact.
-    return data.decode("latin-1").lstrip("﻿ï»¿")
-
-
 # --------------------------------------------------------------------------- index
 
 @dataclass
@@ -331,54 +262,56 @@ class Index:
         return self._pick(self.animation_types.get(name, []), base_only)
 
 
-def _entity_record(items: list[Item], path: str, dlc: str | None) -> dict:
-    rec: dict[str, Any] = {"name": first(items, "name"), "defined_in": path, "dlc": dlc}
+def _blocks(items: Block, key: str) -> list[Block]:
+    return [v for v in items.get_all(key) if isinstance(v, Block)]
+
+
+def _entity_record(items: Block, path: str, dlc: str | None) -> dict:
+    rec: dict[str, Any] = {"name": items.get_str("name"), "defined_in": path, "dlc": dlc}
     for key in ("clone", "pdxmesh"):
-        if first(items, key) is not None:
-            rec[key] = first(items, key)
-    if first(items, "version") is not None:
-        rec["version"] = _num(first(items, "version"))
+        if items.get_str(key) is not None:
+            rec[key] = items.get_str(key)
+    if items.get_str("version") is not None:
+        rec["version"] = _num(items.get_str("version"))
     states = []
-    for st in values(items, "state"):
-        if not isinstance(st, list):
-            continue
-        state: dict[str, Any] = {"name": first(st, "name")}
-        if first(st, "animation") is not None:
-            state["animation"] = first(st, "animation")
-        events = [{k: (_num(v) if k == "time" else v) for k, _, v in ev} for ev in values(st, "event") if isinstance(ev, list)]
+    for st in _blocks(items, "state"):
+        state: dict[str, Any] = {"name": st.get_str("name")}
+        if st.get_str("animation") is not None:
+            state["animation"] = st.get_str("animation")
+        events = [{k: (_num(v) if k == "time" else v) for k, v in ev.scalar_map().items()} for ev in _blocks(st, "event")]
         if events:
             state["events"] = events
         states.append(state)
     if states:
         rec["states"] = states
-    attaches = [{k: v for k, _, v in a if k is not None} for a in values(items, "attach") if isinstance(a, list)]
+    attaches = [a.scalar_map() for a in _blocks(items, "attach")]
     if attaches:
         rec["attach"] = attaches
     known = {"name", "clone", "pdxmesh", "version", "state", "attach"}
-    extra = {k: v for k, _, v in items if k is not None and k not in known and not isinstance(v, list)}
+    extra = {p.key.value: p.value.value for p in items.pairs() if p.key.value not in known and isinstance(p.value, Scalar)}
     if extra:
         rec["extra"] = extra
     return rec
 
 
-def _pdxmesh_record(items: list[Item], path: str, dlc: str | None) -> dict:
-    rec = {"name": first(items, "name"), "defined_in": path, "dlc": dlc, "file": first(items, "file"),
-           "scale": _num(first(items, "scale")),
-           "animations": {first(a, "id"): first(a, "type") for a in values(items, "animation") if isinstance(a, list)}}
+def _pdxmesh_record(items: Block, path: str, dlc: str | None) -> dict:
+    rec = {"name": items.get_str("name"), "defined_in": path, "dlc": dlc, "file": items.get_str("file"),
+           "scale": _num(items.get_str("scale")),
+           "animations": {a.get_str("id"): a.get_str("type") for a in _blocks(items, "animation")}}
     return rec
 
 
-def _sprite_pack_record(name: str, items: list[Item], path: str, dlc: str | None) -> dict:
+def _sprite_pack_record(name: str, items: Block, path: str, dlc: str | None) -> dict:
     rec: dict[str, Any] = {"name": name, "defined_in": path, "dlc": dlc}
-    trig = first(items, "country_trigger")
-    rec["country_trigger"] = dump_script(trig) if isinstance(trig, list) else None
-    gcs = first(items, "graphical_cultures")
-    if isinstance(gcs, list):
-        rec["graphical_cultures"] = [v for k, _, v in gcs if k is None]
+    trig = items.get_block("country_trigger")
+    rec["country_trigger"] = compact(trig) if trig is not None else None
+    gcs = items.get_block("graphical_cultures")
+    if gcs is not None:
+        rec["graphical_cultures"] = gcs.bare()
     for utype in UNIT_TYPES:
-        block = first(items, f"sprite_{utype}")
-        if isinstance(block, list):
-            rec[utype] = {k: v for k, _, v in block if k is not None}
+        sprites = items.get_block(f"sprite_{utype}")
+        if sprites is not None:
+            rec[utype] = sprites.scalar_map()
     return rec
 
 
@@ -386,48 +319,46 @@ def build_index(files: GameFiles) -> Index:
     idx = Index()
 
     for path, dlc, data in files.iter_files("gfx/entities", (".asset",)):
-        for key, _, val in parse_script(_text(data)):
-            if key == "entity" and isinstance(val, list) and first(val, "name"):
+        for val in _blocks(parse_bytes(data), "entity"):
+            if val.get_str("name"):
                 rec = _entity_record(val, path, dlc)
                 idx.entities.setdefault(rec["name"], []).append(rec)
 
     for path, dlc, data in files.iter_files("interface", (".gfx",), recursive=True):
-        for key, _, val in parse_script(_text(data)):
-            blocks = values(val, "pdxmesh") if key == "objectTypes" and isinstance(val, list) else []
-            for block in blocks:
-                if isinstance(block, list) and first(block, "name"):
-                    rec = _pdxmesh_record(block, path, dlc)
+        for obj_types in _blocks(parse_bytes(data), "objectTypes"):
+            for pdx in _blocks(obj_types, "pdxmesh"):
+                if pdx.get_str("name"):
+                    rec = _pdxmesh_record(pdx, path, dlc)
                     idx.pdxmeshes.setdefault(rec["name"], []).append(rec)
 
     for path, dlc, data in files.iter_files("gfx/models", (".asset",), recursive=True):
         folder = PurePosixPath(path).parent
-        for key, _, val in parse_script(_text(data)):
-            if key == "animation" and isinstance(val, list) and first(val, "name") and first(val, "file"):
-                rec = {"name": first(val, "name"), "defined_in": path, "dlc": dlc,
-                       "file": str(folder / first(val, "file"))}
+        for val in _blocks(parse_bytes(data), "animation"):
+            if val.get_str("name") and val.get_str("file"):
+                rec = {"name": val.get_str("name"), "defined_in": path, "dlc": dlc,
+                       "file": str(folder / val.get_str("file"))}
                 idx.animation_types.setdefault(rec["name"], []).append(rec)
 
     for path, dlc, data in files.iter_files("gfx/sprite_packs", (".txt",)):
-        for key, _, val in parse_script(_text(data)):
-            if key and isinstance(val, list):
-                idx.sprite_packs.setdefault(key, []).append(_sprite_pack_record(key, val, path, dlc))
+        for p in parse_bytes(data).pairs():
+            if isinstance(p.value, Block):
+                idx.sprite_packs.setdefault(p.key.value, []).append(_sprite_pack_record(p.key.value, p.value, path, dlc))
 
     for path, dlc, data in files.iter_files("gfx/sprite_packs_order", (".txt",)):
-        for key, _, val in parse_script(_text(data)):
-            if key and _num(val) is not None:
-                idx.pack_order.setdefault(key, []).append({"order": _num(val), "defined_in": path, "dlc": dlc})
+        for p in parse_bytes(data).pairs():
+            if isinstance(p.value, Scalar) and _num(p.value.value) is not None:
+                idx.pack_order.setdefault(p.key.value, []).append({"order": _num(p.value.value), "defined_in": path, "dlc": dlc})
 
     gct = files.read("common/graphicalculturetype.txt")
     if gct:
-        idx.graphical_cultures = [v for k, _, v in parse_script(_text(gct)) if k is None]
+        idx.graphical_cultures = parse_bytes(gct).bare()
 
     mil = files.read("common/technologies/mil.txt")
     if mil:
-        techs = [v for k, _, v in parse_script(_text(mil)) if k == "technology" and isinstance(v, list)]
-        for n, tech in enumerate(techs):
-            level = first(tech, "sprite_level")
+        for n, tech in enumerate(_blocks(parse_bytes(mil), "technology")):
+            level = tech.get_str("sprite_level")
             if level is not None:
-                idx.sprite_levels[str(level)] = {"mil_tech": n, "year": _num(first(tech, "year"))}
+                idx.sprite_levels[str(level)] = {"mil_tech": n, "year": _num(tech.get_str("year"))}
 
     for key, fname in (("eu4_branch", "eu4_branch.txt"), ("eu4_rev", "eu4_rev.txt")):
         raw = files.read(fname)
@@ -474,7 +405,7 @@ def _entity_closure(idx: Index, roots: list[str]) -> list[str]:
     return sorted(out)
 
 
-def _find_pack(idx: Index, *, tag: str | None = None, gfx: str | None = None) -> dict | None:
+def find_pack(idx: Index, *, tag: str | None = None, gfx: str | None = None) -> dict | None:
     for defs in idx.sprite_packs.values():
         for pack in defs:
             if pack["dlc"] is not None:
@@ -506,7 +437,7 @@ def _describe_slot(idx: Index, utype: str, entity: str) -> dict:
     return slot
 
 
-def _tiers(idx: Index, pack: dict) -> dict:
+def pack_tiers(idx: Index, pack: dict) -> dict:
     tiers: dict[str, dict] = {}
     for utype in UNIT_TYPES:
         for i, ent in sorted(pack.get(utype, {}).items()):
@@ -519,8 +450,8 @@ def _strip(rec: dict) -> dict:
 
 
 def build_base_models(files: GameFiles, idx: Index, tag: str, gfx: str) -> dict:
-    tag_pack = _find_pack(idx, tag=tag)
-    gfx_pack = _find_pack(idx, gfx=gfx)
+    tag_pack = find_pack(idx, tag=tag)
+    gfx_pack = find_pack(idx, gfx=gfx)
     if tag_pack is None or gfx_pack is None:
         raise LookupError(f"no base-game sprite pack for tag {tag!r} and/or graphical culture {gfx!r}")
 
@@ -563,7 +494,7 @@ def build_base_models(files: GameFiles, idx: Index, tag: str, gfx: str) -> dict:
 
     # Group identical skeletons; name each group after the first mesh file using it,
     # graphical-culture default meshes first so names read "western_generic_01_type1", not "DAN_01".
-    gfx_tiers = _tiers(idx, gfx_pack)
+    gfx_tiers = pack_tiers(idx, gfx_pack)
     gfx_pdx = {v for slots in gfx_tiers.values() for s in slots.values() for k, v in s.items() if k.endswith("pdxmesh")}
     skeletons: dict[str, dict] = {}
     attach_keys = {k for e in entities.values() for a in e.get("attach", []) for k in a if k != "name"}
@@ -633,7 +564,7 @@ def build_base_models(files: GameFiles, idx: Index, tag: str, gfx: str) -> dict:
             "sprite_pack": {"name": tag_pack["name"], "file": tag_pack["defined_in"],
                             "country_trigger": tag_pack["country_trigger"],
                             "order": tag_order[-1]["order"] if tag_order else None},
-            "tiers": _tiers(idx, tag_pack),
+            "tiers": pack_tiers(idx, tag_pack),
             "dlc_overrides": dlc_overrides,
         },
         "graphical_culture_defaults": {

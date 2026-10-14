@@ -1,0 +1,29 @@
+{{ header }}
+{% for e in entities %}
+
+entity = {
+{% if e.clone %}
+	clone = {{ e.clone | q }}
+{% endif %}
+	name = {{ e.name | q }}
+{% if e.pdxmesh %}
+	pdxmesh = {{ e.pdxmesh | q }}
+{% endif %}
+	version = {{ e.version }}
+{% for s in e.states %}
+	state = { name = {{ (s.name | q).ljust(9) }} animation = {{ s.animation | q }} }
+{% endfor %}
+{% for a in e.attaches %}
+{% if a.name and a.nodes | length > 1 %}
+	attach = {
+		name = {{ a.name | q }}
+{% for node, target in a.nodes %}
+		{{ node }} = {{ target | q }}
+{% endfor %}
+	}
+{% else %}
+	attach = { {% if a.name %}name = {{ a.name | q }} {% endif %}{% for node, target in a.nodes %}{{ node }} = {{ target | q }} {% endfor %}}
+{% endif %}
+{% endfor %}
+}
+{% endfor %}

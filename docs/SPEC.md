@@ -288,7 +288,7 @@ entity = {
 ### 7.3 Artillery (clone-based, Phase 1 default)
 ```
 entity = {
-    clone = "westerngfx_ARTILLERY_1"         # tiers 2-4: westerngfx_ARTILLERY_n_generic
+    clone = "westerngfx_ARTILLERY_1"         # all tiers: see clone-source rule below
     name = "MAC_ARTILLERY_1"
     version = 20
     attach = {
@@ -299,6 +299,8 @@ entity = {
 }
 ```
 For the Hellenistic mod, `cannon_node` will later point to a lithobolos or torsion-engine entity.
+
+**Clone-source rule (generator).** Follow the vanilla clone chain while the vanilla entity only sets fields the generated entity overrides anyway (`attach` for horse/artillery, `pdxmesh` for riders). Result for westerngfx: riders clone `westerngfx_CAVALRY_1_rider`; horses clone `westerngfx_CAVALRY_1` (tiers 1–2) or `westerngfx_CAVALRY_3`/`_4` (own horse mesh); artillery clones `westerngfx_ARTILLERY_1` at every tier (`_n` and `_n_generic` only add the gunman attach, which is restated). This keeps clone chains one level deep.
 
 ### 7.4 Sprite packs + order
 `gfx/sprite_packs/hr_mac_pack.txt`
@@ -320,7 +322,7 @@ hellenicgfx_sprite_pack = {
     sprite_artillery = { 0 = hellenicgfx_ARTILLERY_1 1 = hellenicgfx_ARTILLERY_2 2 = hellenicgfx_ARTILLERY_3 3 = hellenicgfx_ARTILLERY_4 }
 }
 ```
-`gfx/sprite_packs_order/hr_sprite_pack_orders.txt`, with tag packs only (see §3):
+`gfx/sprite_packs_order/hr_mac_order.txt`: one file per tag, so nations can be generated independently (every file in the folder loads). Tag packs only (see §3):
 ```
 hr_mac_units = 110
 ```
@@ -345,7 +347,7 @@ Also generate `hellenicgfx_INFANTRY_1–4`, `_CAVALRY_1–4` (+ `_rider`), `_ART
 # common/units/hr_hellenic_phalanx.txt
 type = infantry
 unit_type = hr_hellenic          # tech group; omit = available to all
-maneuver = 1                     # 1 infantry/artillery, 2 cavalry
+maneuver = 1                     # vanilla: 1 infantry, 2 cavalry AND artillery (all 329 unit files)
 offensive_morale = 1
 defensive_morale = 1
 offensive_fire = 0
@@ -364,6 +366,13 @@ l_english:
 ```
 (Localisation files: UTF-8 with BOM, filename ends `_l_english.yml`.)
 
+Vanilla artillery unit files have **no `unit_type`** line (all 18). `unit_type` values are the tech groups in `common/technology.txt` → `groups`. Vanilla MIL 0 enables no units; the first land units unlock at MIL 1 and the first artillery at MIL 7. Generator defaults: tier 1 units at MIL 1 (artillery 7), tiers 2–4 at the tech that raises `sprite_level`.
+
+`mil.txt` and `graphicalculturetype.txt` are single files. The generator patches the mod's copy if it has one (and mod checks are on), else vanilla's, adding lines in place with the round-trip parser so everything else stays byte-identical. Export never overwrites a copy the tool didn't write. `INTEGRATION.md` (package root) lists everything to merge by hand: the country-file lines (`graphical_culture`, `color` if set, `historical_units`), MIL enables per tech, new graphical cultures.
+
+### 7.7 Unit sets
+A unit set has a name (`--set`, default: the tag in lowercase). The set name, not the tag, names the TAG sprite pack (`hr_<set>_units`), its entity, pack, order and localisation files, and the unit keys (`hr_<set>_infantry_1`). Entity names stay `TAG_INFANTRY_n` (engine pattern). Set names are lowercase and can't end in `gfx`, which keeps them apart from graphical-culture files.
+
 ---
 
 ## 8. Architecture
@@ -374,7 +383,8 @@ src/eu4unitgen/
   core/
     project.py        # mod root, vanilla path, DLC path, owned DLC, target EU4 version
     nation.py         # tag, gfx culture, colours, tech group, tier→era mapping
-    naming.py         # single source of truth for all generated names
+    naming.py         # single source of truth for all generated names and file paths
+    generator.py      # Phase 1: builds every file for a nation in memory (writes nothing)
   pdxscript/
     parser.py         # Clausewitz text parser/writer (recursive descent; must round-trip)
     templates/        # Jinja2: entity.asset, pdxmesh.gfx, sprite_pack.txt, gfx_sprite_pack.txt, pack_order.txt, unit.txt, loc.yml, country snippet
@@ -388,11 +398,14 @@ src/eu4unitgen/
     runner.py         # subprocess: blender --background --python job.py -- args.json
     jobs/             # import_mesh.py, retarget_textures.py, kitbash.py, render_thumb.py, export_mesh.py
   validate/
-    graph.py          # dependency graph: pack → entity → pdxmesh → mesh → textures; state id → anim type → .anim; attaches
+    graph.py          # World (vanilla+DLC < mod < generated, same-path replaces) + dependency graph: pack → entity → pdxmesh → mesh → textures; state id → anim type → .anim; attaches
     rules.py          # naming, missing nodes, version collisions, DDS format, loc keys, tech enables, anim ids, pack-order shadowing
     errorlog.py       # parse error.log after a test launch, map lines back to generated files
   export/
-    writer.py         # dry-run diff, atomic writes, manifest of generated files
+    writer.py         # dry-run diff, atomic writes, manifest (.eu4unitgen/manifest.json: path → sha256, role, tags)
+  export/testmod.py   # throwaway in-game test mod (eu4unitgen_test) around one unit set
+  library/tags.py     # 1444 tag facts (owners, culture, group, reforms) + 3-valued sprite-pack trigger evaluation
+  cli.py              # generate (-> output/<set>/) | pick-test-tag | test-mod (dry run unless --apply / --stage-dir)
   gui/                # PySide6: Project setup, Nation wizard, Template picker, Texture editor, Validator, Export
 tests/
 ```
@@ -401,7 +414,7 @@ tests/
 - Reads the base game and `dlc/*/*.zip` in place (stdlib `zipfile`). Path lookups ignore case, because scripts write `Units` and `units` interchangeably and Linux is case-sensitive.
 - Indexes entities (`gfx/entities`), pdxmeshes (`interface/**/*.gfx` → `objectTypes`), animation types (`gfx/models/**/*.asset`), sprite packs, pack order, the graphical-culture list, `mil.txt` sprite levels and the game version. Every definition records its source file and DLC, so later validator rules can detect version collisions.
 - Parses binary `.mesh` files (shader, texture names, bone names, locators with parent bone) and DDS headers.
-- The Clausewitz reader inside scanner.py is a stopgap. Phase 1 swaps it for `pdxscript.parser`.
+- Script text is read with `pdxscript.parser` (lossless; round-trips all 8,852 vanilla + DLC script files byte-for-byte). Two DLC116 files are malformed in vanilla: `116_sprites.txt` ends inside an unclosed block and `scanup_NOR.gfx` has a stray `}`. The parser reads every pack and pdxmesh in both and reports the problem as a warning.
 - CLI: `python -m eu4unitgen.library.scanner --eu4 "<install>" [--tag DAN] [--gfx westerngfx] [--no-dlc] [--out ...]`, or set `EU4_PATH`.
 - Files in the `dlc/` folder don't prove the user owns that DLC (Steam installs them all), so DLC ownership is a project setting.
 
@@ -462,7 +475,14 @@ Edited meshes keep the vanilla skeleton, so they **reuse vanilla animation types
   12. Sprite tiers confirmed at MIL 0/12/21/26 (§2).
 - Moved out of Phase 0: bone **parenting** (hierarchy) is deferred to Phase 3. The Blender import of one infantry, horse+rider and artillery mesh moves with it; bone names, locators, shaders, texture names and DDS headers are already done.
 
-### Phase 1: Scaffolder + validator (no meshes)
+### Phase 1: Scaffolder + validator (no meshes) — IN PROGRESS
+Done (2026-10-14): parser/writer, naming, templates, generator, validator, export dry-run/manifest, CLI. MAC/hellenicgfx validates clean against 1.37.5 + DLC116. Remaining: nation wizard (GUI) and the in-game tests below.
+- **Mod checks are off by default** (`Project.check_mod_collisions`, CLI `--check-mod`) until the Hellenistic Revolution folder exists. Off means the mod folder is not read for collisions or shared-file copies. Export ownership checks always run.
+- **Test mod.** `cli test-mod` writes `<EU4 mod dir>/eu4unitgen_test.mod` + `eu4unitgen_test/` (descriptor keys copied from the user's own `.mod` files: `version tags name supported_version path`). It contains the package plus the tag's vanilla country file with INTEGRATION.md applied. It reads no other mod.
+- **Test tag.** `cli pick-test-tag` checks every tag that owns land on 1444.11.11 against every vanilla and DLC sprite-pack trigger (tag, was_tag, primary_culture, culture, culture_group, colonial flags, has_reform at the start date, AND/OR/NOT; anything else counts as "might match") and against vanilla/DLC `TAG_*` unit entities. On 1.37.5 exactly one tag passes: **HDA (Haida)**, 1 province, north_american tech, northamericagfx. DLC unit packs cover every other 1444 culture. Test set: `macedonian_test` on HDA, graphical culture overridden to hellenicgfx.
+- **Windows Controlled Folder Access** blocks python.exe from writing under Documents on the user's machine. The writer probes before writing; `--stage-dir` builds the mod elsewhere for copying in Explorer. The user copies by hand; don't ask to whitelist Python.
+- **Drop-in package.** `cli generate` writes `output/<set>/`: only files the tool creates (entities, packs, order, units, localisation) plus `INTEGRATION.md` at its root. Patched copies of game files (`mil.txt`, `graphicalculturetype.txt`) are not in the package; they exist only in memory so the validator checks the merged result. The manifest is `output/.eu4unitgen/<set>.manifest.json`, beside the package. `generate` never writes to a mod folder: it refuses an output path inside the EU4 mod directory, under a folder with `descriptor.mod`, or under a folder with a sibling `<name>.mod`. `--mod` is only read, and only with `--check-mod`.
+- **Test-only sprite levels.** `test-mod --test-sprite-techs 2 3 4` moves `sprite_level` 2–4 to those MIL techs in the test mod's `mil.txt` only, unlocks each tier's units there and all tier-1 units at MIL 1. HDA's tech group (north_american) starts at MIL 1, so tier 1 shows at start and tiers 2–4 are one MIL tech apart. The validator requires sprite levels 1–4 exactly once, rising with the tech.
 - Clausewitz parser/writer with round-trip tests on vanilla files; replace the stopgap reader in `scanner.py`.
 - `naming.py`, Jinja2 templates, nation wizard (GUI).
 - Generate: clone-based 12 TAG entities; gfx-culture default set; **TAG sprite pack and gfx-culture sprite pack (`graphical_cultures` block)**; pack-order entry for the TAG pack; `graphicalculturetype.txt` (vanilla list + new names, at export); units; mil.txt enables; localisation; country snippet.
