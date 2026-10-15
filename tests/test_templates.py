@@ -105,10 +105,11 @@ def test_integration_template():
                         ["hr_macedonian_test_infantry_1"], {1: ["hr_macedonian_test_infantry_1"]}, ["hellenicgfx"])
     lines = render("country_snippet.txt.j2", gfx="hellenicgfx", colour=None, units=integ.historical_units)
     out = render("integration.md.j2", integ=integ, country_lines=lines, mil_file="common/technologies/mil.txt",
-                 gct_file="common/graphicalculturetype.txt")
+                 gct_file="common/graphicalculturetype.txt", colours_file="common/country_colors/00_country_colors.txt")
     check_golden("templates/INTEGRATION.md", out)
     assert "`common/countries/Haida.txt`" in out and "\tenable = hr_macedonian_test_infantry_1" in out
     assert "`color` is left as it is." in out
+    assert "the engine's default\nunit colours" in out  # no unit colours set: section 4 says so
 
 
 @pytest.mark.parametrize("bad", ['say "hi"', "two\nlines"])

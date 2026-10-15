@@ -47,7 +47,14 @@ def _set_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--version", type=int, default=DEFAULT_ENTITY_VERSION, help="entity version")
     p.add_argument("--pack-order", type=int, default=DEFAULT_TAG_PACK_ORDER)
     p.add_argument("--diff-out", type=Path, help="also write the diff to this file")
+    p.add_argument("--unit-colours", type=int, nargs=9, metavar="V",
+                   help="unit colours color1 color2 color3 as 9 numbers (R G B R G B R G B), for common/country_colors")
     p.add_argument("--texture-recipe", type=Path, help="Phase 2: texture recipe JSON (retextures the TAG set)")
+
+
+def _unit_colours(args: argparse.Namespace):
+    v = args.unit_colours
+    return (tuple(v[0:3]), tuple(v[3:6]), tuple(v[6:9])) if v else None
 
 
 def _recipe(args: argparse.Namespace):
@@ -89,7 +96,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
                       owned_dlc=args.owned_dlc, check_mod_collisions=args.check_mod)
     nation = Nation(args.tag, args.gfx, base_gfx=args.base_gfx, name=args.name, adjective=args.adjective,
                     colour=tuple(args.colour) if args.colour else None, tech_group=args.tech_group,
-                    set_name=args.set_name)
+                    set_name=args.set_name, unit_colours=_unit_colours(args))
     game = GameFiles(project.eu4_path, include_dlc=project.include_dlc)
     mod = project.mod_files()
     try:
@@ -195,7 +202,7 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
         nation = Nation(args.tag, args.gfx, base_gfx=args.base_gfx, name=args.name, adjective=args.adjective,
                         colour=tuple(args.colour) if args.colour else None,
                         tech_group=args.tech_group or facts.technology_group, set_name=args.set_name,
-                        gfx_set_base=args.gfx_set_base)
+                        gfx_set_base=args.gfx_set_base, unit_colours=_unit_colours(args))
         sprite_techs = None
         if args.test_sprite_techs:
             sprite_techs = dict(zip((2, 3, 4), args.test_sprite_techs))

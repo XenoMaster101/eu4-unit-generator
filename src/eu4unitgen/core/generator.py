@@ -275,6 +275,8 @@ class Integration:
     historical_units: list[str]
     mil_enables: dict[int, list[str]]  # MIL tech index -> unit keys
     graphical_cultures_added: list[str]
+    unit_colours: tuple[tuple[int, int, int], ...] | None = None  # common/country_colors entry, if set
+    unit_colours_snippet: str = ""
 
 
 def patch_history_culture(data: bytes, culture: str, date: tuple[int, int, int] = START_DATE) -> bytes:
@@ -332,6 +334,25 @@ class TestFixtures:
     @property
     def unpacked_owners(self) -> list[str]:
         return [c.tag for c in self.cases if c.case == "b"]
+
+
+def patch_country_colours(data: bytes, snippet: str, tag: str) -> bytes:
+    """Apply an Integration's country_colors entry: replace the tag's block (or append it).
+    The rest of the file is kept byte-for-byte."""
+    doc = parse_bytes(data)
+    if b"\r\n" in data:  # match the file's line endings
+        snippet = snippet.replace("\r\n", "\n").replace("\n", "\r\n")
+    new = next(parse_bytes(snippet.encode("utf-8")).pairs(tag), None)
+    if new is None:
+        raise GenerationError(f"country_colors snippet has no {tag} entry")
+    found = list(doc.pairs(tag))
+    if found:
+        found[0].value = new.value
+        for extra in found[1:]:
+            doc.remove(extra)
+    else:
+        doc.append(new)
+    return doc.to_bytes()
 
 
 def patch_country(data: bytes, integ: Integration) -> bytes:
@@ -434,12 +455,16 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
         tag=tag, set_name=set_name, country_file=cfile, graphical_culture=gfx, colour=nation.colour,
         historical_units=[u.key for u in nation.units],
         mil_enables={t: [u.key for u in nation.units if u.mil_tech == t] for t in sorted({u.mil_tech for u in nation.units})},
-        graphical_cultures_added=[gfx] if gfx not in idx.graphical_cultures else [])
+        graphical_cultures_added=[gfx] if gfx not in idx.graphical_cultures else [],
+        unit_colours=nation.unit_colours,
+        unit_colours_snippet=render("country_colors_snippet.txt.j2", tag=tag, colours=nation.unit_colours)
+        if nation.unit_colours else "")
     country_lines = render("country_snippet.txt.j2", gfx=gfx, colour=nation.colour,
                            units=out.integration.historical_units)
     out.add(GeneratedFile(naming.integration_file(set_name), _utf8(render(
         "integration.md.j2", integ=out.integration, country_lines=country_lines,
-        mil_file=naming.mil_tech_file(), gct_file=naming.graphical_culture_file())), SNIPPET))
+        mil_file=naming.mil_tech_file(), gct_file=naming.graphical_culture_file(),
+        colours_file=naming.country_colours_file())), SNIPPET))
 
     if gfx not in idx.graphical_cultures:
         out.notes.append(

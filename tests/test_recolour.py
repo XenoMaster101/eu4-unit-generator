@@ -260,3 +260,36 @@ def test_unit_colours_and_preview_fallback(fake_install, tmp_path):
         assert DEFAULT_UNIT_COLOURS[0] == (205, 32, 26)
     finally:
         s.close()
+
+
+def test_unit_colours_rule_integration_and_test_mod(project, nation, tex_game, tmp_path):
+    from eu4unitgen.core.nation import Nation
+    from eu4unitgen.export.testmod import build_test_mod
+    files, idx = tex_game
+    bare = Nation("MAC", "hellenicgfx")
+    report = validate(project, bare, generate(project, bare, files, idx), files, idx)
+    assert any(i.rule == "unit_colours" and i.severity == "info" and "no entry" in i.message for i in report.issues)
+    out = generate(project, nation, files, idx)  # conftest MAC sets unit colours
+    report = validate(project, nation, out, files, idx)
+    assert not any(i.rule == "unit_colours" for i in report.issues)
+    assert "\tcolor2 = { 210 170 40 }" in out.files["INTEGRATION.md"].text
+    with pytest.raises(ValueError):
+        Nation("MAC", "hellenicgfx", unit_colours=((1, 2, 3), (4, 5, 6)))
+
+    (tmp_path / "mods").mkdir()
+    cc = files.root / "common/country_colors"
+    cc.mkdir(parents=True)
+    (cc / "00_country_colors.txt").write_text("# made up\nAAA = {\n\tcolor1= { 1 2 3 }\n\tcolor2= { 4 5 6 }\n"
+                                              "\tcolor3= { 7 8 9 }\n}\n")
+    tagged = Nation("AAA", "hellenicgfx", set_name="macedonian_test", unit_colours=nation.unit_colours)
+    fresh = GameFiles(files.root)  # GameFiles caches folder listings; read the new file with a new one
+    try:
+        tm = build_test_mod(project, tagged, fresh, build_index(fresh), tmp_path / "mods")
+    finally:
+        fresh.close()
+    patched = tm.package.files["common/country_colors/00_country_colors.txt"].text
+    assert patched.replace("\r\n", "\n").startswith("# made up\nAAA = {\n\tcolor1 = { 150 20 30 }")
+    assert patched.count("AAA") == 1
+    if "\r\n" in patched:  # a CRLF file stays CRLF throughout
+        assert "\n" not in patched.replace("\r\n", "")
+    assert not [i for i in tm.report.issues if i.rule == "unit_colours"]

@@ -37,3 +37,8 @@ of vanilla's; UNVERIFIED but expected: the mod's copy replaces the vanilla list)
 ```
 hellenicgfx
 ```
+
+## 4. Unit colours
+
+Not set: HDA's units keep its entry in `common/country_colors/00_country_colors.txt`, or the engine's default
+unit colours if it has none (the validator notes which).

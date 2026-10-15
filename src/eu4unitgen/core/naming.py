@@ -233,6 +233,11 @@ class Naming:
         return "common/technologies/mil.txt"
 
     @staticmethod
+    def country_colours_file() -> str:
+        """Vanilla's unit-colour file (the only file in common/country_colors on 1.37.5)."""
+        return "common/country_colors/00_country_colors.txt"
+
+    @staticmethod
     def graphical_culture_file() -> str:
         return "common/graphicalculturetype.txt"
 

@@ -174,6 +174,23 @@ class UnitSetPage(Page):
         cl.addWidget(self.colour_on)
         cl.addWidget(self.colour_btn)
         cl.addStretch(1)
+        self.unit_colours_on = QCheckBox("Set unit colours")
+        self.unit_colours_on.setToolTip("common/country_colors color1-3: what the game tints units with "
+                                        "(primary, secondary, tertiary). Handed over in INTEGRATION.md.")
+        self.unit_colour_btns = []
+        self._unit_colours = [QColor(150, 20, 30), QColor(210, 170, 40), QColor(25, 35, 90)]
+        urow = QWidget()
+        ul = QHBoxLayout(urow)
+        ul.setContentsMargins(0, 0, 0, 0)
+        ul.addWidget(self.unit_colours_on)
+        for i, label in enumerate(("primary", "secondary", "tertiary")):
+            btn = QPushButton()
+            btn.setToolTip(label)
+            btn.clicked.connect(lambda _=False, i=i: self._pick_unit_colour(i))
+            self.unit_colour_btns.append(btn)
+            ul.addWidget(btn)
+        ul.addStretch(1)
+        self._paint_unit_colours()
         form.addRow("Tag(s)", self.tags)
         form.addRow("Set name", self.set_name)
         form.addRow("Graphical culture", self.gfx)
@@ -181,7 +198,8 @@ class UnitSetPage(Page):
         form.addRow("Default set copies", self.gfx_base)
         form.addRow("Adjective", self.adjective)
         form.addRow("Tech group", self.tech)
-        form.addRow("Colour", crow)
+        form.addRow("Map colour", crow)
+        form.addRow("Unit colours", urow)
         self.layout_.addLayout(form)
         self.layout_.addWidget(self.message)
         self.layout_.addStretch(1)
@@ -196,6 +214,18 @@ class UnitSetPage(Page):
             self._colour = c
             self.colour_on.setChecked(True)
             self._paint_colour()
+
+    def _paint_unit_colours(self) -> None:
+        for btn, c in zip(self.unit_colour_btns, self._unit_colours):
+            btn.setText(f"{c.red()} {c.green()} {c.blue()}")
+            btn.setStyleSheet(f"background:{c.name()}; color:{'#fff' if c.lightness() < 128 else '#000'}")
+
+    def _pick_unit_colour(self, i: int) -> None:
+        c = QColorDialog.getColor(self._unit_colours[i], self, ("Primary", "Secondary", "Tertiary")[i] + " unit colour")
+        if c.isValid():
+            self._unit_colours[i] = c
+            self.unit_colours_on.setChecked(True)
+            self._paint_unit_colours()
 
     def fill(self, cultures: list[str], bases: list[str]) -> None:
         current_gfx, current_base = self.gfx.currentText(), self.base.currentText()
@@ -216,7 +246,9 @@ class UnitSetPage(Page):
                        adjective=self.adjective.text().strip(),
                        colour=(c.red(), c.green(), c.blue()) if self.colour_on.isChecked() else None,
                        tech_group=self.tech.text().strip(),
-                       gfx_set_base=None if gfx_base in ("", SAME_AS_BASE) else gfx_base)
+                       gfx_set_base=None if gfx_base in ("", SAME_AS_BASE) else gfx_base,
+                       unit_colours=tuple((u.red(), u.green(), u.blue()) for u in self._unit_colours)
+                       if self.unit_colours_on.isChecked() else None)
 
 
 # --------------------------------------------------------------------------- results helpers

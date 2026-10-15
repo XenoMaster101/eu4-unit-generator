@@ -1,0 +1,5 @@
+{{ tag }} = {
+{% for c in colours %}
+	color{{ loop.index }} = { {{ c | join(" ") }} }
+{% endfor %}
+}

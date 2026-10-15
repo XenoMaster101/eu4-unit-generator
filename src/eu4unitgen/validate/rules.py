@@ -652,6 +652,45 @@ def integration(ctx: Context) -> list[Issue]:
     return out
 
 
+@rule("unit_colours")
+def unit_colours(ctx: Context) -> list[Issue]:
+    """Unit colours come from common/country_colors color1-3 (in-game test 5). Note when the tag
+    has no entry anywhere and gets none from this set (the engine default applies); check that
+    INTEGRATION.md and any generated copy of the file carry the set's colours."""
+    from eu4unitgen.library.tags import unit_colours as read_colours
+
+    tag, wanted = ctx.nation.tag, ctx.nation.unit_colours
+    rel = ctx.naming.country_colours_file()
+    out = []
+    entries = read_colours(ctx.world.game)
+    if ctx.world.mod is not None:
+        entries.update(read_colours(ctx.world.mod))
+    if ctx.world.gen.exists(rel):
+        gen = read_colours(_OneFile(rel, ctx.world.gen.read(rel)))
+        if wanted and gen.get(tag) != list(wanted):
+            out.append(Issue(ERROR, "unit_colours", f"{tag}'s entry doesn't carry the set's unit colours", rel))
+        entries.update(gen)
+    if wanted:
+        integ = ctx.generated.integration
+        if integ is None or tuple(integ.unit_colours or ()) != wanted or not integ.unit_colours_snippet:
+            out.append(Issue(ERROR, "unit_colours", "INTEGRATION.md doesn't hand over the unit colours"))
+    elif tag not in entries:
+        out.append(Issue(INFO, "unit_colours", f"{tag} has no entry in {rel} and the set gives none: its units use "
+                                               "the engine's default unit colours (red in test 5; UNVERIFIED). "
+                                               "Set unit colours to choose them.", rel))
+    return out
+
+
+class _OneFile:
+    """Just enough of GameFiles for library.tags.unit_colours over one in-memory file."""
+
+    def __init__(self, rel: str, data: bytes):
+        self.rel, self.data = rel, data
+
+    def iter_files(self, rel_dir: str, suffixes: tuple[str, ...], recursive: bool = False):
+        yield self.rel, None, self.data
+
+
 @rule("country_files")
 def country_files(ctx: Context) -> list[Issue]:
     """Generated country-file copies (test mod only): culture listed, historical units exist."""

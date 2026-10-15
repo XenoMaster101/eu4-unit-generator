@@ -63,6 +63,7 @@ class SetSpec:
     colour: tuple[int, int, int] | None = None
     tech_group: str = ""  # blank: the tag's 1444 tech group, else western
     gfx_set_base: str | None = None
+    unit_colours: tuple | None = None  # common/country_colors color1-3 for the tag(s); None: leave as is
     texture_recipe: Any = None  # Phase 2: a core.recipe JSON file (Path) or a TextureRecipe
 
     @staticmethod
@@ -208,7 +209,7 @@ class Session:
                 tech = spec.tech_group or self._tag_tech_group(tag) or "western"
                 out.append(Nation(tag, spec.gfx, base_gfx=spec.base_gfx, name=spec.name, adjective=spec.adjective,
                                   colour=spec.colour, tech_group=tech, set_name=spec.set_name,
-                                  gfx_set_base=spec.gfx_set_base or None))
+                                  gfx_set_base=spec.gfx_set_base or None, unit_colours=spec.unit_colours))
             except (NamingError, ValueError) as exc:
                 raise SpecError(str(exc)) from exc
         return out
@@ -333,7 +334,7 @@ class Session:
         except RecipeError as exc:
             raise SpecError(str(exc)) from exc
         tag = spec.tags[0] if spec.tags else ""
-        colours = self.unit_colours().get(tag)
+        colours = list(spec.unit_colours) if spec.unit_colours else self.unit_colours().get(tag)
         notes = list(res.notes)
         if colours is None:
             colours = DEFAULT_UNIT_COLOURS

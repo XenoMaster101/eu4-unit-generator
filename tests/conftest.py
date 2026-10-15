@@ -35,4 +35,5 @@ def project(fake_install: Path, mod_root: Path) -> Project:
 
 @pytest.fixture
 def nation() -> Nation:
-    return Nation("MAC", "hellenicgfx", name="Macedon", adjective="Macedonian", colour=(120, 30, 140))
+    return Nation("MAC", "hellenicgfx", name="Macedon", adjective="Macedonian", colour=(120, 30, 140),
+                  unit_colours=((150, 20, 30), (210, 170, 40), (25, 35, 90)))

@@ -49,3 +49,17 @@ of vanilla's; UNVERIFIED but expected: the mod's copy replaces the vanilla list)
 {% else %}
 Nothing to add: {{ integ.graphical_culture }} is already a vanilla graphical culture.
 {% endif %}
+
+## 4. Unit colours
+
+{% if integ.unit_colours %}
+Units are tinted with `color1`-`color3` from `{{ colours_file }}` (not the map `color` above).
+Put this entry in your mod's copy of that file, replacing any existing {{ integ.tag }} entry
+(if your mod has none yet, start from a copy of vanilla's):
+
+```
+{{ integ.unit_colours_snippet }}```
+{% else %}
+Not set: {{ integ.tag }}'s units keep its entry in `{{ colours_file }}`, or the engine's default
+unit colours if it has none (the validator notes which).
+{% endif %}

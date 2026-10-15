@@ -70,3 +70,17 @@ of vanilla's; UNVERIFIED but expected: the mod's copy replaces the vanilla list)
 ```
 hellenicgfx
 ```
+
+## 4. Unit colours
+
+Units are tinted with `color1`-`color3` from `common/country_colors/00_country_colors.txt` (not the map `color` above).
+Put this entry in your mod's copy of that file, replacing any existing MAC entry
+(if your mod has none yet, start from a copy of vanilla's):
+
+```
+MAC = {
+	color1 = { 150 20 30 }
+	color2 = { 210 170 40 }
+	color3 = { 25 35 90 }
+}
+```

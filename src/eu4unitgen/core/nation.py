@@ -58,6 +58,9 @@ class Nation:
     units: list[UnitSpec] = field(default_factory=list)
     set_name: str = ""  # names the pack, files and unit keys; defaults to the tag in lowercase
     gfx_set_base: str | None = None  # vanilla culture the gfx-culture default set copies; None: base_gfx
+    # Unit colours (common/country_colors color1-3): what PdxMeshColor multiplies into spec R/G/B.
+    # None: leave the tag's entry alone (or the engine default when it has none; SPEC §4).
+    unit_colours: tuple[tuple[int, int, int], ...] | None = None
 
     def __post_init__(self) -> None:
         check_tag(self.tag)
@@ -69,6 +72,12 @@ class Nation:
             check_identifier(self.tech_group, "tech group")
         if self.colour is not None and (len(self.colour) != 3 or not all(0 <= c <= 255 for c in self.colour)):
             raise ValueError(f"colour {self.colour!r} must be three 0-255 values")
+        if self.unit_colours is not None:
+            cols = tuple(tuple(c) for c in self.unit_colours)
+            if len(cols) != 3 or not all(len(c) == 3 and all(isinstance(v, int) and 0 <= v <= 255 for v in c)
+                                         for c in cols):
+                raise ValueError(f"unit colours {self.unit_colours!r} must be three [r, g, b] colours, 0-255")
+            self.unit_colours = cols
         self.set_name = check_set_name(self.set_name or self.tag.lower())
         self.name = self.name or self.tag
         self.adjective = self.adjective or self.name

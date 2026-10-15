@@ -27,7 +27,7 @@ from pathlib import Path
 from eu4unitgen import __version__
 from eu4unitgen.core.generator import (
     OWNED, PATCHED, BaseChain, FallbackCase, GeneratedFile, GeneratedSet, GenerationError, TestFixtures, generate,
-    patch_country, patch_country_gfx, patch_history_culture, unit_entities,
+    patch_country, patch_country_colours, patch_country_gfx, patch_history_culture, unit_entities,
 )
 from eu4unitgen.core.naming import MANIFEST_FILE, TEST_MOD_NAME, UNIT_TYPES
 from eu4unitgen.core.nation import Nation
@@ -77,6 +77,13 @@ def _main_package(project: Project, nation: Nation, game: GameFiles, idx: Index,
     if original is None:
         raise GenerationError(f"{integ.country_file} not found in the EU4 install")
     package.add(GeneratedFile(integ.country_file, patch_country(original, integ), PATCHED, "vanilla"))
+    if integ.unit_colours:
+        rel = project.naming.country_colours_file()
+        data = game.read(rel)
+        if data is None:
+            raise GenerationError(f"{rel} not found in the EU4 install")
+        package.add(GeneratedFile(rel, patch_country_colours(data, integ.unit_colours_snippet, nation.tag),
+                                  PATCHED, "vanilla"))
     return package
 
 

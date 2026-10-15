@@ -25,7 +25,7 @@ python -m eu4unitgen.gui
 The wizard has six screens, left to right:
 
 1. **Settings**: your EU4 install folder (pre-filled from the `EU4_PATH` environment variable), the output folder, optionally your mod folder for collision checks, the test-mod staging folder, and Blender (pinned to 4.2.23 LTS with io_pdx_mesh 0.91; used from Phase 2 on, only as a background process). Press **Load EU4 install**, then tick the DLC you own.
-2. **Unit set**: tag(s), set name, graphical culture (pick one or type a new one such as `hellenicgfx`), the vanilla culture to copy units from, adjective, colour.
+2. **Unit set**: tag(s), set name, graphical culture (pick one or type a new one such as `hellenicgfx`), the vanilla culture to copy units from, adjective, map colour, and **unit colours** (primary/secondary/tertiary: what the game tints uniforms with, from `common/country_colors`; INTEGRATION.md gives the entry to merge).
 3. **Textures** (optional): a texture recipe, one slot at a time (tier 1–4 × infantry/horse/cannon; infantry also dresses the rider and the gun crew). Protect skin/metal, recolour from a reference image's palette, recolour cloth, overlay a pattern, paint country-colour masks, set gloss. **Preview slot** shows the base and the result tinted the way the game tints them; **Export painting guide** writes PNGs to paint your own masks over. Tick "Use a texture recipe" so Validate/Generate/Test mod use it; Save/Load keeps it as a `.json` file.
 4. **Validate**: runs every validator rule and lists errors, warnings and notes.
 5. **Generate**: writes the drop-in package to `<output>/<set>/` and shows its files and `INTEGRATION.md` (the lines you merge by hand). **Open output folder** opens it in Explorer/your file manager.
