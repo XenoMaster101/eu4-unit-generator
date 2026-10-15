@@ -290,6 +290,9 @@ def test_unit_colours_rule_integration_and_test_mod(project, nation, tex_game, t
     patched = tm.package.files["common/country_colors/00_country_colors.txt"].text
     assert patched.replace("\r\n", "\n").startswith("# made up\nAAA = {\n\tcolor1 = { 150 20 30 }")
     assert patched.count("AAA") == 1
+    from eu4unitgen.core.generator import patch_country_colours
+    appended = patch_country_colours(b"X = {\n\tcolor1= { 1 2 3 }\n}", "BBB = {\n\tcolor1 = { 4 5 6 }\n}\n", "BBB")
+    assert b"}\nBBB = {" in appended  # no final newline in the original: the entry still starts a line
     if "\r\n" in patched:  # a CRLF file stays CRLF throughout
         assert "\n" not in patched.replace("\r\n", "")
     assert not [i for i in tm.report.issues if i.rule == "unit_colours"]

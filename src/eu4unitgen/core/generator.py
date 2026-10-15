@@ -339,9 +339,9 @@ class TestFixtures:
 def patch_country_colours(data: bytes, snippet: str, tag: str) -> bytes:
     """Apply an Integration's country_colors entry: replace the tag's block (or append it).
     The rest of the file is kept byte-for-byte."""
-    doc = parse_bytes(data)
     if b"\r\n" in data:  # match the file's line endings
         snippet = snippet.replace("\r\n", "\n").replace("\n", "\r\n")
+    doc = parse_bytes(data)
     new = next(parse_bytes(snippet.encode("utf-8")).pairs(tag), None)
     if new is None:
         raise GenerationError(f"country_colors snippet has no {tag} entry")
@@ -351,6 +351,8 @@ def patch_country_colours(data: bytes, snippet: str, tag: str) -> bytes:
         for extra in found[1:]:
             doc.remove(extra)
     else:
+        # No source tokens: the writer starts the entry on a new line (vanilla's file has no final newline).
+        new.key, new.op_tok = Scalar(tag), None
         doc.append(new)
     return doc.to_bytes()
 
