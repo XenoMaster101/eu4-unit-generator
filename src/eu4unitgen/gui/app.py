@@ -244,7 +244,34 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def log_path() -> Path:
+    """Where the GUI writes errors when it has no console (pythonw.exe, the desktop shortcut)."""
+    import os
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".local" / "state")
+    return base / "eu4unitgen" / "gui.log"
+
+
+def _install_error_reporting() -> None:
+    """Under pythonw.exe there is no stderr: send output to log_path() and show uncaught errors
+    in a message box instead of letting the app vanish silently."""
+    if sys.stderr is None or sys.stdout is None:
+        path = log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stream = open(path, "a", encoding="utf-8", buffering=1)  # noqa: SIM115 - lives for the process
+        sys.stdout = sys.stdout or stream
+        sys.stderr = sys.stderr or stream
+
+    def hook(exc_type, exc, tb) -> None:
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        print(text, file=sys.stderr)
+        from PySide6.QtWidgets import QMessageBox
+        if QApplication.instance() is not None:
+            QMessageBox.critical(None, "eu4unitgen: unexpected error", f"{text}\n(also written to {log_path()})")
+    sys.excepthook = hook
+
+
 def main(argv: list[str] | None = None) -> int:
+    _install_error_reporting()
     app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
     window = MainWindow(store=QSettings("eu4unitgen", "eu4unitgen"))
     window.show()

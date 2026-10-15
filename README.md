@@ -22,6 +22,17 @@ python -m eu4unitgen.gui
 
 (After `pip install -e .` there is also an `eu4unitgen-gui` command.)
 
+### Desktop shortcut (Windows)
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\make_shortcut.ps1
+```
+
+This (re)creates **EU4 Unit Generator** on your Desktop. It runs `.venv\Scripts\pythonw.exe -m eu4unitgen.gui`
+in the repo folder: `pythonw` is the windowless Python, so no console opens. Errors then go to
+`%LOCALAPPDATA%\eu4unitgen\gui.log` and pop up in a message box. Options: `-Name "..."`, `-Folder <path>`.
+In Explorer you can also right-click the script → *Run with PowerShell*.
+
 The wizard has six screens, left to right:
 
 1. **Settings**: your EU4 install folder (pre-filled from the `EU4_PATH` environment variable), the output folder, optionally your mod folder for collision checks, the test-mod staging folder, and Blender (pinned to 4.2.23 LTS with io_pdx_mesh 0.91; used from Phase 2 on, only as a background process). Press **Load EU4 install**, then tick the DLC you own.

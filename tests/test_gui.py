@@ -175,3 +175,19 @@ def test_check_blender_button(window, monkeypatch):
                                                                  "module": "bl_ext.user_default.io_pdx_mesh"})
     window.settings_page.check_blender.click()
     assert "Blender 4.2.23 OK; io_pdx_mesh 0.91 enabled" in window.settings_page.message.text()
+
+
+def test_no_console_errors_go_to_a_log(monkeypatch, tmp_path):
+    """pythonw.exe (the desktop shortcut) has no stdout/stderr: they go to the GUI log instead."""
+    import sys
+    from eu4unitgen.gui import app as app_mod
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "excepthook", sys.__excepthook__)
+    app_mod._install_error_reporting()
+    print("hello from pythonw", file=sys.stderr)
+    sys.stderr.flush()
+    assert app_mod.log_path() == tmp_path / "eu4unitgen" / "gui.log"
+    assert "hello from pythonw" in app_mod.log_path().read_text(encoding="utf-8")
+    sys.stderr.close()
