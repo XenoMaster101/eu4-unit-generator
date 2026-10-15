@@ -184,6 +184,15 @@ class MainWindow(QMainWindow):
             return None
         return spec
 
+    def check_blender(self) -> None:
+        self._sync_settings()
+        page = self.settings_page
+
+        def done(res: dict) -> None:
+            page.show_message(f"Blender {res['blender']} OK; io_pdx_mesh {res['addon_version']} enabled "
+                              f"({res['module']}).")
+        self.run(page, "Checking Blender", self.session.check_blender, done)
+
     def validate(self) -> None:
         self._sync_settings()
         spec = self.current_spec(self.validate_page)

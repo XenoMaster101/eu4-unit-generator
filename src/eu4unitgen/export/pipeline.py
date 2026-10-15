@@ -376,3 +376,14 @@ class Session:
             img.save(path)
             out.append(path)
         return out
+
+    # ------------------------------------------------------------------ Blender (Phase 2 step 8)
+    def check_blender(self) -> dict:
+        """Run the pinned-toolchain check in background Blender (version + io_pdx_mesh enabled)."""
+        from eu4unitgen.blender.runner import BlenderError, BlenderRunner
+
+        try:
+            runner = BlenderRunner(self.settings.blender_path, log_dir=self.settings.output_dir / "blender_logs")
+            return runner.check_addon()
+        except BlenderError as exc:
+            raise SpecError(str(exc)) from exc

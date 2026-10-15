@@ -96,9 +96,16 @@ class SettingsPage(Page):
         form.addRow(f"Blender {BLENDER_VERSION} LTS", _path_row(self.blender, pick_dir=False))
         self.layout_.addLayout(form)
 
+        buttons = QHBoxLayout()
         self.load = QPushButton("Load EU4 install")
         self.load.clicked.connect(window.load_install)
-        self.layout_.addWidget(self.load)
+        self.check_blender = QPushButton("Check Blender")
+        self.check_blender.setToolTip("Runs Blender in the background: version and io_pdx_mesh enabled")
+        self.check_blender.clicked.connect(window.check_blender)
+        buttons.addWidget(self.load)
+        buttons.addWidget(self.check_blender)
+        buttons.addStretch(1)
+        self.layout_.addLayout(buttons)
         self.info = QLabel("Not loaded.")
         self.layout_.addWidget(self.info)
 

@@ -164,3 +164,10 @@ def test_textures_recipe_used_by_generate_and_saved(window, fake_install, tmp_pa
     assert page.palette_image.text().endswith("ref.png") and page.use.isChecked()
     page.use.setChecked(False)
     assert page.recipe_for_spec() is None
+
+
+def test_check_blender_button(window, monkeypatch):
+    monkeypatch.setattr(window.session, "check_blender", lambda: {"blender": "4.2.23", "addon_version": "0.91",
+                                                                 "module": "bl_ext.user_default.io_pdx_mesh"})
+    window.settings_page.check_blender.click()
+    assert "Blender 4.2.23 OK; io_pdx_mesh 0.91 enabled" in window.settings_page.message.text()
