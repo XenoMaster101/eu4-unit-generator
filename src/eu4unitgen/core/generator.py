@@ -192,12 +192,19 @@ def unit_entities(owner: str, chain: BaseChain, naming: Naming, version: int) ->
     return out
 
 
+def set_trigger(tags: list[str], cultures: list[str] = ()) -> str:
+    """country_trigger body for a set's pack: one condition (``tag = MAC``, ``primary_culture =
+    macedonian``), or ``OR = { tag = MAC primary_culture = macedonian }`` for several (the OR form
+    vanilla's base packs use, e.g. +01_eastern_base_sprites.txt; vanilla culture packs use
+    ``primary_culture``, e.g. dlc003_pol_sprite_pack)."""
+    conds = [f"tag = {t}" for t in tags] + [f"primary_culture = {c}" for c in cultures]
+    if len(conds) == 1:
+        return conds[0]
+    return "OR = { " + " ".join(conds) + " }"
+
+
 def tag_trigger(tags: list[str]) -> str:
-    """country_trigger body for a set's pack: ``tag = MAC``, or ``OR = { tag = MAC tag = EPI }`` for a
-    shared set (the form vanilla's base packs use, e.g. +01_eastern_base_sprites.txt)."""
-    if len(tags) == 1:
-        return f"tag = {tags[0]}"
-    return "OR = { " + " ".join(f"tag = {t}" for t in tags) + " }"
+    return set_trigger(tags)
 
 
 def _sprites(owner: str, naming: Naming) -> list[tuple[str, list[tuple[int, str]]]]:
@@ -287,14 +294,16 @@ class Integration:
     graphical_cultures_added: list[str]
     unit_colours: dict | None = None  # tag -> (color1, color2, color3): common/country_colors entries, if set
     unit_colours_snippet: str = ""  # those entries as script
+    cultures: list[str] = field(default_factory=list)  # primary cultures the pack also matches
+    trigger: str = ""  # the pack's country_trigger
 
     @property
-    def tag(self) -> str:
-        return self.tags[0]
+    def tag(self) -> str | None:
+        return self.tags[0] if self.tags else None
 
     @property
     def country_file(self) -> str | None:
-        return self.country_files.get(self.tags[0])
+        return self.country_files.get(self.tags[0]) if self.tags else None
 
 
 def patch_history_culture(data: bytes, culture: str, date: tuple[int, int, int] = START_DATE) -> bytes:
@@ -430,7 +439,8 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
         first = {u: 1 for u in UNIT_TYPES} if test_sprite_techs else None
         nation.units = default_units(nation, naming, sprite_mil, first)
     out = GeneratedSet(nation)
-    tag, gfx, set_name = nation.tag, nation.gfx_culture, nation.set_name
+    gfx, set_name = nation.gfx_culture, nation.set_name
+    tag = naming.entity_owner(nation.tags, set_name)  # entity owner: the first tag, or the set
 
     # Entities: TAG set + gfx-culture defaults (SPEC §3: both, always).
     tag_entities = unit_entities(tag, chain, naming, version)
@@ -466,7 +476,7 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
 
     # Sprite packs + order (order entry for the TAG pack only, SPEC §3).
     out.add(GeneratedFile(naming.set_pack_file(set_name), _utf8(render(
-        "sprite_pack.txt.j2", pack=naming.set_sprite_pack(set_name), trigger=tag_trigger(nation.tags),
+        "sprite_pack.txt.j2", pack=naming.set_sprite_pack(set_name), trigger=set_trigger(nation.tags, nation.cultures),
         graphical_cultures=None, sprites=_sprites(tag, naming)))))
     out.add(GeneratedFile(naming.gfx_pack_file(gfx), _utf8(render(
         "sprite_pack.txt.j2", pack=naming.gfx_sprite_pack(gfx), trigger="always = no",
@@ -504,7 +514,8 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
         historical_units=[u.key for u in nation.units],
         mil_enables={t: [u.key for u in nation.units if u.mil_tech == t] for t in sorted({u.mil_tech for u in nation.units})},
         graphical_cultures_added=[gfx] if gfx not in idx.graphical_cultures else [],
-        unit_colours=nation.unit_colours,
+        unit_colours=nation.unit_colours, cultures=list(nation.cultures),
+        trigger=set_trigger(nation.tags, nation.cultures),
         unit_colours_snippet=render("country_colors_snippet.txt.j2", entries=list(nation.unit_colours.items()))
         if nation.unit_colours else "")
     country_lines = render("country_snippet.txt.j2", gfx=gfx, colour=nation.colour,

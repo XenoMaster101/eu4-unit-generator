@@ -23,6 +23,8 @@ _PREFIX = re.compile(r"^[a-z][a-z0-9]*_$")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _LANG = re.compile(r"^[a-z_]+$")
 _SET = re.compile(r"^[a-z][a-z0-9_]*$")
+_CULTURE = re.compile(r"^[a-z][a-z0-9_]*$")
+_SET_OWNER = re.compile(r"^[a-z][a-z0-9]*_[a-z][a-z0-9_]*$")  # <prefix><set>, for a culture-only set
 
 # Tags the engine reserves: rebels, pirates, natives, and the dynamic-tag ranges
 # (letter + two digits, e.g. D00, C01, K12, T05, O00, E00, F00).
@@ -63,6 +65,13 @@ def check_set_name(name: str) -> str:
     return name
 
 
+def check_culture(name: str) -> str:
+    """A culture key as common/cultures writes it (macedonian): lowercase [a-z0-9_]."""
+    if not _CULTURE.match(name or ""):
+        raise NamingError(f"culture {name!r} must be a lowercase culture key [a-z0-9_], e.g. macedonian")
+    return name
+
+
 def check_identifier(name: str, what: str = "name") -> str:
     if not _IDENT.match(name or ""):
         raise NamingError(f"{what} {name!r} must be a script identifier [A-Za-z0-9_], not starting with a digit")
@@ -82,10 +91,15 @@ def _check_tier(tier: int) -> int:
 
 
 def _check_owner(owner: str) -> str:
-    """Entity owners are a TAG (MAC_INFANTRY_1) or a graphical culture (hellenicgfx_INFANTRY_1)."""
+    """Entity owners are a TAG (MAC_INFANTRY_1), a graphical culture (hellenicgfx_INFANTRY_1) or, for a
+    set with no tag (culture trigger only), the prefixed set name (hr_macedonian_INFANTRY_1)."""
     if _TAG.match(owner or ""):
         return check_tag(owner)
-    return check_gfx(owner)
+    if _GFX.match(owner or ""):
+        return owner
+    if _SET_OWNER.match(owner or ""):
+        return owner
+    raise NamingError(f"entity owner {owner!r} must be a tag, a graphical culture or a prefixed set name")
 
 
 @dataclass(frozen=True)
@@ -96,6 +110,14 @@ class Naming:
         check_prefix(self.prefix)
 
     # ------------------------------------------------------------------ entities
+    def entity_owner(self, tags: list[str], set_name: str) -> str:
+        """Who a set's entities are named after: its first tag (MAC_INFANTRY_1); a set triggered by
+        culture only has no tag, so the prefixed set name (hr_macedonian_INFANTRY_1). The names
+        themselves pick nothing in game; the sprite pack does (in-game test 3)."""
+        if tags:
+            return check_tag(tags[0])
+        return f"{self.prefix}{check_set_name(set_name)}"
+
     def unit_entity(self, owner: str, utype: str, tier: int) -> str:
         """Root map entity: MAC_INFANTRY_1, hellenicgfx_CAVALRY_3. Engine-mandated pattern."""
         return f"{_check_owner(owner)}_{_check_type(utype).upper()}_{_check_tier(tier)}"

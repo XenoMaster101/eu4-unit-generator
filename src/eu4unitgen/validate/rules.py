@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Callable
 
-from eu4unitgen.core.generator import BINARY_SUFFIXES, SNIPPET, GeneratedSet, tag_trigger
+from eu4unitgen.core.generator import BINARY_SUFFIXES, SNIPPET, GeneratedSet, set_trigger
 from eu4unitgen.core.naming import LOADOUT_ROLES, PART_KINDS, TIERS, UNIT_TYPES, Naming
 from eu4unitgen.core.nation import MANEUVER, Nation
 from eu4unitgen.core.project import Project
@@ -51,6 +51,11 @@ class Context:
 
     def gen_entities(self) -> dict[str, dict]:
         return {n: d for n, defs in self.world.idx.entities.items() for d in defs if d["origin"] == GENERATED}
+
+    @property
+    def owner(self) -> str:
+        """Who the set's entities are named after (its first tag, or the set for a culture-only set)."""
+        return self.naming.entity_owner(self.nation.tags, self.nation.set_name)
 
     def gen_defs(self, kind: str) -> dict[str, dict]:
         return {n: d for n, defs in getattr(self.world.idx, kind).items() for d in defs if d["origin"] == GENERATED}
@@ -388,7 +393,7 @@ def loadout(ctx: Context) -> list[Issue]:
                                                  f"{nodes['left_hand_node']} in the left hand", subject=name))
     for tier, body in sorted(res.chosen_bodies.items()):
         brec = w.pdxmesh(body)
-        inf = f"{ctx.nation.tag}_INFANTRY_{tier}"
+        inf = ctx.naming.unit_entity(ctx.owner, "infantry", tier)
         mine = w.pdxmesh(w.resolve(inf, "pdxmesh") or "") or {}
         if brec is None or not w.game.in_base_game(brec.get("file") or ""):
             out.append(Issue(ERROR, "loadout", f"tier {tier} body {body!r} isn't a base-game pdxmesh", subject=inf))
@@ -423,7 +428,7 @@ def loadout(ctx: Context) -> list[Issue]:
 @rule("naming")
 def naming(ctx: Context) -> list[Issue]:
     """Generated entity and pack names are exactly the ones naming.py produces."""
-    n, tag, gfx = ctx.naming, ctx.nation.tag, ctx.nation.gfx_culture
+    n, tag, gfx = ctx.naming, ctx.owner, ctx.nation.gfx_culture
     expected = set()
     fx = ctx.generated.fixtures
     for owner in (tag, gfx, *(fx.unpacked_owners if fx else [])):
@@ -618,7 +623,7 @@ def orphan_entities(ctx: Context) -> list[Issue]:
 
 @rule("sprite_packs")
 def sprite_packs(ctx: Context) -> list[Issue]:
-    n, tag, gfx = ctx.naming, ctx.nation.tag, ctx.nation.gfx_culture
+    n, tag, gfx = ctx.naming, ctx.owner, ctx.nation.gfx_culture
     packs, out = ctx.gen_defs("sprite_packs"), []
     tag_pack, gfx_pack = packs.get(n.set_sprite_pack(ctx.nation.set_name)), packs.get(n.gfx_sprite_pack(gfx))
     for pack, owner in ((tag_pack, tag), (gfx_pack, gfx)):
@@ -631,7 +636,7 @@ def sprite_packs(ctx: Context) -> list[Issue]:
                 if slots.get(str(t - 1)) != want:
                     out.append(Issue(ERROR, "sprite_packs", f"{pack['name']}: sprite_{utype} {t - 1} should be {want}",
                                      pack["defined_in"]))
-    want_trigger = tag_trigger(ctx.nation.tags)
+    want_trigger = set_trigger(ctx.nation.tags, ctx.nation.cultures)
     if tag_pack is not None and tag_pack.get("country_trigger") != want_trigger:
         out.append(Issue(ERROR, "sprite_packs", f"{tag_pack['name']}: country_trigger should be '{want_trigger}'",
                          tag_pack["defined_in"]))
@@ -659,11 +664,53 @@ def _excludes_tag(trigger: str | None, tag: str) -> bool:
     return bool(m) and m.group(1) != tag
 
 
+def _culture_matches(trigger: str | None, culture: str, groups: dict[str, str]) -> bool | None:
+    """Could a pack's trigger match a country whose primary culture is ``culture`` (any tag)?
+    False only when provably not; None = maybe (depends on the tag, religion, ...)."""
+    from eu4unitgen.library.tags import TagFacts, trigger_matches
+
+    if trigger is None:
+        return None
+    return trigger_matches(trigger, TagFacts(tag="", primary_culture=culture, culture_group=groups.get(culture)))
+
+
+def _cultures(ctx: Context) -> dict[str, str]:
+    """culture -> group from vanilla and (with mod checks) the mod."""
+    from eu4unitgen.library.tags import culture_groups
+
+    if getattr(ctx, "_culture_groups", None) is None:
+        groups = culture_groups(ctx.world.game)
+        if ctx.world.mod is not None:
+            groups.update(culture_groups(ctx.world.mod))
+        ctx._culture_groups = groups
+    return ctx._culture_groups
+
+
+@rule("cultures")
+def cultures(ctx: Context) -> list[Issue]:
+    """Every culture in the set's trigger exists (common/cultures, vanilla or the mod)."""
+    out = []
+    if not ctx.nation.cultures:
+        return out
+    groups = _cultures(ctx)
+    for c in ctx.nation.cultures:
+        if c in groups:
+            continue
+        if ctx.world.mod is None:
+            out.append(Issue(WARNING, "cultures", f"culture {c!r} isn't a vanilla culture; turn on mod checks so the "
+                                                  "mod's common/cultures is read", subject=c))
+        else:
+            out.append(Issue(ERROR, "cultures", f"culture {c!r} isn't in common/cultures (vanilla or the mod): "
+                                                "the pack would never match by culture", subject=c))
+    return out
+
+
 @rule("pack_order")
 def pack_order(ctx: Context) -> list[Issue]:
-    """The TAG pack has an order entry; flag other packs that might match any of the set's tags at
-    >= that order."""
+    """The set's pack has an order entry; flag other packs that might match any of the set's tags or
+    cultures at >= that order (the higher order wins, in-game test 3)."""
     n, tags, out = ctx.naming, ctx.nation.tags, []
+    groups = _cultures(ctx) if ctx.nation.cultures else {}
     pack = n.set_sprite_pack(ctx.nation.set_name)
     orders = [d for d in ctx.world.idx.pack_order.get(pack, []) if ctx.world.loaded(d)]
     if not orders:
@@ -679,6 +726,11 @@ def pack_order(ctx: Context) -> list[Issue]:
         fx = ctx.generated.fixtures
         for p in pdefs:
             hit = [t for t in tags if not _excludes_tag(p.get("country_trigger"), t)] if ctx.world.loaded(p) else []
+            if ctx.world.loaded(p) and not p.get("graphical_cultures"):
+                for c in ctx.nation.cultures:
+                    m = _culture_matches(p.get("country_trigger"), c, groups)
+                    if m is not False:
+                        hit.append(f"{'every' if m else 'maybe some'} {c} country")
             if hit:
                 if fx and other == fx.rival_pack:
                     out.append(Issue(INFO, "pack_order", f"{other} (order {order}) is the pack-priority test's "
@@ -873,6 +925,10 @@ def unit_colours(ctx: Context) -> list[Issue]:
         integ = ctx.generated.integration
         if integ is None or (integ.unit_colours or {}) != wanted or not integ.unit_colours_snippet:
             out.append(Issue(ERROR, "unit_colours", "INTEGRATION.md doesn't hand over the unit colours"))
+    if ctx.nation.cultures:
+        out.append(Issue(INFO, "unit_colours", "countries matched by culture ("
+                                               + ", ".join(ctx.nation.cultures) + ") keep their own country_colors "
+                                               "entries; unit colours here apply to the set's tags only"))
     for tag in ctx.nation.tags:
         if tag not in wanted and tag not in entries:
             out.append(Issue(INFO, "unit_colours", f"{tag} has no entry in {rel} and the set gives none: its units "

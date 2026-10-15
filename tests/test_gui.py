@@ -271,3 +271,14 @@ def test_parts_bodies_points_and_shield_warning(window, tmp_path):
     page.save_file(tmp_path / "lo.json")
     saved = (tmp_path / "lo.json").read_text(encoding="utf-8")
     assert '"3": "generic_01"' in saved and '"rider": "up"' in saved and '"xyston"' in saved
+
+
+def test_cultures_field_reaches_the_set(window):
+    window.unit_page.tags.setText("")
+    window.unit_page.cultures.setText("alphan, Testish")
+    window.unit_page.set_name.setText("alphan_set")
+    spec = window.unit_page.spec()
+    assert spec.tags == [] and spec.cultures == ["alphan", "testish"]
+    window.validate_page.run.click()
+    top = window.validate_page.tree.topLevelItem(0)
+    assert top.text(0) == "alphan testish / alphan_set" and "0 errors" in top.text(2), top.text(2)

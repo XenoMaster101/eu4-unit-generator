@@ -200,7 +200,7 @@ def _eval(entries: list, f: TagFacts) -> list[bool | None]:
             continue
         val = v.value
         if k in ("tag", "was_tag"):
-            out.append(val == f.tag)
+            out.append(val == f.tag if f.tag else None)  # no tag: a country of some culture, any tag
         elif k == "primary_culture":
             out.append(val == f.primary_culture if f.primary_culture else None)
         elif k == "culture":

@@ -73,10 +73,15 @@ class SetSpec:
     unit_colours: Any = None  # common/country_colors color1-3: one triple for all tags or {tag: triple}
     texture_recipe: Any = None  # Phase 2: a core.recipe JSON file (Path) or a TextureRecipe
     loadout: Any = None  # Phase 3: a core.loadout JSON file (Path) or a Loadout
+    cultures: list[str] = field(default_factory=list)  # primary cultures the set's pack also matches
 
     @staticmethod
     def parse_tags(text: str) -> list[str]:
         return [t for t in re.split(r"[\s,;]+", text.strip().upper()) if t]
+
+    @staticmethod
+    def parse_cultures(text: str) -> list[str]:
+        return [c for c in re.split(r"[\s,;]+", text.strip().lower()) if c]
 
 
 @dataclass
@@ -248,12 +253,14 @@ class Session:
 
     def nations(self, spec: SetSpec) -> list[Nation]:
         """The set the form describes (a list of one: callers loop over results)."""
-        if not spec.tags:
-            raise SpecError("enter at least one tag")
+        if not spec.tags and not spec.cultures:
+            raise SpecError("enter at least one tag or culture")
         if len(set(spec.tags)) != len(spec.tags):
             raise SpecError("a tag is listed twice")
         if len(spec.tags) > 1 and not spec.set_name:
             raise SpecError("several tags share one set: give the set a name")
+        if not spec.tags and not spec.set_name:
+            raise SpecError("a set triggered by culture only needs a set name")
         try:
             for tag in spec.tags:
                 check_tag(tag)
@@ -268,7 +275,8 @@ class Session:
                 tech = known[0] if known else "western"
             return [Nation(list(spec.tags), spec.gfx, base_gfx=spec.base_gfx, name=spec.name,
                            adjective=spec.adjective, colour=spec.colour, tech_group=tech, set_name=spec.set_name,
-                           gfx_set_base=spec.gfx_set_base or None, unit_colours=spec.unit_colours)]
+                           gfx_set_base=spec.gfx_set_base or None, unit_colours=spec.unit_colours,
+                           cultures=list(spec.cultures))]
         except (NamingError, ValueError) as exc:
             if isinstance(exc, SpecError):
                 raise

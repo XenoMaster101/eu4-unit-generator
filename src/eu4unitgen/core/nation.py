@@ -4,7 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from eu4unitgen.core.naming import TIERS, UNIT_TYPES, Naming, check_gfx, check_identifier, check_set_name, check_tag
+from eu4unitgen.core.naming import (
+    TIERS, UNIT_TYPES, Naming, check_culture, check_gfx, check_identifier, check_set_name, check_tag,
+)
 
 STAT_KEYS = ("offensive_morale", "defensive_morale", "offensive_fire", "defensive_fire",
              "offensive_shock", "defensive_shock")
@@ -59,9 +61,12 @@ def _colour_triple(value, what: str) -> tuple[Colour, Colour, Colour]:
 
 @dataclass
 class Nation:
-    """A unit set and the tag(s) that use it. ``tag`` may be one tag or a list: several tags
-    share one set through one sprite pack (``country_trigger = { OR = { tag = A tag = B } }``);
-    the set's entities are named after the first tag (``tags[0]``, also ``self.tag``)."""
+    """A unit set and the countries that use it: tags, primary cultures, or both. ``tag`` may be one
+    tag or a list; ``cultures`` lists primary cultures. One sprite pack covers them all with one
+    trigger (``tag = MAC``, ``primary_culture = macedonian`` or ``OR = { tag = MAC primary_culture =
+    macedonian }``), so a culture-triggered look survives tag changes (forming a nation). Entities
+    are named after the first tag (``self.tag``), or after the set when there is no tag
+    (``Naming.entity_owner``)."""
     tag: str | list[str]
     gfx_culture: str  # the nation's graphical culture; new ones get a default set + gfx pack
     base_gfx: str = "westerngfx"  # vanilla culture whose entities the Phase 1 set copies
@@ -76,19 +81,27 @@ class Nation:
     # One triple for every tag, or {tag: triple}. Stored as {tag: triple} for the tags that have
     # one; a tag left out keeps its entry (or the engine default when it has none; SPEC §4).
     unit_colours: Any = None
+    cultures: list[str] = field(default_factory=list)  # primary cultures the set's pack also matches
     tags: list[str] = field(init=False)
 
     def __post_init__(self) -> None:
-        tags = [self.tag] if isinstance(self.tag, str) else list(self.tag)
-        if not tags:
-            raise ValueError("a unit set needs at least one tag")
+        tags = [self.tag] if isinstance(self.tag, str) else list(self.tag or [])
+        self.cultures = list(self.cultures or [])
+        if not tags and not self.cultures:
+            raise ValueError("a unit set needs at least one tag or culture")
         for t in tags:
             check_tag(t)
+        for c in self.cultures:
+            check_culture(c)
         if len(set(tags)) != len(tags):
             raise ValueError(f"a tag is listed twice in {tags}")
-        if len(tags) > 1 and not self.set_name:
-            raise ValueError(f"a set shared by several tags ({' '.join(tags)}) needs a set name")
-        self.tags, self.tag = tags, tags[0]
+        if len(set(self.cultures)) != len(self.cultures):
+            raise ValueError(f"a culture is listed twice in {self.cultures}")
+        if (len(tags) > 1 or not tags) and not self.set_name:
+            raise ValueError("a set shared by several tags, or triggered by culture only, needs a set name")
+        self.tags, self.tag = tags, (tags[0] if tags else None)
+        if self.unit_colours is not None and not tags:
+            raise ValueError("unit colours are per tag (common/country_colors); a culture-only set has no tag")
         if self.unit_colours is not None:
             if isinstance(self.unit_colours, dict):
                 unknown = sorted(set(self.unit_colours) - set(tags))
@@ -108,7 +121,7 @@ class Nation:
         if self.colour is not None and (len(self.colour) != 3 or not all(0 <= c <= 255 for c in self.colour)):
             raise ValueError(f"colour {self.colour!r} must be three 0-255 values")
         self.set_name = check_set_name(self.set_name or self.tag.lower())
-        self.name = self.name or self.tag
+        self.name = self.name or self.tag or self.set_name.replace("_", " ").title()
         self.adjective = self.adjective or self.name
 
 

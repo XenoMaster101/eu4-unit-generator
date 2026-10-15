@@ -156,8 +156,14 @@ class UnitSetPage(Page):
         self.tags.setPlaceholderText("e.g. MAC, or several sharing one set: MAC EPI (then name the set)")
         self.tags.setToolTip("Several tags share one set: one sprite pack whose country_trigger is "
                              "OR = { tag = ... }. The set's entities are named after the first tag.")
+        self.cultures = QLineEdit()
+        self.cultures.setPlaceholderText("optional primary cultures, e.g. macedonian (the look follows the culture)")
+        self.cultures.setToolTip("The sprite pack also matches any country with one of these primary cultures: "
+                                 "country_trigger = { OR = { tag = ... primary_culture = ... } }. The look then "
+                                 "survives tag changes such as forming a new nation. Tags may be left empty.")
         self.set_name = QLineEdit()
-        self.set_name.setPlaceholderText("one tag: defaults to the tag in lowercase; several tags: required")
+        self.set_name.setPlaceholderText("one tag: defaults to the tag in lowercase; several tags or cultures only: "
+                                         "required")
         self.gfx = QComboBox()
         self.gfx.setEditable(True)
         self.gfx.setEditText("hellenicgfx")
@@ -209,6 +215,7 @@ class UnitSetPage(Page):
         ul.addStretch(1)
         self._paint_unit_colours()
         form.addRow("Tag(s)", self.tags)
+        form.addRow("Culture(s)", self.cultures)
         form.addRow("Set name", self.set_name)
         form.addRow("Graphical culture", self.gfx)
         form.addRow("Copy units from", self.base)
@@ -297,7 +304,8 @@ class UnitSetPage(Page):
     def spec(self) -> SetSpec:
         c = self._colour
         gfx_base = self.gfx_base.currentText()
-        return SetSpec(tags=SetSpec.parse_tags(self.tags.text()), gfx=self.gfx.currentText().strip(),
+        return SetSpec(tags=SetSpec.parse_tags(self.tags.text()), cultures=SetSpec.parse_cultures(self.cultures.text()),
+                       gfx=self.gfx.currentText().strip(),
                        set_name=self.set_name.text().strip(), base_gfx=self.base.currentText(),
                        adjective=self.adjective.text().strip(),
                        colour=(c.red(), c.green(), c.blue()) if self.colour_on.isChecked() else None,
@@ -348,7 +356,8 @@ class ValidatePage(Page):
         self.layout_.addWidget(self.tree, 1)
 
     def show_results(self, results) -> None:
-        fill_issues(self.tree, [(f"{' '.join(r.nation.tags)} / {r.nation.set_name}", r.report) for r in results])
+        fill_issues(self.tree, [(f"{' '.join(r.nation.tags + r.nation.cultures)} / {r.nation.set_name}", r.report)
+                                for r in results])
         errors = sum(len(r.report.errors) for r in results)
         self.show_message("No errors: ready to generate." if not errors else
                           f"{errors} error(s): fix them before generating.", error=bool(errors))
@@ -408,7 +417,8 @@ class GeneratePage(Page):
                 item.setExpanded(True)
         self.files.resizeColumnToContents(0)
         self.integration.setPlainText("\n\n".join(r.integration_text for r in results))
-        fill_issues(self.issues, [(f"{' '.join(r.nation.tags)} / {r.nation.set_name}", r.report) for r in results])
+        fill_issues(self.issues, [(f"{' '.join(r.nation.tags + r.nation.cultures)} / {r.nation.set_name}", r.report)
+                                  for r in results])
         written = sum(len(r.written) for r in results)
         if written:
             self.show_message(f"Wrote {written} files. Copy each package folder's contents into your mod's root, "

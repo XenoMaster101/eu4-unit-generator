@@ -39,8 +39,11 @@ def _common(p: argparse.ArgumentParser) -> None:
 
 
 def _set_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--tag", dest="tags", nargs="+", required=True, type=str.upper,
+    p.add_argument("--tag", dest="tags", nargs="+", default=[], type=str.upper,
                    help="one tag, or several sharing one set (one sprite pack, OR over the tags; --set required)")
+    p.add_argument("--culture", dest="cultures", nargs="+", default=[], type=str.lower,
+                   help="primary cultures the set's sprite pack also matches (OR with the tags), so the look "
+                        "survives tag changes; with no --tag, --set is required")
     p.add_argument("--gfx", required=True, help="the nation's graphical culture, e.g. hellenicgfx")
     p.add_argument("--set", dest="set_name", default="", help="unit set name (default: the tag in lowercase)")
     p.add_argument("--base-gfx", default="westerngfx", help="vanilla culture whose set is copied")
@@ -85,7 +88,7 @@ def _settings(args: argparse.Namespace, **kw) -> Settings:
 
 
 def _spec(args: argparse.Namespace) -> SetSpec:
-    return SetSpec(tags=list(args.tags), gfx=args.gfx, set_name=args.set_name, base_gfx=args.base_gfx, name=args.name,
+    return SetSpec(tags=list(args.tags), cultures=list(args.cultures), gfx=args.gfx, set_name=args.set_name, base_gfx=args.base_gfx, name=args.name,
                    adjective=args.adjective, colour=tuple(args.colour) if args.colour else None,
                    tech_group=args.tech_group or "", gfx_set_base=getattr(args, "gfx_set_base", None),
                    unit_colours=_unit_colours(args), texture_recipe=args.texture_recipe, loadout=args.loadout)

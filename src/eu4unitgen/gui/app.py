@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
                       self.generate_page, self.test_page]
         if store is not None:
             self.unit_page.tags.setText(str(store.value("tags", "")))
+            self.unit_page.cultures.setText(str(store.value("cultures", "")))
             self.unit_page.set_name.setText(str(store.value("set_name", "")))
             self.unit_page.adjective.setText(str(store.value("adjective", "")))
             if store.value("gfx"):
@@ -125,7 +126,8 @@ class MainWindow(QMainWindow):
                 self.store.setValue(k, "" if v is None else str(v))
             self.store.setValue("owned_dlc", s.owned_dlc)
             u = self.unit_page
-            for k, v in (("tags", u.tags.text()), ("set_name", u.set_name.text()), ("adjective", u.adjective.text()),
+            for k, v in (("tags", u.tags.text()), ("cultures", u.cultures.text()), ("set_name", u.set_name.text()),
+                         ("adjective", u.adjective.text()),
                          ("gfx", u.gfx.currentText())):
                 self.store.setValue(k, v)
             self.store.setValue("texture_recipe", self.textures_page.recipe_path.text().strip())
