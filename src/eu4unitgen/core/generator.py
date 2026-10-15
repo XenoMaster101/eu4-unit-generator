@@ -39,6 +39,7 @@ STATES = ("idle", "walk", "attack", "retreat")  # SPEC §5: the only live states
 OWNED = "owned"  # written entirely by the tool
 PATCHED = "patched"  # an existing game/mod file plus the tool's additions
 SNIPPET = "snippet"  # for the user to read or merge by hand; not loaded by the game
+BASE = "base"  # test mod built on a base mod: one of the base mod's files, copied unchanged
 BINARY_SUFFIXES = (".dds", ".mesh")  # generated files that aren't script text
 
 
@@ -69,6 +70,7 @@ class GeneratedSet:
     integration: "Integration | None" = None
     fixtures: "TestFixtures | None" = None  # in-game test suite only
     loadout: "Any | None" = None  # core.loadout.LoadoutResult when the set carries procedural parts (Phase 3)
+    test_owners: dict[str, str] = field(default_factory=dict)  # TEST ONLY: province history path -> tag made owner
 
     def add(self, f: GeneratedFile) -> None:
         if f.path in self.files:
@@ -324,6 +326,30 @@ def patch_history_culture(data: bytes, culture: str, date: tuple[int, int, int] 
     return doc.to_bytes()
 
 
+def patch_province_owner(data: bytes, tag: str, date: tuple[int, int, int] = START_DATE) -> bytes:
+    """TEST ONLY: make ``tag`` own and control a province at ``date`` (every owner/controller in
+    effect then: undated, and in dated blocks up to ``date``) and give it a core there. Later dated
+    changes and everything else stay byte-for-byte."""
+    doc = parse_bytes(data)
+    found: set[str] = set()
+    cores = set()
+    for p in doc.pairs():
+        when = parse_date(p.key.value)
+        targets = [p] if when is None else (list(p.value.pairs()) if isinstance(p.value, Block) and when <= date else [])
+        for t in targets:
+            if t.key.value in ("owner", "controller"):
+                t.value = Scalar(tag)
+                found.add(t.key.value)
+            elif t.key.value == "add_core" and isinstance(t.value, Scalar):
+                cores.add(t.value.value)
+    for key in ("owner", "controller"):
+        if key not in found:  # undated: applies first, and every dated one up to ``date`` now names the tag too
+            doc.append(Pair(Scalar(key), "=", Scalar(tag)))
+    if tag not in cores:
+        doc.append(Pair(Scalar("add_core"), "=", Scalar(tag)))
+    return doc.to_bytes()
+
+
 def patch_country_gfx(data: bytes, gfx: str) -> bytes:
     """TEST ONLY: set a country file's graphical_culture; everything else stays byte-for-byte."""
     doc = parse_bytes(data)
@@ -507,7 +533,9 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
     out.add(GeneratedFile(rel, patch_graphical_cultures(data, [gfx]), PATCHED, base))
 
     # Hand-merge instructions for files the tool doesn't own.
-    cfiles = country_files(game)
+    from eu4unitgen.library.scanner import LayeredFiles
+
+    cfiles = country_files(LayeredFiles(mod, game) if mod is not None else game)  # a mod's own tags too
     out.integration = Integration(
         tags=list(nation.tags), set_name=set_name, country_files={t: cfiles.get(t) for t in nation.tags},
         graphical_culture=gfx, colour=nation.colour,

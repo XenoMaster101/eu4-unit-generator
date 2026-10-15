@@ -443,6 +443,11 @@ class TestModPage(Page):
         self.plain_note = QLabel("Neither ticked: the plain test mod, with the set's texture recipe and parts "
                                  "loadout (with a loadout, the checklist is in-game test 8's; Blender builds the parts).")
         self.plain_note.setWordWrap(True)
+        self.base_mod = QLineEdit()
+        self.base_mod.setPlaceholderText("optional: build the test mod as a copy of this mod folder (only read)")
+        self.base_mod.setToolTip("The test mod becomes a full copy of that mod with the set integrated "
+                                 "(INTEGRATION.md applied to copies of its files). Enable it instead of that mod.")
+        self.give_cores = QCheckBox("Test only: the tag owns its cored provinces and capital at the start")
         self.rival = QComboBox()
         self.rival.addItem("asiangfx")
         self.sprites_on = QCheckBox("Move sprite tiers 2-4 to early MIL techs (test only)")
@@ -463,6 +468,8 @@ class TestModPage(Page):
         form.addRow(self.suite)
         form.addRow(self.textures)
         form.addRow(self.plain_note)
+        form.addRow("Base mod", _path_row(self.base_mod))
+        form.addRow(self.give_cores)
         form.addRow("Rival pack copies", self.rival)
         form.addRow(srow)
         form.addRow(self.clear)
@@ -494,7 +501,9 @@ class TestModPage(Page):
     def options(self) -> dict:
         techs = dict(zip((2, 3, 4), (b.value() for b in self.sprite_techs))) if self.sprites_on.isChecked() else None
         return {"suite": self.suite.isChecked(), "sprite_techs": techs, "rival_gfx": self.rival.currentText(),
-                "clear": self.clear.isChecked(), "textures": self.textures.isChecked()}
+                "clear": self.clear.isChecked(), "textures": self.textures.isChecked(),
+                "base_mod": Path(self.base_mod.text().strip()) if self.base_mod.text().strip() else None,
+                "give_cores": self.give_cores.isChecked()}
 
     def fill(self, bases: list[str]) -> None:
         keep = self.rival.currentText()

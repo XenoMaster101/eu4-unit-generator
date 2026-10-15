@@ -292,6 +292,15 @@ class Naming:
         return f"{TEST_MOD_NAME}_v{variant}"
 
     @staticmethod
+    def base_test_mod(base_folder: str) -> str:
+        """eu4unitgen_test_victorias_secret: a test mod that is a copy of a base mod (its folder name,
+        lowercased, non-alphanumerics as _) with the set integrated."""
+        slug = re.sub(r"[^a-z0-9]+", "_", base_folder.lower()).strip("_")
+        if not slug:
+            raise NamingError(f"base mod folder {base_folder!r} gives no usable name")
+        return f"{TEST_MOD_NAME}_{slug}"
+
+    @staticmethod
     def texture_test_mod() -> str:
         """eu4unitgen_test_textures: the meshsettings / texture-path test (SPEC §10 Phase 2)."""
         return f"{TEST_MOD_NAME}_textures"

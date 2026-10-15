@@ -895,8 +895,8 @@ def integration(ctx: Context) -> list[Issue]:
         out.append(Issue(ERROR, "integration", f"hands over tags {integ.tags}, the set has {ctx.nation.tags}", path))
     for t in ctx.nation.tags:
         cfile = integ.country_files.get(t)
-        if cfile and not ctx.world.game.exists(cfile):
-            out.append(Issue(ERROR, "integration", f"{t}: {cfile} doesn't exist in the game", path))
+        if cfile and not ctx.world.exists(cfile):
+            out.append(Issue(ERROR, "integration", f"{t}: {cfile} doesn't exist in the game or the mod", path))
         if len(ctx.nation.tags) > 1 and f"- {t}:" not in text:
             out.append(Issue(ERROR, "integration", f"{t}'s country file isn't listed", path))
     return out
@@ -1042,6 +1042,30 @@ def test_fixtures(ctx: Context) -> list[Issue]:
 
 
 # --------------------------------------------------------------------------- notes
+
+@rule("test_owners")
+def test_owners(ctx: Context) -> list[Issue]:
+    """TEST ONLY (fix C): each patched province history gives its tag the owner, controller and a core
+    at the start date."""
+    from eu4unitgen.library.tags import START_DATE, _history_entries
+
+    out = []
+    for rel, tag in sorted(ctx.generated.test_owners.items()):
+        f = ctx.generated.files.get(rel)
+        if f is None:
+            out.append(Issue(ERROR, "test_owners", f"{rel} wasn't generated", rel))
+            continue
+        doc = parse_bytes(f.data)
+        now = {p.key.value: p.value.value for p in _history_entries(doc, START_DATE)
+               if p.key.value in ("owner", "controller") and isinstance(p.value, Scalar)}
+        cores = {p.value.value for p in _history_entries(doc, START_DATE)
+                 if p.key.value == "add_core" and isinstance(p.value, Scalar)}
+        if now.get("owner") != tag or now.get("controller") != tag or tag not in cores:
+            out.append(Issue(ERROR, "test_owners", f"{tag} should own, control and core it at the start: {now}", rel))
+        else:
+            out.append(Issue(INFO, "test_owners", f"TEST ONLY: {tag} owns it at the start", rel))
+    return out
+
 
 @rule("generator_notes")
 def generator_notes(ctx: Context) -> list[Issue]:

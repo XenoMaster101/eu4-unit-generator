@@ -110,14 +110,19 @@ def unit_colours(files: GameFiles) -> dict[str, list[tuple[int, int, int]]]:
     return out
 
 
-def tag_facts(files: GameFiles, date: tuple[int, int, int] = START_DATE) -> dict[str, TagFacts]:
-    """Facts for every tag that owns at least one province at ``date``."""
+def tag_facts(files: GameFiles, date: tuple[int, int, int] = START_DATE,
+              tags: list[str] | None = None) -> dict[str, TagFacts]:
+    """Facts for every tag that owns at least one province at ``date``, plus ``tags`` even when they
+    own none (a releasable tag such as a mod's MAC). ``files`` may be a LayeredFiles (a mod over
+    the game): its country_tags, countries and history then win."""
     owners = province_owners(files, date)
+    for t in tags or []:
+        owners.setdefault(t, 0)
     groups = culture_groups(files)
     cfiles = country_files(files)
     history: dict[str, tuple[str, bytes]] = {}
     for path, _, data in files.iter_files("history/countries", (".txt",)):
-        tag = path.rsplit("/", 1)[-1][:3].upper()
+        tag = path.rsplit("/", 1)[-1][:3].upper()  # the engine reads the tag from the name's first 3 letters
         history.setdefault(tag, (path, data))
     out = {}
     for tag, n in sorted(owners.items()):
@@ -159,6 +164,35 @@ def apply_history(f: TagFacts, data: bytes, groups: dict[str, str],
             f.reforms.append(v)
     f.culture_group = groups.get(f.primary_culture or "")
     return f
+
+
+def province_cores(files: GameFiles, tag: str) -> list[str]:
+    """history/provinces files that give ``tag`` a core (``add_core = TAG`` anywhere in the file)."""
+    out = []
+    for path, _, data in files.iter_files("history/provinces", (".txt",)):
+        for p in _all_pairs(parse_bytes(data)):
+            if p.key.value == "add_core" and isinstance(p.value, Scalar) and p.value.value == tag:
+                out.append(path)
+                break
+    return sorted(out)
+
+
+def province_file(files: GameFiles, province_id: int | str) -> str | None:
+    """history/provinces/<id> - <name>.txt (the id is the name's leading number)."""
+    for path, _, _ in files.iter_files("history/provinces", (".txt",)):
+        head = path.rsplit("/", 1)[-1].split("-")[0].split(" ")[0].strip()
+        if head == str(province_id):
+            return path
+    return None
+
+
+def _all_pairs(doc) -> list[Pair]:
+    out = []
+    for p in doc.pairs():
+        out.append(p)
+        if isinstance(p.value, Block):
+            out += list(p.value.pairs())
+    return out
 
 
 def start_level(files: GameFiles, tech_group: str | None) -> int | None:

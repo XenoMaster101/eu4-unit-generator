@@ -307,6 +307,40 @@ class GameFiles:
         return cur if cur.is_dir() else None
 
 
+class LayeredFiles:
+    """A mod read over the game: a path the mod has replaces the game's (and its DLC's) file of the
+    same path, case-insensitively; everything else falls through. Read-only, like GameFiles."""
+
+    def __init__(self, top: "GameFiles | None", base: GameFiles):
+        self.top, self.base = top, base
+
+    def read(self, rel: str) -> bytes | None:
+        if self.top is not None:
+            data = self.top.read(rel)
+            if data is not None:
+                return data
+        return self.base.read(rel)
+
+    def exists(self, rel: str) -> bool:
+        return (self.top is not None and self.top.exists(rel)) or self.base.exists(rel)
+
+    def in_base_game(self, rel: str) -> bool:
+        return self.base.in_base_game(rel)
+
+    def from_top(self, rel: str) -> bool:
+        return self.top is not None and self.top.exists(rel)
+
+    def iter_files(self, rel_dir: str, suffixes: tuple[str, ...], recursive: bool = False):
+        seen = set()
+        if self.top is not None:
+            for path, dlc, data in self.top.iter_files(rel_dir, suffixes, recursive):
+                seen.add(path.lower())
+                yield path, dlc, data
+        for path, dlc, data in self.base.iter_files(rel_dir, suffixes, recursive):
+            if path.lower() not in seen:
+                yield path, dlc, data
+
+
 # --------------------------------------------------------------------------- index
 
 @dataclass

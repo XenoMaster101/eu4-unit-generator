@@ -26,8 +26,9 @@ from pathlib import Path
 
 from eu4unitgen import __version__
 from eu4unitgen.core.generator import (
-    OWNED, PATCHED, BaseChain, FallbackCase, GeneratedFile, GeneratedSet, GenerationError, TestFixtures, generate,
-    patch_country, patch_country_colours, patch_country_gfx, patch_history_culture, unit_entities,
+    BASE, OWNED, PATCHED, BaseChain, FallbackCase, GeneratedFile, GeneratedSet, GenerationError, TestFixtures, generate,
+    patch_country, patch_country_colours, patch_country_gfx, patch_history_culture, patch_province_owner,
+    unit_entities,
 )
 from eu4unitgen.core.naming import MANIFEST_FILE, TEST_MOD_NAME, UNIT_TYPES
 from eu4unitgen.core.nation import Nation
@@ -92,13 +93,17 @@ def _main_package(project: Project, nation: Nation, game: GameFiles, idx: Index,
 
 
 def _wrap(project: Project, nation: Nation, package: GeneratedSet, game: GameFiles, idx: Index, mod_dir: Path,
-          name: str) -> TestMod:
-    """Validate the package, then put it in a mod folder with both descriptors and plan the export."""
-    report = validate(project, nation, package, game, idx, mod=None)
+          name: str, report: Report | None = None, display: str | None = None,
+          copies: dict[str, bytes] | None = None) -> TestMod:
+    """Validate the package (unless ``report`` is given), then put it in a mod folder with both
+    descriptors and plan the export. ``display``: the launcher name (default: the folder name).
+    ``copies``: a base mod's files, copied unchanged where the package doesn't write that path."""
+    if report is None:
+        report = validate(project, nation, package, game, idx, mod=None)
     folder = Path(mod_dir) / name
     supported = supported_version(idx)
-    outer = descriptor_text(name, supported, folder.as_posix())
-    inner = descriptor_text(name, supported, None)
+    outer = descriptor_text(display or name, supported, folder.as_posix())
+    inner = descriptor_text(display or name, supported, None)
     report.issues += [i for i in check_descriptor(outer, folder.as_posix())]
     report.issues += [i for i in check_descriptor(inner)]
 
@@ -106,11 +111,121 @@ def _wrap(project: Project, nation: Nation, package: GeneratedSet, game: GameFil
                            fixtures=package.fixtures)
     for f in package.files.values():
         wrapped.add(GeneratedFile(f"{name}/{f.path}", f.data, f.role, f.based_on, game_path=f.game_path or f.path))
+    written = {f.path.lower() for f in package.files.values()}
+    for rel, data in (copies or {}).items():
+        if rel.lower() not in written:
+            wrapped.add(GeneratedFile(f"{name}/{rel}", data, BASE))
     wrapped.add(GeneratedFile(f"{name}.mod", outer.encode("utf-8"), DESCRIPTOR))
     wrapped.add(GeneratedFile(f"{name}/descriptor.mod", inner.encode("utf-8"), DESCRIPTOR))
     plan = plan_export(mod_dir, wrapped, game, [str(i) for i in report.issues if i.severity == ERROR],
                        manifest_rel=f"{name}/{MANIFEST_FILE}")
     return TestMod(package, report, plan)
+
+
+# --------------------------------------------------------------------------- test mod on a copy of a base mod
+
+BASE_SKIP_DIRS = {".git", ".eu4unitgen"}  # never copied from the base mod
+BASE_SKIP_FILES = {"descriptor.mod"}  # replaced by the test mod's own
+
+
+def base_descriptor_name(base: Path) -> str:
+    """The base mod's display name (its descriptor.mod ``name``), else its folder name."""
+    from eu4unitgen.pdxscript.parser import parse_bytes
+
+    desc = Path(base) / "descriptor.mod"
+    if desc.is_file():
+        name = parse_bytes(desc.read_bytes()).get_str("name")
+        if name:
+            return name
+    return Path(base).name
+
+
+def base_files(base: Path) -> dict[str, bytes]:
+    """Every file of the base mod (posix paths), minus .git, the tool's folder and descriptor.mod."""
+    base = Path(base)
+    out = {}
+    for p in sorted(base.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(base)
+        if rel.parts[0] in BASE_SKIP_DIRS or rel.as_posix().lower() in BASE_SKIP_FILES:
+            continue
+        out[rel.as_posix()] = p.read_bytes()
+    return out
+
+
+def own_cores(package: GeneratedSet, tag: str, files) -> list[str]:
+    """TEST ONLY (fix C): ``tag`` owns the provinces it has cores on, and its history capital, at the
+    start date, so a releasable tag (no land in 1444) can be played straight away. ``files``: the
+    base mod over the game (LayeredFiles). Returns the patched province history paths."""
+    from eu4unitgen.library.tags import province_cores, province_file
+    from eu4unitgen.pdxscript.parser import parse_bytes
+
+    paths = province_cores(files, tag)
+    hist = next((p for p, _, _ in files.iter_files("history/countries", (".txt",))
+                 if p.rsplit("/", 1)[-1][:3].upper() == tag), None)
+    capital = parse_bytes(files.read(hist)).get_str("capital") if hist else None
+    cap_path = province_file(files, capital) if capital and capital.isdigit() else None
+    if cap_path and cap_path not in paths:
+        paths.append(cap_path)
+    if not paths:
+        raise GenerationError(f"{tag} has no cores and no capital province to own")
+    for rel in paths:
+        package.add(GeneratedFile(rel, patch_province_owner(files.read(rel), tag), PATCHED,
+                                  "mod" if files.from_top(rel) else "vanilla"))
+        package.test_owners[rel] = tag
+    package.notes.append(f"TEST ONLY: {tag} owns {len(paths)} provinces at the start (its cores and capital): "
+                         + ", ".join(p.rsplit("/", 1)[-1].removesuffix(".txt") for p in paths))
+    return paths
+
+
+def build_base_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path, base: Path,
+                        test_sprite_techs: dict[int, int] | None = None, recipe=None, loadout=None, runner=None,
+                        part_cache: dict | None = None, give_cores: bool = False,
+                        name: str | None = None) -> TestMod:
+    """Fix B: a test mod that is a full copy of a base mod (e.g. Victoria's Secret) with the set
+    integrated: INTEGRATION.md applied to copies of the base mod's own files (country file, mil.txt,
+    graphicalculturetype.txt, country_colors), the package added, everything else copied unchanged.
+    Enable it instead of the base mod. ``give_cores`` (fix C, TEST ONLY): the tag owns its cored
+    provinces and capital at the start. The base mod is only read."""
+    from eu4unitgen.library.scanner import LayeredFiles
+    from eu4unitgen.library.tags import country_files
+
+    base = Path(base)
+    if not base.is_dir():
+        raise GenerationError(f"base mod folder {base} not found")
+    mod = GameFiles(base, include_dlc=False)
+    try:
+        files = LayeredFiles(mod, game)
+        package = generate(project, nation, game, idx, mod=mod, test_sprite_techs=test_sprite_techs, recipe=recipe,
+                           loadout=loadout, runner=runner, part_cache=part_cache)
+        integ = package.integration
+        cfiles = country_files(files)
+        for tag in nation.tags:
+            cfile = cfiles.get(tag)
+            raw = files.read(cfile) if cfile else None
+            if raw is None:
+                raise GenerationError(f"{tag} has no country file in the base mod or the game")
+            package.add(GeneratedFile(cfile, patch_country(raw, integ), PATCHED,
+                                      "mod" if files.from_top(cfile) else "vanilla"))
+        if integ.unit_colours:
+            rel = project.naming.country_colours_file()
+            raw = files.read(rel)
+            if raw is None:
+                raise GenerationError(f"{rel} not found in the base mod or the game")
+            package.add(GeneratedFile(rel, patch_country_colours(raw, integ.unit_colours_snippet,
+                                                                 list(integ.unit_colours)),
+                                      PATCHED, "mod" if files.from_top(rel) else "vanilla"))
+        if give_cores:
+            for tag in nation.tags:
+                own_cores(package, tag, files)
+        report = validate(project, nation, package, game, idx, mod=mod)
+    finally:
+        mod.close()
+    folder = project.naming.base_test_mod(base.name)
+    display = name or f"{base_descriptor_name(base)} - unitgen test"
+    return _wrap(project, nation, package, game, idx, mod_dir, folder, report=report, display=display,
+                 copies=base_files(base))
 
 
 def build_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path,

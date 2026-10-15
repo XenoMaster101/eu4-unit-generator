@@ -167,6 +167,7 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
     techs = dict(zip((2, 3, 4), args.test_sprite_techs)) if args.test_sprite_techs else None
     try:
         res = session.build_test_mod(_spec(args), suite=args.suite, textures=args.textures, sprite_techs=techs,
+                                     base_mod=args.base_mod, give_cores=args.give_cores, base_name=args.base_name,
                                      rival_gfx=args.rival_gfx, write=write,
                                      fallback_tags=dict(zip("abc", args.fallback_tags)) if args.fallback_tags else None)
     except ExportError as exc:
@@ -252,6 +253,12 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--textures", action="store_true",
                    help="build the texture test instead (eu4unitgen_test_textures): tier 1 retextured through "
                         "pdxmesh meshsettings, and print the checklist")
+    t.add_argument("--base-mod", type=Path,
+                   help="build the test mod as a copy of this mod folder (only read) with the set integrated: "
+                        "enable it instead of that mod")
+    t.add_argument("--base-name", help="launcher name of the base-mod copy (default: '<its name> - unitgen test')")
+    t.add_argument("--give-cores", action="store_true",
+                   help="TEST ONLY, with --base-mod: the tag owns its cored provinces and capital at the start")
     t.add_argument("--fallback-tags", nargs=3, metavar=("A", "B", "C"),
                    help="suite: tags for fallback cases a, b, c (default: picked automatically)")
     t.add_argument("--rival-gfx", default="asiangfx", help="suite: vanilla set the rival priority pack lists")

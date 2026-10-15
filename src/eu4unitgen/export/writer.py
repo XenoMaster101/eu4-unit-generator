@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from eu4unitgen import __version__
-from eu4unitgen.core.generator import BINARY_SUFFIXES, PATCHED, GeneratedFile, GeneratedSet
+from eu4unitgen.core.generator import BASE, BINARY_SUFFIXES, PATCHED, GeneratedFile, GeneratedSet
 from eu4unitgen.core.naming import MANIFEST_FILE
 from eu4unitgen.library.scanner import GameFiles
 
@@ -140,7 +140,9 @@ def plan_export(mod_root: Path, generated: GeneratedSet, game: GameFiles | None 
         current = target.read_bytes() if target.is_file() else None
         entry = owned.get(gf.path)
         pf = PlannedFile(gf.path, CREATE, gf.data, gf.role)
-        if current is None:
+        if current is None and gf.role == BASE:
+            pf.reason = "copied unchanged from the base mod"  # thousands of these: no diff
+        elif current is None:
             # New file. For a patched copy of a vanilla file, diff against vanilla so the
             # dry run shows only the lines the tool adds.
             src = gf.game_path or gf.path

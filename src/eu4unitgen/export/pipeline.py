@@ -18,7 +18,8 @@ from eu4unitgen.core.project import (
     DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_blender_path, default_mod_dir,
 )
 from eu4unitgen.export.testmod import (
-    Suite, build_suite, build_test_mod, build_texture_test, loadout_checklist, suite_checklist, texture_checklist,
+    Suite, build_base_test_mod, build_suite, build_test_mod, build_texture_test, loadout_checklist, suite_checklist,
+    texture_checklist,
 )
 from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
 from eu4unitgen.library.scanner import GameFiles, Index, build_index, find_pack
@@ -130,7 +131,7 @@ class TexturePreview:
 DEFAULT_UNIT_COLOURS = [(205, 32, 26), (255, 255, 255), (70, 50, 40)]
 
 
-STAGE_ENTRY = re.compile(rf"^{TEST_MOD_NAME}(_v\d+|_textures|_parts)?(\.mod)?$")
+STAGE_ENTRY = re.compile(rf"^{TEST_MOD_NAME}(_[a-z0-9_]+)?(\.mod)?$")  # incl. base-mod copies
 
 
 def clear_stage(stage_dir: Path) -> None:
@@ -198,6 +199,7 @@ class Session:
         self._runner = None
         self._runner_for: Path | None = None
         self.part_cache: dict[str, bytes] = {}  # built part meshes, by job entry (core.parts.build_parts)
+        self._base_facts: dict[tuple, dict[str, TagFacts]] = {}  # (mod folder, tags) -> facts through the mod
         self._game: GameFiles | None = None
         self._idx: Index | None = None
         self._facts: dict[str, TagFacts] | None = None
@@ -224,6 +226,21 @@ class Session:
             self._facts = tag_facts(game)
         return self._facts
 
+    def mod_facts(self, mod_folder: Path, tags: list[str]) -> dict[str, TagFacts]:
+        """Fix A: tag facts with ``mod_folder`` read over the game (its country_tags, countries and
+        history win), including ``tags`` that own no land at the start (a mod's releasable tag)."""
+        from eu4unitgen.library.scanner import LayeredFiles
+
+        key = (str(Path(mod_folder).resolve()), tuple(sorted(tags)))
+        if key not in self._base_facts:
+            game, _ = self.game()
+            mod = GameFiles(Path(mod_folder), include_dlc=False)
+            try:
+                self._base_facts[key] = tag_facts(LayeredFiles(mod, game), tags=list(tags))
+            finally:
+                mod.close()
+        return self._base_facts[key]
+
     def available_dlc(self) -> list[str]:
         return sorted(self.game()[0].zips)
 
@@ -240,6 +257,7 @@ class Session:
             self._game.close()
         self._game = self._idx = self._facts = self._loaded_from = None
         self._unit_colours = None
+        self._base_facts = {}
         self._bodies = None
 
     # ------------------------------------------------------------------ building blocks
@@ -251,7 +269,7 @@ class Session:
                        entity_version=s.entity_version, tag_pack_order=s.tag_pack_order,
                        check_mod_collisions=check, **kw)
 
-    def nations(self, spec: SetSpec) -> list[Nation]:
+    def nations(self, spec: SetSpec, base_mod: Path | None = None) -> list[Nation]:
         """The set the form describes (a list of one: callers loop over results)."""
         if not spec.tags and not spec.cultures:
             raise SpecError("enter at least one tag or culture")
@@ -266,7 +284,7 @@ class Session:
                 check_tag(tag)
             tech = spec.tech_group
             if not tech:
-                groups = {t: self._tag_tech_group(t) for t in spec.tags}
+                groups = {t: self._tag_tech_group(t, spec.tags, base_mod) for t in spec.tags}
                 known = sorted({g for g in groups.values() if g})
                 if len(known) > 1:
                     raise SpecError("the tags start in different tech groups ("
@@ -282,11 +300,22 @@ class Session:
                 raise
             raise SpecError(str(exc)) from exc
 
-    def _tag_tech_group(self, tag: str) -> str | None:
-        f = self.facts().get(tag)
+    def _tag_tech_group(self, tag: str, tags: list[str], base_mod: Path | None = None) -> str | None:
+        """From the tag's history: through the mod when one is read (``base_mod``, or mod checks), so a
+        mod's own or landless tag gets its group (fix A); else vanilla's 1444 facts."""
+        folder = base_mod or self.settings.mod_folder
+        facts = self.mod_facts(folder, tags) if folder else self.facts()
+        f = facts.get(tag)
         return f.technology_group if f else None
 
     # ------------------------------------------------------------------ steps
+    def _layered(self, mod_folder: Path | None):
+        """The game, or a mod folder read over it."""
+        from eu4unitgen.library.scanner import LayeredFiles
+
+        game, _ = self.game()
+        return LayeredFiles(GameFiles(Path(mod_folder), include_dlc=False), game) if mod_folder else game
+
     def runner(self):
         """The Blender runner (pinned version checked on first use); SpecError when Blender is unusable."""
         from eu4unitgen.blender.runner import BlenderError, BlenderRunner
@@ -347,37 +376,49 @@ class Session:
 
     def build_test_mod(self, spec: SetSpec, *, suite: bool = False, sprite_techs: dict[int, int] | None = None,
                        rival_gfx: str = "asiangfx", clear: bool = False, textures: bool = False,
-                       write: str = "stage", fallback_tags: dict[str, str] | None = None) -> TestModResult:
+                       write: str = "stage", fallback_tags: dict[str, str] | None = None,
+                       base_mod: Path | None = None, give_cores: bool = False,
+                       base_name: str | None = None) -> TestModResult:
         """Build the test mod (or the two-variant suite, or the texture test). ``write``: "stage"
         (settings.stage_dir, for copying into the EU4 mod folder by hand), "apply" (straight into
         the EU4 mod folder) or "dry" (nothing written; plans returned). A shared set may have several
         tags; the suite and the texture test take one. The plain test mod carries the spec's
-        texture recipe and parts loadout; with a loadout its checklist is in-game test 8's."""
+        texture recipe and parts loadout; with a loadout its checklist is in-game test 8's.
+
+        ``base_mod`` (fix B): the test mod is a copy of that mod with the set integrated (enable it
+        instead of the base mod); ``give_cores`` (fix C, TEST ONLY) makes each tag own its cored
+        provinces and capital at the start; ``base_name`` overrides the launcher name."""
         if write not in ("stage", "apply", "dry"):
             raise SpecError(f"write must be stage, apply or dry, not {write!r}")
         if suite and textures:
             raise SpecError("pick either the test suite or the texture test, not both")
         if (suite or textures) and len(spec.tags) != 1:
             raise SpecError("the test suite and the texture test take exactly one tag")
+        if base_mod is not None and (suite or textures):
+            raise SpecError("a base-mod test mod is the plain test mod; untick the suite and the texture test")
+        if give_cores and base_mod is None:
+            raise SpecError("giving a tag its cores is for a test mod on a base mod")
         if not spec.tags:
             raise SpecError("enter at least one tag")
         game, idx = self.game()
-        facts = self.facts()
+        facts = self.mod_facts(base_mod, spec.tags) if base_mod else self.facts()
         warnings = []
         for t in spec.tags:
             ft = facts.get(t)
             if ft is None:
                 raise SpecError(f"{t} owns no land at 1444.11.11; pick another tag (pick-test-tag)")
+            if base_mod and ft.provinces == 0 and not give_cores:
+                warnings.append(f"{t} owns no land at the start: release it in game, or tick 'give the tag its cores'")
             cov = coverage(idx, ft)
             if not cov.clean:
                 warnings.append(f"{t} is matched by {[p for p, _, _ in cov.packs]} / has {cov.entities[:4]}; "
                                 "the map may not show the generated set")
             if sprite_techs:
-                start = start_level(game, ft.technology_group)
+                start = start_level(self._layered(base_mod), ft.technology_group)
                 if start is not None and min(sprite_techs.values()) <= start:
                     warnings.append(f"{t} starts at MIL {start}; tiers at MIL <= {start} show from day one")
         tag, f = spec.tags[0], facts[spec.tags[0]]
-        nation = self.nations(spec)[0]
+        nation = self.nations(spec, base_mod)[0]
         mod_dir = self.settings.user_mod_dir()
         project = self.project(mod_root=mod_dir / TEST_MOD_NAME)
         checklist = ""
@@ -386,6 +427,13 @@ class Session:
             if textures:
                 tt = build_texture_test(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
                 mods, checklist = [tt.mod], texture_checklist(tt, sprite_techs)
+            elif base_mod is not None:
+                tm = build_base_test_mod(project, nation, game, idx, mod_dir, Path(base_mod),
+                                         test_sprite_techs=sprite_techs, recipe=load_recipe(spec),
+                                         give_cores=give_cores, name=base_name, **self._parts_args(spec))
+                mods = [tm]
+                if tm.package.loadout is not None:
+                    checklist = loadout_checklist(tm.package, tm.plan.manifest_rel.split("/", 1)[0], sprite_techs)
             elif suite:
                 built = build_suite(project, nation, game, idx, mod_dir, facts, culture_groups(game),
                                     rival_gfx=rival_gfx, test_sprite_techs=sprite_techs, fallback_tags=fallback_tags)
