@@ -8,7 +8,7 @@ A part is our own geometry (built by the Blender job ``build_parts``) and our ow
 
 Vanilla conventions (measured, base_models.json): hand weapons run along +Z with the grip at
 the origin, pdxmesh scale 0.5, PdxMeshStandard, no bones or locators. Attaching to ``head``
-is UNVERIFIED (vanilla never does it); in-game test 7 decides.
+works (vanilla never does it; in-game test 7).
 """
 from __future__ import annotations
 

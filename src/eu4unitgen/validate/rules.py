@@ -250,13 +250,13 @@ def texture_paths(ctx: Context) -> list[Issue]:
 
 
 PART_TRI_BUDGET = 3000  # vanilla weapons: tens to a few hundred triangles; a body ~2,000
-UNVERIFIED_ATTACH_BONES = {"head"}  # never used by vanilla; in-game test 7
 
 
 @rule("attach_bones")
 def attach_bones(ctx: Context) -> list[Issue]:
     """Every attach node on a generated entity is a bone (or locator) of the entity's own mesh
-    (case-insensitive: vanilla writes both Saddle_Node and saddle_node)."""
+    (case-insensitive: vanilla writes both Saddle_Node and saddle_node). Any bone works, including
+    ``head``, which vanilla never uses (in-game test 7)."""
     w, out = ctx.world, []
     for name, rec in sorted(ctx.gen_entities().items()):
         pdx = w.pdxmesh(w.resolve(name, "pdxmesh") or "")
@@ -269,9 +269,6 @@ def attach_bones(ctx: Context) -> list[Issue]:
                 if bone.lower() not in nodes:
                     out.append(Issue(ERROR, "attach_bones", f"{name}: attach node {bone!r} isn't a bone or locator of "
                                                             f"{pdx['file']}", rec["defined_in"], name))
-                elif bone in UNVERIFIED_ATTACH_BONES:
-                    out.append(Issue(INFO, "attach_bones", f"{name}: attaches to {bone!r}, which vanilla never uses "
-                                                           "(UNVERIFIED; in-game test 7)", rec["defined_in"], name))
     return out
 
 
