@@ -380,6 +380,26 @@ Vanilla artillery unit files have **no `unit_type`** line (all 18). `unit_type` 
 ### 7.7 Unit sets
 A unit set has a name (`--set`, default: the tag in lowercase). The set name, not the tag, names the TAG sprite pack (`hr_<set>_units`), its entity, pack, order and localisation files, and the unit keys (`hr_<set>_infantry_1`). Entity names stay `TAG_INFANTRY_n` (engine pattern). Set names are lowercase and can't end in `gfx`, which keeps them apart from graphical-culture files.
 
+### 7.8 Procedural parts (Phase 3)
+A loadout (`core/loadout.py`) dresses the TAG set; the gfx-culture defaults stay undressed. Each part is a static mesh made from scratch, in the set's own folder with its textures beside it (bare names resolve there), a pdxmesh with no animations and an entity with no states:
+```
+# interface/assets/hr_mac.gfx
+pdxmesh = { name = "hr_mac_hoplon_1_mesh"  file = "gfx/models/units/hr_mac/hr_mac_hoplon_1.mesh"  scale = 0.5 }
+pdxmesh = {                                   # stance: the vanilla body with another animation set
+    name = "hr_mac_infantry_1_mesh"  file = "gfx/models/Units/western_generic_01_type1.mesh"
+    animation = { id = "idle"   type = "spear_shield_idle_animation" }
+    animation = { id = "walk"   type = "spear_shield_moving_animation" }
+    animation = { id = "attack" type = "spear_shield_attack_animation" }
+    ... every other id of the base pdxmesh, unchanged ...
+    scale = 0.5 }
+# gfx/entities/hr_mac_units.asset
+entity = { name = "hr_mac_hoplon_1"  pdxmesh = "hr_mac_hoplon_1_mesh"  version = 20 }
+entity = { name = "MAC_INFANTRY_1"  pdxmesh = "hr_mac_infantry_1_mesh"  version = 20  state = { ... }
+    attach = { Right_hand_node = "hr_mac_dory_1" Left_hand_node = "hr_mac_hoplon_1" head = "hr_mac_crest_1" } }
+entity = { name = "MAC_ARTILLERY_1_crew" ... }   # only when the crew is dressed apart; the gunman's infantry_node points at it
+```
+Names (`naming.py`): parts `hr_<set>_<kind>_<tier>` for the infantry, `hr_<set>_<kind>_<role>_<tier>` for the rider and crew (the role before the tier: names ending `_rider`/`_crew`/`_cannon` are the unit entities'); crew entity `TAG_ARTILLERY_n_crew`; stance pdxmeshes `hr_<set>_infantry_n_mesh` (the retextured one if there is one) and `hr_<set>_crew_n_mesh`. Identical parts at one tier are built once and shared between roles.
+
 ---
 
 ## 8. Architecture
@@ -412,6 +432,12 @@ src/eu4unitgen/
     writer.py         # dry-run diff, atomic writes, manifest (.eu4unitgen/manifest.json: path → sha256, role, tags)
   export/testmod.py   # throwaway in-game test mod (eu4unitgen_test) around one unit set, and the two-variant test suite
   core/retexture.py   # Phase 2: retextured pdxmesh (vanilla .mesh + meshsettings) and derived DDS; entities pointed at it
+  core/parts.py       # Phase 3: part kinds (bone, roles, params, colour zones), PartSpec -> ResolvedPart, build_parts (Blender job + cache)
+  core/fitting.py     # Phase 3: body measurements from the .mesh (stature, head shape) -> fitted part params
+  core/loadout.py     # Phase 3: loadout JSON; apply_loadout dresses a set (parts, crew entities, stances)
+  textures/procedural.py  # Phase 3: part textures from scratch (strip / disc layouts, country zones, blazon)
+  blender/jobs/build_parts.py, render_parts.py  # part geometry; fit previews and thumbnails
+  gui/parts_page.py   # the Parts screen
   export/pipeline.py  # Session: load the install once; validate / generate / build test mod for a unit-set form (GUI + tests)
   library/tags.py     # 1444 tag facts (owners, culture, group, reforms) + 3-valued sprite-pack trigger evaluation
   cli.py              # generate (-> output/<set>/) | pick-test-tag | test-mod (dry run unless --apply / --stage-dir); generate and test-mod call export/pipeline.py (one code path with the GUI)
@@ -597,12 +623,25 @@ Order (each step with tests and its validator rule):
    - Consequences: `head` is a verified attach node; the derived-mesh fallback is dropped (see Decisions). Static meshes exported by io_pdx_mesh (boundingsphere stripped) load and render.
 
 Order from here (renumbered after the spike):
-3. Procedural part library (hoplon, dory, sarissa, xiphos, crest), thumbnails.
-4. Fitting: part sizes and placement measured from the body mesh each part attaches to.
-5. Generator loadouts + rules.
-6. GUI Parts screen.
-7. In-game test 8: the full set (every tier dressed differently).
+3. **Done (2026-10-15).** Procedural part library (`core/parts.py`, `blender/jobs/build_parts.py`, `textures/procedural.py`). Five kinds, each with one bone, the roles it may dress, numeric params and colour zones:
+   - `dory` (infantry, rider, crew) and `sarissa` (infantry, crew): spear builder on `Right_hand_node`; dory = the spike's (z -12.8..15), sarissa z -14.5..30. `xiphos` (all roles): leaf blade from a grip at the origin. Hand weapons take `point`: up = +Z (halberd, spears), down = -Z (cavalry sabre convention); auto = down for riders, up otherwise.
+   - `hoplon` (infantry, crew) on `Left_hand_node`: a closed domed shell in the hand's YZ plane (radius 3.8, dome 0.9 towards +X, rim 0.35), face zone planar-mapped onto a 256² "disc" texture (corners hold the rim and inside swatches). Face in a unit colour by default (PdxMeshColor, spec R; precedent: vanilla `south_american_generic_01_type1_shield` is a static PdxMeshColor shield); a fixed colour makes it PdxMeshStandard. Optional blazon PNG: painted over the face in fixed colours (the country channel is cleared under it), `blazon_rotate`/`blazon_mirror` if the game shows it turned.
+   - `crest` (all roles) on `head`: the spike's fin (fore-aft or transverse, thickness 0.28 total, as tested).
+   - Any zone can take a unit colour (`country1-3`); the part's shader follows (PdxMeshColor if any zone does). Diffuse under a country zone is grey 170.
+   - Thumbnails and fit previews: `blender/jobs/render_parts.py` imports the tier's body (its vanilla .mesh written to a temp folder) and the parts, puts each part at its bone's bind pose and renders front, left side and a 3/4 thumbnail per part (Workbench, textures, body and country zones tinted with the unit colours). `Session.parts_preview`, CLI `parts-preview`, GUI "Preview slot". Saved to `<output>/part_previews/<set>/<tier>_<role>.png` (shows a base-game body: user output only).
+   - Facts found: the unit faces PDX -Z (nose and toes point there in the side render); io_pdx_mesh flips V on import and export, so image coordinates map to Blender UVs as v -> 1 - v and what Blender shows is what the game gets; seen from outside the shield (+X) the viewer's right is PDX +Z. **Vanilla `western_generic_03_type1` and `_04_type1` have a `Right_hand_node` inverse bind scaled by ~1e12**, so the raw bind pose shrinks anything on it to a point; previews use its rotation only (`fitting.rigid`). The halberd shows in game, so the engine animates from the .anim, not the bind pose.
+4. **Done.** Fitting (`core/fitting.py`, pure Python): from the body's .mesh, the stature (head joint height, 14.499 on every generic western body) and the head's shape (vertices skinned mostly to `head`, in that bone's frame). Lengths scale by stature / 14.499; not by the bounding box, which counts headgear (western tier 4's shako: 18.06 against 16.65). Crest: base = helmet top - 0.25, radius = 1.1 x the head's larger front/back reach, clamped 0.8-2.5; on western tier 1 that is base 1.90, radius 1.40: test 7's values, now measured instead of typed. Western head tops: tier 1 2.15, tier 2 2.88, tier 3 2.40, tier 4 3.56. Order: kind default < fitted < the user's value.
+5. **Done.** Generator loadouts (`core/loadout.py`, `generate(..., loadout=, runner=, part_cache=)`): JSON slots `<tier>/<infantry|rider|crew>` with parts and a stance. A hand weapon replaces the base's whole hand loadout (**western tiers 2-4 carry their musket on `Left_hand_node`** with rifleman animations; a sarissa mustn't leave it behind). Stance `auto`: hoplon -> `spear_shield` (indiangfx's set; same 28-bone skeleton), dory/sarissa -> `polearm_twohanded` (the western halberd set the test-7 dory used), xiphos -> `polearm_onehanded`, nothing in hand -> base; or named. A stance edits the retextured pdxmesh in place or adds one on the vanilla .mesh with every other animation id restated. A crew slot gives the gun crew its own entity (a copy of the base infantry, the gunman repointed); its pdxmesh is the infantry's when they move alike, else `hr_<set>_crew_n_mesh`. Built meshes are cached per session (Blender runs only for changed parts). Rules: `loadout` (part entity/pdxmesh/.mesh agree, shader included; each part on its kind's bone only; hand weapons have their grip inside the mesh; a PdxMeshColor part's spec map has a mask; crew = its artillery's gunman; stance in the pdxmesh; warnings: a shield without `spear_shield`, a weapon part with the base's item still in the left hand), plus `part_mesh`, `attach_bones`, `naming` (part and crew names). CLI `--loadout`, `--blender`.
+6. **Done.** GUI Parts screen (`gui/parts_page.py`, between Textures and Validate): tier, body (infantry/rider/crew; "dress the gun crew apart"), stance; one box per bone with the kind, its params ("auto" = default, fitted), zone colours (default / fixed / unit colour) and the hoplon's blazon; fit preview; load/save.
+7. **In-game test 8 — STAGED** (2026-10-15; HDA / `macedonian_test`, `build/test8/loadout.json` + `blazon_R.png`, unit colours blue 40 60 160 / yellow 220 190 40 / black 20 20 20, test sprite techs 2 3 4; staged in `build/test8/stage`, checklist `build/test8/checklist.txt`; validator 0 errors, 0 warnings). Every tier dressed differently:
+   - T1 hoplite: dory + hoplon (blue face) + red crest, `spear_shield`; crew apart with a yellow crest and the halberd; rider xiphos (point down) + the shared crest.
+   - T2 phalangite: sarissa + black transverse crest, `polearm_twohanded` (replaces the musket and rifleman set); crew = the infantry; rider dory (point down).
+   - T3: dory + off-white hoplon with the "R" blazon, `spear_shield`; rider xiphos point up.
+   - T4: xiphos + blue crest, `polearm_onehanded`; crew apart with a black hoplon only (`hr_macedonian_test_crew_4_mesh`, `spear_shield`); rider plain (vanilla sabre).
+   - **UNVERIFIED, decided by test 8:** riders' weapon orientation (down vs up, T1/T2 vs T3); whether a blazon reads the right way round in game (Blender shows it correct); PdxMeshColor on our static shield; `spear_shield` and `polearm_onehanded` on western bodies; a separate crew entity with its own stance; the crest on tier 2-4 hats.
 8. AI backend (TripoSG local, Tripo API opt-in).
+
+**Removed:** the spike's `test-mod --parts` / GUI "Parts spike" (`build_parts_test`); the normal test mod with `--loadout` replaces it.
 - Headless import/export, kitbash of pre-weighted accessories, thumbnail rendering for GUI preview.
 - Import one vanilla infantry, horse + rider and artillery mesh via io_pdx_mesh; record **bone parenting** into `base_models.json` (scanner or a Blender job).
 

@@ -18,8 +18,7 @@ from eu4unitgen.core.project import (
     DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_blender_path, default_mod_dir,
 )
 from eu4unitgen.export.testmod import (
-    Suite, build_parts_test, build_suite, build_test_mod, build_texture_test, parts_checklist, suite_checklist,
-    texture_checklist,
+    Suite, build_suite, build_test_mod, build_texture_test, loadout_checklist, suite_checklist, texture_checklist,
 )
 from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
 from eu4unitgen.library.scanner import GameFiles, Index, build_index, find_pack
@@ -73,6 +72,7 @@ class SetSpec:
     gfx_set_base: str | None = None
     unit_colours: Any = None  # common/country_colors color1-3: one triple for all tags or {tag: triple}
     texture_recipe: Any = None  # Phase 2: a core.recipe JSON file (Path) or a TextureRecipe
+    loadout: Any = None  # Phase 3: a core.loadout JSON file (Path) or a Loadout
 
     @staticmethod
     def parse_tags(text: str) -> list[str]:
@@ -99,6 +99,15 @@ class TestModResult:
     checklist: str = ""
     plans: list[ExportPlan] = field(default_factory=list)  # one per mod (the suite has two)
     info: str = ""  # the tag's 1444 facts, for the CLI
+
+
+@dataclass
+class PartsPreview:
+    image: Any  # PIL: front and side views of the body with its parts, then each part alone
+    path: Path  # where it was saved (<output>/part_previews/<set>/<tier>_<role>.png)
+    body: str  # the body's pdxmesh
+    parts: list[dict]  # {entity, kind, bone, params, fitted} per part
+    notes: list[str]
 
 
 @dataclass
@@ -151,9 +160,39 @@ def load_recipe(spec: "SetSpec"):
         raise SpecError(str(exc)) from exc
 
 
+class _Checked:
+    """A Blender runner whose failures surface as SpecError (shown on the form, not as a traceback)."""
+
+    def __init__(self, runner):
+        self.inner = runner
+
+    def run_job(self, *a, **kw):
+        from eu4unitgen.blender.runner import BlenderError
+
+        try:
+            return self.inner.run_job(*a, **kw)
+        except BlenderError as exc:
+            raise SpecError(str(exc)) from exc
+
+
+def load_loadout(spec: "SetSpec"):
+    """The spec's parts loadout: a Loadout as it is (the GUI's), or loaded from a file."""
+    from eu4unitgen.core.loadout import Loadout, LoadoutError
+
+    if spec.loadout is None or isinstance(spec.loadout, Loadout):
+        return spec.loadout
+    try:
+        return Loadout.load(spec.loadout)
+    except LoadoutError as exc:
+        raise SpecError(str(exc)) from exc
+
+
 class Session:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._runner = None
+        self._runner_for: Path | None = None
+        self.part_cache: dict[str, bytes] = {}  # built part meshes, by job entry (core.parts.build_parts)
         self._game: GameFiles | None = None
         self._idx: Index | None = None
         self._facts: dict[str, TagFacts] | None = None
@@ -239,17 +278,38 @@ class Session:
         return f.technology_group if f else None
 
     # ------------------------------------------------------------------ steps
+    def runner(self):
+        """The Blender runner (pinned version checked on first use); SpecError when Blender is unusable."""
+        from eu4unitgen.blender.runner import BlenderError, BlenderRunner
+
+        path = self.settings.blender_path
+        if self._runner is None or self._runner_for != path:
+            try:
+                self._runner = BlenderRunner(path, log_dir=self.settings.output_dir / "blender_logs")
+            except BlenderError as exc:
+                raise SpecError(str(exc)) from exc
+            self._runner_for = path
+        return _Checked(self._runner)
+
+    def _parts_args(self, spec: SetSpec) -> dict:
+        """generate()'s loadout arguments; Blender only when the loadout changes something."""
+        loadout = load_loadout(spec)
+        if loadout is None or not loadout.active():
+            return {}
+        return {"loadout": loadout, "runner": self.runner(), "part_cache": self.part_cache}
+
     def validate(self, spec: SetSpec) -> list[SetResult]:
-        """Generate in memory and validate; writes nothing."""
+        """Generate in memory and validate; writes nothing (parts are built in a temporary folder)."""
         game, idx = self.game()
         project = self.project()
         mod = project.mod_files()
         recipe = load_recipe(spec)
+        parts = self._parts_args(spec)
         try:
             out = []
             for nation in self.nations(spec):
                 try:
-                    generated = generate(project, nation, game, idx, mod, recipe=recipe)
+                    generated = generate(project, nation, game, idx, mod, recipe=recipe, **parts)
                 except GenerationError as exc:
                     raise SpecError(str(exc)) from exc
                 out.append(SetResult(nation, generated, validate(project, nation, generated, game, idx, mod)))
@@ -277,18 +337,18 @@ class Session:
 
     def build_test_mod(self, spec: SetSpec, *, suite: bool = False, sprite_techs: dict[int, int] | None = None,
                        rival_gfx: str = "asiangfx", clear: bool = False, textures: bool = False,
-                       write: str = "stage", fallback_tags: dict[str, str] | None = None,
-                       parts: bool = False) -> TestModResult:
+                       write: str = "stage", fallback_tags: dict[str, str] | None = None) -> TestModResult:
         """Build the test mod (or the two-variant suite, or the texture test). ``write``: "stage"
         (settings.stage_dir, for copying into the EU4 mod folder by hand), "apply" (straight into
         the EU4 mod folder) or "dry" (nothing written; plans returned). A shared set may have several
-        tags; the suite and the texture test take one."""
+        tags; the suite and the texture test take one. The plain test mod carries the spec's
+        texture recipe and parts loadout; with a loadout its checklist is in-game test 8's."""
         if write not in ("stage", "apply", "dry"):
             raise SpecError(f"write must be stage, apply or dry, not {write!r}")
-        if sum((suite, textures, parts)) > 1:
-            raise SpecError("pick one of the test suite, the texture test and the parts test")
-        if (suite or textures or parts) and len(spec.tags) != 1:
-            raise SpecError("the test suite, the texture test and the parts test take exactly one tag")
+        if suite and textures:
+            raise SpecError("pick either the test suite or the texture test, not both")
+        if (suite or textures) and len(spec.tags) != 1:
+            raise SpecError("the test suite and the texture test take exactly one tag")
         if not spec.tags:
             raise SpecError("enter at least one tag")
         game, idx = self.game()
@@ -313,16 +373,7 @@ class Session:
         checklist = ""
         built: Suite | None = None
         try:
-            if parts:
-                from eu4unitgen.blender.runner import BlenderError, BlenderRunner
-                try:
-                    runner = BlenderRunner(self.settings.blender_path,
-                                           log_dir=self.settings.output_dir / "blender_logs")
-                    pt = build_parts_test(project, nation, game, idx, mod_dir, runner, test_sprite_techs=sprite_techs)
-                except BlenderError as exc:
-                    raise SpecError(str(exc)) from exc
-                mods, checklist = [pt.mod], parts_checklist(pt, sprite_techs)
-            elif textures:
+            if textures:
                 tt = build_texture_test(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
                 mods, checklist = [tt.mod], texture_checklist(tt, sprite_techs)
             elif suite:
@@ -330,8 +381,11 @@ class Session:
                                     rival_gfx=rival_gfx, test_sprite_techs=sprite_techs, fallback_tags=fallback_tags)
                 mods = built.variants
             else:
-                mods = [build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs,
-                                       recipe=load_recipe(spec))]
+                tm = build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs,
+                                    recipe=load_recipe(spec), **self._parts_args(spec))
+                mods = [tm]
+                if tm.package.loadout is not None:
+                    checklist = loadout_checklist(tm.package, TEST_MOD_NAME, sprite_techs)
         except GenerationError as exc:
             raise SpecError(str(exc)) from exc
         reports = [(tm.plan.manifest_rel.split("/", 1)[0], tm.report) for tm in mods]
@@ -378,18 +432,23 @@ class Session:
             res = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role)
         except RecipeError as exc:
             raise SpecError(str(exc)) from exc
-        tag = spec.tags[0] if spec.tags else ""
-        own = spec.unit_colours.get(tag) if isinstance(spec.unit_colours, dict) else spec.unit_colours
-        colours = [tuple(c) for c in own] if own else self.unit_colours().get(tag)
-        notes = list(res.notes)
-        if colours is None:
-            colours = DEFAULT_UNIT_COLOURS
-            notes.append(f"{tag or 'the tag'} has no common/country_colors entry: previewed with the default "
-                         "unit colours (red/white/brown)")
+        colours, notes = self._preview_colours(spec)
+        notes = list(res.notes) + notes
         shader = b.shape["shader"]
         return TexturePreview(b.pdxmesh, shader, guide(b.diffuse, res.regions),
                               shade(b.diffuse, b.specular, colours, shader),
                               shade(res.diffuse or b.diffuse, res.specular or b.specular, colours, shader), notes)
+
+    def _preview_colours(self, spec: SetSpec) -> tuple[list, list[str]]:
+        """The colours previews tint country regions with: the set's unit colours, else the tag's
+        common/country_colors entry, else the file's template (with a note)."""
+        tag = spec.tags[0] if spec.tags else ""
+        own = spec.unit_colours.get(tag) if isinstance(spec.unit_colours, dict) else spec.unit_colours
+        colours = [tuple(c) for c in own] if own else self.unit_colours().get(tag)
+        if colours is None:
+            return DEFAULT_UNIT_COLOURS, [f"{tag or 'the tag'} has no common/country_colors entry: previewed with the "
+                                          "default unit colours (red/white/brown)"]
+        return colours, []
 
     def unit_colours(self) -> dict:
         """tag -> [color1, color2, color3] from common/country_colors (what units are tinted with)."""
@@ -422,6 +481,145 @@ class Session:
             img.save(path)
             out.append(path)
         return out
+
+    # ------------------------------------------------------------------ parts (Phase 3)
+    def _body(self, spec: SetSpec, tier: int):
+        """The body a tier's parts are fitted on: the base culture's infantry pdxmesh for that tier
+        (riders and crews use the same .mesh). -> (pdxmesh, mesh file, mesh bytes, BodyFit)."""
+        from eu4unitgen.core.fitting import measure_body
+        from eu4unitgen.core.generator import BaseChain
+
+        game, idx = self.game()
+        try:
+            name = BaseChain(idx, spec.base_gfx).slot("infantry", tier)["pdxmesh"]
+        except GenerationError as exc:
+            raise SpecError(str(exc)) from exc
+        file = idx.pdxmesh(name)["file"]
+        data = game.read(file)
+        if data is None:
+            raise SpecError(f"body mesh {file} not found in the EU4 install")
+        return name, file, data, measure_body(data, file)
+
+    def fitted(self, spec: SetSpec, tier: int, role: str, kind: str) -> dict:
+        """A part kind's values on this tier's body before any override: defaults, then fitting
+        (lengths scaled to the body, the crest measured on the head). Fast: no Blender."""
+        from eu4unitgen.core.parts import PartError, PartSpec, resolve
+
+        *_, fit = self._body(spec, tier)
+        try:
+            return resolve(PartSpec(kind), role, fit).params
+        except PartError as exc:
+            raise SpecError(str(exc)) from exc
+
+    def parts_preview(self, spec: SetSpec, tier: int, role: str, loadout) -> PartsPreview:
+        """Render one slot in background Blender: the tier's body in its bind pose with the slot's
+        parts on their bones (front and side), and each part alone. Country zones and the body are
+        tinted with the unit colours, as PdxMeshColor would. Saved to
+        <output>/part_previews/<set>/<tier>_<role>.png (it shows a base-game body: user output only)."""
+        import tempfile
+
+        from PIL import Image, ImageDraw
+
+        from eu4unitgen.core.fitting import rigid
+        from eu4unitgen.core.loadout import LoadoutError, RoleLoadout, check_slot
+        from eu4unitgen.core.naming import Naming
+        from eu4unitgen.core.parts import KINDS, PartBuild, PartError, build_parts, resolve
+        from eu4unitgen.core.retexture import base_textures
+        from eu4unitgen.textures.dds import DDSFormat, full_mip_count, write_dds
+        from eu4unitgen.textures.procedural import part_images
+        from eu4unitgen.textures.recolour import shade
+
+        game, idx = self.game()
+        naming = Naming(self.settings.prefix)
+        set_name = spec.set_name or (spec.tags[0].lower() if spec.tags else "")
+        slot = loadout.slots.get((tier, role))
+        notes: list[str] = []
+        if slot is None and role == "crew":
+            slot = loadout.slots.get((tier, "infantry"))
+            notes.append("no crew slot: the gun crew is the infantry entity, shown with the infantry's parts")
+        slot = slot or RoleLoadout()
+        try:
+            check_slot(tier, role, slot)
+        except LoadoutError as exc:
+            raise SpecError(str(exc)) from exc
+        body_name, body_file, body_data, fit = self._body(spec, tier)
+        notes += fit.notes
+        colours, more = self._preview_colours(spec)
+        notes += more
+        builds = []
+        try:
+            for spec_part in slot.parts:
+                part = resolve(spec_part, role, fit)
+                blazon = loadout.image(spec_part.blazon) if spec_part.blazon else None
+                builds.append(PartBuild(naming.part(set_name, spec_part.kind, tier, role), tier, part, blazon))
+        except (PartError, LoadoutError) as exc:
+            raise SpecError(str(exc)) from exc
+        built = build_parts(self.runner(), naming, set_name, builds, self.settings.entity_version, self.part_cache)
+        skeleton = self._skeleton(body_data)
+
+        def dds(img) -> bytes:
+            w, h = img.size
+            return write_dds(img.convert("RGBA"), DDSFormat("DXT1", w, h, full_mip_count(w, h)))
+
+        with tempfile.TemporaryDirectory(prefix="eu4unitgen_preview_") as tmp:
+            folder = Path(tmp)
+            body_path = folder / Path(body_file).name
+            body_path.write_bytes(body_data)
+            try:
+                bt = base_textures(body_name, game, idx)
+                (folder / bt.shape["diffuse"]).write_bytes(
+                    dds(shade(bt.diffuse, bt.specular, colours, bt.shape["shader"])))
+            except GenerationError as exc:
+                notes.append(f"body untextured in the preview: {exc}")
+            parts_args = []
+            for b in builds:
+                k = KINDS[b.part.kind]
+                imgs = part_images(b.part.zones, k.layout, b.blazon, int(b.part.params.get("blazon_rotate", 0)),
+                                   b.part.params.get("blazon_mirror") == "yes")
+                diffuse = shade(imgs["diffuse"], imgs["specular"], colours, b.part.shader)
+                tex = naming.part_texture(set_name, b.part.kind, tier, "diffuse", role)
+                (folder / tex).write_bytes(dds(diffuse))
+                mesh_path = folder / f"{b.name}.mesh"
+                mesh_path.write_bytes(built.raw_meshes[b.name])
+                bind = (skeleton.get(b.part.bone) or {}).get("bind")
+                if bind is None:
+                    notes.append(f"{body_file} has no {b.part.bone} bone: {b.part.kind} shown at the origin")
+                    bind = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]
+                bind, scaled = rigid(bind)
+                if scaled:
+                    notes.append(f"{body_file}: {b.part.bone}'s bind pose is scaled; the preview uses its rotation "
+                                 "(the game animates from the .anim)")
+                parts_args.append({"name": b.name, "mesh": str(mesh_path), "matrix": list(bind) + [0, 0, 0, 1]})
+            res = self.runner().run_job("render_parts", {"body": str(body_path), "parts": parts_args,
+                                                         "views": ["front", "side"], "size": 360,
+                                                         "thumbs": bool(parts_args), "out_dir": tmp}, timeout=300)
+            views = [Image.open(res.result["views"][v]).convert("RGB") for v in ("front", "side")]
+            thumbs = [(n, Image.open(path).convert("RGB")) for n, path in res.result.get("thumbs", {}).items()]
+            for img in views + [t for _, t in thumbs]:
+                img.load()
+        thumb = 150
+        sheet = Image.new("RGB", (720, 360 + (thumb + 20 if thumbs else 0)), (40, 40, 42))
+        sheet.paste(views[0], (0, 0))
+        sheet.paste(views[1], (360, 0))
+        draw = ImageDraw.Draw(sheet)
+        draw.text((6, 4), f"tier {tier} {role}: front", fill=(230, 230, 230))
+        draw.text((366, 4), "side (left, shield side)", fill=(230, 230, 230))
+        for i, (name, img) in enumerate(thumbs[:4]):
+            x = i * (thumb + 30)
+            sheet.paste(img.resize((thumb, thumb)), (x, 360 + 18))
+            draw.text((x + 2, 362), name.removeprefix(f"{naming.prefix}{set_name}_"), fill=(230, 230, 230))
+        out = self.settings.output_dir / naming.part_preview_dir(set_name) / naming.part_preview(tier, role)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        sheet.save(out)
+        parts = [{"entity": b.name, "kind": b.part.kind, "bone": b.part.bone, "params": b.part.params,
+                  "fitted": b.part.fitted, "shader": b.part.shader} for b in builds]
+        return PartsPreview(sheet, out, body_name, parts, notes)
+
+    @staticmethod
+    def _skeleton(body_data: bytes) -> dict:
+        from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
+
+        return summarize_mesh(parse_pdx_mesh(body_data))["skeleton"]
 
     # ------------------------------------------------------------------ Blender (Phase 2 step 8)
     def check_blender(self) -> dict:

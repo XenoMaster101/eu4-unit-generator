@@ -33,14 +33,15 @@ in the repo folder: `pythonw` is the windowless Python, so no console opens. Err
 `%LOCALAPPDATA%\eu4unitgen\gui.log` and pop up in a message box. Options: `-Name "..."`, `-Folder <path>`.
 In Explorer you can also right-click the script → *Run with PowerShell*.
 
-The wizard has six screens, left to right:
+The wizard has seven screens, left to right:
 
 1. **Settings**: your EU4 install folder (pre-filled from the `EU4_PATH` environment variable), the output folder, optionally your mod folder for collision checks, the test-mod staging folder, and Blender (pinned to 4.2.23 LTS with io_pdx_mesh 0.91; used from Phase 2 on, only as a background process). Press **Load EU4 install**, then tick the DLC you own.
 2. **Unit set**: tag(s) (several tags share one set and one sprite pack; then name the set), set name, graphical culture (pick one or type a new one such as `hellenicgfx`), the vanilla culture to copy units from, adjective, map colour, and **unit colours** (primary/secondary/tertiary: what the game tints uniforms with, from `common/country_colors`; INTEGRATION.md gives the entry to merge).
 3. **Textures** (optional): a texture recipe, one slot at a time (tier 1–4 × infantry/horse/cannon; infantry also dresses the rider and the gun crew). Protect skin/metal, recolour from a reference image's palette, recolour cloth, overlay a pattern, paint country-colour masks, set gloss. **Preview slot** shows the base and the result tinted the way the game tints them; **Export painting guide** writes PNGs to paint your own masks over. Tick "Use a texture recipe" so Validate/Generate/Test mod use it; Save/Load keeps it as a `.json` file.
-4. **Validate**: runs every validator rule and lists errors, warnings and notes.
-5. **Generate**: writes the drop-in package to `<output>/<set>/` and shows its files and `INTEGRATION.md` (the lines you merge by hand). **Open output folder** opens it in Explorer/your file manager.
-6. **Test mod**: builds a throwaway test mod (or the two-launch in-game test suite, or the texture test) into the staging folder, default `build\test_mod`. **Open staging folder**, then copy its contents into your EU4 `mod` folder.
+4. **Parts** (optional): a parts loadout, one slot at a time (tier 1–4 × infantry/rider/crew). Per bone: a weapon in the right hand (dory, sarissa, xiphos), a hoplon in the left, a crest on the head, each with its sizes (blank = "auto": the default, fitted to that tier's body) and colours (fixed, or a unit colour); the hoplon takes an optional blazon PNG. Stance picks the animation set (auto: shield → spear-and-shield, spear → two-handed, sword → one-handed). The gun crew is the infantry unless you dress it apart. **Preview slot (Blender)** renders the body with its parts, front and side, plus each part. Tick "Use a parts loadout" so Validate/Generate/Test mod use it (they then run Blender in the background to build the parts); Save/Load keeps it as a `.json` file.
+5. **Validate**: runs every validator rule and lists errors, warnings and notes.
+6. **Generate**: writes the drop-in package to `<output>/<set>/` and shows its files and `INTEGRATION.md` (the lines you merge by hand). **Open output folder** opens it in Explorer/your file manager.
+7. **Test mod**: builds a throwaway test mod (or the two-launch in-game test suite, or the texture test) into the staging folder, default `build\test_mod`. With a parts loadout it prints the in-game parts checklist. **Open staging folder**, then copy its contents into your EU4 `mod` folder.
 
 Settings are remembered between runs. Nothing is ever written into the EU4 install or your mod folder.
 
@@ -54,6 +55,8 @@ python -m eu4unitgen.cli pick-test-tag                              # tags no sp
 python -m eu4unitgen.cli test-mod --tag HDA --gfx hellenicgfx --stage-dir build/test_mod
 python -m eu4unitgen.cli test-mod --textures --tag HDA --gfx hellenicgfx --set macedonian_test --test-sprite-techs 2 3 4 --stage-dir build/test_mod
 ```
+
+`--loadout loadout.json` (on `generate`, `test-mod` and `parts-preview`) dresses the set with procedural parts built in background Blender; the format is described in `src/eu4unitgen/core/loadout.py`. `parts-preview --tier 1 --role infantry` renders one slot to `output/part_previews/<set>/`.
 
 `--texture-recipe recipe.json` (on `generate` and `test-mod`) retextures the set; the recipe format is described in `src/eu4unitgen/core/recipe.py`. `--textures` builds the texture test (Phase 2): tier 1 retextured through a `meshsettings` texture override, with a checklist. In the GUI: Test mod → "Texture test".
 

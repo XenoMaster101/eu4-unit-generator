@@ -336,7 +336,7 @@ def _issue_tree() -> QTreeWidget:
 # --------------------------------------------------------------------------- validate
 
 class ValidatePage(Page):
-    title = "4. Validate"
+    title = "5. Validate"
 
     def __init__(self, window):
         super().__init__(window)
@@ -357,7 +357,7 @@ class ValidatePage(Page):
 # --------------------------------------------------------------------------- generate
 
 class GeneratePage(Page):
-    title = "5. Generate"
+    title = "6. Generate"
 
     def __init__(self, window):
         super().__init__(window)
@@ -421,7 +421,7 @@ class GeneratePage(Page):
 # --------------------------------------------------------------------------- test mod
 
 class TestModPage(Page):
-    title = "6. Test mod"
+    title = "7. Test mod"
 
     def __init__(self, window):
         super().__init__(window)
@@ -430,10 +430,9 @@ class TestModPage(Page):
         self.textures = QCheckBox("Texture test (tier 1 retextured through meshsettings)")
         self.suite.toggled.connect(lambda on: on and self.textures.setChecked(False))
         self.textures.toggled.connect(lambda on: on and self.suite.setChecked(False))
-        self.parts = QCheckBox("Parts spike (tier-1 dory + crest on the head bone; runs Blender)")
-        for box in (self.suite, self.textures, self.parts):
-            box.toggled.connect(lambda on, b=box: on and [o.setChecked(False) for o in
-                                                          (self.suite, self.textures, self.parts) if o is not b])
+        self.plain_note = QLabel("Neither ticked: the plain test mod, with the set's texture recipe and parts "
+                                 "loadout (with a loadout, the checklist is in-game test 8's; Blender builds the parts).")
+        self.plain_note.setWordWrap(True)
         self.rival = QComboBox()
         self.rival.addItem("asiangfx")
         self.sprites_on = QCheckBox("Move sprite tiers 2-4 to early MIL techs (test only)")
@@ -453,7 +452,7 @@ class TestModPage(Page):
         self.clear.setChecked(True)
         form.addRow(self.suite)
         form.addRow(self.textures)
-        form.addRow(self.parts)
+        form.addRow(self.plain_note)
         form.addRow("Rival pack copies", self.rival)
         form.addRow(srow)
         form.addRow(self.clear)
@@ -472,7 +471,7 @@ class TestModPage(Page):
         self.issues = _issue_tree()
         self.checklist = QPlainTextEdit()
         self.checklist.setReadOnly(True)
-        self.checklist.setPlaceholderText("The test suite's or texture test's checklist appears here.")
+        self.checklist.setPlaceholderText("The test suite's, texture test's or parts test's checklist appears here.")
         split.addWidget(self.issues)
         split.addWidget(self.checklist)
         self.layout_.addWidget(split, 1)
@@ -485,8 +484,7 @@ class TestModPage(Page):
     def options(self) -> dict:
         techs = dict(zip((2, 3, 4), (b.value() for b in self.sprite_techs))) if self.sprites_on.isChecked() else None
         return {"suite": self.suite.isChecked(), "sprite_techs": techs, "rival_gfx": self.rival.currentText(),
-                "clear": self.clear.isChecked(), "textures": self.textures.isChecked(),
-                "parts": self.parts.isChecked()}
+                "clear": self.clear.isChecked(), "textures": self.textures.isChecked()}
 
     def fill(self, bases: list[str]) -> None:
         keep = self.rival.currentText()

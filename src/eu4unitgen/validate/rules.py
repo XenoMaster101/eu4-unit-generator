@@ -12,7 +12,7 @@ from pathlib import PurePosixPath
 from typing import Callable
 
 from eu4unitgen.core.generator import BINARY_SUFFIXES, SNIPPET, GeneratedSet, tag_trigger
-from eu4unitgen.core.naming import PART_KINDS, TIERS, UNIT_TYPES, Naming
+from eu4unitgen.core.naming import LOADOUT_ROLES, PART_KINDS, TIERS, UNIT_TYPES, Naming
 from eu4unitgen.core.nation import MANEUVER, Nation
 from eu4unitgen.core.project import Project
 from eu4unitgen.library.tags import TagFacts, apply_history, coverage, culture_groups
@@ -307,6 +307,97 @@ def part_mesh(ctx: Context) -> list[Issue]:
     return out
 
 
+@rule("loadout")
+def loadout(ctx: Context) -> list[Issue]:
+    """A loadout's parts, crews and stances (core.loadout): each part's entity, pdxmesh and .mesh
+    are generated and agree (shader included); it hangs on its kind's bone and nowhere else; hand
+    weapons have their grip at the origin; a country-coloured part's spec map carries the mask;
+    a shield-bearer uses the spear_shield set; a crew entity is the gunman of its artillery; a
+    stance is in the pdxmesh."""
+    from eu4unitgen.core.loadout import STANCE_TYPES
+    from eu4unitgen.core.parts import KINDS
+    from eu4unitgen.textures.dds import DDSError, read_dds
+
+    res = ctx.generated.loadout
+    if res is None:
+        return []
+    w, out = ctx.world, []
+    ents = ctx.gen_entities()
+    hung: dict[str, set[str]] = {}  # part entity -> bones it hangs on
+    for name in ents:
+        for a in w.resolve(name, "attach") or []:
+            for bone, target in a.items():
+                if bone != "name":
+                    hung.setdefault(target, set()).add(bone)
+    for r in res.parts:
+        rec = ents.get(r.entity)
+        if rec is None:
+            out.append(Issue(ERROR, "loadout", f"part entity {r.entity} wasn't generated", subject=r.entity))
+            continue
+        where = rec["defined_in"]
+        pdx_name = w.resolve(r.entity, "pdxmesh") or ""
+        pdx = ctx.gen_defs("pdxmeshes").get(pdx_name)
+        if pdx is None or (pdx.get("file") or "").lower() != r.mesh_file.lower():
+            out.append(Issue(ERROR, "loadout", f"{r.entity}: pdxmesh {pdx_name!r} isn't a generated pdxmesh on "
+                                               f"{r.mesh_file}", where, r.entity))
+            continue
+        mesh = ctx.generated.files.get(r.mesh_file)
+        if mesh is None:
+            out.append(Issue(ERROR, "loadout", f"{r.entity}: {r.mesh_file} wasn't generated", where, r.entity))
+            continue
+        summary = w.mesh_summary(r.mesh_file) or {}
+        shapes = summary.get("shapes", [])
+        if [sh.get("shader") for sh in shapes] != [r.shader]:
+            out.append(Issue(ERROR, "loadout", f"{r.entity}: mesh shader {[sh.get('shader') for sh in shapes]} "
+                                               f"isn't the part's {r.shader}", r.mesh_file, r.entity))
+        bones = hung.get(r.entity, set())
+        if not bones:
+            out.append(Issue(WARNING, "loadout", f"{r.entity}: no generated entity attaches it", where, r.entity))
+        elif {b.lower() for b in bones} != {r.bone.lower()}:
+            out.append(Issue(ERROR, "loadout", f"{r.entity}: a {r.kind} belongs on {r.bone}, but hangs on "
+                                               f"{sorted(bones)}", where, r.entity))
+        box = summary.get("aabb")
+        if KINDS[r.kind].bone == "Right_hand_node" and box and not box["min"][2] < 0 < box["max"][2]:
+            out.append(Issue(ERROR, "loadout", f"{r.entity}: the grip (z = 0) isn't inside the weapon "
+                                               f"(z {box['min'][2]:.2f}..{box['max'][2]:.2f})", r.mesh_file, r.entity))
+        if r.shader == "PdxMeshColor" and shapes and shapes[0].get("specular"):
+            spec_path = f"{PurePosixPath(r.mesh_file).parent}/{shapes[0]['specular']}"
+            spec = ctx.generated.files.get(spec_path)
+            try:
+                rgb_max = max(hi for _, hi in read_dds(spec.data).convert("RGB").getextrema()) if spec else 0
+            except (DDSError, OSError, ValueError):
+                rgb_max = 0
+            if rgb_max == 0:
+                out.append(Issue(ERROR, "loadout", f"{r.entity}: PdxMeshColor, but its spec map has no country-colour "
+                                                   "mask (RGB all 0)", spec_path, r.entity))
+    for crew, art in sorted(res.crews.items()):
+        gunmen = [a.get("infantry_node") for a in w.resolve(art, "attach") or [] if a.get("name") == "gunman"]
+        if gunmen != [crew]:
+            out.append(Issue(ERROR, "loadout", f"{crew}: {art}'s gunman attaches {gunmen}, not this crew", subject=crew))
+    for entity, (stance, pdx_name) in sorted(res.stances.items()):
+        anims = (w.pdxmesh(w.resolve(entity, "pdxmesh") or "") or {}).get("animations") or {}
+        if w.resolve(entity, "pdxmesh") != pdx_name or any(anims.get(i) != t for i, t in STANCE_TYPES[stance].items()):
+            out.append(Issue(ERROR, "loadout", f"{entity}: stance {stance} isn't in its pdxmesh "
+                                               f"{w.resolve(entity, 'pdxmesh')!r}", subject=entity))
+    weapons = {r.entity for r in res.parts if r.bone == "Right_hand_node"}
+    ours = {r.entity for r in res.parts}
+    for name in sorted(ents):
+        nodes = {b.lower(): t for a in w.resolve(name, "attach") or [] for b, t in a.items() if b != "name"}
+        if nodes.get("right_hand_node") in weapons and nodes.get("left_hand_node") not in (None, *ours):
+            out.append(Issue(WARNING, "loadout", f"{name} carries {nodes['right_hand_node']} and still the base's "
+                                                 f"{nodes['left_hand_node']} in the left hand", subject=name))
+    shields = {r.entity for r in res.parts if r.kind == "hoplon"}
+    for name in sorted(ents):
+        carried = {t for a in w.resolve(name, "attach") or [] for b, t in a.items() if b != "name"} & shields
+        if carried:
+            anims = (w.pdxmesh(w.resolve(name, "pdxmesh") or "") or {}).get("animations") or {}
+            if any(anims.get(i) != t for i, t in STANCE_TYPES["spear_shield"].items()):
+                out.append(Issue(WARNING, "loadout", f"{name} carries {sorted(carried)} but doesn't use the "
+                                                     "spear_shield animations: the left arm may not hold it up",
+                                 subject=name))
+    return out
+
+
 # --------------------------------------------------------------------------- naming
 
 @rule("naming")
@@ -322,7 +413,9 @@ def naming(ctx: Context) -> list[Issue]:
     names = set(ctx.gen_entities())
     # Optional: an owner's own cannon entity, made only when its cannon is retextured (Phase 2).
     optional = {n.cannon_entity(owner, t) for owner in (tag, gfx) for t in TIERS}
-    optional |= {n.part(ctx.nation.set_name, kind, t) for kind in PART_KINDS for t in TIERS}  # Phase 3 parts
+    optional |= {n.part(ctx.nation.set_name, kind, t, role) for kind in PART_KINDS for t in TIERS
+                 for role in LOADOUT_ROLES}  # Phase 3 parts
+    optional |= {n.crew_entity(tag, t) for t in TIERS}  # a loadout's own gun crew
     for name in sorted(names - expected - optional):
         out.append(Issue(ERROR, "naming", f"unexpected generated entity name {name!r}", subject=name))
     for name in sorted(expected - names):

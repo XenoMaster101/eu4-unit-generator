@@ -6,6 +6,8 @@
     python -m eu4unitgen.cli test-mod --tag HDA --gfx hellenicgfx --set macedonian_test [--stage-dir DIR]
     python -m eu4unitgen.cli test-mod --textures --tag HDA --gfx hellenicgfx --set macedonian_test --test-sprite-techs 2 3 4
     python -m eu4unitgen.cli test-mod --suite --tag HDA --gfx hellenicgfx --gfx-set-base muslimgfx [--stage-dir DIR]
+    python -m eu4unitgen.cli test-mod --tag HDA --gfx hellenicgfx --set macedonian_test --loadout loadout.json --stage-dir DIR
+    python -m eu4unitgen.cli parts-preview --tag HDA --gfx hellenicgfx --set macedonian_test --loadout loadout.json --tier 1 --role infantry
 
 generate and test-mod run through export/pipeline.py, the same code path as the GUI.
 generate writes a drop-in package to <out>/<set>/ (new files + INTEGRATION.md) and never
@@ -55,6 +57,8 @@ def _set_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tag-unit-colours", nargs=10, action="append", metavar="X",
                    help="unit colours for one tag: TAG R G B R G B R G B (repeat per tag; overrides --unit-colours)")
     p.add_argument("--texture-recipe", type=Path, help="Phase 2: texture recipe JSON (retextures the TAG set)")
+    p.add_argument("--loadout", type=Path, help="Phase 3: parts loadout JSON (procedural parts; runs Blender)")
+    p.add_argument("--blender", type=Path, help="Blender executable (default: the pinned 4.2 LTS path)")
 
 
 def _triple(v: list[int]) -> tuple:
@@ -73,6 +77,8 @@ def _unit_colours(args: argparse.Namespace):
 
 
 def _settings(args: argparse.Namespace, **kw) -> Settings:
+    if getattr(args, "blender", None):
+        kw.setdefault("blender_path", args.blender)
     return Settings(eu4_path=args.eu4, owned_dlc=list(args.owned_dlc), prefix=args.prefix,
                     entity_version=args.version, tag_pack_order=args.pack_order,
                     mod_dir=getattr(args, "mod_dir", None), **kw)
@@ -82,7 +88,7 @@ def _spec(args: argparse.Namespace) -> SetSpec:
     return SetSpec(tags=list(args.tags), gfx=args.gfx, set_name=args.set_name, base_gfx=args.base_gfx, name=args.name,
                    adjective=args.adjective, colour=tuple(args.colour) if args.colour else None,
                    tech_group=args.tech_group or "", gfx_set_base=getattr(args, "gfx_set_base", None),
-                   unit_colours=_unit_colours(args), texture_recipe=args.texture_recipe)
+                   unit_colours=_unit_colours(args), texture_recipe=args.texture_recipe, loadout=args.loadout)
 
 
 def _print_plan(label: str | None, report: Report, plan: ExportPlan, args: argparse.Namespace, suffix: str = "") -> None:
@@ -154,12 +160,10 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
     """The test mod, the in-game test suite (--suite) or the texture test (--textures), through
     export/pipeline.py. A dry run unless --apply (into the EU4 mod directory) or --stage-dir."""
     write = "apply" if args.apply else "stage" if args.stage_dir else "dry"
-    session = Session(_settings(args, stage_dir=args.stage_dir or Path("build") / "test_mod",
-                                **({"blender_path": args.blender} if args.blender else {})))
+    session = Session(_settings(args, stage_dir=args.stage_dir or Path("build") / "test_mod"))
     techs = dict(zip((2, 3, 4), args.test_sprite_techs)) if args.test_sprite_techs else None
     try:
-        res = session.build_test_mod(_spec(args), suite=args.suite, textures=args.textures, parts=args.parts,
-                                     sprite_techs=techs,
+        res = session.build_test_mod(_spec(args), suite=args.suite, textures=args.textures, sprite_techs=techs,
                                      rival_gfx=args.rival_gfx, write=write,
                                      fallback_tags=dict(zip("abc", args.fallback_tags)) if args.fallback_tags else None)
     except ExportError as exc:
@@ -184,6 +188,29 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
         print()
         print(res.checklist)
     return code
+
+
+def cmd_parts_preview(args: argparse.Namespace) -> int:
+    """Render one loadout slot (a body with its parts, front and side, and each part alone) in
+    background Blender, to <out>/part_previews/<set>/<tier>_<role>.png."""
+    from eu4unitgen.export.pipeline import load_loadout
+
+    session = Session(_settings(args, output_dir=args.out))
+    try:
+        spec = _spec(args)
+        loadout = load_loadout(spec)
+        if loadout is None:
+            raise SpecError("pass --loadout")
+        pv = session.parts_preview(spec, args.tier, args.role, loadout)
+    finally:
+        session.close()
+    print(f"body {pv.body}; preview written to {pv.path}")
+    for part in pv.parts:
+        fitted = ", ".join(f"{k} {v}" for k, v in sorted(part["fitted"].items()))
+        print(f"  {part['entity']} on {part['bone']} ({part['shader']})" + (f"; fitted: {fitted}" if fitted else ""))
+    for n in pv.notes:
+        print(f"NOTE: {n}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -222,10 +249,6 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--textures", action="store_true",
                    help="build the texture test instead (eu4unitgen_test_textures): tier 1 retextured through "
                         "pdxmesh meshsettings, and print the checklist")
-    t.add_argument("--parts", action="store_true",
-                   help="build the procedural-parts spike instead (eu4unitgen_test_parts): a dory on Right_hand_node "
-                        "and a crest on the head bone of tier-1 infantry, built in background Blender")
-    t.add_argument("--blender", type=Path, help="Blender executable (default: the pinned 4.2 LTS path)")
     t.add_argument("--fallback-tags", nargs=3, metavar=("A", "B", "C"),
                    help="suite: tags for fallback cases a, b, c (default: picked automatically)")
     t.add_argument("--rival-gfx", default="asiangfx", help="suite: vanilla set the rival priority pack lists")
@@ -234,17 +257,27 @@ def main(argv: list[str] | None = None) -> int:
                         "uses a different look here so case c can be told apart from a westerngfx fallback")
     t.set_defaults(func=cmd_test_mod)
 
+    v = sub.add_parser("parts-preview", help="render one loadout slot (body + parts) in background Blender")
+    _set_args(v)
+    _common(v)
+    v.add_argument("--tech-group", default=None, help=argparse.SUPPRESS)
+    v.add_argument("--tier", type=int, choices=(1, 2, 3, 4), required=True)
+    v.add_argument("--role", choices=("infantry", "rider", "crew"), default="infantry")
+    v.add_argument("--out", type=Path, default=Path("output"), help="output root; previews go to <out>/part_previews/")
+    v.set_defaults(func=cmd_parts_preview)
+
     args = ap.parse_args(argv)
     if getattr(args, "eu4", None) is None:
         project = Project(mod_root=Path("."))
         if project.eu4_path is None:
             ap.error("pass --eu4 or set EU4_PATH")
         args.eu4 = project.eu4_path
+    from eu4unitgen.core.loadout import LoadoutError
     from eu4unitgen.core.recipe import RecipeError
 
     try:
         return args.func(args)
-    except (GenerationError, RecipeError, SpecError) as exc:
+    except (GenerationError, RecipeError, LoadoutError, SpecError) as exc:
         print(f"error: {exc}")
         return 1
 

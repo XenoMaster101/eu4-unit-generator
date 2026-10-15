@@ -15,6 +15,7 @@ TIERS = (1, 2, 3, 4)
 MESH_ROLES = ("infantry", "horse", "cannon")  # retexturable meshes per tier; the rider uses the infantry's
 TEXTURE_KINDS = ("diffuse", "normal", "specular")
 PART_KINDS = ("dory", "sarissa", "xiphos", "hoplon", "crest")  # procedural rigid parts (Phase 3)
+LOADOUT_ROLES = ("infantry", "rider", "crew")  # bodies a loadout dresses (Phase 3)
 
 _TAG = re.compile(r"^[A-Z][A-Z0-9]{2}$")
 _GFX = re.compile(r"^[a-z][a-z0-9_]*gfx$")
@@ -119,28 +120,48 @@ class Naming:
         return f"{self.prefix}{check_set_name(set_name)}_{check_identifier(role, 'role')}_{_check_tier(tier)}_{kind}.dds"
 
     # ------------------------------------------------------------------ procedural parts (Phase 3)
+    def crew_entity(self, owner: str, tier: int) -> str:
+        """TAG_ARTILLERY_1_crew: a gun crew dressed apart from the infantry (a loadout's crew slot).
+        Without one the crew is the infantry entity itself (SPEC §5)."""
+        return f"{self.unit_entity(owner, 'artillery', tier)}_crew"
+
     def part_dir(self, set_name: str) -> str:
         """The set's own model folder: its part meshes and their textures (bare names resolve here)."""
         return f"gfx/models/units/{self.prefix}{check_set_name(set_name)}"
 
-    def part(self, set_name: str, kind: str, tier: int) -> str:
-        """hr_mac_dory_1: the part's entity name, and the stem of its mesh and textures."""
+    def part(self, set_name: str, kind: str, tier: int, role: str = "infantry") -> str:
+        """hr_mac_dory_1 (infantry), hr_mac_crest_rider_1, hr_mac_crest_crew_1: the part's entity
+        name, and the stem of its pdxmesh, mesh and textures. The role goes before the tier: names
+        ending in _rider/_crew/_cannon are the unit entities' (validator rules key on them)."""
         if kind not in PART_KINDS:
             raise NamingError(f"part kind {kind!r} must be one of {PART_KINDS}")
-        return f"{self.prefix}{check_set_name(set_name)}_{kind}_{_check_tier(tier)}"
+        if role not in LOADOUT_ROLES:
+            raise NamingError(f"part role {role!r} must be one of {LOADOUT_ROLES}")
+        middle = "" if role == "infantry" else f"{role}_"
+        return f"{self.prefix}{check_set_name(set_name)}_{kind}_{middle}{_check_tier(tier)}"
 
-    def part_mesh_file(self, set_name: str, kind: str, tier: int) -> str:
-        return f"{self.part_dir(set_name)}/{self.part(set_name, kind, tier)}.mesh"
+    def part_pdxmesh(self, set_name: str, kind: str, tier: int, role: str = "infantry") -> str:
+        return f"{self.part(set_name, kind, tier, role)}_mesh"
 
-    def part_texture(self, set_name: str, kind: str, tier: int, tex: str) -> str:
+    def part_mesh_file(self, set_name: str, kind: str, tier: int, role: str = "infantry") -> str:
+        return f"{self.part_dir(set_name)}/{self.part(set_name, kind, tier, role)}.mesh"
+
+    def part_texture(self, set_name: str, kind: str, tier: int, tex: str, role: str = "infantry") -> str:
         if tex not in TEXTURE_KINDS:
             raise NamingError(f"texture kind {tex!r} must be one of {TEXTURE_KINDS}")
-        return f"{self.part(set_name, kind, tier)}_{tex}.dds"
+        return f"{self.part(set_name, kind, tier, role)}_{tex}.dds"
 
     @staticmethod
-    def parts_test_mod() -> str:
-        """eu4unitgen_test_parts: the procedural-part spike (SPEC §10 Phase 3, in-game test 7)."""
-        return f"{TEST_MOD_NAME}_parts"
+    def part_preview_dir(set_name: str) -> str:
+        """Fit previews (a body with its parts, rendered in Blender), under the output folder:
+        part_previews/mac. They show a base-game body, so user output only, never the repo."""
+        return f"part_previews/{check_set_name(set_name)}"
+
+    @staticmethod
+    def part_preview(tier: int, role: str) -> str:
+        if role not in LOADOUT_ROLES:
+            raise NamingError(f"part role {role!r} must be one of {LOADOUT_ROLES}")
+        return f"{_check_tier(tier)}_{role}.png"
 
     @staticmethod
     def texture_guide_dir(set_name: str) -> str:

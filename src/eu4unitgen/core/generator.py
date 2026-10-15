@@ -68,6 +68,7 @@ class GeneratedSet:
     notes: list[str] = field(default_factory=list)
     integration: "Integration | None" = None
     fixtures: "TestFixtures | None" = None  # in-game test suite only
+    loadout: "Any | None" = None  # core.loadout.LoadoutResult when the set carries procedural parts (Phase 3)
 
     def add(self, f: GeneratedFile) -> None:
         if f.path in self.files:
@@ -404,7 +405,8 @@ def patch_country(data: bytes, integ: Integration) -> bytes:
 # --------------------------------------------------------------------------- top level
 
 def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod: GameFiles | None = None,
-             test_sprite_techs: dict[int, int] | None = None, recipe=None) -> GeneratedSet:
+             test_sprite_techs: dict[int, int] | None = None, recipe=None, loadout=None, runner=None,
+             part_cache: dict | None = None) -> GeneratedSet:
     """Build every Phase 1 file for ``nation``. Reads vanilla through ``game``/``idx`` and, when
     given, the mod's current copies of shared files through ``mod``. Writes nothing.
 
@@ -412,7 +414,11 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
     {2: 2, 3: 3, 4: 4}, unlocks each tier's units there and all tier-1 units at MIL 1.
 
     ``recipe`` (a core.recipe.TextureRecipe, Phase 2) retextures the TAG set's slots through
-    pdxmesh meshsettings (core.retexture); the gfx-culture defaults stay on vanilla meshes."""
+    pdxmesh meshsettings (core.retexture); the gfx-culture defaults stay on vanilla meshes.
+
+    ``loadout`` (a core.loadout.Loadout, Phase 3) dresses the TAG set with procedural parts built
+    in background Blender through ``runner`` (blender.runner.BlenderRunner); ``part_cache`` keeps
+    built meshes between calls. The gfx-culture defaults stay undressed."""
     naming, version = project.naming, project.entity_version
     chain = BaseChain(idx, nation.base_gfx)
     if not nation.units:
@@ -428,14 +434,26 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
 
     # Entities: TAG set + gfx-culture defaults (SPEC §3: both, always).
     tag_entities = unit_entities(tag, chain, naming, version)
+    meshes: list[dict] = []
     if recipe is not None and recipe.active():
         from eu4unitgen.core.retexture import retexture_set
 
         meshes, textures, notes = retexture_set(naming, set_name, tag, tag_entities, recipe, chain, game, idx, version)
-        out.add(GeneratedFile(naming.pdxmesh_file(set_name), _utf8(render("pdxmeshes.gfx.j2", meshes=meshes))))
         for f in textures:
             out.add(f)
         out.notes += notes
+    if loadout is not None and loadout.active():
+        from eu4unitgen.core.loadout import apply_loadout
+
+        if runner is None:
+            raise GenerationError("a parts loadout needs Blender to build the parts (Settings: Blender path)")
+        out.loadout = apply_loadout(naming, set_name, tag, tag_entities, meshes, loadout, game, idx, version, runner,
+                                    part_cache)
+        for f in out.loadout.files:
+            out.add(f)
+        out.notes += out.loadout.notes
+    if meshes:
+        out.add(GeneratedFile(naming.pdxmesh_file(set_name), _utf8(render("pdxmeshes.gfx.j2", meshes=meshes))))
     out.add(GeneratedFile(naming.set_entities_file(set_name), _utf8(render(
         "entities.asset.j2", entities=tag_entities))))
     gfx_chain = BaseChain(idx, nation.gfx_set_base) if nation.gfx_set_base else chain

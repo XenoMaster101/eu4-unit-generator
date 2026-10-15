@@ -1,4 +1,4 @@
-"""Nation wizard: Settings -> Unit set -> Textures -> Validate -> Generate -> Test mod.
+"""Nation wizard: Settings -> Unit set -> Textures -> Parts -> Validate -> Generate -> Test mod.
 
 Thin by design (CLAUDE.md): every action builds Settings/SetSpec from the forms and calls
 export.pipeline.Session. Long steps (loading the install takes several seconds) run on a
@@ -15,14 +15,17 @@ from PySide6.QtCore import QObject, QRunnable, QSettings, QThreadPool, Signal
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QListWidget, QMainWindow, QStackedWidget, QWidget
 
 from eu4unitgen.core.generator import GenerationError
+from eu4unitgen.core.loadout import LoadoutError
 from eu4unitgen.core.naming import NamingError
+from eu4unitgen.core.parts import PartError
 from eu4unitgen.core.recipe import RecipeError
 from eu4unitgen.export.pipeline import Session, SetSpec, Settings, SpecError
 from eu4unitgen.export.writer import ExportError
 from eu4unitgen.gui.pages import GeneratePage, SettingsPage, TestModPage, UnitSetPage, ValidatePage
+from eu4unitgen.gui.parts_page import PartsPage
 from eu4unitgen.gui.textures_page import TexturesPage
 
-EXPECTED = (SpecError, ExportError, GenerationError, NamingError, RecipeError, OSError)
+EXPECTED = (SpecError, ExportError, GenerationError, NamingError, RecipeError, LoadoutError, PartError, OSError)
 KEYS = ("eu4_path", "output_dir", "mod_folder", "stage_dir", "mod_dir", "prefix", "blender_path")
 
 
@@ -62,10 +65,12 @@ class MainWindow(QMainWindow):
         self.settings_page = SettingsPage(self, self.session.settings)
         self.unit_page = UnitSetPage(self)
         self.textures_page = TexturesPage(self)
+        self.parts_page = PartsPage(self)
         self.validate_page = ValidatePage(self)
         self.generate_page = GeneratePage(self)
         self.test_page = TestModPage(self)
-        self.pages = [self.settings_page, self.unit_page, self.textures_page, self.validate_page, self.generate_page, self.test_page]
+        self.pages = [self.settings_page, self.unit_page, self.textures_page, self.parts_page, self.validate_page,
+                      self.generate_page, self.test_page]
         if store is not None:
             self.unit_page.tags.setText(str(store.value("tags", "")))
             self.unit_page.set_name.setText(str(store.value("set_name", "")))
@@ -79,6 +84,13 @@ class MainWindow(QMainWindow):
                 except RecipeError:
                     pass
                 self.textures_page.use.setChecked(str(store.value("use_texture_recipe", "")) == "true")
+            loadout = str(store.value("loadout", "") or "")
+            if loadout and Path(loadout).is_file():
+                try:
+                    self.parts_page.load_file(Path(loadout))
+                except LoadoutError:
+                    pass
+                self.parts_page.use.setChecked(str(store.value("use_loadout", "")) == "true")
 
         self.steps = QListWidget()
         self.steps.addItems([p.title for p in self.pages])
@@ -118,6 +130,8 @@ class MainWindow(QMainWindow):
                 self.store.setValue(k, v)
             self.store.setValue("texture_recipe", self.textures_page.recipe_path.text().strip())
             self.store.setValue("use_texture_recipe", "true" if self.textures_page.use.isChecked() else "false")
+            self.store.setValue("loadout", self.parts_page.loadout_path.text().strip())
+            self.store.setValue("use_loadout", "true" if self.parts_page.use.isChecked() else "false")
 
     def run(self, page, label: str, fn: Callable[[], Any], on_done: Callable[[Any], None]) -> None:
         """Run ``fn`` (off the GUI thread unless run_async is False), then ``on_done`` with its result.
@@ -175,10 +189,11 @@ class MainWindow(QMainWindow):
         self.run(self.settings_page, "Loading EU4 install", work, done)
 
     def current_spec(self, page) -> SetSpec | None:
-        """The unit-set form plus the texture recipe; a bad recipe form shows on ``page``."""
+        """The unit-set form plus the texture recipe and parts loadout; a bad form shows on ``page``."""
         spec = self.unit_page.spec()
         try:
             spec.texture_recipe = self.textures_page.recipe_for_spec()
+            spec.loadout = self.parts_page.loadout_for_spec()
         except SpecError as exc:
             page.show_message(str(exc), error=True)
             return None
@@ -228,6 +243,18 @@ class MainWindow(QMainWindow):
         base = page.base.text().strip() or None
         self.run(page, "Exporting painting guide",
                  lambda: self.session.export_texture_guide(spec, tier, role, base), page.show_guide)
+
+    def parts_preview(self) -> None:
+        self._sync_settings()
+        page = self.parts_page
+        spec = self.unit_page.spec()
+        try:
+            loadout = page.loadout_for_preview()
+        except SpecError as exc:
+            return page.show_message(str(exc), error=True)
+        tier, role = page.slot_key()
+        self.run(page, "Rendering parts preview", lambda: self.session.parts_preview(spec, tier, role, loadout),
+                 page.show_preview)
 
     def build_test_mod(self) -> None:
         self._sync_settings()

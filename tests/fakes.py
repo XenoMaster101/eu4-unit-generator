@@ -61,7 +61,7 @@ def make_dds(width: int, height: int, mips: int, fourcc: bytes = b"DXT1") -> byt
 
 # --------------------------------------------------------------------------- script text
 
-INF_BONES = ["root", "Left_hand_node", "Right_hand_node", "attach_back"]
+INF_BONES = ["root", "head", "Left_hand_node", "Right_hand_node", "attach_back"]
 HORSE_BONES = ["Root", "Saddle_Node"]
 STATES4 = "\n".join(f'\tstate = {{ name = "{s}" animation = "{s}" }}' for s in ("idle", "walk", "attack", "retreat"))
 HORSE_STATES = ('\tstate = { name = "idle" animation = "horse_idle" }\n\tstate = { name = "walk" animation = "horse_walk" }\n'
@@ -144,8 +144,10 @@ def _gfx() -> str:
     return "objectTypes = {\n" + "\n".join(lines) + "\n}\n"
 
 
+STANCE_ANIMS = tuple(f"{family}_{state}" for family in ("spear_shield", "polearm_onehanded", "polearm_twohanded")
+                     for state in ("idle", "moving", "attack"))  # the stance sets a loadout switches to (Phase 3)
 ANIMS = "\n".join(f'animation = {{ name = "{n}_animation" file = "{n}.anim" }}' for n in (
-    "inf_idle", "inf_walk", "inf_attack", "rider_idle", "horse_idle", "base_idle", "cannon_attack"))
+    "inf_idle", "inf_walk", "inf_attack", "rider_idle", "horse_idle", "base_idle", "cannon_attack", *STANCE_ANIMS))
 
 PACKS = """
 westerngfx_sprite_pack = {
@@ -213,7 +215,8 @@ def build_fake_install(root: Path) -> Path:
     _write(root, "gfx/entities/weapons.asset", WEAPONS)
     _write(root, "interface/assets/units.gfx", _gfx())
     _write(root, "gfx/models/Units/animation/animation.asset", ANIMS)
-    for n in ("inf_idle", "inf_walk", "inf_attack", "rider_idle", "horse_idle", "base_idle", "cannon_attack"):
+    for n in ("inf_idle", "inf_walk", "inf_attack", "rider_idle", "horse_idle", "base_idle", "cannon_attack",
+              *STANCE_ANIMS):
         _write(root, f"gfx/models/Units/animation/{n}.anim", b"")
     _write(root, "gfx/sprite_packs/+00_base_sprites.txt", PACKS)
     _write(root, "gfx/sprite_packs/+01_tst.txt",

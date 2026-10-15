@@ -32,7 +32,7 @@ def window(qapp, fake_install, tmp_path):
 
 def test_every_screen_loads(window):
     assert [window.steps.item(i).text() for i in range(window.steps.count())] == [
-        "1. Settings", "2. Unit set", "3. Textures", "4. Validate", "5. Generate", "6. Test mod"]
+        "1. Settings", "2. Unit set", "3. Textures", "4. Parts", "5. Validate", "6. Generate", "7. Test mod"]
     for i, page in enumerate(window.pages):
         window.steps.setCurrentRow(i)
         assert window.stack.currentWidget() is page
@@ -191,3 +191,61 @@ def test_no_console_errors_go_to_a_log(monkeypatch, tmp_path):
     assert app_mod.log_path() == tmp_path / "eu4unitgen" / "gui.log"
     assert "hello from pythonw" in app_mod.log_path().read_text(encoding="utf-8")
     sys.stderr.close()
+
+
+def _fake_blender(window, monkeypatch):
+    """Generate runs Blender for a loadout: swap in test_parts' fake runner."""
+    from test_parts import FakeRunner
+    runner = FakeRunner()
+    monkeypatch.setattr(window.session, "runner", lambda: runner)
+    return runner
+
+
+def test_parts_form_round_trip_and_crew_toggle(window, tmp_path):
+    page = window.parts_page
+    right, left, head = (page.boxes[b] for b in ("Right_hand_node", "Left_hand_node", "head"))
+    right.kind.setCurrentIndex(right.kind.findData("dory"))
+    right.params["tip"].setValue(18.0)
+    left.kind.setCurrentIndex(left.kind.findData("hoplon"))
+    left.zones["face"].set_value("country2")
+    head.kind.setCurrentIndex(head.kind.findData("crest"))
+    head.params["orientation"].setCurrentText("transverse")
+    page.role.setCurrentText("rider")  # stores 1/infantry
+    assert left.kind.findData("hoplon") == -1 and right.kind.findData("xiphos") >= 0  # no shields on riders
+    assert not page.stance.isEnabled()
+    page.role.setCurrentText("crew")
+    assert not right.isEnabled() and "gun crew is the infantry entity" in page.message.text()
+    page.crew_apart.setChecked(True)
+    assert right.isEnabled() and (1, "crew") in page.loadout.slots
+    page.role.setCurrentText("infantry")
+    assert right.kind_name() == "dory" and right.params["tip"].value() == 18.0
+    assert left.zones["face"].value() == "country2" and head.params["orientation"].currentText() == "transverse"
+    assert right.params["butt"].value() == right.params["butt"].minimum()  # untouched: auto
+    page.save_file(tmp_path / "loadout.json")
+    saved = (tmp_path / "loadout.json").read_text(encoding="utf-8")
+    assert '"tip": 18.0' in saved and '"1/crew"' in saved and '"butt"' not in saved
+    page._clear_slot()
+    assert right.kind_name() is None
+    page.load_file(tmp_path / "loadout.json")
+    assert right.kind_name() == "dory" and page.use.isChecked()
+    assert "1/infantry (dory, hoplon, crest)" in page.slots_label.text()
+
+
+def test_parts_loadout_used_by_generate_and_preview_button(window, tmp_path, monkeypatch):
+    runner = _fake_blender(window, monkeypatch)
+    window.unit_page.tags.setText("MAC")
+    page = window.parts_page
+    page.boxes["head"].kind.setCurrentIndex(page.boxes["head"].kind.findData("crest"))
+    page.use.setChecked(True)
+    window.generate_page.run.click()
+    assert "Wrote" in window.generate_page.message.text(), window.generate_page.message.text()
+    assert (tmp_path / "out" / "mac" / "gfx" / "models" / "units" / "hr_mac" / "hr_mac_crest_1.mesh").is_file()
+    assert runner.calls
+    calls = []
+    monkeypatch.setattr(window.session, "parts_preview", lambda spec, tier, role, lo: calls.append((tier, role)) or
+                        type("P", (), {"image": __import__("PIL.Image").Image.new("RGB", (720, 360)), "body": "generic_01",
+                                       "path": tmp_path / "p.png", "parts": [], "notes": ["n1"]})())
+    page.tier.setCurrentText("2")
+    page.preview_btn.click()
+    assert calls == [(2, "infantry")] and "Body generic_01" in page.message.text()
+    assert not page.preview.pixmap().isNull()

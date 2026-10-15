@@ -67,9 +67,11 @@ class TestMod:
 
 
 def _main_package(project: Project, nation: Nation, game: GameFiles, idx: Index,
-                  test_sprite_techs: dict[int, int] | None, recipe=None) -> GeneratedSet:
+                  test_sprite_techs: dict[int, int] | None, recipe=None, loadout=None, runner=None,
+                  part_cache: dict | None = None) -> GeneratedSet:
     """The unit set plus the main tag's country file with INTEGRATION.md applied."""
-    package = generate(project, nation, game, idx, mod=None, test_sprite_techs=test_sprite_techs, recipe=recipe)
+    package = generate(project, nation, game, idx, mod=None, test_sprite_techs=test_sprite_techs, recipe=recipe,
+                       loadout=loadout, runner=runner, part_cache=part_cache)
     integ = package.integration
     for tag in nation.tags:
         cfile = integ.country_files.get(tag) if integ else None
@@ -113,11 +115,11 @@ def _wrap(project: Project, nation: Nation, package: GeneratedSet, game: GameFil
 
 def build_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path,
                    name: str = TEST_MOD_NAME, test_sprite_techs: dict[int, int] | None = None,
-                   recipe=None) -> TestMod:
+                   recipe=None, loadout=None, runner=None, part_cache: dict | None = None) -> TestMod:
     """``test_sprite_techs`` (e.g. {2: 2, 3: 3, 4: 4}) moves sprite levels 2-4 to early MIL techs in
-    this test mod's mil.txt only, so every tier can be seen in minutes. ``recipe``: a texture
-    recipe (the set as generate() would write it)."""
-    package = _main_package(project, nation, game, idx, test_sprite_techs, recipe)
+    this test mod's mil.txt only, so every tier can be seen in minutes. ``recipe`` (texture recipe)
+    and ``loadout`` (parts, built through ``runner``): the set as generate() would write it."""
+    package = _main_package(project, nation, game, idx, test_sprite_techs, recipe, loadout, runner, part_cache)
     return _wrap(project, nation, package, game, idx, mod_dir, name)
 
 
@@ -384,59 +386,77 @@ def texture_checklist(test: TextureTest, sprite_techs: dict[int, int] | None) ->
     return "\n".join(lines)
 
 
-# --------------------------------------------------------------------------- parts spike (Phase 3, in-game test 7)
+# --------------------------------------------------------------------------- parts (Phase 3, in-game test 8)
 
-SPIKE_PARTS = (("dory", 1), ("crest", 1))
-
-
-@dataclass
-class PartsTest:
-    mod: TestMod
-    attach: dict  # (tier, bone) -> part entity
-    nation: Nation
-
-
-def build_parts_test(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path, runner,
-                     test_sprite_techs: dict[int, int] | None = None) -> PartsTest:
-    """In-game test 7 (SPEC §10 Phase 3 spike): a crude procedural dory on Right_hand_node
-    (replacing the halberd) and a crude crest on the ``head`` bone of tier-1 infantry (so also
-    the tier-1 gun crew). Tiers 2-4 plain. ``runner``: blender.runner.BlenderRunner."""
-    from eu4unitgen.core.parts import PartSpec, attach_parts, build_parts
-
-    naming, set_name = project.naming, nation.set_name
-    package = _main_package(project, nation, game, idx, test_sprite_techs)
-    chain = BaseChain(idx, nation.base_gfx)
-    built = build_parts(runner, naming, set_name, [PartSpec(k, t) for k, t in SPIKE_PARTS], project.entity_version)
-    entities = unit_entities(nation.tag, chain, naming, project.entity_version)
-    attach_parts(entities, nation.tag, built.attach, naming)
-    rel = naming.set_entities_file(set_name)
-    package.files[rel] = GeneratedFile(rel, render("entities.asset.j2", entities=entities + built.entities)
-                                       .encode("utf-8"), OWNED)
-    package.add(GeneratedFile(naming.pdxmesh_file(set_name), render("pdxmeshes.gfx.j2", meshes=built.meshes)
-                              .encode("utf-8"), OWNED))
-    for f in built.files:
-        package.add(f)
-    package.notes.append("TEST ONLY: tier-1 infantry carries a procedural dory (Right_hand_node) and crest (head)")
-    return PartsTest(_wrap(project, nation, package, game, idx, mod_dir, naming.parts_test_mod()), built.attach, nation)
+STANCE_LOOK = {
+    "spear_shield": "the shield arm holds the shield up in front, the spear arm thrusts (no arm through the shield, "
+                    "nothing floating).",
+    "polearm_onehanded": "a one-handed thrust with the right arm; the left arm is free.",
+    "polearm_twohanded": "both hands on the shaft, levelled in the attack like the halberd.",
+}
+ROLE_WHERE = {"infantry": "infantry (and the gun crew, unless a crew line follows)",
+              "rider": "cavalry rider", "crew": "artillery gun crew"}
 
 
-def parts_checklist(test: PartsTest, sprite_techs: dict[int, int] | None) -> str:
-    tag = test.nation.tag
-    name = test.mod.plan.manifest_rel.split("/", 1)[0]
+def _describe_part(r) -> str:
+    from eu4unitgen.core.parts import KINDS
+
+    p, k = r.params, KINDS[r.kind]
+    bits = [k.label.split(" (")[0].lower(), f"on {r.bone}"]
+    if "point" in p:
+        bits.append("point " + ("+Z (up/forward, like the halberd)" if p["point"] == "up" else "-Z (like the sabre)"))
+    if r.kind == "crest":
+        bits.append("front-to-back" if p.get("orientation") == "fore_aft" else "side-to-side (transverse)")
+    names = {"country1": "primary", "country2": "secondary", "country3": "tertiary"}
+    for zone, value in r.zones.items():
+        zd = next(z for z in k.zones if z.name == zone)
+        if isinstance(value, str):
+            bits.append(f"{zd.label.lower()} in the {names[value]} unit colour")
+        elif tuple(value) != zd.colour:
+            bits.append(f"{zd.label.lower()} fixed rgb {' '.join(map(str, value))}")
+    if r.blazon:
+        bits.append(f"blazon {Path(r.blazon).name} (must read the right way round)")
+    return ", ".join(bits)
+
+
+def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict[int, int] | None) -> str:
+    """In-game test 8: what each tier's bodies should carry, from the loadout the set was built with."""
+    res, nation = generated.loadout, generated.nation
     techs = (", ".join(f"tier {lvl} at MIL {t}" for lvl, t in sorted(sprite_techs.items())) if sprite_techs
              else "vanilla sprite techs")
-    return "\n".join([
-        "IN-GAME TEST 7 CHECKLIST (procedural parts spike)",
-        f"Enable only {name} (disable every other eu4unitgen mod). Play {tag}. Sprite tiers: tier 1 at start, {techs}.",
-        "Look at tier-1 infantry standing, marching and fighting, and at a tier-1 artillery crew. PASS/FAIL + notes.",
+    lines = [
+        "IN-GAME TEST 8 CHECKLIST (procedural parts: the full set)",
+        f"Enable only {mod_name} (disable every other eu4unitgen mod). Play {nation.tag}. Sprite tiers: tier 1 at "
+        f"start, {techs}.",
+        "At each tier make one army per type (infantry, cavalry, artillery); watch them stand, march and fight. "
+        "PASS/FAIL + notes per line.",
+    ]
+    colours = (nation.unit_colours or {}).get(nation.tag) if isinstance(nation.unit_colours, dict) else None
+    if colours:
+        lines.append("Unit colours: " + ", ".join(f"{n} {' '.join(map(str, c))}"
+                                                 for n, c in zip(("primary", "secondary", "tertiary"), colours)))
+    by_entity = {r.entity: r for r in res.parts}
+    for tier in sorted({tier for tier, _ in res.slots}):
+        lines += ["", f"TIER {tier}"]
+        for role in ("infantry", "crew", "rider"):
+            if (tier, role) not in res.slots:
+                if role == "crew" and (tier, "infantry") in res.slots:
+                    lines.append(f"[ ] {tier}C  artillery gun crew: the infantry entity itself, so it carries the "
+                                 "infantry's parts and stance")
+                continue
+            parts = [by_entity[e] for e in res.carried.get((tier, role), [])]
+            lines.append(f"[ ] {tier}{role[0].upper()}  {ROLE_WHERE[role]}: "
+                         + ("; ".join(_describe_part(r) for r in parts) or "no parts of its own: the plain base infantry"))
+        for entity, (stance, _) in sorted(res.stances.items()):
+            if entity.endswith((f"_INFANTRY_{tier}", f"_{tier}_crew")):
+                lines.append(f"[ ] {tier}S  {entity}: {stance} animations; " + STANCE_LOOK.get(stance, ""))
+    lines += [
         "",
-        "[ ] H1 crest: a red front-to-back crest sits on top of the helmet (head attach WORKS).",
-        "       Not visible at all / at the feet / at the unit's origin = head attach FAILS -> stop, report.",
-        "[ ] H2 the crest follows the head through idle, walk and attack (no floating, no lag).",
-        "[ ] H3 crest size and height: roughly right / too big / too small / sunk into or floating above the helmet.",
-        "[ ] D1 dory: a long brown shaft with a bronze point replaces the halberd in the right hand.",
-        "[ ] D2 the point is UP / forward like the halberd's blade (not reversed), held at the grip, not through the arm.",
-        "[ ] D3 length looks plausible (about the halberd's).",
-        "[ ] C  tiers 2-4: plain western units (control).",
-        "[ ] E  error.log: note any line with hr_, .mesh, entity, attach, head or texture.",
-    ])
+        "GENERAL",
+        "[ ] G1 every part follows its bone through idle, walk and attack (no floating, no lag).",
+        "[ ] G2 hoplon face: the country colour (or the fixed colour) as listed; rim bronze; the inside is not see-through.",
+        "[ ] G3 blazon (if any): upright and not mirrored, seen from the front of the unit. If not: note how it is turned.",
+        "[ ] G4 sizes: a part far too big or small, or sunk into / floating off the body: note which.",
+        "[ ] E  error.log: note any line with hr_, .mesh, entity, attach, texture or animation.",
+    ]
+    return "\n".join(lines)
