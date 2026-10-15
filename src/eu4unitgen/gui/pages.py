@@ -153,9 +153,11 @@ class UnitSetPage(Page):
         super().__init__(window)
         form = QFormLayout()
         self.tags = QLineEdit()
-        self.tags.setPlaceholderText("e.g. MAC, or several: MAC EPI (one set per tag)")
+        self.tags.setPlaceholderText("e.g. MAC, or several sharing one set: MAC EPI (then name the set)")
+        self.tags.setToolTip("Several tags share one set: one sprite pack whose country_trigger is "
+                             "OR = { tag = ... }. The set's entities are named after the first tag.")
         self.set_name = QLineEdit()
-        self.set_name.setPlaceholderText("default: the tag in lowercase; leave blank with several tags")
+        self.set_name.setPlaceholderText("one tag: defaults to the tag in lowercase; several tags: required")
         self.gfx = QComboBox()
         self.gfx.setEditable(True)
         self.gfx.setEditText("hellenicgfx")
@@ -181,14 +183,22 @@ class UnitSetPage(Page):
         cl.addWidget(self.colour_on)
         cl.addWidget(self.colour_btn)
         cl.addStretch(1)
+        self.unit_colour_tag = QComboBox()
+        self.unit_colour_tag.setToolTip("which tag these unit colours are for")
+        self.unit_colour_tag.currentTextChanged.connect(self._show_tag_colours)
+        self._per_tag: dict[str, list[QColor]] = {}
+        self._per_tag_on: set[str] = set()
+        self.tags.textChanged.connect(self._refresh_colour_tags)
         self.unit_colours_on = QCheckBox("Set unit colours")
-        self.unit_colours_on.setToolTip("common/country_colors color1-3: what the game tints units with "
-                                        "(primary, secondary, tertiary). Handed over in INTEGRATION.md.")
+        self.unit_colours_on.setToolTip("common/country_colors color1-3 for the chosen tag: what the game tints "
+                                        "units with (primary, secondary, tertiary). Handed over in INTEGRATION.md.")
+        self.unit_colours_on.toggled.connect(self._toggle_tag_colours)
         self.unit_colour_btns = []
         self._unit_colours = [QColor(150, 20, 30), QColor(210, 170, 40), QColor(25, 35, 90)]
         urow = QWidget()
         ul = QHBoxLayout(urow)
         ul.setContentsMargins(0, 0, 0, 0)
+        ul.addWidget(self.unit_colour_tag)
         ul.addWidget(self.unit_colours_on)
         for i, label in enumerate(("primary", "secondary", "tertiary")):
             btn = QPushButton()
@@ -222,6 +232,45 @@ class UnitSetPage(Page):
             self.colour_on.setChecked(True)
             self._paint_colour()
 
+    # Unit colours are kept per tag; the row shows the tag picked in unit_colour_tag.
+    def _refresh_colour_tags(self) -> None:
+        tags = SetSpec.parse_tags(self.tags.text())
+        keep = self.unit_colour_tag.currentText()
+        self.unit_colour_tag.blockSignals(True)
+        self.unit_colour_tag.clear()
+        self.unit_colour_tag.addItems(tags)
+        self.unit_colour_tag.blockSignals(False)
+        i = self.unit_colour_tag.findText(keep)
+        self.unit_colour_tag.setCurrentIndex(i if i >= 0 else 0)
+        self._show_tag_colours(self.unit_colour_tag.currentText())
+
+    def _show_tag_colours(self, tag: str) -> None:
+        if not tag:
+            return
+        self._unit_colours = self._per_tag.setdefault(tag, [QColor(c) for c in self._unit_colours])
+        self.unit_colours_on.blockSignals(True)
+        self.unit_colours_on.setChecked(tag in self._per_tag_on)
+        self.unit_colours_on.blockSignals(False)
+        self._paint_unit_colours()
+
+    def _toggle_tag_colours(self, on: bool) -> None:
+        tag = self.unit_colour_tag.currentText()
+        if tag:
+            (self._per_tag_on.add if on else self._per_tag_on.discard)(tag)
+
+    def set_unit_colours(self, tag: str, colours) -> None:
+        """Set one tag's unit colours (used by tests and stored settings)."""
+        self._per_tag[tag] = [QColor(*c) for c in colours]
+        self._per_tag_on.add(tag)
+        if self.unit_colour_tag.currentText() == tag:
+            self._show_tag_colours(tag)
+
+    def unit_colours(self) -> dict | None:
+        tags = SetSpec.parse_tags(self.tags.text())
+        out = {t: tuple((c.red(), c.green(), c.blue()) for c in self._per_tag[t])
+               for t in tags if t in self._per_tag_on and t in self._per_tag}
+        return out or None
+
     def _paint_unit_colours(self) -> None:
         for btn, c in zip(self.unit_colour_btns, self._unit_colours):
             btn.setText(f"{c.red()} {c.green()} {c.blue()}")
@@ -254,8 +303,7 @@ class UnitSetPage(Page):
                        colour=(c.red(), c.green(), c.blue()) if self.colour_on.isChecked() else None,
                        tech_group=self.tech.text().strip(),
                        gfx_set_base=None if gfx_base in ("", SAME_AS_BASE) else gfx_base,
-                       unit_colours=tuple((u.red(), u.green(), u.blue()) for u in self._unit_colours)
-                       if self.unit_colours_on.isChecked() else None)
+                       unit_colours=self.unit_colours())
 
 
 # --------------------------------------------------------------------------- results helpers
@@ -300,7 +348,7 @@ class ValidatePage(Page):
         self.layout_.addWidget(self.tree, 1)
 
     def show_results(self, results) -> None:
-        fill_issues(self.tree, [(f"{r.nation.tag} / {r.nation.set_name}", r.report) for r in results])
+        fill_issues(self.tree, [(f"{' '.join(r.nation.tags)} / {r.nation.set_name}", r.report) for r in results])
         errors = sum(len(r.report.errors) for r in results)
         self.show_message("No errors: ready to generate." if not errors else
                           f"{errors} error(s): fix them before generating.", error=bool(errors))
@@ -360,7 +408,7 @@ class GeneratePage(Page):
                 item.setExpanded(True)
         self.files.resizeColumnToContents(0)
         self.integration.setPlainText("\n\n".join(r.integration_text for r in results))
-        fill_issues(self.issues, [(f"{r.nation.tag} / {r.nation.set_name}", r.report) for r in results])
+        fill_issues(self.issues, [(f"{' '.join(r.nation.tags)} / {r.nation.set_name}", r.report) for r in results])
         written = sum(len(r.written) for r in results)
         if written:
             self.show_message(f"Wrote {written} files. Copy each package folder's contents into your mod's root, "

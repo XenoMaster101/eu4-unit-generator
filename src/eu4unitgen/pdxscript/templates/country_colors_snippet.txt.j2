@@ -1,5 +1,7 @@
+{% for tag, colours in entries %}
 {{ tag }} = {
 {% for c in colours %}
 	color{{ loop.index }} = { {{ c | join(" ") }} }
 {% endfor %}
 }
+{% endfor %}

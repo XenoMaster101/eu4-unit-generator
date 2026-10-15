@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Callable
 
-from eu4unitgen.core.generator import BINARY_SUFFIXES, SNIPPET, GeneratedSet
+from eu4unitgen.core.generator import BINARY_SUFFIXES, SNIPPET, GeneratedSet, tag_trigger
 from eu4unitgen.core.naming import TIERS, UNIT_TYPES, Naming
 from eu4unitgen.core.nation import MANEUVER, Nation
 from eu4unitgen.core.project import Project
@@ -442,8 +442,9 @@ def sprite_packs(ctx: Context) -> list[Issue]:
                 if slots.get(str(t - 1)) != want:
                     out.append(Issue(ERROR, "sprite_packs", f"{pack['name']}: sprite_{utype} {t - 1} should be {want}",
                                      pack["defined_in"]))
-    if tag_pack is not None and tag_pack.get("country_trigger") != f"tag = {tag}":
-        out.append(Issue(ERROR, "sprite_packs", f"{tag_pack['name']}: country_trigger should be 'tag = {tag}'",
+    want_trigger = tag_trigger(ctx.nation.tags)
+    if tag_pack is not None and tag_pack.get("country_trigger") != want_trigger:
+        out.append(Issue(ERROR, "sprite_packs", f"{tag_pack['name']}: country_trigger should be '{want_trigger}'",
                          tag_pack["defined_in"]))
     if gfx_pack is not None:
         if gfx_pack.get("graphical_cultures") != [gfx]:
@@ -471,8 +472,9 @@ def _excludes_tag(trigger: str | None, tag: str) -> bool:
 
 @rule("pack_order")
 def pack_order(ctx: Context) -> list[Issue]:
-    """The TAG pack has an order entry; flag other packs that might match the tag at >= that order."""
-    n, tag, out = ctx.naming, ctx.nation.tag, []
+    """The TAG pack has an order entry; flag other packs that might match any of the set's tags at
+    >= that order."""
+    n, tags, out = ctx.naming, ctx.nation.tags, []
     pack = n.set_sprite_pack(ctx.nation.set_name)
     orders = [d for d in ctx.world.idx.pack_order.get(pack, []) if ctx.world.loaded(d)]
     if not orders:
@@ -487,13 +489,14 @@ def pack_order(ctx: Context) -> list[Issue]:
             continue
         fx = ctx.generated.fixtures
         for p in pdefs:
-            if ctx.world.loaded(p) and not _excludes_tag(p.get("country_trigger"), tag):
+            hit = [t for t in tags if not _excludes_tag(p.get("country_trigger"), t)] if ctx.world.loaded(p) else []
+            if hit:
                 if fx and other == fx.rival_pack:
                     out.append(Issue(INFO, "pack_order", f"{other} (order {order}) is the pack-priority test's "
                                                          f"deliberate rival of {pack} (order {ours})", p["defined_in"]))
                     continue
                 out.append(Issue(WARNING, "pack_order",
-                                 f"{other} (order {order}, trigger '{p.get('country_trigger')}') may match {tag} "
+                                 f"{other} (order {order}, trigger '{p.get('country_trigger')}') may match {', '.join(hit)} "
                                  f"and is not below {pack} (order {ours})", p["defined_in"]))
     gfx_pack = n.gfx_sprite_pack(ctx.nation.gfx_culture)
     if gfx_pack in ctx.world.idx.pack_order:
@@ -647,8 +650,14 @@ def integration(ctx: Context) -> list[Issue]:
         out.append(Issue(ERROR, "integration", f"{extra} is listed but not generated", path))
     if f"graphical_culture = {ctx.nation.gfx_culture}" not in text:
         out.append(Issue(ERROR, "integration", "country lines don't set graphical_culture", path))
-    if integ.country_file and not ctx.world.game.exists(integ.country_file):
-        out.append(Issue(ERROR, "integration", f"{integ.country_file} doesn't exist in the game", path))
+    if list(integ.tags) != list(ctx.nation.tags):
+        out.append(Issue(ERROR, "integration", f"hands over tags {integ.tags}, the set has {ctx.nation.tags}", path))
+    for t in ctx.nation.tags:
+        cfile = integ.country_files.get(t)
+        if cfile and not ctx.world.game.exists(cfile):
+            out.append(Issue(ERROR, "integration", f"{t}: {cfile} doesn't exist in the game", path))
+        if len(ctx.nation.tags) > 1 and f"- {t}:" not in text:
+            out.append(Issue(ERROR, "integration", f"{t}'s country file isn't listed", path))
     return out
 
 
@@ -659,7 +668,7 @@ def unit_colours(ctx: Context) -> list[Issue]:
     INTEGRATION.md and any generated copy of the file carry the set's colours."""
     from eu4unitgen.library.tags import unit_colours as read_colours
 
-    tag, wanted = ctx.nation.tag, ctx.nation.unit_colours
+    wanted = ctx.nation.unit_colours or {}
     rel = ctx.naming.country_colours_file()
     out = []
     entries = read_colours(ctx.world.game)
@@ -667,17 +676,19 @@ def unit_colours(ctx: Context) -> list[Issue]:
         entries.update(read_colours(ctx.world.mod))
     if ctx.world.gen.exists(rel):
         gen = read_colours(_OneFile(rel, ctx.world.gen.read(rel)))
-        if wanted and gen.get(tag) != list(wanted):
-            out.append(Issue(ERROR, "unit_colours", f"{tag}'s entry doesn't carry the set's unit colours", rel))
+        for tag, cols in wanted.items():
+            if gen.get(tag) != list(cols):
+                out.append(Issue(ERROR, "unit_colours", f"{tag}'s entry doesn't carry the set's unit colours", rel))
         entries.update(gen)
     if wanted:
         integ = ctx.generated.integration
-        if integ is None or tuple(integ.unit_colours or ()) != wanted or not integ.unit_colours_snippet:
+        if integ is None or (integ.unit_colours or {}) != wanted or not integ.unit_colours_snippet:
             out.append(Issue(ERROR, "unit_colours", "INTEGRATION.md doesn't hand over the unit colours"))
-    elif tag not in entries:
-        out.append(Issue(INFO, "unit_colours", f"{tag} has no entry in {rel} and the set gives none: its units use "
-                                               "the engine's default unit colours (red in test 5; UNVERIFIED). "
-                                               "Set unit colours to choose them.", rel))
+    for tag in ctx.nation.tags:
+        if tag not in wanted and tag not in entries:
+            out.append(Issue(INFO, "unit_colours", f"{tag} has no entry in {rel} and the set gives none: its units "
+                                                   "use the engine's default unit colours (red in test 5; UNVERIFIED). "
+                                                   "Set unit colours to choose them.", rel))
     return out
 
 

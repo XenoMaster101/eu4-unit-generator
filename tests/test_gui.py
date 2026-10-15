@@ -66,9 +66,13 @@ def test_validate_lists_issues_and_bad_input_shows_an_error(window):
     top = window.validate_page.tree.topLevelItem(0)
     assert top.text(0) == "MAC / mac" and "0 errors" in top.text(2)
     window.unit_page.tags.setText("MAC EPI")
-    window.unit_page.set_name.setText("both")
+    window.unit_page.set_name.setText("")
     window.validate_page.run.click()
-    assert "leave the set name blank" in window.validate_page.message.text()
+    assert "give the set a name" in window.validate_page.message.text()
+    window.unit_page.set_name.setText("argead")
+    window.validate_page.run.click()
+    top = window.validate_page.tree.topLevelItem(0)
+    assert top.text(0) == "MAC EPI / argead" and "0 errors" in top.text(2), top.text(2)
 
 
 def test_test_mod_button_stages_into_the_staging_folder(window, tmp_path):

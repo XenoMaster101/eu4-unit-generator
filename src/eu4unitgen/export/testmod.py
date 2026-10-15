@@ -71,18 +71,20 @@ def _main_package(project: Project, nation: Nation, game: GameFiles, idx: Index,
     """The unit set plus the main tag's country file with INTEGRATION.md applied."""
     package = generate(project, nation, game, idx, mod=None, test_sprite_techs=test_sprite_techs, recipe=recipe)
     integ = package.integration
-    if not integ or not integ.country_file:
-        raise GenerationError(f"{nation.tag} has no vanilla country file; the test mod needs a vanilla tag")
-    original = game.read(integ.country_file)
-    if original is None:
-        raise GenerationError(f"{integ.country_file} not found in the EU4 install")
-    package.add(GeneratedFile(integ.country_file, patch_country(original, integ), PATCHED, "vanilla"))
+    for tag in nation.tags:
+        cfile = integ.country_files.get(tag) if integ else None
+        if not cfile:
+            raise GenerationError(f"{tag} has no vanilla country file; the test mod needs vanilla tags")
+        original = game.read(cfile)
+        if original is None:
+            raise GenerationError(f"{cfile} not found in the EU4 install")
+        package.add(GeneratedFile(cfile, patch_country(original, integ), PATCHED, "vanilla"))
     if integ.unit_colours:
         rel = project.naming.country_colours_file()
         data = game.read(rel)
         if data is None:
             raise GenerationError(f"{rel} not found in the EU4 install")
-        package.add(GeneratedFile(rel, patch_country_colours(data, integ.unit_colours_snippet, nation.tag),
+        package.add(GeneratedFile(rel, patch_country_colours(data, integ.unit_colours_snippet, list(integ.unit_colours)),
                                   PATCHED, "vanilla"))
     return package
 

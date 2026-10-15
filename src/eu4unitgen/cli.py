@@ -1,6 +1,7 @@
 """Command line: generate and validate unit sets, build the throwaway test mod.
 
     python -m eu4unitgen.cli generate --tag MAC --gfx hellenicgfx [--out output] [--dry-run]
+    python -m eu4unitgen.cli generate --tag MAC EPI --set argead --gfx hellenicgfx   (one set, two tags)
     python -m eu4unitgen.cli pick-test-tag
     python -m eu4unitgen.cli test-mod --tag HDA --gfx hellenicgfx --set macedonian_test [--stage-dir DIR]
     python -m eu4unitgen.cli test-mod --textures --tag HDA --gfx hellenicgfx --set macedonian_test --test-sprite-techs 2 3 4
@@ -36,7 +37,8 @@ def _common(p: argparse.ArgumentParser) -> None:
 
 
 def _set_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--tag", required=True)
+    p.add_argument("--tag", dest="tags", nargs="+", required=True, type=str.upper,
+                   help="one tag, or several sharing one set (one sprite pack, OR over the tags; --set required)")
     p.add_argument("--gfx", required=True, help="the nation's graphical culture, e.g. hellenicgfx")
     p.add_argument("--set", dest="set_name", default="", help="unit set name (default: the tag in lowercase)")
     p.add_argument("--base-gfx", default="westerngfx", help="vanilla culture whose set is copied")
@@ -48,13 +50,26 @@ def _set_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--pack-order", type=int, default=DEFAULT_TAG_PACK_ORDER)
     p.add_argument("--diff-out", type=Path, help="also write the diff to this file")
     p.add_argument("--unit-colours", type=int, nargs=9, metavar="V",
-                   help="unit colours color1 color2 color3 as 9 numbers (R G B R G B R G B), for common/country_colors")
+                   help="unit colours color1 color2 color3 as 9 numbers (R G B R G B R G B) for every tag "
+                        "(common/country_colors)")
+    p.add_argument("--tag-unit-colours", nargs=10, action="append", metavar="X",
+                   help="unit colours for one tag: TAG R G B R G B R G B (repeat per tag; overrides --unit-colours)")
     p.add_argument("--texture-recipe", type=Path, help="Phase 2: texture recipe JSON (retextures the TAG set)")
 
 
+def _triple(v: list[int]) -> tuple:
+    return tuple(v[0:3]), tuple(v[3:6]), tuple(v[6:9])
+
+
 def _unit_colours(args: argparse.Namespace):
-    v = args.unit_colours
-    return (tuple(v[0:3]), tuple(v[3:6]), tuple(v[6:9])) if v else None
+    """--unit-colours (every tag) and --tag-unit-colours (one tag each) -> {tag: triple} or None."""
+    out = {t: _triple(args.unit_colours) for t in args.tags} if args.unit_colours else {}
+    for entry in args.tag_unit_colours or []:
+        tag, nums = entry[0].upper(), entry[1:]
+        if not all(n.isdigit() for n in nums):
+            raise SpecError(f"--tag-unit-colours {tag}: nine numbers 0-255 expected, got {' '.join(nums)}")
+        out[tag] = _triple([int(n) for n in nums])
+    return out or None
 
 
 def _settings(args: argparse.Namespace, **kw) -> Settings:
@@ -64,7 +79,7 @@ def _settings(args: argparse.Namespace, **kw) -> Settings:
 
 
 def _spec(args: argparse.Namespace) -> SetSpec:
-    return SetSpec(tags=[args.tag], gfx=args.gfx, set_name=args.set_name, base_gfx=args.base_gfx, name=args.name,
+    return SetSpec(tags=list(args.tags), gfx=args.gfx, set_name=args.set_name, base_gfx=args.base_gfx, name=args.name,
                    adjective=args.adjective, colour=tuple(args.colour) if args.colour else None,
                    tech_group=args.tech_group or "", gfx_set_base=getattr(args, "gfx_set_base", None),
                    unit_colours=_unit_colours(args), texture_recipe=args.texture_recipe)

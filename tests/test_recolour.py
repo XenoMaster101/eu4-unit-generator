@@ -281,7 +281,7 @@ def test_unit_colours_rule_integration_and_test_mod(project, nation, tex_game, t
     cc.mkdir(parents=True)
     (cc / "00_country_colors.txt").write_text("# made up\nAAA = {\n\tcolor1= { 1 2 3 }\n\tcolor2= { 4 5 6 }\n"
                                               "\tcolor3= { 7 8 9 }\n}\n")
-    tagged = Nation("AAA", "hellenicgfx", set_name="macedonian_test", unit_colours=nation.unit_colours)
+    tagged = Nation("AAA", "hellenicgfx", set_name="macedonian_test", unit_colours=nation.unit_colours["MAC"])
     fresh = GameFiles(files.root)  # GameFiles caches folder listings; read the new file with a new one
     try:
         tm = build_test_mod(project, tagged, fresh, build_index(fresh), tmp_path / "mods")

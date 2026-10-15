@@ -101,7 +101,7 @@ def test_country_snippet_template():
 
 def test_integration_template():
     from eu4unitgen.core.generator import Integration
-    integ = Integration("HDA", "macedonian_test", "common/countries/Haida.txt", "hellenicgfx", None,
+    integ = Integration(["HDA"], "macedonian_test", {"HDA": "common/countries/Haida.txt"}, "hellenicgfx", None,
                         ["hr_macedonian_test_infantry_1"], {1: ["hr_macedonian_test_infantry_1"]}, ["hellenicgfx"])
     lines = render("country_snippet.txt.j2", gfx="hellenicgfx", colour=None, units=integ.historical_units)
     out = render("integration.md.j2", integ=integ, country_lines=lines, mil_file="common/technologies/mil.txt",

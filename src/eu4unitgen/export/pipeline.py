@@ -57,7 +57,8 @@ class Settings:
 
 @dataclass
 class SetSpec:
-    """The unit-set form. Several tags make one set per tag, each named after its tag."""
+    """The unit-set form. Several tags share one set (one sprite pack, OR over the tags); the set
+    name is then required. Unit colours: one (color1, color2, color3) for every tag, or {tag: ...}."""
     tags: list[str]
     gfx: str
     set_name: str = ""
@@ -67,7 +68,7 @@ class SetSpec:
     colour: tuple[int, int, int] | None = None
     tech_group: str = ""  # blank: the tag's 1444 tech group, else western
     gfx_set_base: str | None = None
-    unit_colours: tuple | None = None  # common/country_colors color1-3 for the tag(s); None: leave as is
+    unit_colours: Any = None  # common/country_colors color1-3: one triple for all tags or {tag: triple}
     texture_recipe: Any = None  # Phase 2: a core.recipe JSON file (Path) or a TextureRecipe
 
     @staticmethod
@@ -203,23 +204,32 @@ class Session:
                        check_mod_collisions=check, **kw)
 
     def nations(self, spec: SetSpec) -> list[Nation]:
+        """The set the form describes (a list of one: callers loop over results)."""
         if not spec.tags:
             raise SpecError("enter at least one tag")
-        if len(spec.tags) > 1 and spec.set_name:
-            raise SpecError("with several tags, leave the set name blank: each set is named after its tag")
         if len(set(spec.tags)) != len(spec.tags):
             raise SpecError("a tag is listed twice")
-        out = []
-        for tag in spec.tags:
-            try:
+        if len(spec.tags) > 1 and not spec.set_name:
+            raise SpecError("several tags share one set: give the set a name")
+        try:
+            for tag in spec.tags:
                 check_tag(tag)
-                tech = spec.tech_group or self._tag_tech_group(tag) or "western"
-                out.append(Nation(tag, spec.gfx, base_gfx=spec.base_gfx, name=spec.name, adjective=spec.adjective,
-                                  colour=spec.colour, tech_group=tech, set_name=spec.set_name,
-                                  gfx_set_base=spec.gfx_set_base or None, unit_colours=spec.unit_colours))
-            except (NamingError, ValueError) as exc:
-                raise SpecError(str(exc)) from exc
-        return out
+            tech = spec.tech_group
+            if not tech:
+                groups = {t: self._tag_tech_group(t) for t in spec.tags}
+                known = sorted({g for g in groups.values() if g})
+                if len(known) > 1:
+                    raise SpecError("the tags start in different tech groups ("
+                                    + ", ".join(f"{t} {g}" for t, g in groups.items() if g)
+                                    + "); set the tech group for the shared units")
+                tech = known[0] if known else "western"
+            return [Nation(list(spec.tags), spec.gfx, base_gfx=spec.base_gfx, name=spec.name,
+                           adjective=spec.adjective, colour=spec.colour, tech_group=tech, set_name=spec.set_name,
+                           gfx_set_base=spec.gfx_set_base or None, unit_colours=spec.unit_colours)]
+        except (NamingError, ValueError) as exc:
+            if isinstance(exc, SpecError):
+                raise
+            raise SpecError(str(exc)) from exc
 
     def _tag_tech_group(self, tag: str) -> str | None:
         f = self.facts().get(tag)
@@ -267,29 +277,33 @@ class Session:
                        write: str = "stage", fallback_tags: dict[str, str] | None = None) -> TestModResult:
         """Build the test mod (or the two-variant suite, or the texture test). ``write``: "stage"
         (settings.stage_dir, for copying into the EU4 mod folder by hand), "apply" (straight into
-        the EU4 mod folder) or "dry" (nothing written; plans returned). One tag only."""
+        the EU4 mod folder) or "dry" (nothing written; plans returned). A shared set may have several
+        tags; the suite and the texture test take one."""
         if write not in ("stage", "apply", "dry"):
             raise SpecError(f"write must be stage, apply or dry, not {write!r}")
         if suite and textures:
             raise SpecError("pick either the test suite or the texture test, not both")
-        if len(spec.tags) != 1:
-            raise SpecError("the test mod takes exactly one tag")
+        if (suite or textures) and len(spec.tags) != 1:
+            raise SpecError("the test suite and the texture test take exactly one tag")
+        if not spec.tags:
+            raise SpecError("enter at least one tag")
         game, idx = self.game()
         facts = self.facts()
-        tag = spec.tags[0]
-        f = facts.get(tag)
-        if f is None:
-            raise SpecError(f"{tag} owns no land at 1444.11.11; pick another tag (pick-test-tag)")
         warnings = []
-        cov = coverage(idx, f)
-        if not cov.clean:
-            warnings.append(f"{tag} is matched by {[p for p, _, _ in cov.packs]} / has {cov.entities[:4]}; "
-                            "the map may not show the generated set")
-        if sprite_techs:
-            start = start_level(game, f.technology_group)
-            if start is not None and min(sprite_techs.values()) <= start:
-                warnings.append(f"{tag} starts at MIL {start}; tiers at MIL <= {start} show from day one")
-        nation = self.nations(SetSpec(**{**spec.__dict__, "tech_group": spec.tech_group or f.technology_group or ""}))[0]
+        for t in spec.tags:
+            ft = facts.get(t)
+            if ft is None:
+                raise SpecError(f"{t} owns no land at 1444.11.11; pick another tag (pick-test-tag)")
+            cov = coverage(idx, ft)
+            if not cov.clean:
+                warnings.append(f"{t} is matched by {[p for p, _, _ in cov.packs]} / has {cov.entities[:4]}; "
+                                "the map may not show the generated set")
+            if sprite_techs:
+                start = start_level(game, ft.technology_group)
+                if start is not None and min(sprite_techs.values()) <= start:
+                    warnings.append(f"{t} starts at MIL {start}; tiers at MIL <= {start} show from day one")
+        tag, f = spec.tags[0], facts[spec.tags[0]]
+        nation = self.nations(spec)[0]
         mod_dir = self.settings.user_mod_dir()
         project = self.project(mod_root=mod_dir / TEST_MOD_NAME)
         checklist = ""
@@ -322,7 +336,9 @@ class Session:
                 written += apply_export(t)
         if built is not None:
             checklist = suite_checklist(built, sprite_techs)
-        info = f"test mod for {tag} ({f.primary_culture}, {f.technology_group}, was {f.graphical_culture})"
+        info = "test mod for " + "; ".join(
+            f"{t} ({facts[t].primary_culture}, {facts[t].technology_group}, was {facts[t].graphical_culture})"
+            for t in spec.tags)
         return TestModResult(stage, reports, written, warnings, checklist, [tm.plan for tm in mods], info)
 
     # ------------------------------------------------------------------ textures (Phase 2)
@@ -350,7 +366,8 @@ class Session:
         except RecipeError as exc:
             raise SpecError(str(exc)) from exc
         tag = spec.tags[0] if spec.tags else ""
-        colours = list(spec.unit_colours) if spec.unit_colours else self.unit_colours().get(tag)
+        own = spec.unit_colours.get(tag) if isinstance(spec.unit_colours, dict) else spec.unit_colours
+        colours = [tuple(c) for c in own] if own else self.unit_colours().get(tag)
         notes = list(res.notes)
         if colours is None:
             colours = DEFAULT_UNIT_COLOURS

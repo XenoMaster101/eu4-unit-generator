@@ -190,6 +190,14 @@ def unit_entities(owner: str, chain: BaseChain, naming: Naming, version: int) ->
     return out
 
 
+def tag_trigger(tags: list[str]) -> str:
+    """country_trigger body for a set's pack: ``tag = MAC``, or ``OR = { tag = MAC tag = EPI }`` for a
+    shared set (the form vanilla's base packs use, e.g. +01_eastern_base_sprites.txt)."""
+    if len(tags) == 1:
+        return f"tag = {tags[0]}"
+    return "OR = { " + " ".join(f"tag = {t}" for t in tags) + " }"
+
+
 def _sprites(owner: str, naming: Naming) -> list[tuple[str, list[tuple[int, str]]]]:
     return [(u, [(t - 1, naming.unit_entity(owner, u, t)) for t in TIERS]) for u in UNIT_TYPES]
 
@@ -267,16 +275,24 @@ def patch_mil_enables(data: bytes, units: list[UnitSpec]) -> bytes:
 class Integration:
     """Changes that belong in files the tool doesn't own, as data. INTEGRATION.md renders it for
     a human; the test mod applies it to copies of the vanilla files."""
-    tag: str
+    tags: list[str]
     set_name: str
-    country_file: str | None  # vanilla path of the tag's country file, if the tag exists in vanilla
+    country_files: dict[str, str | None]  # tag -> vanilla path of its country file (None: not a vanilla tag)
     graphical_culture: str
     colour: tuple[int, int, int] | None
     historical_units: list[str]
     mil_enables: dict[int, list[str]]  # MIL tech index -> unit keys
     graphical_cultures_added: list[str]
-    unit_colours: tuple[tuple[int, int, int], ...] | None = None  # common/country_colors entry, if set
-    unit_colours_snippet: str = ""
+    unit_colours: dict | None = None  # tag -> (color1, color2, color3): common/country_colors entries, if set
+    unit_colours_snippet: str = ""  # those entries as script
+
+    @property
+    def tag(self) -> str:
+        return self.tags[0]
+
+    @property
+    def country_file(self) -> str | None:
+        return self.country_files.get(self.tags[0])
 
 
 def patch_history_culture(data: bytes, culture: str, date: tuple[int, int, int] = START_DATE) -> bytes:
@@ -336,9 +352,15 @@ class TestFixtures:
         return [c.tag for c in self.cases if c.case == "b"]
 
 
-def patch_country_colours(data: bytes, snippet: str, tag: str) -> bytes:
-    """Apply an Integration's country_colors entry: replace the tag's block (or append it).
+def patch_country_colours(data: bytes, snippet: str, tags: list[str] | str) -> bytes:
+    """Apply an Integration's country_colors entries: replace each tag's block (or append it).
     The rest of the file is kept byte-for-byte."""
+    for tag in [tags] if isinstance(tags, str) else tags:
+        data = _patch_one_colour(data, snippet, tag)
+    return data
+
+
+def _patch_one_colour(data: bytes, snippet: str, tag: str) -> bytes:
     if b"\r\n" in data:  # match the file's line endings
         snippet = snippet.replace("\r\n", "\n").replace("\n", "\r\n")
     doc = parse_bytes(data)
@@ -421,7 +443,7 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
 
     # Sprite packs + order (order entry for the TAG pack only, SPEC §3).
     out.add(GeneratedFile(naming.set_pack_file(set_name), _utf8(render(
-        "sprite_pack.txt.j2", pack=naming.set_sprite_pack(set_name), trigger=f"tag = {tag}",
+        "sprite_pack.txt.j2", pack=naming.set_sprite_pack(set_name), trigger=tag_trigger(nation.tags),
         graphical_cultures=None, sprites=_sprites(tag, naming)))))
     out.add(GeneratedFile(naming.gfx_pack_file(gfx), _utf8(render(
         "sprite_pack.txt.j2", pack=naming.gfx_sprite_pack(gfx), trigger="always = no",
@@ -452,14 +474,15 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
     out.add(GeneratedFile(rel, patch_graphical_cultures(data, [gfx]), PATCHED, base))
 
     # Hand-merge instructions for files the tool doesn't own.
-    cfile = country_files(game).get(tag)
+    cfiles = country_files(game)
     out.integration = Integration(
-        tag=tag, set_name=set_name, country_file=cfile, graphical_culture=gfx, colour=nation.colour,
+        tags=list(nation.tags), set_name=set_name, country_files={t: cfiles.get(t) for t in nation.tags},
+        graphical_culture=gfx, colour=nation.colour,
         historical_units=[u.key for u in nation.units],
         mil_enables={t: [u.key for u in nation.units if u.mil_tech == t] for t in sorted({u.mil_tech for u in nation.units})},
         graphical_cultures_added=[gfx] if gfx not in idx.graphical_cultures else [],
         unit_colours=nation.unit_colours,
-        unit_colours_snippet=render("country_colors_snippet.txt.j2", tag=tag, colours=nation.unit_colours)
+        unit_colours_snippet=render("country_colors_snippet.txt.j2", entries=list(nation.unit_colours.items()))
         if nation.unit_colours else "")
     country_lines = render("country_snippet.txt.j2", gfx=gfx, colour=nation.colour,
                            units=out.integration.historical_units)

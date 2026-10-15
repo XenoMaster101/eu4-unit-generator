@@ -1,7 +1,8 @@
-"""A nation to generate units for: tag, graphical culture, base set, units."""
+"""A nation to generate units for: tag(s), graphical culture, base set, units."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from eu4unitgen.core.naming import TIERS, UNIT_TYPES, Naming, check_gfx, check_identifier, check_set_name, check_tag
 
@@ -46,24 +47,58 @@ class UnitSpec:
         return MANEUVER[self.type]
 
 
+Colour = tuple[int, int, int]
+
+
+def _colour_triple(value, what: str) -> tuple[Colour, Colour, Colour]:
+    cols = tuple(tuple(c) for c in value)
+    if len(cols) != 3 or not all(len(c) == 3 and all(isinstance(v, int) and 0 <= v <= 255 for v in c) for c in cols):
+        raise ValueError(f"{what} {value!r} must be three [r, g, b] colours, 0-255")
+    return cols  # type: ignore[return-value]
+
+
 @dataclass
 class Nation:
-    tag: str
+    """A unit set and the tag(s) that use it. ``tag`` may be one tag or a list: several tags
+    share one set through one sprite pack (``country_trigger = { OR = { tag = A tag = B } }``);
+    the set's entities are named after the first tag (``tags[0]``, also ``self.tag``)."""
+    tag: str | list[str]
     gfx_culture: str  # the nation's graphical culture; new ones get a default set + gfx pack
     base_gfx: str = "westerngfx"  # vanilla culture whose entities the Phase 1 set copies
     name: str = ""
     adjective: str = ""
-    colour: tuple[int, int, int] | None = None  # None: leave the country file's color alone
+    colour: tuple[int, int, int] | None = None  # map colour for every tag's country file; None: leave alone
     tech_group: str | None = "western"  # unit_type on infantry/cavalry; artillery never has one
     units: list[UnitSpec] = field(default_factory=list)
-    set_name: str = ""  # names the pack, files and unit keys; defaults to the tag in lowercase
+    set_name: str = ""  # names the pack, files and unit keys; one tag: defaults to it in lowercase
     gfx_set_base: str | None = None  # vanilla culture the gfx-culture default set copies; None: base_gfx
     # Unit colours (common/country_colors color1-3): what PdxMeshColor multiplies into spec R/G/B.
-    # None: leave the tag's entry alone (or the engine default when it has none; SPEC §4).
-    unit_colours: tuple[tuple[int, int, int], ...] | None = None
+    # One triple for every tag, or {tag: triple}. Stored as {tag: triple} for the tags that have
+    # one; a tag left out keeps its entry (or the engine default when it has none; SPEC §4).
+    unit_colours: Any = None
+    tags: list[str] = field(init=False)
 
     def __post_init__(self) -> None:
-        check_tag(self.tag)
+        tags = [self.tag] if isinstance(self.tag, str) else list(self.tag)
+        if not tags:
+            raise ValueError("a unit set needs at least one tag")
+        for t in tags:
+            check_tag(t)
+        if len(set(tags)) != len(tags):
+            raise ValueError(f"a tag is listed twice in {tags}")
+        if len(tags) > 1 and not self.set_name:
+            raise ValueError(f"a set shared by several tags ({' '.join(tags)}) needs a set name")
+        self.tags, self.tag = tags, tags[0]
+        if self.unit_colours is not None:
+            if isinstance(self.unit_colours, dict):
+                unknown = sorted(set(self.unit_colours) - set(tags))
+                if unknown:
+                    raise ValueError(f"unit colours for {unknown}, which aren't tags of this set")
+                self.unit_colours = {t: _colour_triple(c, f"unit colours for {t}")
+                                     for t, c in self.unit_colours.items() if c is not None} or None
+            else:
+                triple = _colour_triple(self.unit_colours, "unit colours")
+                self.unit_colours = {t: triple for t in tags}
         check_gfx(self.gfx_culture)
         check_gfx(self.base_gfx)
         if self.gfx_set_base is not None:
@@ -72,12 +107,6 @@ class Nation:
             check_identifier(self.tech_group, "tech group")
         if self.colour is not None and (len(self.colour) != 3 or not all(0 <= c <= 255 for c in self.colour)):
             raise ValueError(f"colour {self.colour!r} must be three 0-255 values")
-        if self.unit_colours is not None:
-            cols = tuple(tuple(c) for c in self.unit_colours)
-            if len(cols) != 3 or not all(len(c) == 3 and all(isinstance(v, int) and 0 <= v <= 255 for v in c)
-                                         for c in cols):
-                raise ValueError(f"unit colours {self.unit_colours!r} must be three [r, g, b] colours, 0-255")
-            self.unit_colours = cols
         self.set_name = check_set_name(self.set_name or self.tag.lower())
         self.name = self.name or self.tag
         self.adjective = self.adjective or self.name
