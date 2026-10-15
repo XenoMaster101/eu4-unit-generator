@@ -154,10 +154,12 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
     """The test mod, the in-game test suite (--suite) or the texture test (--textures), through
     export/pipeline.py. A dry run unless --apply (into the EU4 mod directory) or --stage-dir."""
     write = "apply" if args.apply else "stage" if args.stage_dir else "dry"
-    session = Session(_settings(args, stage_dir=args.stage_dir or Path("build") / "test_mod"))
+    session = Session(_settings(args, stage_dir=args.stage_dir or Path("build") / "test_mod",
+                                **({"blender_path": args.blender} if args.blender else {})))
     techs = dict(zip((2, 3, 4), args.test_sprite_techs)) if args.test_sprite_techs else None
     try:
-        res = session.build_test_mod(_spec(args), suite=args.suite, textures=args.textures, sprite_techs=techs,
+        res = session.build_test_mod(_spec(args), suite=args.suite, textures=args.textures, parts=args.parts,
+                                     sprite_techs=techs,
                                      rival_gfx=args.rival_gfx, write=write,
                                      fallback_tags=dict(zip("abc", args.fallback_tags)) if args.fallback_tags else None)
     except ExportError as exc:
@@ -220,6 +222,10 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--textures", action="store_true",
                    help="build the texture test instead (eu4unitgen_test_textures): tier 1 retextured through "
                         "pdxmesh meshsettings, and print the checklist")
+    t.add_argument("--parts", action="store_true",
+                   help="build the procedural-parts spike instead (eu4unitgen_test_parts): a dory on Right_hand_node "
+                        "and a crest on the head bone of tier-1 infantry, built in background Blender")
+    t.add_argument("--blender", type=Path, help="Blender executable (default: the pinned 4.2 LTS path)")
     t.add_argument("--fallback-tags", nargs=3, metavar=("A", "B", "C"),
                    help="suite: tags for fallback cases a, b, c (default: picked automatically)")
     t.add_argument("--rival-gfx", default="asiangfx", help="suite: vanilla set the rival priority pack lists")

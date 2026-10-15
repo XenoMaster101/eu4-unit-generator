@@ -17,7 +17,10 @@ from eu4unitgen.core.nation import Nation
 from eu4unitgen.core.project import (
     DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_blender_path, default_mod_dir,
 )
-from eu4unitgen.export.testmod import Suite, build_suite, build_test_mod, build_texture_test, suite_checklist, texture_checklist
+from eu4unitgen.export.testmod import (
+    Suite, build_parts_test, build_suite, build_test_mod, build_texture_test, parts_checklist, suite_checklist,
+    texture_checklist,
+)
 from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
 from eu4unitgen.library.scanner import GameFiles, Index, build_index, find_pack
 from eu4unitgen.library.tags import TagFacts, coverage, culture_groups, start_level, tag_facts
@@ -113,7 +116,7 @@ class TexturePreview:
 DEFAULT_UNIT_COLOURS = [(205, 32, 26), (255, 255, 255), (70, 50, 40)]
 
 
-STAGE_ENTRY = re.compile(rf"^{TEST_MOD_NAME}(_v\d+|_textures)?(\.mod)?$")
+STAGE_ENTRY = re.compile(rf"^{TEST_MOD_NAME}(_v\d+|_textures|_parts)?(\.mod)?$")
 
 
 def clear_stage(stage_dir: Path) -> None:
@@ -274,17 +277,18 @@ class Session:
 
     def build_test_mod(self, spec: SetSpec, *, suite: bool = False, sprite_techs: dict[int, int] | None = None,
                        rival_gfx: str = "asiangfx", clear: bool = False, textures: bool = False,
-                       write: str = "stage", fallback_tags: dict[str, str] | None = None) -> TestModResult:
+                       write: str = "stage", fallback_tags: dict[str, str] | None = None,
+                       parts: bool = False) -> TestModResult:
         """Build the test mod (or the two-variant suite, or the texture test). ``write``: "stage"
         (settings.stage_dir, for copying into the EU4 mod folder by hand), "apply" (straight into
         the EU4 mod folder) or "dry" (nothing written; plans returned). A shared set may have several
         tags; the suite and the texture test take one."""
         if write not in ("stage", "apply", "dry"):
             raise SpecError(f"write must be stage, apply or dry, not {write!r}")
-        if suite and textures:
-            raise SpecError("pick either the test suite or the texture test, not both")
-        if (suite or textures) and len(spec.tags) != 1:
-            raise SpecError("the test suite and the texture test take exactly one tag")
+        if sum((suite, textures, parts)) > 1:
+            raise SpecError("pick one of the test suite, the texture test and the parts test")
+        if (suite or textures or parts) and len(spec.tags) != 1:
+            raise SpecError("the test suite, the texture test and the parts test take exactly one tag")
         if not spec.tags:
             raise SpecError("enter at least one tag")
         game, idx = self.game()
@@ -309,7 +313,16 @@ class Session:
         checklist = ""
         built: Suite | None = None
         try:
-            if textures:
+            if parts:
+                from eu4unitgen.blender.runner import BlenderError, BlenderRunner
+                try:
+                    runner = BlenderRunner(self.settings.blender_path,
+                                           log_dir=self.settings.output_dir / "blender_logs")
+                    pt = build_parts_test(project, nation, game, idx, mod_dir, runner, test_sprite_techs=sprite_techs)
+                except BlenderError as exc:
+                    raise SpecError(str(exc)) from exc
+                mods, checklist = [pt.mod], parts_checklist(pt, sprite_techs)
+            elif textures:
                 tt = build_texture_test(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
                 mods, checklist = [tt.mod], texture_checklist(tt, sprite_techs)
             elif suite:

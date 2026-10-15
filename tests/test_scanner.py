@@ -385,3 +385,14 @@ def test_vanilla_install_regenerates_committed_file():
     finally:
         files.close()
     assert doc == json.loads(COMMITTED.read_text(encoding="utf-8"))
+
+
+def test_bind_pose_inverts_tx():
+    from eu4unitgen.library.scanner import bind_pose
+    # tx = inverse bind: identity rotation, translation (0, -14.5, 0) -> bone at y = 14.5
+    assert bind_pose([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -14.5, 0]) == [1, 0, 0, 0, 0, 1, 0, 14.5, 0, 0, 1, 0]
+    # 180 degrees about X (Right_hand_node-like): inverse of itself; position -R^T t
+    pose = bind_pose([1, 0, 0, 0, -1, 0, 0, 0, -1, -6, 10, 0])
+    assert [round(v, 6) + 0.0 for v in pose] == [1, 0, 0, 6, 0, -1, 0, 10, 0, 0, -1, 0]
+    with pytest.raises(ValueError):
+        bind_pose([0.0] * 12)

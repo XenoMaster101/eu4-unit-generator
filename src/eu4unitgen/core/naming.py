@@ -14,6 +14,7 @@ UNIT_TYPES = ("infantry", "cavalry", "artillery")
 TIERS = (1, 2, 3, 4)
 MESH_ROLES = ("infantry", "horse", "cannon")  # retexturable meshes per tier; the rider uses the infantry's
 TEXTURE_KINDS = ("diffuse", "normal", "specular")
+PART_KINDS = ("dory", "sarissa", "xiphos", "hoplon", "crest")  # procedural rigid parts (Phase 3)
 
 _TAG = re.compile(r"^[A-Z][A-Z0-9]{2}$")
 _GFX = re.compile(r"^[a-z][a-z0-9_]*gfx$")
@@ -116,6 +117,30 @@ class Naming:
         if kind not in TEXTURE_KINDS:
             raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
         return f"{self.prefix}{check_set_name(set_name)}_{check_identifier(role, 'role')}_{_check_tier(tier)}_{kind}.dds"
+
+    # ------------------------------------------------------------------ procedural parts (Phase 3)
+    def part_dir(self, set_name: str) -> str:
+        """The set's own model folder: its part meshes and their textures (bare names resolve here)."""
+        return f"gfx/models/units/{self.prefix}{check_set_name(set_name)}"
+
+    def part(self, set_name: str, kind: str, tier: int) -> str:
+        """hr_mac_dory_1: the part's entity name, and the stem of its mesh and textures."""
+        if kind not in PART_KINDS:
+            raise NamingError(f"part kind {kind!r} must be one of {PART_KINDS}")
+        return f"{self.prefix}{check_set_name(set_name)}_{kind}_{_check_tier(tier)}"
+
+    def part_mesh_file(self, set_name: str, kind: str, tier: int) -> str:
+        return f"{self.part_dir(set_name)}/{self.part(set_name, kind, tier)}.mesh"
+
+    def part_texture(self, set_name: str, kind: str, tier: int, tex: str) -> str:
+        if tex not in TEXTURE_KINDS:
+            raise NamingError(f"texture kind {tex!r} must be one of {TEXTURE_KINDS}")
+        return f"{self.part(set_name, kind, tier)}_{tex}.dds"
+
+    @staticmethod
+    def parts_test_mod() -> str:
+        """eu4unitgen_test_parts: the procedural-part spike (SPEC §10 Phase 3, in-game test 7)."""
+        return f"{TEST_MOD_NAME}_parts"
 
     @staticmethod
     def texture_guide_dir(set_name: str) -> str:

@@ -39,7 +39,7 @@ STATES = ("idle", "walk", "attack", "retreat")  # SPEC §5: the only live states
 OWNED = "owned"  # written entirely by the tool
 PATCHED = "patched"  # an existing game/mod file plus the tool's additions
 SNIPPET = "snippet"  # for the user to read or merge by hand; not loaded by the game
-BINARY_SUFFIXES = (".dds",)  # generated files that aren't script text
+BINARY_SUFFIXES = (".dds", ".mesh")  # generated files that aren't script text
 
 
 class GenerationError(ValueError):
@@ -54,6 +54,7 @@ class GeneratedFile:
     based_on: str | None = None  # PATCHED: "vanilla" or "mod"
     game_path: str | None = None  # PATCHED from vanilla: the game path it copies, when it differs from ``path``
     derived_from: str | None = None  # derived texture: the base-game file it was made from (never DLC, CLAUDE.md rule 2)
+    procedural: bool = False  # made from scratch by the tool (procedural parts and their textures): nothing derived
 
     @property
     def text(self) -> str:

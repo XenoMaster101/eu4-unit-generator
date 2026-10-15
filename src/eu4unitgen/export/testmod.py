@@ -382,3 +382,61 @@ def texture_checklist(test: TextureTest, sprite_techs: dict[int, int] | None) ->
         "[ ] E        error.log: note any line with hr_, meshsettings, .dds, texture or mesh.",
     ]
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- parts spike (Phase 3, in-game test 7)
+
+SPIKE_PARTS = (("dory", 1), ("crest", 1))
+
+
+@dataclass
+class PartsTest:
+    mod: TestMod
+    attach: dict  # (tier, bone) -> part entity
+    nation: Nation
+
+
+def build_parts_test(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path, runner,
+                     test_sprite_techs: dict[int, int] | None = None) -> PartsTest:
+    """In-game test 7 (SPEC §10 Phase 3 spike): a crude procedural dory on Right_hand_node
+    (replacing the halberd) and a crude crest on the ``head`` bone of tier-1 infantry (so also
+    the tier-1 gun crew). Tiers 2-4 plain. ``runner``: blender.runner.BlenderRunner."""
+    from eu4unitgen.core.parts import PartSpec, attach_parts, build_parts
+
+    naming, set_name = project.naming, nation.set_name
+    package = _main_package(project, nation, game, idx, test_sprite_techs)
+    chain = BaseChain(idx, nation.base_gfx)
+    built = build_parts(runner, naming, set_name, [PartSpec(k, t) for k, t in SPIKE_PARTS], project.entity_version)
+    entities = unit_entities(nation.tag, chain, naming, project.entity_version)
+    attach_parts(entities, nation.tag, built.attach, naming)
+    rel = naming.set_entities_file(set_name)
+    package.files[rel] = GeneratedFile(rel, render("entities.asset.j2", entities=entities + built.entities)
+                                       .encode("utf-8"), OWNED)
+    package.add(GeneratedFile(naming.pdxmesh_file(set_name), render("pdxmeshes.gfx.j2", meshes=built.meshes)
+                              .encode("utf-8"), OWNED))
+    for f in built.files:
+        package.add(f)
+    package.notes.append("TEST ONLY: tier-1 infantry carries a procedural dory (Right_hand_node) and crest (head)")
+    return PartsTest(_wrap(project, nation, package, game, idx, mod_dir, naming.parts_test_mod()), built.attach, nation)
+
+
+def parts_checklist(test: PartsTest, sprite_techs: dict[int, int] | None) -> str:
+    tag = test.nation.tag
+    name = test.mod.plan.manifest_rel.split("/", 1)[0]
+    techs = (", ".join(f"tier {lvl} at MIL {t}" for lvl, t in sorted(sprite_techs.items())) if sprite_techs
+             else "vanilla sprite techs")
+    return "\n".join([
+        "IN-GAME TEST 7 CHECKLIST (procedural parts spike)",
+        f"Enable only {name} (disable every other eu4unitgen mod). Play {tag}. Sprite tiers: tier 1 at start, {techs}.",
+        "Look at tier-1 infantry standing, marching and fighting, and at a tier-1 artillery crew. PASS/FAIL + notes.",
+        "",
+        "[ ] H1 crest: a red front-to-back crest sits on top of the helmet (head attach WORKS).",
+        "       Not visible at all / at the feet / at the unit's origin = head attach FAILS -> stop, report.",
+        "[ ] H2 the crest follows the head through idle, walk and attack (no floating, no lag).",
+        "[ ] H3 crest size and height: roughly right / too big / too small / sunk into or floating above the helmet.",
+        "[ ] D1 dory: a long brown shaft with a bronze point replaces the halberd in the right hand.",
+        "[ ] D2 the point is UP / forward like the halberd's blade (not reversed), held at the grip, not through the arm.",
+        "[ ] D3 length looks plausible (about the halberd's).",
+        "[ ] C  tiers 2-4: plain western units (control).",
+        "[ ] E  error.log: note any line with hr_, .mesh, entity, attach, head or texture.",
+    ])

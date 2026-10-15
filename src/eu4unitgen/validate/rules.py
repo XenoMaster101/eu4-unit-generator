@@ -12,7 +12,7 @@ from pathlib import PurePosixPath
 from typing import Callable
 
 from eu4unitgen.core.generator import BINARY_SUFFIXES, SNIPPET, GeneratedSet, tag_trigger
-from eu4unitgen.core.naming import TIERS, UNIT_TYPES, Naming
+from eu4unitgen.core.naming import PART_KINDS, TIERS, UNIT_TYPES, Naming
 from eu4unitgen.core.nation import MANEUVER, Nation
 from eu4unitgen.core.project import Project
 from eu4unitgen.library.tags import TagFacts, apply_history, coverage, culture_groups
@@ -116,8 +116,9 @@ def is_binary(path: str) -> bool:
 @rule("dds_format")
 def dds_format(ctx: Context) -> list[Issue]:
     """Every generated DDS is derived from a base-game texture (never DLC, CLAUDE.md rule 2) and
-    matches its format, size and mip count (SPEC §4: a mismatch shows as a black/wrong unit)."""
-    from eu4unitgen.textures.dds import DDSError, DDSFormat, check_matches, read_header
+    matches its format, size and mip count (SPEC §4: a mismatch shows as a black/wrong unit), or
+    is a procedural texture (made from scratch) in vanilla's form: DXT1/DXT5, full mips, no DX10."""
+    from eu4unitgen.textures.dds import DDSError, DDSFormat, check_matches, full_mip_count, read_header
 
     out = []
     game = ctx.world.game
@@ -125,6 +126,15 @@ def dds_format(ctx: Context) -> list[Issue]:
         if not f.path.lower().endswith(".dds"):
             continue
         base = f.derived_from
+        if f.procedural and not base:
+            try:
+                h = read_header(f.data)
+                own = DDSFormat(h["format"], h["width"], h["height"], full_mip_count(h["width"], h["height"]))
+                problems = check_matches(f.data, own)
+            except (DDSError, ValueError) as exc:
+                problems = [str(exc)]
+            out += [Issue(ERROR, "dds_format", f"procedural texture: {p}", f.path) for p in problems]
+            continue
         if not base:
             out.append(Issue(ERROR, "dds_format", "generated texture doesn't record the base texture it came from", f.path))
             continue
@@ -217,18 +227,86 @@ def texture_paths(ctx: Context) -> list[Issue]:
                                      rec["defined_in"], name))
                     continue
                 named.add(meshsettings_texture_path(mesh_file, tex).lower())
+    for f in ctx.generated.files.values():  # textures a generated (procedural) .mesh names itself
+        if f.path.lower().endswith(".mesh"):
+            folder = str(PurePosixPath(f.path).parent)
+            for shape in (w.mesh_summary(f.path) or {}).get("shapes", []):
+                for key in ("diffuse", "normal", "specular"):
+                    if shape.get(key):
+                        named.add(f"{folder}/{shape[key]}".lower())
     for f in ctx.generated.files.values():
         if not f.path.lower().endswith(".dds"):
             continue
         if f.path.lower() not in named:
-            out.append(Issue(ERROR, "texture_paths", "generated texture isn't in the folder of a mesh whose generated "
-                                                     "pdxmesh names it by bare file name", f.path))
+            out.append(Issue(ERROR, "texture_paths", "generated texture isn't in the folder of a mesh that names it "
+                                                     "(a generated pdxmesh's meshsettings or a generated .mesh)", f.path))
         if w.game.exists(f.path):
             where = "base-game" if w.game.in_base_game(f.path) else "DLC"
             out.append(Issue(ERROR, "texture_paths", f"same path as a {where} texture: the mod's file would replace "
                                                      "it for every nation", f.path))
         elif w.mod is not None and w.mod.exists(f.path):
             out.append(Issue(ERROR, "texture_paths", "same path as a file already in the mod", f.path))
+    return out
+
+
+PART_TRI_BUDGET = 3000  # vanilla weapons: tens to a few hundred triangles; a body ~2,000
+UNVERIFIED_ATTACH_BONES = {"head"}  # never used by vanilla; in-game test 7
+
+
+@rule("attach_bones")
+def attach_bones(ctx: Context) -> list[Issue]:
+    """Every attach node on a generated entity is a bone (or locator) of the entity's own mesh
+    (case-insensitive: vanilla writes both Saddle_Node and saddle_node)."""
+    w, out = ctx.world, []
+    for name, rec in sorted(ctx.gen_entities().items()):
+        pdx = w.pdxmesh(w.resolve(name, "pdxmesh") or "")
+        summary = w.mesh_summary(pdx["file"]) if pdx and pdx.get("file") else None
+        if not summary:
+            continue  # missing_nodes reports it
+        nodes = {b.lower() for b in summary.get("bones", [])} | {loc.lower() for loc in summary.get("locators", {})}
+        for a in w.resolve(name, "attach") or []:
+            for bone in (k for k in a if k != "name"):
+                if bone.lower() not in nodes:
+                    out.append(Issue(ERROR, "attach_bones", f"{name}: attach node {bone!r} isn't a bone or locator of "
+                                                            f"{pdx['file']}", rec["defined_in"], name))
+                elif bone in UNVERIFIED_ATTACH_BONES:
+                    out.append(Issue(INFO, "attach_bones", f"{name}: attaches to {bone!r}, which vanilla never uses "
+                                                           "(UNVERIFIED; in-game test 7)", rec["defined_in"], name))
+    return out
+
+
+@rule("part_mesh")
+def part_mesh(ctx: Context) -> list[Issue]:
+    """Generated .mesh files (procedural parts): parse, vanilla static-weapon layout (no
+    boundingsphere, no skeleton), a known shader, within the triangle budget, non-degenerate."""
+    from eu4unitgen.library.scanner import _walk, parse_pdx_mesh
+
+    out = []
+    for f in ctx.generated.files.values():
+        if not f.path.lower().endswith(".mesh"):
+            continue
+        try:
+            tree = parse_pdx_mesh(f.data)
+        except (ValueError, IndexError) as exc:
+            out.append(Issue(ERROR, "part_mesh", f"doesn't parse: {exc}", f.path))
+            continue
+        tris = 0
+        for node in _walk(tree):
+            if "boundingsphere" in node["props"]:
+                out.append(Issue(ERROR, "part_mesh", "has a boundingsphere (vanilla meshes never do)", f.path))
+            if node["name"] == "skeleton":
+                out.append(Issue(ERROR, "part_mesh", "has a skeleton; rigid parts are static meshes", f.path))
+            tris += len(node["props"].get("tri", [])) // 3
+        summary = ctx.world.mesh_summary(f.path) or {}
+        for shape in summary.get("shapes", []):
+            if shape.get("shader") not in SHADERS:
+                out.append(Issue(ERROR, "part_mesh", f"shape {shape.get('shape')}: unknown shader {shape.get('shader')!r}",
+                                 f.path))
+        if tris == 0 or tris > PART_TRI_BUDGET:
+            out.append(Issue(ERROR, "part_mesh", f"{tris} triangles (budget 1-{PART_TRI_BUDGET})", f.path))
+        box = summary.get("aabb")
+        if not box or any(hi - lo <= 0 for lo, hi in zip(box["min"], box["max"])):
+            out.append(Issue(ERROR, "part_mesh", f"degenerate bounding box {box}", f.path))
     return out
 
 
@@ -247,6 +325,7 @@ def naming(ctx: Context) -> list[Issue]:
     names = set(ctx.gen_entities())
     # Optional: an owner's own cannon entity, made only when its cannon is retextured (Phase 2).
     optional = {n.cannon_entity(owner, t) for owner in (tag, gfx) for t in TIERS}
+    optional |= {n.part(ctx.nation.set_name, kind, t) for kind in PART_KINDS for t in TIERS}  # Phase 3 parts
     for name in sorted(names - expected - optional):
         out.append(Issue(ERROR, "naming", f"unexpected generated entity name {name!r}", subject=name))
     for name in sorted(expected - names):

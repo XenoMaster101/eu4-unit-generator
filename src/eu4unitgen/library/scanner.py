@@ -93,19 +93,91 @@ def parse_pdx_mesh(data: bytes) -> dict:
     return root
 
 
+def write_pdx_mesh(tree: dict) -> bytes:
+    """The inverse of ``parse_pdx_mesh`` (byte-identical on every vanilla unit mesh; tested).
+    Property types: ints stay 'i', floats 'f', strings 's'."""
+    out = bytearray(b"@@b@")
+
+    def props(node: dict) -> None:
+        for name, vals in node["props"].items():
+            raw = name.encode("latin-1")
+            if vals and all(isinstance(v, str) for v in vals):
+                dtype, body = b"s", b"".join(struct.pack("<i", len(v.encode("latin-1")) + 1) + v.encode("latin-1") + b"\0"
+                                             for v in vals)
+            elif vals and all(isinstance(v, int) and not isinstance(v, bool) for v in vals):
+                dtype, body = b"i", struct.pack(f"<{len(vals)}i", *vals)
+            else:
+                dtype, body = b"f", struct.pack(f"<{len(vals)}f", *vals)
+            out.extend(b"!" + bytes([len(raw)]) + raw + dtype + struct.pack("<i", len(vals)) + body)
+
+    def nodes(node: dict, depth: int) -> None:
+        for child in node["children"]:
+            out.extend(b"[" * depth + child["name"].encode("latin-1") + b"\0")
+            props(child)
+            nodes(child, depth + 1)
+
+    props(tree)
+    nodes(tree, 1)
+    return bytes(out)
+
+
+def strip_mesh_props(data: bytes, names: tuple[str, ...] = ("boundingsphere",)) -> bytes:
+    """Drop properties vanilla EU4 meshes never carry (io_pdx_mesh 0.91 always writes
+    ``boundingsphere``; none of the 167 vanilla unit meshes has it)."""
+    tree = parse_pdx_mesh(data)
+    for node in _walk(tree):
+        for n in names:
+            node["props"].pop(n, None)
+    return write_pdx_mesh(tree)
+
+
 def _walk(node: dict) -> Iterator[dict]:
     yield node
     for child in node["children"]:
         yield from _walk(child)
 
 
+def bind_pose(tx: list[float]) -> list[float]:
+    """A bone's ``tx`` (inverse bind matrix; columns tx[0:3], tx[3:6], tx[6:9], translation
+    tx[9:12], as io_pdx_mesh reads it) -> its bind pose in mesh space (Y-up), as a row-major
+    3x4 [r00 r01 r02 t0, r10 r11 r12 t1, r20 r21 r22 t2]."""
+    a = [[tx[0], tx[3], tx[6]], [tx[1], tx[4], tx[7]], [tx[2], tx[5], tx[8]]]
+    t = tx[9:12]
+    det = (a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+           + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]))
+    if abs(det) < 1e-12:
+        raise ValueError("singular bone transform")
+    inv = [[(a[(j + 1) % 3][(i + 1) % 3] * a[(j + 2) % 3][(i + 2) % 3]
+             - a[(j + 1) % 3][(i + 2) % 3] * a[(j + 2) % 3][(i + 1) % 3]) / det for j in range(3)] for i in range(3)]
+    pos = [-sum(inv[r][c] * t[c] for c in range(3)) for r in range(3)]
+    return [v for r in range(3) for v in (*inv[r], pos[r])]
+
+
 def summarize_mesh(tree: dict) -> dict:
-    """Shapes (shader + texture names), bone names in file order, locators with parent bone."""
-    shapes, bones, locators = [], [], {}
+    """Shapes (shader + texture names), bone names in file order, locators with parent bone,
+    the skeleton (parent and bind pose per bone) and the bounding box over all shapes."""
+    shapes, bones, locators, skeleton = [], [], {}, {}
+    lo, hi = [float("inf")] * 3, [float("-inf")] * 3
     for node in _walk(tree):
         if node["name"] == "object":
             for shape in node["children"]:
                 for part in shape["children"]:
+                    for box in (c for c in part["children"] if c["name"] == "aabb"):
+                        mn, mx = box["props"].get("min"), box["props"].get("max")
+                        if mn and mx:
+                            lo = [min(a, b) for a, b in zip(lo, mn)]
+                            hi = [max(a, b) for a, b in zip(hi, mx)]
+                    if part["name"] == "skeleton" and not skeleton:
+                        by_index = {(b["props"].get("ix") or [None])[0]: b["name"] for b in part["children"]}
+                        for b in part["children"]:
+                            pa = (b["props"].get("pa") or [None])[0]
+                            tx = b["props"].get("tx")
+                            try:  # vanilla attach_free has an all-zero tx: no bind pose
+                                bind = bind_pose(tx) if tx and len(tx) == 12 else None
+                            except ValueError:
+                                bind = None
+                            skeleton[b["name"]] = {"parent": by_index.get(pa) if pa is not None else None,
+                                                   "bind": bind}
                     for mat in (c for c in part["children"] if c["name"] == "material"):
                         p = mat["props"]
                         shapes.append({
@@ -120,7 +192,8 @@ def summarize_mesh(tree: dict) -> dict:
         elif node["name"] == "locator":
             for loc in node["children"]:
                 locators[loc["name"]] = (loc["props"].get("pa") or [None])[0]
-    return {"shapes": shapes, "bones": bones, "locators": locators}
+    aabb = {"min": lo, "max": hi} if lo[0] != float("inf") else None
+    return {"shapes": shapes, "bones": bones, "locators": locators, "skeleton": skeleton, "aabb": aabb}
 
 
 # --------------------------------------------------------------------------- DDS header
@@ -472,7 +545,7 @@ def build_base_models(files: GameFiles, idx: Index, tag: str, gfx: str) -> dict:
     entities = {n: _strip(idx.entity(n)) for n in entity_names}
 
     pdx_names = sorted({e["pdxmesh"] for e in entities.values() if "pdxmesh" in e})
-    pdxmeshes, textures, anim_names, mesh_bones = {}, {}, set(), {}
+    pdxmeshes, textures, anim_names, mesh_bones, mesh_skel = {}, {}, set(), {}, {}
     for name in pdx_names:
         rec = idx.pdxmesh(name)
         if rec is None:
@@ -494,9 +567,12 @@ def build_base_models(files: GameFiles, idx: Index, tag: str, gfx: str) -> dict:
                 texture_dir=folder,
                 mesh_locators=summary["locators"],
             )
+            if summary["aabb"]:
+                entry["aabb"] = {k: [round(v, 4) for v in vals] for k, vals in summary["aabb"].items()}
             if len(summary["shapes"]) > 1:
                 entry["extra_shapes"] = summary["shapes"][1:]
             mesh_bones[name] = summary["bones"]
+            mesh_skel[name] = summary["skeleton"]
             for tex in entry["textures"].values():
                 if tex and tex not in textures:
                     data = files.read(f"{folder}/{tex}")
@@ -518,7 +594,15 @@ def build_base_models(files: GameFiles, idx: Index, tag: str, gfx: str) -> dict:
         sid = next((s for s, v in skeletons.items() if v["bones"] == bones), None)
         if sid is None:
             sid = PurePosixPath(pdxmeshes[name]["file"]).stem
-            skeletons[sid] = {"bones": bones, "attach_bones": [b for b in bones if b in attach_keys], "used_by": []}
+            skel = mesh_skel.get(name) or {}
+            skeletons[sid] = {
+                "bones": bones, "attach_bones": [b for b in bones if b in attach_keys], "used_by": [],
+                # Hierarchy and bind pose (mesh space, Y-up, row-major 3x4) as in this group's first mesh.
+                "parents": {b: (skel.get(b) or {}).get("parent") for b in bones},
+                "bind": {b: [round(v, 4) for v in (skel.get(b) or {}).get("bind")] if (skel.get(b) or {}).get("bind")
+                         else None for b in bones},
+                "bind_from": name,
+            }
         skeletons[sid]["used_by"].append(name)
         pdxmeshes[name]["skeleton"] = sid
     for skel in skeletons.values():

@@ -430,6 +430,10 @@ class TestModPage(Page):
         self.textures = QCheckBox("Texture test (tier 1 retextured through meshsettings)")
         self.suite.toggled.connect(lambda on: on and self.textures.setChecked(False))
         self.textures.toggled.connect(lambda on: on and self.suite.setChecked(False))
+        self.parts = QCheckBox("Parts spike (tier-1 dory + crest on the head bone; runs Blender)")
+        for box in (self.suite, self.textures, self.parts):
+            box.toggled.connect(lambda on, b=box: on and [o.setChecked(False) for o in
+                                                          (self.suite, self.textures, self.parts) if o is not b])
         self.rival = QComboBox()
         self.rival.addItem("asiangfx")
         self.sprites_on = QCheckBox("Move sprite tiers 2-4 to early MIL techs (test only)")
@@ -449,6 +453,7 @@ class TestModPage(Page):
         self.clear.setChecked(True)
         form.addRow(self.suite)
         form.addRow(self.textures)
+        form.addRow(self.parts)
         form.addRow("Rival pack copies", self.rival)
         form.addRow(srow)
         form.addRow(self.clear)
@@ -480,7 +485,8 @@ class TestModPage(Page):
     def options(self) -> dict:
         techs = dict(zip((2, 3, 4), (b.value() for b in self.sprite_techs))) if self.sprites_on.isChecked() else None
         return {"suite": self.suite.isChecked(), "sprite_techs": techs, "rival_gfx": self.rival.currentText(),
-                "clear": self.clear.isChecked(), "textures": self.textures.isChecked()}
+                "clear": self.clear.isChecked(), "textures": self.textures.isChecked(),
+                "parts": self.parts.isChecked()}
 
     def fill(self, bases: list[str]) -> None:
         keep = self.rival.currentText()
