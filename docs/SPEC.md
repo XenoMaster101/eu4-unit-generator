@@ -414,7 +414,7 @@ src/eu4unitgen/
   core/retexture.py   # Phase 2: retextured pdxmesh (vanilla .mesh + meshsettings) and derived DDS; entities pointed at it
   export/pipeline.py  # Session: load the install once; validate / generate / build test mod for a unit-set form (GUI + tests)
   library/tags.py     # 1444 tag facts (owners, culture, group, reforms) + 3-valued sprite-pack trigger evaluation
-  cli.py              # generate (-> output/<set>/) | pick-test-tag | test-mod (dry run unless --apply / --stage-dir)
+  cli.py              # generate (-> output/<set>/) | pick-test-tag | test-mod (dry run unless --apply / --stage-dir); generate and test-mod call export/pipeline.py (one code path with the GUI)
   gui/                # PySide6: Project setup, Nation wizard, Template picker, Texture editor, Validator, Export
 tests/
 ```

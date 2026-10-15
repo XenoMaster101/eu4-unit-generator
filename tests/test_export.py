@@ -182,7 +182,7 @@ def test_cli_generate_dry_run_writes_nothing(fake_install, tmp_path, capsys):
 
 @pytest.mark.parametrize("make_mod", ["descriptor", "sibling", "inside_mod_dir"])
 def test_generate_refuses_mod_folders(make_mod, fake_install, tmp_path, monkeypatch, capsys):
-    import eu4unitgen.cli as cli
+    import eu4unitgen.export.pipeline as pipeline
     mod_dir = tmp_path / "Paradox" / "mod"
     target = mod_dir / "some_mod" / "out"
     target.mkdir(parents=True)
@@ -190,7 +190,7 @@ def test_generate_refuses_mod_folders(make_mod, fake_install, tmp_path, monkeypa
         (mod_dir / "some_mod" / "descriptor.mod").write_text('name="x"\n')
     elif make_mod == "sibling":
         (mod_dir / "some_mod.mod").write_text('name="x"\n')
-    monkeypatch.setattr(cli, "default_mod_dir", lambda: mod_dir if make_mod == "inside_mod_dir" else tmp_path / "elsewhere")
+    monkeypatch.setattr(pipeline, "default_mod_dir", lambda: mod_dir if make_mod == "inside_mod_dir" else tmp_path / "elsewhere")
     code = cli_main(["generate", "--tag", "MAC", "--gfx", "hellenicgfx", "--eu4", str(fake_install), "--out", str(target)])
     assert code == 1 and "REFUSED" in capsys.readouterr().out
     assert list(target.iterdir()) == []

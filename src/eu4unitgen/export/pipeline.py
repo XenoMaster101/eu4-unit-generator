@@ -14,7 +14,9 @@ from typing import Any
 from eu4unitgen.core.generator import GeneratedSet, GenerationError, generate
 from eu4unitgen.core.naming import TEST_MOD_NAME, NamingError, check_tag
 from eu4unitgen.core.nation import Nation
-from eu4unitgen.core.project import Project, default_blender_path, default_mod_dir
+from eu4unitgen.core.project import (
+    DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_blender_path, default_mod_dir,
+)
 from eu4unitgen.export.testmod import Suite, build_suite, build_test_mod, build_texture_test, suite_checklist, texture_checklist
 from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
 from eu4unitgen.library.scanner import GameFiles, Index, build_index, find_pack
@@ -36,6 +38,8 @@ class Settings:
     mod_dir: Path | None = None  # EU4 user mod directory; default: the one under Documents
     prefix: str = "hr_"
     blender_path: Path | None = None  # default: the pinned Blender 4.2 LTS (core.project.default_blender_path)
+    entity_version: int = DEFAULT_ENTITY_VERSION
+    tag_pack_order: int = DEFAULT_TAG_PACK_ORDER
 
     def __post_init__(self) -> None:
         if self.eu4_path is None and os.environ.get("EU4_PATH"):
@@ -84,11 +88,13 @@ class SetResult:
 
 @dataclass
 class TestModResult:
-    stage_dir: Path
+    stage_dir: Path | None  # where it was written: the stage folder, the EU4 mod folder (apply), None (dry run)
     reports: list[tuple[str, Report]]  # (mod folder name, report)
     written: list[str]
     warnings: list[str]
     checklist: str = ""
+    plans: list[ExportPlan] = field(default_factory=list)  # one per mod (the suite has two)
+    info: str = ""  # the tag's 1444 facts, for the CLI
 
 
 @dataclass
@@ -193,6 +199,7 @@ class Session:
         check = mod_root is None and s.mod_folder is not None
         return Project(mod_root=mod_root or s.mod_folder or s.user_mod_dir() / "hellenistic_revolution",
                        eu4_path=s.eu4_path, prefix=s.prefix, owned_dlc=list(s.owned_dlc),
+                       entity_version=s.entity_version, tag_pack_order=s.tag_pack_order,
                        check_mod_collisions=check, **kw)
 
     def nations(self, spec: SetSpec) -> list[Nation]:
@@ -256,9 +263,13 @@ class Session:
         return results
 
     def build_test_mod(self, spec: SetSpec, *, suite: bool = False, sprite_techs: dict[int, int] | None = None,
-                       rival_gfx: str = "asiangfx", clear: bool = False, textures: bool = False) -> TestModResult:
-        """Stage the test mod (or the two-variant suite, or the texture test) in settings.stage_dir,
-        for copying into the EU4 mod folder by hand. One tag only."""
+                       rival_gfx: str = "asiangfx", clear: bool = False, textures: bool = False,
+                       write: str = "stage", fallback_tags: dict[str, str] | None = None) -> TestModResult:
+        """Build the test mod (or the two-variant suite, or the texture test). ``write``: "stage"
+        (settings.stage_dir, for copying into the EU4 mod folder by hand), "apply" (straight into
+        the EU4 mod folder) or "dry" (nothing written; plans returned). One tag only."""
+        if write not in ("stage", "apply", "dry"):
+            raise SpecError(f"write must be stage, apply or dry, not {write!r}")
         if suite and textures:
             raise SpecError("pick either the test suite or the texture test, not both")
         if len(spec.tags) != 1:
@@ -289,7 +300,7 @@ class Session:
                 mods, checklist = [tt.mod], texture_checklist(tt, sprite_techs)
             elif suite:
                 built = build_suite(project, nation, game, idx, mod_dir, facts, culture_groups(game),
-                                    rival_gfx=rival_gfx, test_sprite_techs=sprite_techs)
+                                    rival_gfx=rival_gfx, test_sprite_techs=sprite_techs, fallback_tags=fallback_tags)
                 mods = built.variants
             else:
                 mods = [build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs,
@@ -297,17 +308,22 @@ class Session:
         except GenerationError as exc:
             raise SpecError(str(exc)) from exc
         reports = [(tm.plan.manifest_rel.split("/", 1)[0], tm.report) for tm in mods]
-        stage = self.settings.stage_dir
+        stage: Path | None = None
         written: list[str] = []
-        if all(tm.plan.can_apply for tm in mods):
-            if clear:
-                clear_stage(stage)
-            targets = [stage_plan(tm.plan, stage, require_empty=i == 0) for i, tm in enumerate(mods)]
+        if write != "dry" and all(tm.plan.can_apply for tm in mods):
+            if write == "stage":
+                stage = self.settings.stage_dir
+                if clear:
+                    clear_stage(stage)
+                targets = [stage_plan(tm.plan, stage, require_empty=i == 0) for i, tm in enumerate(mods)]
+            else:
+                stage, targets = mod_dir, [tm.plan for tm in mods]
             for t in targets:
                 written += apply_export(t)
         if built is not None:
             checklist = suite_checklist(built, sprite_techs)
-        return TestModResult(stage, reports, written, warnings, checklist)
+        info = f"test mod for {tag} ({f.primary_culture}, {f.technology_group}, was {f.graphical_culture})"
+        return TestModResult(stage, reports, written, warnings, checklist, [tm.plan for tm in mods], info)
 
     # ------------------------------------------------------------------ textures (Phase 2)
     def _slot_base(self, spec: SetSpec, tier: int, role: str, base: str | None):

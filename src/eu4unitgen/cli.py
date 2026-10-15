@@ -6,6 +6,7 @@
     python -m eu4unitgen.cli test-mod --textures --tag HDA --gfx hellenicgfx --set macedonian_test --test-sprite-techs 2 3 4
     python -m eu4unitgen.cli test-mod --suite --tag HDA --gfx hellenicgfx --gfx-set-base muslimgfx [--stage-dir DIR]
 
+generate and test-mod run through export/pipeline.py, the same code path as the GUI.
 generate writes a drop-in package to <out>/<set>/ (new files + INTEGRATION.md) and never
 writes into a mod folder. test-mod is a dry run unless --apply (into the EU4 mod
 directory) or --stage-dir (into an empty folder, for copying by hand).
@@ -16,15 +17,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from eu4unitgen.core.generator import GenerationError, generate
+from eu4unitgen.core.generator import GenerationError
 from eu4unitgen.core.naming import TEST_MOD_NAME
-from eu4unitgen.core.nation import Nation
-from eu4unitgen.core.project import DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_mod_dir
-from eu4unitgen.export.testmod import build_suite, build_test_mod, build_texture_test, suite_checklist, texture_checklist
-from eu4unitgen.export.writer import ExportError, ExportPlan, apply_export, plan_package, stage_plan
+from eu4unitgen.core.project import DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project
+from eu4unitgen.export.pipeline import Session, SetSpec, Settings, SpecError
+from eu4unitgen.export.writer import ExportError, ExportPlan
 from eu4unitgen.library.scanner import GameFiles, build_index
-from eu4unitgen.library.tags import coverage, culture_groups, start_level, tag_facts
-from eu4unitgen.validate import Report, validate
+from eu4unitgen.library.tags import coverage, tag_facts
+from eu4unitgen.validate import Report
 
 NATIVE_TECH = {"north_american", "mesoamerican", "south_american", "andean", "high_american",
                "aboriginal_tech", "polynesian_tech"}
@@ -57,64 +57,54 @@ def _unit_colours(args: argparse.Namespace):
     return (tuple(v[0:3]), tuple(v[3:6]), tuple(v[6:9])) if v else None
 
 
-def _recipe(args: argparse.Namespace):
-    from eu4unitgen.core.recipe import TextureRecipe
+def _settings(args: argparse.Namespace, **kw) -> Settings:
+    return Settings(eu4_path=args.eu4, owned_dlc=list(args.owned_dlc), prefix=args.prefix,
+                    entity_version=args.version, tag_pack_order=args.pack_order,
+                    mod_dir=getattr(args, "mod_dir", None), **kw)
 
-    return TextureRecipe.load(args.texture_recipe) if args.texture_recipe else None
+
+def _spec(args: argparse.Namespace) -> SetSpec:
+    return SetSpec(tags=[args.tag], gfx=args.gfx, set_name=args.set_name, base_gfx=args.base_gfx, name=args.name,
+                   adjective=args.adjective, colour=tuple(args.colour) if args.colour else None,
+                   tech_group=args.tech_group or "", gfx_set_base=getattr(args, "gfx_set_base", None),
+                   unit_colours=_unit_colours(args), texture_recipe=args.texture_recipe)
 
 
-def _print_result(report: Report, plan: ExportPlan, args: argparse.Namespace, write: bool) -> int:
+def _print_plan(label: str | None, report: Report, plan: ExportPlan, args: argparse.Namespace, suffix: str = "") -> None:
+    if label:
+        print(f"=== {label}")
     print(f"validator: {report.summary()}")
     for issue in report.issues:
         print(f"  {issue}")
     text = plan.diff_text()
     if args.diff_out:
-        args.diff_out.write_text(text, encoding="utf-8")
-        print(f"diff written to {args.diff_out}")
+        out = args.diff_out.with_name(f"{args.diff_out.stem}{suffix}{args.diff_out.suffix}") if suffix else args.diff_out
+        out.write_text(text, encoding="utf-8")
+        print(f"diff written to {out}")
     print(text)
-    stage = getattr(args, "stage_dir", None)
-    if write or stage:
-        target = stage_plan(plan, stage) if stage else plan
-        try:
-            written = apply_export(target)
-        except ExportError as exc:
-            print(f"EXPORT FAILED, nothing written: {exc}")
-            return 1
-        print(f"wrote {len(written)} files and the manifest under {target.mod_root}")
-        if stage:
-            print(f"staged: copy everything inside {target.mod_root} into {plan.mod_root}")
-    else:
-        print("dry run: nothing written")
-    return 0 if plan.can_apply else 1
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
-    """Generate + validate, then write the drop-in package to <out>/<set>/. Never writes to a mod:
-    --mod is only read, and only with --check-mod."""
-    project = Project(mod_root=args.mod or default_mod_dir() / "hellenistic_revolution", eu4_path=args.eu4,
-                      prefix=args.prefix, entity_version=args.version, tag_pack_order=args.pack_order,
-                      owned_dlc=args.owned_dlc, check_mod_collisions=args.check_mod)
-    nation = Nation(args.tag, args.gfx, base_gfx=args.base_gfx, name=args.name, adjective=args.adjective,
-                    colour=tuple(args.colour) if args.colour else None, tech_group=args.tech_group,
-                    set_name=args.set_name, unit_colours=_unit_colours(args))
-    game = GameFiles(project.eu4_path, include_dlc=project.include_dlc)
-    mod = project.mod_files()
+    """Generate + validate, then write the drop-in package to <out>/<set>/ (export/pipeline.py).
+    Never writes to a mod: --mod is only read, and only with --check-mod."""
+    session = Session(_settings(args, output_dir=args.out, mod_folder=args.mod if args.check_mod else None))
     try:
-        idx = build_index(game)
-        generated = generate(project, nation, game, idx, mod, recipe=_recipe(args))
-        report = validate(project, nation, generated, game, idx, mod)
-        try:
-            plan = plan_package(args.out, generated, game, [str(i) for i in report.errors],
-                                mod_dirs=[default_mod_dir(), project.mod_root])
-        except ExportError as exc:
-            print(f"REFUSED: {exc}")
-            return 1
+        results = session.generate(_spec(args), write=not args.dry_run)
+    except ExportError as exc:
+        print(f"REFUSED: {exc}")
+        return 1
     finally:
-        game.close()
-    code = _print_result(report, plan, args, write=not args.dry_run)
-    if not args.dry_run and code == 0:
-        print(f"package: {plan.mod_root / nation.set_name} (copy its contents into your mod's root; "
-              "merge INTEGRATION.md by hand)")
+        session.close()
+    code = 0
+    for r in results:
+        _print_plan(None, r.report, r.plan, args)
+        if not r.plan.can_apply:
+            code = 1
+        elif args.dry_run:
+            print("dry run: nothing written")
+        else:
+            print(f"wrote {len(r.written)} files and the manifest under {r.plan.mod_root}")
+            print(f"package: {r.package_dir} (copy its contents into your mod's root; merge INTEGRATION.md by hand)")
     return code
 
 
@@ -145,86 +135,37 @@ def cmd_pick_test_tag(args: argparse.Namespace) -> int:
     return 0 if clean else 1
 
 
-def cmd_test_suite(args: argparse.Namespace, project: Project, nation: Nation, game: GameFiles, idx, facts,
-                   sprite_techs: dict[int, int] | None, mod_dir: Path) -> int:
-    fallback = dict(zip("abc", args.fallback_tags)) if args.fallback_tags else None
-    suite = build_suite(project, nation, game, idx, mod_dir, facts, culture_groups(game), rival_gfx=args.rival_gfx,
-                        test_sprite_techs=sprite_techs, fallback_tags=fallback)
-    code = 0
-    for i, tm in enumerate(suite.variants):
-        print(f"=== variant {i + 1}: {tm.plan.manifest_rel.split('/', 1)[0]}")
-        print(f"validator: {tm.report.summary()}")
-        for issue in tm.report.issues:
-            print(f"  {issue}")
-        if args.diff_out:
-            out = args.diff_out.with_name(f"{args.diff_out.stem}_v{i + 1}{args.diff_out.suffix}")
-            out.write_text(tm.plan.diff_text(), encoding="utf-8")
-            print(f"diff written to {out}")
-        print(tm.plan.summary())
-        if not tm.plan.can_apply:
-            print(tm.plan.diff_text())
-            code = 1
-    if code == 0 and (args.apply or args.stage_dir):
-        targets = []
-        try:
-            for i, tm in enumerate(suite.variants):
-                targets.append(stage_plan(tm.plan, args.stage_dir, require_empty=i == 0) if args.stage_dir else tm.plan)
-            for target in targets:
-                written = apply_export(target)
-                print(f"wrote {len(written)} files and the manifest under {target.mod_root / target.manifest_rel.split('/')[0]}")
-        except ExportError as exc:
-            print(f"EXPORT FAILED: {exc}")
-            return 1
-        if args.stage_dir:
-            print(f"staged: copy everything inside {args.stage_dir} into {mod_dir}")
-    elif code == 0:
-        print("dry run: nothing written")
-    print()
-    print(suite_checklist(suite, sprite_techs))
-    return code
-
-
 def cmd_test_mod(args: argparse.Namespace) -> int:
-    mod_dir = args.mod_dir or default_mod_dir()
-    project = Project(mod_root=mod_dir / TEST_MOD_NAME, eu4_path=args.eu4, prefix=args.prefix,
-                      entity_version=args.version, tag_pack_order=args.pack_order, owned_dlc=args.owned_dlc)
-    game = GameFiles(project.eu4_path, include_dlc=project.include_dlc)
+    """The test mod, the in-game test suite (--suite) or the texture test (--textures), through
+    export/pipeline.py. A dry run unless --apply (into the EU4 mod directory) or --stage-dir."""
+    write = "apply" if args.apply else "stage" if args.stage_dir else "dry"
+    session = Session(_settings(args, stage_dir=args.stage_dir or Path("build") / "test_mod"))
+    techs = dict(zip((2, 3, 4), args.test_sprite_techs)) if args.test_sprite_techs else None
     try:
-        idx = build_index(game)
-        facts = tag_facts(game).get(args.tag)
-        if facts is None:
-            print(f"{args.tag} owns no land at 1444.11.11; pick another tag (see pick-test-tag)")
-            return 1
-        cov = coverage(idx, facts)
-        if not cov.clean:
-            print(f"WARNING: {args.tag} is matched by {[p for p, _, _ in cov.packs]} / has {cov.entities[:4]}; "
-                  "the map may not show the generated set")
-        nation = Nation(args.tag, args.gfx, base_gfx=args.base_gfx, name=args.name, adjective=args.adjective,
-                        colour=tuple(args.colour) if args.colour else None,
-                        tech_group=args.tech_group or facts.technology_group, set_name=args.set_name,
-                        gfx_set_base=args.gfx_set_base, unit_colours=_unit_colours(args))
-        sprite_techs = None
-        if args.test_sprite_techs:
-            sprite_techs = dict(zip((2, 3, 4), args.test_sprite_techs))
-            start = start_level(game, facts.technology_group)
-            if start is not None and min(sprite_techs.values()) <= start:
-                print(f"WARNING: {args.tag} starts at MIL {start}; tiers at MIL <= {start} show from day one")
-        if args.suite:
-            return cmd_test_suite(args, project, nation, game, idx, tag_facts(game), sprite_techs, mod_dir)
-        checklist = ""
-        if args.textures:
-            tt = build_texture_test(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs)
-            tm, checklist = tt.mod, texture_checklist(tt, sprite_techs)
-        else:
-            tm = build_test_mod(project, nation, game, idx, mod_dir, test_sprite_techs=sprite_techs,
-                                recipe=_recipe(args))
+        res = session.build_test_mod(_spec(args), suite=args.suite, textures=args.textures, sprite_techs=techs,
+                                     rival_gfx=args.rival_gfx, write=write,
+                                     fallback_tags=dict(zip("abc", args.fallback_tags)) if args.fallback_tags else None)
+    except ExportError as exc:
+        print(f"EXPORT FAILED, nothing written: {exc}")
+        return 1
     finally:
-        game.close()
-    print(f"test mod for {args.tag} ({facts.primary_culture}, {facts.technology_group}, was {facts.graphical_culture})")
-    code = _print_result(tm.report, tm.plan, args, write=args.apply)
-    if checklist:
+        session.close()
+    print(res.info)
+    for w in res.warnings:
+        print(f"WARNING: {w}")
+    several = len(res.plans) > 1
+    for i, ((name, report), plan) in enumerate(zip(res.reports, res.plans)):
+        _print_plan(name if several else None, report, plan, args, f"_v{i + 1}" if several else "")
+    code = 0 if all(p.can_apply for p in res.plans) else 1
+    if code == 0 and write == "dry":
+        print("dry run: nothing written")
+    elif res.written:
+        print(f"wrote {len(res.written)} files and the manifest(s) under {res.stage_dir}")
+        if write == "stage":
+            print(f"staged: copy everything inside {res.stage_dir} into {session.settings.user_mod_dir()}")
+    if res.checklist:
         print()
-        print(checklist)
+        print(res.checklist)
     return code
 
 
@@ -235,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("generate", help="generate + validate + dry-run export for one unit set")
     _set_args(g)
     _common(g)
-    g.add_argument("--tech-group", default="western")
+    g.add_argument("--tech-group", default=None, help="unit_type for the units (default: the tag's 1444 tech group, else western)")
     g.add_argument("--out", type=Path, default=Path("output"), help="output root; the package goes to <out>/<set>/")
     g.add_argument("--dry-run", action="store_true", help="show the plan and diff, write nothing")
     g.add_argument("--mod", type=Path, help="mod folder to READ with --check-mod (default: <EU4 mod dir>/hellenistic_revolution)")
@@ -282,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return args.func(args)
-    except (GenerationError, RecipeError) as exc:
+    except (GenerationError, RecipeError, SpecError) as exc:
         print(f"error: {exc}")
         return 1
 
