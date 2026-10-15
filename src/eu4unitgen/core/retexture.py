@@ -165,15 +165,17 @@ def default_base(chain: BaseChain, role: str, tier: int) -> str:
 
 
 def retexture_set(naming: Naming, set_name: str, owner: str, entities: list[dict], recipe, chain: BaseChain,
-                  game: GameFiles, idx: Index, version: int) -> tuple[list[dict], list[GeneratedFile], list[str]]:
+                  game: GameFiles, idx: Index, version: int,
+                  bodies: dict[int, str] | None = None) -> tuple[list[dict], list[GeneratedFile], list[str]]:
     """Apply a TextureRecipe to ``owner``'s entities: one retextured pdxmesh per active slot,
-    its derived DDS files, and notes. ``entities`` is changed in place."""
+    its derived DDS files, and notes. ``entities`` is changed in place. ``bodies`` (a loadout's
+    tier -> body pdxmesh) replaces the default infantry base of those tiers."""
     from eu4unitgen.core.recipe import RecipeError, apply_slot
 
     meshes, files, notes = [], [], []
     by_tier: dict[int, dict[str, str]] = {}
     for (tier, role), slot in recipe.active().items():
-        base = slot.base or default_base(chain, role, tier)
+        base = slot.base or ((bodies or {}).get(tier) if role == "infantry" else None) or default_base(chain, role, tier)
         holder: dict = {}
 
         def edit(b: BaseTextures, slot=slot, role=role, holder=holder) -> Edited:

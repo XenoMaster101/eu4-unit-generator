@@ -386,6 +386,26 @@ def loadout(ctx: Context) -> list[Issue]:
         if nodes.get("right_hand_node") in weapons and nodes.get("left_hand_node") not in (None, *ours):
             out.append(Issue(WARNING, "loadout", f"{name} carries {nodes['right_hand_node']} and still the base's "
                                                  f"{nodes['left_hand_node']} in the left hand", subject=name))
+    for tier, body in sorted(res.chosen_bodies.items()):
+        brec = w.pdxmesh(body)
+        inf = f"{ctx.nation.tag}_INFANTRY_{tier}"
+        mine = w.pdxmesh(w.resolve(inf, "pdxmesh") or "") or {}
+        if brec is None or not w.game.in_base_game(brec.get("file") or ""):
+            out.append(Issue(ERROR, "loadout", f"tier {tier} body {body!r} isn't a base-game pdxmesh", subject=inf))
+            continue
+        if (mine.get("file") or "").lower() != brec["file"].lower():
+            out.append(Issue(ERROR, "loadout", f"{inf} should wear tier {tier}'s body {body} ({brec['file']}), "
+                                               f"not {mine.get('file')}", subject=inf))
+        shapes = (w.mesh_summary(brec["file"]) or {}).get("shapes", [])
+        if shapes and shapes[0].get("shader") != "PdxMeshColor":
+            out.append(Issue(INFO, "loadout", f"tier {tier} body {body} uses {shapes[0].get('shader')}: its uniform "
+                                              "takes no unit colours", subject=inf))
+    for name in sorted(ents):
+        nodes = {b.lower() for a in w.resolve(name, "attach") or [] for b, t in a.items() if b != "name"}
+        held = {t for a in w.resolve(name, "attach") or [] for b, t in a.items() if b != "name"}
+        if held & {r.entity for r in res.parts if r.kind == "hoplon"} and "right_hand_node" not in nodes:
+            out.append(Issue(WARNING, "loadout", f"{name} carries a shield and nothing in its right hand (no weapon "
+                                                 "part, and the base holds nothing there)", subject=name))
     shields = {r.entity for r in res.parts if r.kind == "hoplon"}
     for name in sorted(ents):
         carried = {t for a in w.resolve(name, "attach") or [] for b, t in a.items() if b != "name"} & shields

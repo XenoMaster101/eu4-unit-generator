@@ -235,6 +235,7 @@ class Session:
             self._game.close()
         self._game = self._idx = self._facts = self._loaded_from = None
         self._unit_colours = None
+        self._bodies = None
 
     # ------------------------------------------------------------------ building blocks
     def project(self, mod_root: Path | None = None, **kw) -> Project:
@@ -294,9 +295,10 @@ class Session:
     def _parts_args(self, spec: SetSpec) -> dict:
         """generate()'s loadout arguments; Blender only when the loadout changes something."""
         loadout = load_loadout(spec)
-        if loadout is None or not loadout.active():
+        if loadout is None or not loadout.changes_anything():
             return {}
-        return {"loadout": loadout, "runner": self.runner(), "part_cache": self.part_cache}
+        return {"loadout": loadout, "runner": self.runner() if loadout.needs_blender() else None,
+                "part_cache": self.part_cache}
 
     def validate(self, spec: SetSpec) -> list[SetResult]:
         """Generate in memory and validate; writes nothing (parts are built in a temporary folder)."""
@@ -414,6 +416,9 @@ class Session:
         from eu4unitgen.core.retexture import base_textures, default_base
 
         game, idx = self.game()
+        loadout = load_loadout(spec)
+        if base is None and role == "infantry" and loadout is not None:
+            base = loadout.bodies.get(tier)
         try:
             name = base or default_base(BaseChain(idx, spec.base_gfx), role, tier)
             return base_textures(name, game, idx)
@@ -483,15 +488,20 @@ class Session:
         return out
 
     # ------------------------------------------------------------------ parts (Phase 3)
-    def _body(self, spec: SetSpec, tier: int):
-        """The body a tier's parts are fitted on: the base culture's infantry pdxmesh for that tier
-        (riders and crews use the same .mesh). -> (pdxmesh, mesh file, mesh bytes, BodyFit)."""
+    def _body(self, spec: SetSpec, tier: int, loadout=None):
+        """The body a tier's parts are fitted on: the loadout's body for that tier, else the base
+        culture's infantry pdxmesh (riders and crews use the same .mesh).
+        -> (pdxmesh, mesh file, mesh bytes, BodyFit)."""
         from eu4unitgen.core.fitting import measure_body
         from eu4unitgen.core.generator import BaseChain
+        from eu4unitgen.core.loadout import check_body
 
         game, idx = self.game()
+        loadout = loadout if loadout is not None else load_loadout(spec)
         try:
-            name = BaseChain(idx, spec.base_gfx).slot("infantry", tier)["pdxmesh"]
+            name = (loadout.bodies.get(tier) if loadout else None) or BaseChain(idx, spec.base_gfx).slot(
+                "infantry", tier)["pdxmesh"]
+            check_body(name, game, idx)
         except GenerationError as exc:
             raise SpecError(str(exc)) from exc
         file = idx.pdxmesh(name)["file"]
@@ -542,14 +552,14 @@ class Session:
             check_slot(tier, role, slot)
         except LoadoutError as exc:
             raise SpecError(str(exc)) from exc
-        body_name, body_file, body_data, fit = self._body(spec, tier)
+        body_name, body_file, body_data, fit = self._body(spec, tier, loadout)
         notes += fit.notes
         colours, more = self._preview_colours(spec)
         notes += more
         builds = []
         try:
             for spec_part in slot.parts:
-                part = resolve(spec_part, role, fit)
+                part = resolve(spec_part, role, fit, loadout.points)
                 blazon = loadout.image(spec_part.blazon) if spec_part.blazon else None
                 builds.append(PartBuild(naming.part(set_name, spec_part.kind, tier, role), tier, part, blazon))
         except (PartError, LoadoutError) as exc:
@@ -614,6 +624,41 @@ class Session:
         parts = [{"entity": b.name, "kind": b.part.kind, "bone": b.part.bone, "params": b.part.params,
                   "fitted": b.part.fitted, "shader": b.part.shader} for b in builds]
         return PartsPreview(sheet, out, body_name, parts, notes)
+
+    def body_candidates(self) -> list[dict]:
+        """Base-game pdxmeshes a loadout can pick as a tier's body: infantry and rider animation ids,
+        the parts' bones (head, both hand nodes), a base-game .mesh. Sorted by file; one entry per
+        .mesh (the first pdxmesh naming it). Cached per install."""
+        from eu4unitgen.core.loadout import BODY_BONES, check_body
+        from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
+
+        game, idx = self.game()
+        if getattr(self, "_bodies", None) is None:
+            out, seen = [], set()
+            for name in sorted(idx.pdxmeshes):
+                try:
+                    rec = check_body(name, game, idx)
+                except GenerationError:
+                    continue
+                stem = Path(rec["file"]).stem.lower()
+                if rec["file"].lower() in seen:
+                    if name.lower() == stem:  # prefer the generic name over a tag's (DAN_INFANTRY_2)
+                        for b in out:
+                            if b["file"].lower() == rec["file"].lower():
+                                b["pdxmesh"] = name
+                    continue
+                try:
+                    summary = summarize_mesh(parse_pdx_mesh(game.read(rec["file"])))
+                except (ValueError, IndexError, TypeError):
+                    continue
+                if not set(BODY_BONES) <= set(summary["bones"]):
+                    continue
+                seen.add(rec["file"].lower())
+                shader = (summary["shapes"] or [{}])[0].get("shader")
+                out.append({"pdxmesh": name, "file": rec["file"], "shader": shader,
+                            "crew": "artillery_attack" in (rec.get("animations") or {})})
+            self._bodies = sorted(out, key=lambda b: b["file"].lower())
+        return self._bodies
 
     @staticmethod
     def _skeleton(body_data: bytes) -> dict:

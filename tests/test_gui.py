@@ -249,3 +249,25 @@ def test_parts_loadout_used_by_generate_and_preview_button(window, tmp_path, mon
     page.preview_btn.click()
     assert calls == [(2, "infantry")] and "Body generic_01" in page.message.text()
     assert not page.preview.pixmap().isNull()
+
+
+def test_parts_bodies_points_and_shield_warning(window, tmp_path):
+    window.settings_page.load.click()
+    page = window.parts_page
+    assert page.body.findText("generic_01") >= 0  # filled from Session.body_candidates on load
+    page.tier.setCurrentText("3")
+    page.body.setCurrentText("generic_01")
+    page.points["rider"].setCurrentText("up")
+    left = page.boxes["Left_hand_node"]
+    left.kind.setCurrentIndex(left.kind.findData("hoplon"))
+    assert "no weapon part" in page.warning.text()
+    right = page.boxes["Right_hand_node"]
+    right.kind.setCurrentIndex(right.kind.findData("xyston"))
+    assert page.warning.text() == ""
+    page.tier.setCurrentText("1")
+    assert page.body.currentText() == "(the tier's own)"
+    page.tier.setCurrentText("3")
+    assert page.body.currentText() == "generic_01"
+    page.save_file(tmp_path / "lo.json")
+    saved = (tmp_path / "lo.json").read_text(encoding="utf-8")
+    assert '"3": "generic_01"' in saved and '"rider": "up"' in saved and '"xyston"' in saved

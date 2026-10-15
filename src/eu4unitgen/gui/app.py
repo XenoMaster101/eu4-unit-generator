@@ -176,10 +176,12 @@ class MainWindow(QMainWindow):
 
         def work():
             game, idx = s.game()
-            return s.available_dlc(), s.graphical_cultures(), s.base_cultures(), idx.game_version.get("eu4_branch", "?")
+            return (s.available_dlc(), s.graphical_cultures(), s.base_cultures(), idx.game_version.get("eu4_branch", "?"),
+                    s.body_candidates())
 
         def done(result) -> None:
-            dlc, cultures, bases, version = result
+            dlc, cultures, bases, version, bodies = result
+            self.parts_page.fill_bodies(bodies)
             self.settings_page.fill_dlc(dlc)
             self.unit_page.fill(cultures, bases)
             self.test_page.fill(bases)
@@ -227,6 +229,7 @@ class MainWindow(QMainWindow):
         page = self.textures_page
         spec = self.unit_page.spec()
         try:
+            spec.loadout = self.parts_page.loadout_for_spec()  # its tier bodies are what gets retextured
             slot = page.current_slot()
         except SpecError as exc:
             return page.show_message(str(exc), error=True)
@@ -239,6 +242,10 @@ class MainWindow(QMainWindow):
         self._sync_settings()
         page = self.textures_page
         spec = self.unit_page.spec()
+        try:
+            spec.loadout = self.parts_page.loadout_for_spec()
+        except SpecError as exc:
+            return page.show_message(str(exc), error=True)
         tier, role = page.slot_key()
         base = page.base.text().strip() or None
         self.run(page, "Exporting painting guide",

@@ -17,15 +17,18 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QScrollArea, QSplitter, QVBoxLayout, QWidget,
 )
 
-from eu4unitgen.core.loadout import STANCE_ROLES, STANCES, Loadout, LoadoutError, RoleLoadout, check_slot
+from eu4unitgen.core.loadout import (
+    STANCE_ROLES, STANCES, Loadout, LoadoutError, RoleLoadout, check_slot, slot_warnings,
+)
 from eu4unitgen.core.naming import LOADOUT_ROLES, TIERS
-from eu4unitgen.core.parts import KINDS, Choice, PartSpec
+from eu4unitgen.core.parts import DEFAULT_POINTS, KINDS, POINTS, Choice, PartSpec
 from eu4unitgen.export.pipeline import SpecError
 from eu4unitgen.gui.pages import Page, _path_row
 from eu4unitgen.textures.procedural import COUNTRY_CHANNELS
 
 BONES = (("Right_hand_node", "Right hand (weapon)"), ("Left_hand_node", "Left hand (shield)"), ("head", "Head"))
 NONE = "(nothing: keep the base's)"
+OWN_BODY = "(the tier's own)"
 ZONE_MODES = ("default", "fixed colour", *COUNTRY_CHANNELS)
 CHANNEL_LABEL = {"country1": "primary", "country2": "secondary", "country3": "tertiary"}
 ROLE_TIP = {"infantry": "The infantry entity; also the gun crew unless the crew is dressed apart.",
@@ -109,6 +112,7 @@ class _BoneBox(QGroupBox):
         self.zones: dict[str, _ZoneRow] = {}
         self.blazon: QLineEdit | None = None
         self.kind.currentIndexChanged.connect(lambda _: self._rebuild())
+        self.on_change = None  # called when the kind changes (the page re-checks its hints)
 
     def fill_kinds(self, role: str) -> None:
         keep = self.kind_name()
@@ -127,6 +131,8 @@ class _BoneBox(QGroupBox):
         return self.kind.currentData()
 
     def _rebuild(self) -> None:
+        if self.on_change is not None:
+            self.on_change()
         while self.form.rowCount():
             self.form.removeRow(0)
         self.params, self.zones, self.blazon = {}, {}, None
@@ -235,16 +241,42 @@ class PartsPage(Page):
             slot_row.addWidget(w)
         slot_row.addWidget(self.crew_apart)
         slot_row.addStretch(1)
+        set_row = QHBoxLayout()
+        self.body = QComboBox()
+        self.body.setEditable(True)
+        self.body.addItem(OWN_BODY)
+        self.body.setMinimumWidth(260)
+        self.body.setToolTip("The base-game infantry body this tier's infantry, rider and crew wear (Load the EU4 "
+                             "install to list them). Western tiers 2-4 are 17th-18th century hat bodies; e.g. "
+                             "western_generic_01_type1 (the armoured tier-1 body) suits every tier.")
+        set_row.addWidget(QLabel("Body for this tier"))
+        set_row.addWidget(self.body)
+        set_row.addSpacing(20)
+        set_row.addWidget(QLabel("Weapon point when auto:"))
+        self.points = {}
+        for role in LOADOUT_ROLES:
+            box = QComboBox()
+            box.addItems(list(POINTS))
+            box.setCurrentText(DEFAULT_POINTS[role])
+            box.setToolTip("For the whole loadout; a part's own Point overrides it. In game a rider's 'down' is "
+                           "levelled forward, 'up' upright and back.")
+            box.currentTextChanged.connect(lambda v, r=role: self.loadout.points.__setitem__(r, v))
+            self.points[role] = box
+            set_row.addWidget(QLabel(role))
+            set_row.addWidget(box)
+        set_row.addStretch(1)
         self.tier.currentIndexChanged.connect(self._switch_slot)
         self.role.currentIndexChanged.connect(self._switch_slot)
         self.crew_apart.toggled.connect(self._crew_toggled)
         self.layout_.addLayout(slot_row)
+        self.layout_.addLayout(set_row)
 
         body = QWidget()
         bl = QVBoxLayout(body)
         self.boxes = {bone: _BoneBox(bone, label) for bone, label in BONES}
         for box in self.boxes.values():
             bl.addWidget(box)
+            box.on_change = self._check
         bl.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -262,6 +294,9 @@ class PartsPage(Page):
         buttons.addStretch(1)
         self.slots_label = QLabel()
         self.slots_label.setWordWrap(True)
+        self.warning = QLabel()
+        self.warning.setWordWrap(True)
+        self.warning.setStyleSheet("color:#b26a00")
         self.preview = QLabel("The preview shows the tier's body in its bind pose with the slot's parts on their "
                               "bones, front and side, then each part alone.")
         self.preview.setAlignment(Qt.AlignCenter)
@@ -276,6 +311,7 @@ class PartsPage(Page):
 
         self.layout_.addWidget(split, 1)
         self.layout_.addLayout(buttons)
+        self.layout_.addWidget(self.warning)
         self.layout_.addWidget(self.slots_label)
         self.layout_.addWidget(self.message)
         self._show_slot()
@@ -298,8 +334,22 @@ class PartsPage(Page):
             raise SpecError(str(exc)) from exc
         return slot
 
+    def _check(self) -> None:
+        if not hasattr(self, "warning"):
+            return
+        hints = slot_warnings(self.form())
+        self.warning.setText("Warning: " + "; ".join(hints) if hints else "")
+
+    def _store_body(self, tier: int) -> None:
+        body = self.body.currentText().strip()
+        if body and body != OWN_BODY:
+            self.loadout.bodies[tier] = body.split(" ")[0]
+        else:
+            self.loadout.bodies.pop(tier, None)
+
     def store(self) -> None:
         tier, role = self._slot_key
+        self._store_body(tier)
         slot = self.current_slot()
         keep = (role == "crew" and self.crew_apart.isChecked()) or slot.parts or slot.stance != "auto"
         if keep:
@@ -324,6 +374,12 @@ class PartsPage(Page):
             box.fill_kinds(role)
             box.set_spec(by_bone.get(bone))
             box.setEnabled(editable)
+        self.body.setCurrentText(self.loadout.bodies.get(tier, OWN_BODY))
+        for r, box in self.points.items():
+            box.blockSignals(True)
+            box.setCurrentText(self.loadout.points.get(r, DEFAULT_POINTS[r]))
+            box.blockSignals(False)
+        self._check()
         if crew and slot is None:
             self.show_message("The gun crew is the infantry entity (it carries the infantry's parts). Tick "
                               "“Dress the gun crew apart” to give it parts of its own.")
@@ -356,7 +412,21 @@ class PartsPage(Page):
             bits = [p.kind for p in s.parts] or ["no parts"]
             return ", ".join(bits) + (f"; {s.stance}" if s.stance != "auto" else "")
         active = [f"{t}/{r} ({describe(s)})" for (t, r), s in sorted(self.loadout.slots.items())]
-        self.slots_label.setText("Slots: " + ("; ".join(active) if active else "none yet"))
+        bodies = [f"tier {t}: {b}" for t, b in sorted(self.loadout.bodies.items())]
+        self.slots_label.setText("Slots: " + ("; ".join(active) if active else "none yet")
+                                 + ("<br>Bodies: " + "; ".join(bodies) if bodies else ""))
+
+    def fill_bodies(self, bodies: list[dict]) -> None:
+        """The body picker's list (Session.body_candidates): pdxmesh, file, shader."""
+        keep = self.body.currentText()
+        self.body.blockSignals(True)
+        self.body.clear()
+        self.body.addItem(OWN_BODY)
+        for b in bodies:
+            note = "" if b["shader"] == "PdxMeshColor" else "  (no unit colours)"
+            self.body.addItem(f"{b['pdxmesh']}{note}")
+        self.body.setCurrentText(keep)
+        self.body.blockSignals(False)
 
     def loadout_for_spec(self) -> Loadout | None:
         """The loadout the set uses (None when unticked). Raises SpecError on a bad form."""

@@ -33,7 +33,7 @@ from typing import Any
 
 from PIL import Image
 
-from eu4unitgen.core.generator import OWNED, GeneratedFile
+from eu4unitgen.core.generator import OWNED, GeneratedFile, GenerationError
 from eu4unitgen.core.naming import LOADOUT_ROLES, PART_KINDS, Naming
 from eu4unitgen.library.scanner import strip_mesh_props
 from eu4unitgen.textures.procedural import COUNTRY_CHANNELS, Zone, part_textures, shader_for, zone_uvs
@@ -87,9 +87,12 @@ class PartKind:
 
 
 WOOD, BRONZE, IRON, HAIR = (110, 75, 40), (180, 130, 60), (165, 165, 170), (170, 20, 25)
-POINT = Choice(("auto", "up", "down"), "auto", "Point",
-               "up: +Z, like the halberd and spears; down: -Z, like the cavalry sabre. auto: up for infantry and "
-               "crews, down for riders")
+POINTS = ("up", "down")
+DEFAULT_POINTS = {"infantry": "up", "crew": "up", "rider": "down"}  # what "auto" means unless the loadout says
+POINT = Choice(("auto", *POINTS), "auto", "Point",
+               "up: +Z, like the halberd and spears; down: -Z, like the cavalry sabre. auto: the loadout's direction "
+               "for this body (default: up for infantry and crews, down for riders). In game (test 8) a rider's "
+               "'down' is levelled forward, 'up' upright and back")
 
 
 def _spear(tip, butt, head_length, head_width, shaft_radius, spike) -> dict:
@@ -110,6 +113,9 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
              scaled=("tip", "butt", "head_length", "spike")),
     PartKind("sarissa", "Sarissa (pike)", "Right_hand_node", ("infantry", "crew"), "spear", "strip",
              _spear(30.0, -13.0, 2.5, 0.32, 0.15, 1.5), SPEAR_ZONES,
+             scaled=("tip", "butt", "head_length", "spike")),
+    PartKind("xyston", "Xyston (cavalry lance)", "Right_hand_node", LOADOUT_ROLES, "spear", "strip",
+             _spear(22.0, -16.0, 3.0, 0.4, 0.16, 2.0), SPEAR_ZONES,
              scaled=("tip", "butt", "head_length", "spike")),
     PartKind("xiphos", "Xiphos (sword)", "Right_hand_node", LOADOUT_ROLES, "sword", "strip",
              {"blade_length": Param(5.0, 1.5, 10, "Blade length", 0.1),
@@ -217,8 +223,9 @@ class ResolvedPart:
         return KINDS[self.kind].bone
 
 
-def resolve(spec: PartSpec, role: str, body=None) -> ResolvedPart:
-    """``body``: a core.fitting.BodyFit of the body this part attaches to (None: defaults)."""
+def resolve(spec: PartSpec, role: str, body=None, points: dict[str, str] | None = None) -> ResolvedPart:
+    """``body``: a core.fitting.BodyFit of the body this part attaches to (None: defaults).
+    ``points``: role -> "up"/"down", what a weapon's "auto" point means (default DEFAULT_POINTS)."""
     from eu4unitgen.core.fitting import fitted_params
 
     spec.check()
@@ -230,7 +237,7 @@ def resolve(spec: PartSpec, role: str, body=None) -> ResolvedPart:
     params.update(fitted)
     params.update(spec.params)
     if params.get("point") == "auto":
-        params["point"] = "down" if role == "rider" else "up"
+        params["point"] = {**DEFAULT_POINTS, **(points or {})}[role]
     if "tip" in params and "butt" in params and params["tip"] - params["head_length"] <= 0:
         raise PartError(f"{spec.kind}: the head ({params['head_length']}) must start above the grip (tip {params['tip']})")
     zones = []
@@ -293,6 +300,8 @@ def build_parts(runner, naming: Naming, set_name: str, builds: list[PartBuild], 
     entries = [job_entry(naming, set_name, b) for b in builds]
     todo = [i for i, e in enumerate(entries) if cache is None or _key(e) not in cache]
     meshes: dict[int, bytes] = {i: cache[_key(e)] for i, e in enumerate(entries) if i not in todo}
+    if todo and runner is None:
+        raise GenerationError("parts need Blender to build (Settings: Blender path)")
     if todo:
         with tempfile.TemporaryDirectory(prefix="eu4unitgen_parts_") as tmp:
             job = [{**entries[i], "out_mesh": str(Path(tmp) / f"{builds[i].name}.mesh")} for i in todo]

@@ -319,7 +319,7 @@ def test_generate_with_a_loadout(project, nation, game):
     report = validate(project, nation, gen, files, idx)
     assert not report.errors, [str(i) for i in report.errors]
     assert not [i for i in report.warnings if i.rule == "loadout"], [str(i) for i in report.warnings]
-    with pytest.raises(GenerationError, match="needs Blender"):
+    with pytest.raises(GenerationError, match="need Blender"):
         generate(project, nation, files, idx, loadout=Loadout.from_json(LOADOUT))
 
 
@@ -444,3 +444,81 @@ def test_rigid_bind_drops_scale():
     bind, changed = rigid(scaled)
     assert changed and bind == pytest.approx([1, 0, 0, -5.9, 0, -1, 0, 9.9, 0, 0, -1, 0.2])
     assert rigid([1, 0, 0, 0, 0, 1, 0, 14.5, 0, 0, 1, 0]) == ([1, 0, 0, 0, 0, 1, 0, 14.5, 0, 0, 1, 0], False)
+
+
+# --------------------------------------------------------------------------- after test 8: bodies, weapon point, xyston
+
+def test_loadout_bodies_weapon_point_and_xyston(tmp_path):
+    from eu4unitgen.core.loadout import slot_warnings
+    lo = Loadout.from_json({"schema": 1, "bodies": {"2": "generic_01"}, "weapon_point": {"rider": "up", "crew": "up"},
+                            "slots": {"1/rider": {"parts": [{"kind": "xyston"}]}}})
+    assert lo.bodies == {2: "generic_01"} and lo.points == {"rider": "up", "crew": "up"}
+    assert lo.to_json()["weapon_point"] == {"rider": "up"}  # defaults aren't written
+    assert Loadout.from_json(lo.to_json()).to_json() == lo.to_json()
+    assert Loadout.from_json({"schema": 1, "bodies": {"3": "generic_01"}}).changes_anything()
+    assert not Loadout.from_json({"schema": 1, "bodies": {"3": "generic_01"}}).needs_blender()
+    for doc, msg in (({"schema": 1, "bodies": {"5": "x"}}, "must be a tier"),
+                     ({"schema": 1, "bodies": {"1": "bad name"}}, "body pdxmesh"),
+                     ({"schema": 1, "weapon_point": {"rider": "sideways"}}, "weapon_point")):
+        with pytest.raises(LoadoutError, match=msg):
+            Loadout.from_json(doc)
+    x = resolve(PartSpec("xyston"), "rider", None)
+    assert x.params["point"] == "down" and x.params["tip"] - x.params["butt"] + x.params["spike"] == pytest.approx(40)
+    assert resolve(PartSpec("xyston"), "rider", None, lo.points).params["point"] == "up"
+    assert resolve(PartSpec("xyston", {"point": "down"}), "rider", None, lo.points).params["point"] == "down"
+    assert RoleLoadout([PartSpec("xyston")]).resolved_stance() == "polearm_twohanded"
+    assert slot_warnings(RoleLoadout([PartSpec("hoplon"), PartSpec("crest")]))
+    assert not slot_warnings(RoleLoadout([PartSpec("hoplon"), PartSpec("dory")]))
+
+
+def test_generate_with_chosen_bodies(project, nation, fake_install):
+    from eu4unitgen.core.recipe import TextureRecipe
+    from eu4unitgen.library.scanner import build_index
+
+    make_textures_decodable(fake_install)
+    # a made-up body like every non-western base-game body: no artillery_attack id
+    anims = " ".join(f'animation = {{ id = "{i}" type = "inf_idle_animation" }}' for i in
+                     ("idle", "walk", "attack", "death", "retreat", "horse_idle", "horse_walk", "horse_attack",
+                      "horse_death", "horse_retreat"))
+    (fake_install / "interface/assets/zz_eastern.gfx").write_text(
+        f'objectTypes = {{\n\tpdxmesh = {{ name = "eastern_01" file = "gfx/models/Units/generic_03.mesh" {anims} '
+        'scale = 0.5 }\n}\n', encoding="latin-1")
+    files = GameFiles(fake_install)
+    try:
+        idx = build_index(files)
+        lo = Loadout.from_json({"schema": 1, "bodies": {"2": "generic_01", "3": "eastern_01", "4": "generic_01"},
+                                "slots": {"2/infantry": {"parts": [{"kind": "hoplon"}]}}})
+        recipe = TextureRecipe.from_json({"schema": 1, "slots": {"4/infantry": {"ops": [
+            {"op": "hue_shift", "region": "cloth", "degrees": 40}]}}})
+        gen = generate(project, nation, files, idx, recipe=recipe, loadout=lo, runner=FakeRunner())
+        ents = _entities(gen)
+        assert ents["MAC_CAVALRY_2_rider"]["pdxmesh"] == "generic_01"
+        assert ents["MAC_INFANTRY_2"]["pdxmesh"] == "hr_mac_infantry_2_mesh"  # body generic_01 + spear_shield stance
+        gfx = gen.files[N.pdxmesh_file("mac")].text
+        assert 'file = "gfx/models/Units/generic_01.mesh"' in gfx[gfx.index('"hr_mac_infantry_2_mesh"'):]
+        # the eastern-style body gets artillery_attack (= its attack) for the gun crew; its rider keeps it as it is
+        assert ents["MAC_INFANTRY_3"]["pdxmesh"] == "hr_mac_infantry_3_mesh"
+        block = gfx[gfx.index('"hr_mac_infantry_3_mesh"'):].split("pdxmesh = {")[0]
+        assert 'id = "artillery_attack" type = "inf_idle_animation"' in block
+        assert ents["MAC_CAVALRY_3_rider"]["pdxmesh"] == "eastern_01"
+        # tier 4: the recipe retextures the chosen body, not the culture's tier-4 one
+        block4 = gfx[gfx.index('"hr_mac_infantry_4_mesh"'):]
+        assert 'file = "gfx/models/Units/generic_01.mesh"' in block4.split("pdxmesh = {")[0]
+        assert ents["MAC_CAVALRY_4_rider"]["pdxmesh"] == "hr_mac_infantry_4_mesh"
+        report = validate(project, nation, gen, files, idx)
+        assert not report.errors, [str(i) for i in report.errors]
+        warns = [str(i) for i in report.warnings if i.rule == "loadout"]
+        assert any("MAC_INFANTRY_2 carries a shield and nothing in its right hand" in w for w in warns), warns
+        with pytest.raises(GenerationError, match="isn't a base-game pdxmesh"):
+            generate(project, nation, files, idx, loadout=Loadout.from_json({"schema": 1, "bodies": {"1": "nope"}}))
+    finally:
+        files.close()
+
+
+def test_body_candidates_on_the_fake_install(fake_install, tmp_path):
+    from eu4unitgen.export.pipeline import Session, Settings
+    s = Session(Settings(eu4_path=fake_install, output_dir=tmp_path))
+    try:
+        assert [b["pdxmesh"] for b in s.body_candidates()] == ["generic_01", "generic_02", "generic_03", "generic_04"]
+    finally:
+        s.close()

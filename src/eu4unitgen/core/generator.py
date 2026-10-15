@@ -435,18 +435,22 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
     # Entities: TAG set + gfx-culture defaults (SPEC §3: both, always).
     tag_entities = unit_entities(tag, chain, naming, version)
     meshes: list[dict] = []
+    dressed = loadout is not None and loadout.changes_anything()
+    if dressed and loadout.bodies:
+        from eu4unitgen.core.loadout import apply_bodies
+
+        out.notes += apply_bodies(naming, tag, tag_entities, loadout, game, idx)
     if recipe is not None and recipe.active():
         from eu4unitgen.core.retexture import retexture_set
 
-        meshes, textures, notes = retexture_set(naming, set_name, tag, tag_entities, recipe, chain, game, idx, version)
+        meshes, textures, notes = retexture_set(naming, set_name, tag, tag_entities, recipe, chain, game, idx, version,
+                                                bodies=loadout.bodies if dressed else None)
         for f in textures:
             out.add(f)
         out.notes += notes
-    if loadout is not None and loadout.active():
+    if dressed:
         from eu4unitgen.core.loadout import apply_loadout
 
-        if runner is None:
-            raise GenerationError("a parts loadout needs Blender to build the parts (Settings: Blender path)")
         out.loadout = apply_loadout(naming, set_name, tag, tag_entities, meshes, loadout, game, idx, version, runner,
                                     part_cache)
         for f in out.loadout.files:

@@ -26,6 +26,15 @@ western halberd set, in-game test 7's dory); a xiphos -> ``polearm_onehanded``; 
 hands -> the base culture's own (on western tiers 2-4 that is the musket set). Or name one.
 Changing it makes a pdxmesh on the same vanilla .mesh (or edits the set's retextured one).
 
+Loadout-wide settings (both optional):
+
+    "bodies": {"2": "western_generic_01_type1", ...}     tier -> the base-game infantry pdxmesh its
+        infantry, rider and crew wear, instead of the base culture's own for that tier (western tiers
+        2-4 are 17th-18th century hat bodies). It must share the generic 28-bone skeleton; the
+        texture recipe and fitting follow it.
+    "weapon_point": {"rider": "up"}     role -> what a weapon's "auto" point means (up/down;
+        default up for infantry and crews, down for riders).
+
 Paths (blazons) are relative to the loadout file.
 """
 from __future__ import annotations
@@ -39,7 +48,10 @@ from PIL import Image
 
 from eu4unitgen.core.generator import GeneratedFile, GenerationError
 from eu4unitgen.core.naming import LOADOUT_ROLES, TIERS, Naming
-from eu4unitgen.core.parts import KINDS, PartBuild, PartError, PartSpec, attach, build_parts, resolve
+from eu4unitgen.core.naming import check_identifier
+from eu4unitgen.core.parts import (
+    DEFAULT_POINTS, KINDS, POINTS, PartBuild, PartError, PartSpec, attach, build_parts, resolve,
+)
 
 SCHEMA = 1
 STANCE_ROLES = ("infantry", "crew")
@@ -70,7 +82,7 @@ class RoleLoadout:
         kinds = {p.kind for p in self.parts}
         if "hoplon" in kinds:
             return "spear_shield"
-        if kinds & {"dory", "sarissa"}:
+        if kinds & {"dory", "sarissa", "xyston"}:
             return "polearm_twohanded"
         if "xiphos" in kinds:
             return "polearm_onehanded"
@@ -110,10 +122,22 @@ def check_slot(tier: int, role: str, slot: RoleLoadout) -> None:
         bones[k.bone] = p.kind
 
 
+def slot_warnings(slot: RoleLoadout) -> list[str]:
+    """Hints for a slot as the form shows it (the validator checks the generated result)."""
+    kinds = {KINDS[p.kind].bone: p.kind for p in slot.parts}
+    if "Left_hand_node" in kinds and "Right_hand_node" not in kinds:
+        return [f"a {kinds['Left_hand_node']} but no weapon part: the right hand keeps only what the base holds "
+                "there, and western tiers 2-4 hold nothing there (their musket is in the left hand, which the "
+                "shield replaces), so the unit carries no weapon"]
+    return []
+
+
 @dataclass
 class Loadout:
     slots: dict[tuple[int, str], RoleLoadout] = field(default_factory=dict)
     root: Path = Path(".")
+    bodies: dict[int, str] = field(default_factory=dict)  # tier -> base-game infantry pdxmesh
+    points: dict[str, str] = field(default_factory=dict)  # role -> "up"/"down" for weapons left on "auto"
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -141,10 +165,28 @@ class Loadout:
             slot = RoleLoadout(parts, raw.get("stance", "auto"))
             check_slot(tier, role, slot)
             out.slots[(tier, role)] = slot
+        for key, body in (doc.get("bodies") or {}).items():
+            if not str(key).isdigit() or int(key) not in TIERS:
+                raise LoadoutError(f"bodies: {key!r} must be a tier {TIERS}")
+            try:
+                out.bodies[int(key)] = check_identifier(body, "body pdxmesh")
+            except ValueError as exc:
+                raise LoadoutError(f"bodies: {exc}") from exc
+        for role, point in (doc.get("weapon_point") or {}).items():
+            if role not in LOADOUT_ROLES or point not in POINTS:
+                raise LoadoutError(f"weapon_point: {role!r} must be one of {LOADOUT_ROLES} and {point!r} one of {POINTS}")
+            out.points[role] = point
         return out
 
     def to_json(self) -> dict:
-        return {"schema": SCHEMA, "slots": {f"{t}/{r}": s.to_json() for (t, r), s in sorted(self.slots.items())}}
+        out = {"schema": SCHEMA}
+        if self.bodies:
+            out["bodies"] = {str(t): b for t, b in sorted(self.bodies.items())}
+        points = {r: p for r, p in sorted(self.points.items()) if p != DEFAULT_POINTS[r]}
+        if points:
+            out["weapon_point"] = points
+        out["slots"] = {f"{t}/{r}": s.to_json() for (t, r), s in sorted(self.slots.items())}
+        return out
 
     def save(self, path: Path) -> None:
         Path(path).write_text(json.dumps(self.to_json(), indent=2) + "\n", encoding="utf-8")
@@ -154,6 +196,12 @@ class Loadout:
         """Slots that change something. A crew slot always does (the crew gets its own entity)."""
         return {k: s for k, s in sorted(self.slots.items())
                 if s.parts or s.resolved_stance() != "base" or k[1] == "crew"}
+
+    def changes_anything(self) -> bool:
+        return bool(self.active() or self.bodies)
+
+    def needs_blender(self) -> bool:
+        return any(s.parts for s in self.active().values())
 
     def path(self, rel: str) -> Path:
         p = Path(rel)
@@ -196,6 +244,7 @@ class LoadoutResult:
     notes: list[str] = field(default_factory=list)
     bodies: dict = field(default_factory=dict)  # mesh file -> core.fitting.BodyFit
     slots: list[tuple[int, str]] = field(default_factory=list)  # the (tier, role) slots that were applied
+    chosen_bodies: dict[int, str] = field(default_factory=dict)  # tier -> body pdxmesh the loadout picked
     carried: dict[tuple[int, str], list[str]] = field(default_factory=dict)  # slot -> part entities it carries
 
 
@@ -227,6 +276,16 @@ class _Meshes:
             anims.update(STANCE_TYPES[stance])
         return anims
 
+    def ensure_crew_id(self, source: str, new_name: str) -> str:
+        """A chosen body without ``artillery_attack`` (every base-game body outside westerngfx) gets
+        it, mapped to the body's own attack type as western bodies map it; the gun crew needs it."""
+        anims = self.anims(source)
+        if "artillery_attack" in anims or "attack" not in anims:
+            return source
+        name = self.with_anims(source, new_name, {**anims, "artillery_attack": anims["attack"]})
+        self.original[name] = self.anims(name)
+        return name
+
     def with_anims(self, source: str, new_name: str, anims: dict) -> str:
         """``source`` if it already has ``anims``; else ``new_name`` with them: the set's own record
         edited in place, or a new record on the same .mesh (scale, extra keys, meshsettings kept)."""
@@ -245,6 +304,35 @@ class _Meshes:
 
 
 HAND_NODES = ("right_hand_node", "left_hand_node")
+BODY_BONES = ("head", "Right_hand_node", "Left_hand_node")  # what parts hang on
+
+
+def check_body(name: str, game, idx) -> dict:
+    """A body a loadout may pick: a base-game pdxmesh (never DLC, SPEC §9) on a base-game .mesh,
+    with the infantry and rider animation ids. Returns its pdxmesh record."""
+    rec = idx.pdxmesh(name, base_only=True)
+    if rec is None:
+        raise GenerationError(f"body {name!r} isn't a base-game pdxmesh (DLC bodies are never used)")
+    if not rec.get("file") or not game.in_base_game(rec["file"]):
+        raise GenerationError(f"body {name!r}: mesh {rec.get('file')!r} isn't in the base game")
+    ids = set(rec.get("animations") or {})
+    missing = sorted({"idle", "walk", "attack", "horse_idle", "horse_walk", "horse_attack"} - ids)
+    if missing:
+        raise GenerationError(f"body {name!r} lacks animation ids {missing}: not an infantry/rider body")
+    return rec
+
+
+def apply_bodies(naming: Naming, owner: str, entities: list[dict], loadout: Loadout, game, idx) -> list[str]:
+    """Put each tier's chosen body on its infantry and rider (the crew is the infantry). Runs before
+    retexturing, so a recipe retextures the chosen body. Returns notes."""
+    by_name = {e["name"]: e for e in entities}
+    notes = []
+    for tier, body in sorted(loadout.bodies.items()):
+        check_body(body, game, idx)
+        for name in (naming.unit_entity(owner, "infantry", tier), naming.rider_entity(owner, tier)):
+            by_name[name]["pdxmesh"] = body
+        notes.append(f"tier {tier}: infantry, rider and crew wear {body} (loadout body)")
+    return notes
 
 
 def _drop_hand_attaches(entity: dict) -> list[str]:
@@ -270,7 +358,7 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
     through ``runner``; identical parts at one tier are built once and shared between roles."""
     from eu4unitgen.core.fitting import measure_body
 
-    res = LoadoutResult()
+    res = LoadoutResult(chosen_bodies=dict(loadout.bodies))
     by_name = {e["name"]: e for e in entities}
     pdx = _Meshes(meshes, idx)
 
@@ -290,6 +378,12 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
     active = loadout.active()
     for tier in TIERS:
         inf = by_name[naming.unit_entity(owner, "infantry", tier)]
+        if tier in loadout.bodies:
+            before = inf["pdxmesh"]
+            inf["pdxmesh"] = pdx.ensure_crew_id(before, naming.pdxmesh(set_name, "infantry", tier))
+            if inf["pdxmesh"] != before:
+                res.notes.append(f"tier {tier}: {loadout.bodies[tier]} has no artillery_attack; "
+                                 f"{inf['pdxmesh']} adds it (= its attack) for the gun crew")
         base_inf = copy.deepcopy(inf)
         for role in ("infantry", "crew", "rider"):
             slot = active.get((tier, role))
@@ -316,7 +410,7 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
                     res.notes.append(f"{target}: the {weapon} replaces the base's {', '.join(dropped)}")
             for spec in slot.parts:
                 try:
-                    part = resolve(spec, role, fit)
+                    part = resolve(spec, role, fit, loadout.points)
                 except PartError as exc:
                     raise GenerationError(f"loadout slot {tier}/{role}: {exc}") from exc
                 identity = json.dumps([tier, spec.kind, part.params, [(z.colour, z.gloss, z.channel) for z in part.zones],
