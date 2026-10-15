@@ -517,7 +517,7 @@ Done (2026-10-14): parser/writer, naming, templates, generator, validator, expor
     - Fallback: (a) a tag with no sprite pack and no TAG entities; (b) a tag with `TAG_*` entities but no pack; (c) a tag whose gfx culture has only a gfx pack. Record which models show.
     - Priority: two packs for the same tag with different entities at orders N and N+1, then swapped. Record which wins. DLC116 + DAN is a second, free check (order 100, `version = 4`).
 
-### Phase 2: Texture pipeline — IN PROGRESS (all steps built; waiting on in-game test 6)
+### Phase 2: Texture pipeline — DONE (2026-10-14)
 Scope: DDS read/write, spec-mask painter (R/G/B = country colour regions, A = gloss presets), diffuse pattern overlays, reference-palette recolour. Retextured units use a new pdxmesh on the **vanilla `.mesh` with a `meshsettings` texture override** (confirmed on units, in-game test 4). The Blender copy-and-re-point job is no longer needed for retextures.
 
 Decisions (user, 2026-10-14):
@@ -564,7 +564,10 @@ Order (each step with tests and its validator rule; **stop and replan if step 3 
 **Blender runner (step 8, done)**: `blender/runner.py` checks the pinned version (`blender --version`), runs `jobs/<job>.py` with `--background --python-exit-code 1` (no `--factory-startup`: io_pdx_mesh is a user extension), passes arguments and results as JSON, applies a timeout and keeps the log (`<output>/blender_logs/`). `jobs/check_addon.py`: on 4.2 the addon is the extension module `bl_ext.user_default.io_pdx_mesh`, version (0, 91, 0), enabled (verified 2026-10-14, 1.3 s). Settings screen: "Check Blender".
 8. `blender/runner.py` (version check, timeout, log) **Done** (see above). + `check_addon.py`. The mesh copy job isn't needed for retextures (Phase 3 kitbash will use the runner).
 
-**Phase 2 completion:** waiting on in-game test 6 (staged 2026-10-14; `build/test6/`): pattern overlay, `spec_paint` (cloth → primary channel), a protect PNG overriding the auto skin mask plus a `mask:` region, visible gloss (cloth 80%, metal 0%), and HDA's unit colours from the test mod's `country_colors` copy. Mark Phase 2 DONE when it passes.
+**In-game test 6 (2026-10-14, HDA / `macedonian_test`, recipe `build/test6/recipe.json`, unit colours blue/yellow/black): PASS on all tiers, matching the preview.**
+- Unit colours: blue/yellow everywhere: the test mod's `country_colors` entry (appended to a copy of vanilla's file) recolours HDA's units.
+- T1 pattern overlay: stripes on the cloth. T2 `spec_paint`: cloth turned blue (primary channel). T3 protect PNG + `mask:` region: the left half green, face included (the PNG replaced the auto skin protection). T4 gloss: shiny cloth (80%), matte armour (0%).
+- error.log: not reported (the result message carried a placeholder); to be filled in.
 
 **Known limits after Phase 2** (deliberate; revisit when needed):
 - Retexturing handles **one-shape meshes** only; others are refused with an error. Every western/generic base is one shape.
@@ -575,7 +578,7 @@ Order (each step with tests and its validator rule; **stop and replan if step 3 
 - **Shared sets**: entities are named after the first tag, so a later single-tag set for that same tag would collide (`version_collisions` reports it); the map colour, if set, goes to every tag; the test suite and the texture test take one tag.
 - The desktop shortcut is **Windows only** (`scripts/make_shortcut.ps1`); on Linux run `python -m eu4unitgen.gui` (no `.desktop` file yet). Under `pythonw.exe` errors go to `%LOCALAPPDATA%\eu4unitgen\gui.log` and a message box.
 
-### Phase 3: Blender mesh jobs
+### Phase 3: Blender mesh jobs — NEXT
 - Headless import/export, kitbash of pre-weighted accessories, thumbnail rendering for GUI preview.
 - Import one vanilla infantry, horse + rider and artillery mesh via io_pdx_mesh; record **bone parenting** into `base_models.json` (scanner or a Blender job).
 
