@@ -88,6 +88,28 @@ def country_files(files: GameFiles) -> dict[str, str]:
     return out
 
 
+def unit_colours(files: GameFiles) -> dict[str, list[tuple[int, int, int]]]:
+    """tag -> [color1, color2, color3] from common/country_colors: the colours PdxMeshColor
+    multiplies into spec R/G/B (not the map ``color`` in the country file). In-game test 5
+    (2026-10-14): HDA has no entry and its units showed red. UNVERIFIED: the engine's default
+    for tags without an entry (the file's example template uses 205 32 26)."""
+    out: dict[str, list[tuple[int, int, int]]] = {}
+    for _, _, data in files.iter_files("common/country_colors", (".txt",)):
+        for p in parse_bytes(data).pairs():
+            if not isinstance(p.value, Block):
+                continue
+            cols = []
+            for key in ("color1", "color2", "color3"):
+                b = p.value.get_block(key)
+                vals = b.bare() if b is not None else []
+                if len(vals) != 3 or not all(v.isdigit() for v in vals):
+                    break
+                cols.append(tuple(min(255, int(v)) for v in vals))
+            if len(cols) == 3:
+                out[p.key.value] = cols
+    return out
+
+
 def tag_facts(files: GameFiles, date: tuple[int, int, int] = START_DATE) -> dict[str, TagFacts]:
     """Facts for every tag that owns at least one province at ``date``."""
     owners = province_owners(files, date)

@@ -161,7 +161,9 @@ class UnitSetPage(Page):
         self.adjective.setPlaceholderText("used in unit names, e.g. Macedonian")
         self.tech = QLineEdit()
         self.tech.setPlaceholderText("unit_type; blank: the tag's 1444 tech group")
-        self.colour_on = QCheckBox("Set the country colour")
+        self.colour_on = QCheckBox("Set the map colour")
+        self.colour_on.setToolTip("The country file's color (map). Units are tinted with common/country_colors "
+                                  "color1-3 instead; the Textures preview uses those.")
         self.colour_btn = QPushButton()
         self._colour = QColor(120, 30, 140)
         self.colour_btn.clicked.connect(self._pick_colour)

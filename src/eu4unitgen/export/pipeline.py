@@ -100,7 +100,9 @@ class TexturePreview:
     notes: list[str]
 
 
-PREVIEW_COLOURS = [(40, 90, 200), (230, 230, 230), (30, 30, 30)]  # placeholders when the set has no colour
+# Unit colours for tags without a common/country_colors entry: the file's example template.
+# UNVERIFIED engine default; in-game test 5 (HDA, no entry) showed red units.
+DEFAULT_UNIT_COLOURS = [(205, 32, 26), (255, 255, 255), (70, 50, 40)]
 
 
 STAGE_ENTRY = re.compile(rf"^{TEST_MOD_NAME}(_v\d+|_textures)?(\.mod)?$")
@@ -145,6 +147,7 @@ class Session:
         self._idx: Index | None = None
         self._facts: dict[str, TagFacts] | None = None
         self._loaded_from: Path | None = None
+        self._unit_colours: dict | None = None
 
     # ------------------------------------------------------------------ game data
     def game(self) -> tuple[GameFiles, Index]:
@@ -181,6 +184,7 @@ class Session:
         if self._game is not None:
             self._game.close()
         self._game = self._idx = self._facts = self._loaded_from = None
+        self._unit_colours = None
 
     # ------------------------------------------------------------------ building blocks
     def project(self, mod_root: Path | None = None, **kw) -> Project:
@@ -317,8 +321,8 @@ class Session:
             raise SpecError(str(exc)) from exc
 
     def texture_preview(self, spec: SetSpec, tier: int, role: str, recipe, slot) -> TexturePreview:
-        """One slot's edit, before/after, tinted the way PdxMeshColor tints it with the set's
-        colour (secondary/tertiary: placeholders). Writes nothing."""
+        """One slot's edit, before/after, tinted the way PdxMeshColor tints it with the tag's unit
+        colours (common/country_colors; not the map colour). Writes nothing."""
         from eu4unitgen.core.recipe import RecipeError, apply_slot
         from eu4unitgen.textures.recolour import shade
         from eu4unitgen.textures.regions import guide
@@ -328,11 +332,26 @@ class Session:
             res = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role)
         except RecipeError as exc:
             raise SpecError(str(exc)) from exc
-        colours = [spec.colour or PREVIEW_COLOURS[0], *PREVIEW_COLOURS[1:]]
+        tag = spec.tags[0] if spec.tags else ""
+        colours = self.unit_colours().get(tag)
+        notes = list(res.notes)
+        if colours is None:
+            colours = DEFAULT_UNIT_COLOURS
+            notes.append(f"{tag or 'the tag'} has no common/country_colors entry: previewed with the default "
+                         "unit colours (red/white/brown)")
         shader = b.shape["shader"]
         return TexturePreview(b.pdxmesh, shader, guide(b.diffuse, res.regions),
                               shade(b.diffuse, b.specular, colours, shader),
-                              shade(res.diffuse or b.diffuse, res.specular or b.specular, colours, shader), res.notes)
+                              shade(res.diffuse or b.diffuse, res.specular or b.specular, colours, shader), notes)
+
+    def unit_colours(self) -> dict:
+        """tag -> [color1, color2, color3] from common/country_colors (what units are tinted with)."""
+        from eu4unitgen.library.tags import unit_colours
+
+        game, _ = self.game()  # reloads (and clears this cache) when the install path changed
+        if self._unit_colours is None:
+            self._unit_colours = unit_colours(game)
+        return self._unit_colours
 
     def export_texture_guide(self, spec: SetSpec, tier: int, role: str, base: str | None = None) -> list[Path]:
         """Write PNGs to paint masks over (the base diffuse, its region map, its spec map) to

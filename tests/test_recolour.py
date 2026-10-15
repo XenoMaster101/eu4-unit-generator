@@ -234,3 +234,29 @@ def test_simple_slot_round_trip_keeps_unknown_ops():
     assert SimpleSlot.from_slot(slot) == f
     with pytest.raises(RecipeError):
         SimpleSlot(pattern_image="p.png", pattern_region="hat").to_slot()
+
+
+def test_unit_colours_and_preview_fallback(fake_install, tmp_path):
+    from eu4unitgen.library.tags import unit_colours
+    from eu4unitgen.export.pipeline import DEFAULT_UNIT_COLOURS
+    make_textures_decodable(fake_install)
+    (fake_install / "common/country_colors").mkdir(parents=True)
+    (fake_install / "common/country_colors/00_country_colors.txt").write_text(
+        "# made up\nMAC = {\n\tcolor1= { 0 40 104 }\n\tcolor2= { 250 184 7 }\n\tcolor3= { 0 40 104 }\n}\n"
+        "BAD = { color1 = { 1 2 } }\n")
+    files = GameFiles(fake_install)
+    try:
+        assert unit_colours(files) == {"MAC": [(0, 40, 104), (250, 184, 7), (0, 40, 104)]}
+    finally:
+        files.close()
+    s = Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out", mod_dir=tmp_path / "mods"))
+    try:
+        slot = SlotRecipe(ops=[{"op": "hue_shift", "region": "cloth", "degrees": 90}])
+        mac = s.texture_preview(SetSpec(["MAC"], "hellenicgfx"), 1, "infantry", TextureRecipe(), slot)
+        assert not any("no common/country_colors" in n for n in mac.notes)
+        assert mac.before.getpixel((40, 20))[2] > mac.before.getpixel((40, 20))[0]  # primary region tinted navy
+        aaa = s.texture_preview(SetSpec(["AAA"], "hellenicgfx"), 1, "infantry", TextureRecipe(), slot)
+        assert any("no common/country_colors" in n for n in aaa.notes)
+        assert DEFAULT_UNIT_COLOURS[0] == (205, 32, 26)
+    finally:
+        s.close()
