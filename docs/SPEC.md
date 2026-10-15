@@ -567,7 +567,7 @@ Order (each step with tests and its validator rule; **stop and replan if step 3 
 **In-game test 6 (2026-10-14, HDA / `macedonian_test`, recipe `build/test6/recipe.json`, unit colours blue/yellow/black): PASS on all tiers, matching the preview.**
 - Unit colours: blue/yellow everywhere: the test mod's `country_colors` entry (appended to a copy of vanilla's file) recolours HDA's units.
 - T1 pattern overlay: stripes on the cloth. T2 `spec_paint`: cloth turned blue (primary channel). T3 protect PNG + `mask:` region: the left half green, face included (the PNG replaced the auto skin protection). T4 gloss: shiny cloth (80%), matte armour (0%).
-- error.log: not reported (the result message carried a placeholder); to be filled in.
+- error.log: clean (reported by the user).
 
 **Known limits after Phase 2** (deliberate; revisit when needed):
 - Retexturing handles **one-shape meshes** only; others are refused with an error. Every western/generic base is one shape.
@@ -578,7 +578,20 @@ Order (each step with tests and its validator rule; **stop and replan if step 3 
 - **Shared sets**: entities are named after the first tag, so a later single-tag set for that same tag would collide (`version_collisions` reports it); the map colour, if set, goes to every tag; the test suite and the texture test take one tag.
 - The desktop shortcut is **Windows only** (`scripts/make_shortcut.ps1`); on Linux run `python -m eu4unitgen.gui` (no `.desktop` file yet). Under `pythonw.exe` errors go to `%LOCALAPPDATA%\eu4unitgen\gui.log` and a message box.
 
-### Phase 3: Blender mesh jobs — NEXT
+### Phase 3: Asset generation (Blender mesh jobs) — IN PROGRESS
+Decisions (user, 2026-10-14):
+- Derived meshes allowed on the same terms as derived textures (base game only, never in the repo, never DLC; CLAUDE.md rule 2), **only as a fallback** if attaching rigid parts to the `head` bone fails.
+- AI image-to-3D is a later, pluggable backend. Local model: **TripoSG only** (MIT, >= 8 GB VRAM; the user's RTX 3060 has 12 GB), in its own isolated environment (never the app's .venv). **No Hunyuan3D option**: its license excludes the EU, UK and South Korea, including use of outputs there. Hosted fallback: Tripo API, opt-in per request; details at that step. TRELLIS.2 (24 GB, Linux-only) is out.
+- Hoplon face in country colour (PdxMeshColor + spec mask) by default, optional painted blazon.
+
+Facts found while planning (1.37.5): the western, eastern, indian and african generic infantry share one 28-bone skeleton (incl. `head`, `Right_hand_node`, `Left_hand_node`, `attach_back`). Base game spear+shield infantry: `indiangfx_INFANTRY_1` has `attach = { Right_hand_node = "muslim_spear" Left_hand_node = "indian_generic_01_type1_shield" }` and its pdxmesh maps idle/walk/attack to `spear_shield_*` (base-game animations; `polearm_onehanded_*` exist too). Vanilla weapons and shields are static meshes (no bones, no locators, PdxMeshStandard, scale 0.5). Vanilla attaches use plain bone names too (`root`, `L_hand`, `R_hand`, `attach_back`), but never `head` (UNVERIFIED that it works).
+
+Order (each step with tests and its validator rule):
+1. Export round-trip: a Blender job imports vanilla `muslim_spear.mesh` and a body via io_pdx_mesh, exports a trivial procedural mesh; our scanner parses it and compares it with vanilla's static-weapon structure.
+2. Skeleton facts: bone hierarchy, bind transforms of `head` and the hand nodes, vanilla weapon axes/grip/bounds (numbers only) in `base_models.json`.
+3. **Spike / in-game test 7**: one crude procedural crest attached to `head` and one crude dory on `Right_hand_node`, HDA tier 1, staged as a test mod. **If the head attach fails: stop and report.**
+4. Procedural part library (hoplon, dory, sarissa, xiphos, crest), fitting, thumbnails.
+5. Generator loadouts + rules (`attach_bones`, `part_mesh`); 6. GUI Parts screen; 7. in-game test of the full set; 8. AI backend (TripoSG local, Tripo API opt-in).
 - Headless import/export, kitbash of pre-weighted accessories, thumbnail rendering for GUI preview.
 - Import one vanilla infantry, horse + rider and artillery mesh via io_pdx_mesh; record **bone parenting** into `base_models.json` (scanner or a Blender job).
 
