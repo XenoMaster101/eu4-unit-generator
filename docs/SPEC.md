@@ -1187,6 +1187,69 @@ Constraints carried over:
 
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
+**Horse test character: FROZEN as "pipeline proven" (user, 2026-10-16).** No more tuning of its looks; test 12 for it is skipped.
+- **Proven in game or by checks:**
+  - derived bodies (removal + skinned additions, every base block kept, verified in game);
+  - the chain-weight tool and the automatic deformation check;
+  - rigid parts and the Greek helmet;
+  - real UVs, painted and baked textures, normal maps, matte gloss and the hair swatch;
+  - the texture-quality check.
+- **Finding:** procedural parts are good for **rigid** parts (weapons, shields, helmets, crests) and have hit their ceiling for **organic** shapes. The tail reads as a plug and the ear placement is off. Organic parts come in through the import path (R-I below), hand-made, CC0 or generated (TripoSG).
+
+**Plan (PLANNED 2026-10-16, nothing built), in order:**
+
+**R-D. Every character fully data-driven.** One character spec JSON, editable in the GUI, nothing character- or test-specific in code. Proven by a second original character from a new spec with no code changes.
+- **`character.json` (schema 1)**, replacing today's spread (CLI flags + the unit-set form + loadout.json + recipe JSON):
+  - `set`: tags, cultures, gfx, base_gfx, set_name, name, adjective, map colour, tech group, unit colours;
+  - `textures`: the Phase 2 recipe, inline;
+  - `loadout`: slots, bodies, `derived` per tier {add (kind + param overrides), remove}, accept_clipping, weapon_point;
+  - `hair`: swatch colour, inner colour, gloss;
+  - `test`: test tag, sprite techs, base mod, give_cores, stage dir; kept apart, so a real export never carries test settings.
+  - Paths inside it (blazons, imported models) are relative to the spec file.
+- **Tables moved from code into data:**
+  - a **body library** (`library/bodies.json`, base-game facts only: names, removable parts as bone + UV box, hair regions), extendable by a user file;
+  - an **addition library** (`library/additions.json`: shape builder, params, chain, exempt rings, behind joint);
+  - the **material library** (paint `STYLE`, `BUMP`, gloss defaults);
+  - **helmet styles** (`RIM_DROP`) as data the `greek_helmet` kind reads.
+  - Code keeps only builders and checks. Validators read the same files.
+- **GUI:** a Character page (new / open / save spec; every page edits a section of it); a **Derived body** editor per tier (removable parts of the chosen body, additions with their params, accept clipping); hair colours; the Test page reads `test`.
+- **CLI:** `--spec character.json` for generate, test-mod and parts-preview. Today's flags stay as overrides.
+- **Proof: an original Hellenistic hoplite**, built from a new spec only:
+  - **body:** type1, helmet removed (its bare head is already bearded);
+  - **head:** a Corinthian `greek_helmet` with a crest;
+  - **cloth:** a linothorax recolour (Phase 2 recipe: off-white linen, painted panels);
+  - **kit:** dory and hoplon.
+  - Report every gap that needed code. **Known gap already:** a derived body can't take a texture recipe yet ("can't combine with a texture recipe's retextured body"). The fix is generic: the recipe retextures the derived body's derived textures, with the hair swatch on top when there are additions.
+  - Acceptance: the hoplite builds and validates clean from its spec; renders; any code change is a generic fix, listed.
+
+**R-I. Import part.** An external model (.glb, .obj, .fbx), hand-made, CC0 or generated, through the pipeline. Organic parts (tails, ears, hair) come in this way.
+- **Rights first (CLAUDE.md rule 8):** each import records licence (original / CC0 / licensed + terms), author and source URL in the spec. The licence is written to INTEGRATION.md and the manifest. Imports are refused without it; never vanilla or DLC files.
+- **Blender job `import_part`:**
+  - import (built-in glTF, OBJ, FBX), join, apply transforms;
+  - orientation from the spec (up and forward axes; the GUI previews it);
+  - **auto-scale**: to a target size (e.g. a tail length) or fitted to a bone or body measure (head extents, back profile);
+  - **placement**: at an anchor (bone + offset, or snapped to the body surface: tail root on the pelvis back, ears on the crown).
+- **Two modes:**
+  - **rigid:** a static part mesh attached to a bone (like procedural parts; loadout kind `imported`);
+  - **skinned:** appended to a derived body. The chain-weight tool generalises from rings to a **length coordinate** (each vertex projected onto the part's root→tip axis), with the same chains, rules and deformation check.
+- **Decimate to budget** (Blender Decimate, UVs kept): rigid ≤ 400 triangles, skinned additions ≤ 400 each, body total ≤ 4,500.
+- **Textures:**
+  - **when the model has its own:** they are baked into ours (diffuse DXT1; normal converted to RGB green-up, DirectX → flip; roughness → spec alpha gloss into 4-18; spec RGB 0 or zone masks);
+  - **skinned parts:** their texture is re-baked into the derived body's free texture area (free_rect), so the body keeps one material;
+  - **when the model has none:** Q2 paint from a material class in the spec.
+- **Checks:** part_mesh, the derived_body rule (chain weights), the deformation check, the texture-quality check, budgets, and the licence recorded.
+- **Tests:** a synthetic .obj made in the test (no third-party files), through the job (real Blender when present, else the fake runner).
+- **Acceptance:** an original, hand-made test model goes through both modes clean, with renders.
+
+**R-T. TripoSG (step 8) feeding R-I.**
+- Local TripoSG (MIT) in its **own isolated environment** (never the app's .venv), run as a subprocess like Blender, on the user's GPU (RTX 3060, 12 GB). The user installs the model weights; the app only calls it. No Hunyuan3D; Tripo API stays opt-in later.
+- **Input:** an original or licensed reference image (rule 8), one part per image (a tail, an ear, a crest).
+- **Output:** .glb geometry → R-I with clean-up (keep the largest component, fill holes, remesh and decimate to budget) and orientation confirmed in the GUI.
+- **Texture:** Q2 paint by default; projecting the reference image is experimental.
+- **Acceptance:** one organic part (e.g. a tail) generated from an original reference image passes all R-I checks and reads better than the procedural one in renders.
+
+**Order:** R-D (spec, data libraries, GUI, hoplite proof, gap report) → R-I → R-T.
+
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.
 - R2: derived bodies (bareheaded, merged skinned additions). Accept on an in-game test with no error.log lines and no visible artefacts in idle/walk/attack.
