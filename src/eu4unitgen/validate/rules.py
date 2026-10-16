@@ -508,8 +508,8 @@ def derived_body(ctx: Context) -> list[Issue]:
                                                + f" ({counts['removed_triangles']} triangles removed) + "
                                                f"{', '.join(k for k, _, _ in rec.additions) or 'nothing'} "
                                                f"({counts['added_vertices']} vertices, {counts['added_triangles']} "
-                                               "triangles added). UNVERIFIED in game: textures resolving from the "
-                                               "base folder for a mod .mesh", f.path))
+                                               "triangles added); its textures resolve from the base folder "
+                                               "(verified in game, test 10)", f.path))
     return out
 
 

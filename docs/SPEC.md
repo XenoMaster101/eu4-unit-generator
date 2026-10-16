@@ -1032,6 +1032,14 @@ Constraints carried over:
 
 **Step 5 (2026-10-16): hair textures, option T1.** `core.derived_body.HAIR_REGIONS` gives per base body the diffuse's hair that additions' UVs span, strands running down it (each addition's length runs down the region). type1: px 70-118 × 30-92, the back-of-head hair (the largest unmasked hair-coloured rectangle, 68-120 × 28-100, kept clear of the neck skin; mean 40 32 28). A body without a region is refused. Result (`build/plan11/s5/hair_textured.png`): dark brown with faint strands, matching the soldier's hair; reads as dark hair at map scale. **T2 (a derived texture copy with a painted, lighter hair swatch) is deferred until after test 11.**
 
+**Step 6 (2026-10-16): pre-checks for test 11, both body options.**
+- **T2 body:** `african_generic_03_type1` (bareheaded, no removal). Hair region from **its scalp's own UVs** (head vertices at the crown and back; px 208-234 × 5-13 of 256, black, mask 0; `HAIR_REGIONS` entries now carry the texture size). The scalp-UV method also lands on type1's hair; candidate for computing regions automatically.
+- **Staged:** `build/test11/stage`, validator **0 errors, 4 warnings**: three are the tuft's accepted C2, one is a marginal C5 (T2 tuft idle -0.04). `check_derived` clean on both bodies.
+- **Deformation check:** tail and ears pass on both. T2's tuft clips far less in the attack (0.12 deep) than T1's (0.97).
+- **Posed renders** (`scripts/plan11/unit_render_job.py`: derived body + staged part meshes following their bones through `spear_shield` walk/attack):
+  - close-ups `build/test11/precheck/precheck_close.png`: helmet, dory and hoplon follow their bones; the tail reads clearly side-on and from the rear, most of all in the attack;
+  - map scale `precheck_map.png` (48 px from above, camera angle UNVERIFIED): the helmet and hoplon read; **the dark tail and ears barely read** (dark on dark, foreshortened from above). This is the case for T2 (lighter hair swatch).
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

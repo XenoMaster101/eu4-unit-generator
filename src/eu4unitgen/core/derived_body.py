@@ -294,17 +294,20 @@ PATCH_TEX = 512
 # Per base body: the diffuse's hair (px, x0 y0 x1 y1 of a PATCH_TEX texture) the additions' UVs span,
 # strands running down it (step 5: the largest unmasked hair-coloured rectangle, mean 40 32 28, kept
 # clear of the neck skin). A body without one is refused.
-HAIR_REGIONS: dict[str, tuple[int, int, int, int]] = {
+HAIR_REGIONS: dict[str, tuple[int, int, int, int] | tuple[int, int, int, int, int]] = {
     "gfx/models/units/western_generic_01_type1.mesh": (70, 30, 118, 92),
+    # step 6: the scalp's own UVs (head vertices at the crown and back), on a 256-px texture; black hair, mask 0
+    "gfx/models/units/african_generic_03_type1.mesh": (208, 5, 234, 13, 256),
 }
 
 
-def hair_region(base_file: str) -> tuple[int, int, int, int]:
+def hair_region(base_file: str) -> tuple[tuple[int, int, int, int], int]:
+    """(x0, y0, x1, y1) in image px and the texture's size."""
     region = HAIR_REGIONS.get(base_file.lower())
     if region is None:
         raise DerivedBodyError(f"{base_file} has no known hair region for skinned additions' textures "
                                "(core.derived_body.HAIR_REGIONS)")
-    return region
+    return tuple(region[:4]), (region[4] if len(region) > 4 else PATCH_TEX)
 
 
 @dataclass(frozen=True)
@@ -377,7 +380,7 @@ def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, 
         except WeightError as exc:
             raise DerivedBodyError(f"{k}: {exc}") from exc
     if base_file is not None:
-        patch = hair_region(base_file)
+        patch, tex = hair_region(base_file)
     with tempfile.TemporaryDirectory(prefix="eu4unitgen_derived_") as tmp:
         body = Path(tmp) / "base.mesh"
         body.write_bytes(append_additions(base, [], remove) if remove else base)
