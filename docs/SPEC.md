@@ -1180,6 +1180,11 @@ Constraints carried over:
 - **Rule `texture_quality`** warns when a generated part (its .mesh and the three textures its material names) falls outside `RANGES`: density 15-40, detail ≥ 8, shading ≥ 4 (no upper bound: a texture may hold dark lining next to bright metal), normal tilt 4-20°, gloss 2-20.
 - **Test-11 parts now** (dory, hoplon, helmet, tiers 1-2): all in range. Detail 9.3-12.0, shading 11-51, normal 5.1-9.1°, gloss 10-13, density 20.1-34.3.
 
+**Quality pass sign-off renders (2026-10-16; awaiting the user's sign-off before test 12):** `build/signoff/signoff_vs_vanilla.png`.
+- **Rows:** the vanilla western tier-1 infantryman (type1 + halberd, `polearm_twohanded`) against ours on T1 (type1 - helmet + ears, tail, tuft; greek_helmet, dory, hoplon; `spear_shield`) and T2 (african_generic_03 + the same), each in walk (f14) and attack (f30).
+- **Views:** side and rear-quarter close-ups, and map scale (48 px from above, front- and rear-quarter, also ×4).
+- **Limits:** Workbench renders show diffuse and shape only. Normal maps, gloss and unit colours aren't shown (the hoplon face and the cloth stay grey here); those show in game.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**
