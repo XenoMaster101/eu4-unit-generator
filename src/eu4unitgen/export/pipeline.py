@@ -605,10 +605,9 @@ class Session:
         from eu4unitgen.core.fitting import rigid
         from eu4unitgen.core.loadout import LoadoutError, RoleLoadout, check_slot
         from eu4unitgen.core.naming import Naming
-        from eu4unitgen.core.parts import KINDS, PartBuild, PartError, build_parts, resolve
+        from eu4unitgen.core.parts import PartBuild, PartError, build_parts, resolve
         from eu4unitgen.core.retexture import base_textures
         from eu4unitgen.textures.dds import DDSFormat, full_mip_count, write_dds
-        from eu4unitgen.textures.procedural import part_images
         from eu4unitgen.textures.recolour import shade
 
         game, idx = self.game()
@@ -655,9 +654,7 @@ class Session:
                 notes.append(f"body untextured in the preview: {exc}")
             parts_args = []
             for b in builds:
-                k = KINDS[b.part.kind]
-                imgs = part_images(b.part.zones, k.layout, b.blazon, int(b.part.params.get("blazon_rotate", 0)),
-                                   b.part.params.get("blazon_mirror") == "yes")
+                imgs = built.images(b)
                 diffuse = shade(imgs["diffuse"], imgs["specular"], colours, b.part.shader)
                 tex = naming.part_texture(set_name, b.part.kind, tier, "diffuse", role)
                 (folder / tex).write_bytes(dds(diffuse))

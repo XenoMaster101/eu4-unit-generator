@@ -34,6 +34,7 @@ class Builder:
     def __init__(self, zone_uvs, flip_z=False):
         self.bm = bmesh.new()
         self.uv = self.bm.loops.layers.uv.new("map1")
+        self.zone = self.bm.faces.layers.int.new("zone")  # kept through triangulation; the atlas painter needs it
         self.zone_uvs = zone_uvs
         self.flip_z = flip_z
         self.pdx = {}  # vert -> PDX coords (for planar UVs)
@@ -49,6 +50,7 @@ class Builder:
         if self.flip_z:  # mirroring turns faces inside out; recalc_face_normals fixes closed shells, keep winding sane
             verts = list(reversed(verts))
         f = self.bm.faces.new(verts)
+        f[self.zone] = zone
         for loop in f.loops:
             u, vv = planar(self.pdx[loop.vert]) if planar else self.zone_uvs[zone]
             loop[self.uv].uv = (u, 1.0 - vv)
@@ -336,6 +338,33 @@ BUILDERS = {"spear": build_spear, "sword": build_sword, "shield": build_shield, 
             "helmet": build_helmet}
 
 
+def unwrap_atlas(obj, density):
+    """Q1: a real UV unwrap (Smart UV Project, islands packed with a margin) and the texture size
+    (a power of two, 64-512) that gives about ``density`` texels per mesh unit. Returns
+    {"size", "density", "tris": [[zone, u0, v0, u1, v1, u2, v2], ...]} in image coordinates (v down)."""
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.03)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    me = obj.data
+    uv = me.uv_layers["map1"].data
+    zone = me.attributes.get("zone")
+    area3, area_uv, tris = 0.0, 0.0, []
+    for poly in me.polygons:
+        pts = [uv[li].uv for li in poly.loop_indices]
+        area3 += poly.area
+        area_uv += abs((pts[1].x - pts[0].x) * (pts[2].y - pts[0].y) - (pts[2].x - pts[0].x) * (pts[1].y - pts[0].y)) / 2
+        z = zone.data[poly.index].value if zone is not None else 0
+        tris.append([z] + [c for p in pts for c in (p.x, 1.0 - p.y)])
+    ideal = density * math.sqrt(area3 / area_uv) if area_uv > 0 else 64
+    size = 64
+    while size < 512 and size * 1.41 < ideal:
+        size *= 2
+    return {"size": size, "density": size * math.sqrt(area_uv / area3) if area3 else 0.0, "tris": tris}
+
+
 def main() -> None:
     a = _pdx.args()
     ie = _pdx.io_module()
@@ -350,9 +379,10 @@ def main() -> None:
         bpy.context.scene.collection.objects.link(obj)
         mesh.materials.append(_pdx.pdx_material(part["shape"] + "_mat", part.get("shader", "PdxMeshStandard"),
                                                 part["textures"]))
+        atlas = unwrap_atlas(obj, part.get("density", 32.0)) if part.get("layout") == "atlas" else None
         ie.export_meshfile(part["out_mesh"], exp_mesh=True, exp_skel=False, exp_locs=False)
         out.append({"kind": part["kind"], "out_mesh": part["out_mesh"], "verts": len(mesh.vertices),
-                    "faces": len(mesh.polygons)})
+                    "faces": len(mesh.polygons), **({"atlas": atlas} if atlas else {})})
     _pdx.write_result(a, {"parts": out})
 
 

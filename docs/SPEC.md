@@ -1128,6 +1128,17 @@ Constraints carried over:
 - deformation check clean on both bodies; renders `build/q0/ears_q0_round2.png` and `ear_silhouettes_round2.png`.
 - **Requirement for Q2/Q5 (user):** the ears and the tuft must be **matte and hair-coloured, not glossy black, with a lighter inner ear**. The black gloss makes them read as horns.
 
+**Q1 (2026-10-16): real UVs and texel density.**
+- **Layout `atlas`** for dory, sarissa, xyston, xiphos, crest, horse_ears and greek_helmet:
+  - `build_parts` records each face's zone in a face attribute (it survives triangulation), unwraps with Smart UV Project (66°, island margin 0.03), and picks a power-of-two size (64-512) for `TEXEL_DENSITY` = 32 texels per mesh unit;
+  - it returns each triangle's zone and UVs; `textures.procedural.atlas_images` paints zone diffuse and spec (country masks, gloss) on that layout, edges bled 2 px against mip bleed;
+  - cached alongside the mesh (`#atlas`); the hoplon keeps its disc layout (the blazon needs it).
+- **Measured** (test-11 parts, `measure_quality.py`): dory 20.1 texels/unit at 512 px (the cap; base-game halberd 25.2), greek_helmet 34.3 at 256, hoplon 22.9 (unchanged), against 0 before. Detail is still 0 until Q2 paints them.
+- **Additions on the body texture:** each uses only as much of the hair region as gives 32 texels/unit (the job measures the mapping's real density and scales once).
+  - type1: tuft 32.0, ears 32.0; the tail 15.7 is capped (the region is too small);
+  - african_generic_03: tail 3.6, tuft 9.2, ears 14.1 (its scalp region is 26×8 px).
+  - Both are lifted by Q5's dedicated hair swatch.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from eu4unitgen.core.chain_weights import MAX_INFLUENCES, Chain, WeightError, check_weights, weights
 from eu4unitgen.library.scanner import parse_pdx_mesh, write_pdx_mesh
+from eu4unitgen.textures.procedural import TEXEL_DENSITY
 
 
 def _sub(a, b):
@@ -385,7 +386,7 @@ def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, 
         body = Path(tmp) / "base.mesh"
         body.write_bytes(append_additions(base, [], remove) if remove else base)
         res = runner.run_job("build_additions", {
-            "body": str(body), "patch_px": list(patch), "tex": tex,
+            "body": str(body), "patch_px": list(patch), "tex": tex, "density": TEXEL_DENSITY,
             "additions": [{"name": k, "shape": ADDITION_KINDS[k]["shape"], "params": ADDITION_KINDS[k]["params"]}
                           for k in kinds]}, timeout=300).result
     adds = []

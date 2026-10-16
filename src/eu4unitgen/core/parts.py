@@ -36,7 +36,9 @@ from PIL import Image
 from eu4unitgen.core.generator import OWNED, GeneratedFile, GenerationError
 from eu4unitgen.core.naming import LOADOUT_ROLES, PART_KINDS, Naming
 from eu4unitgen.library.scanner import strip_mesh_props
-from eu4unitgen.textures.procedural import COUNTRY_CHANNELS, Zone, part_textures, shader_for, zone_uvs
+from eu4unitgen.textures.procedural import (
+    COUNTRY_CHANNELS, TEXEL_DENSITY, Zone, atlas_images, encode_part_textures, part_images, shader_for, zone_uvs,
+)
 
 PART_SCALE = 0.5  # vanilla weapons' and shields' pdxmesh scale
 
@@ -108,16 +110,16 @@ def _spear(tip, butt, head_length, head_width, shaft_radius, spike) -> dict:
 SPEAR_ZONES = (ZoneDef("shaft", "Shaft", WOOD, 3), ZoneDef("metal", "Head and butt spike", BRONZE, 13))
 
 KINDS: dict[str, PartKind] = {k.name: k for k in (
-    PartKind("dory", "Dory (spear)", "Right_hand_node", LOADOUT_ROLES, "spear", "strip",
+    PartKind("dory", "Dory (spear)", "Right_hand_node", LOADOUT_ROLES, "spear", "atlas",
              _spear(15.0, -11.5, 4.0, 0.45, 0.17, 1.3), SPEAR_ZONES,
              scaled=("tip", "butt", "head_length", "spike")),
-    PartKind("sarissa", "Sarissa (pike)", "Right_hand_node", ("infantry", "crew"), "spear", "strip",
+    PartKind("sarissa", "Sarissa (pike)", "Right_hand_node", ("infantry", "crew"), "spear", "atlas",
              _spear(30.0, -13.0, 2.5, 0.32, 0.15, 1.5), SPEAR_ZONES,
              scaled=("tip", "butt", "head_length", "spike")),
-    PartKind("xyston", "Xyston (cavalry lance)", "Right_hand_node", LOADOUT_ROLES, "spear", "strip",
+    PartKind("xyston", "Xyston (cavalry lance)", "Right_hand_node", LOADOUT_ROLES, "spear", "atlas",
              _spear(22.0, -16.0, 3.0, 0.4, 0.16, 2.0), SPEAR_ZONES,
              scaled=("tip", "butt", "head_length", "spike")),
-    PartKind("xiphos", "Xiphos (sword)", "Right_hand_node", LOADOUT_ROLES, "sword", "strip",
+    PartKind("xiphos", "Xiphos (sword)", "Right_hand_node", LOADOUT_ROLES, "sword", "atlas",
              {"blade_length": Param(5.0, 1.5, 10, "Blade length", 0.1),
               "blade_width": Param(0.55, 0.15, 1.5, "Blade width", tip="at its widest, two thirds along (leaf blade)"),
               "grip_length": Param(1.0, 0.4, 2.5, "Grip length", 0.1),
@@ -138,7 +140,7 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
              (ZoneDef("face", "Face", (150, 110, 60), 10, "country1"), ZoneDef("rim", "Rim", BRONZE, 13),
               ZoneDef("back", "Inside", (120, 85, 50), 3)),
              scaled=("radius", "centre_y"), blazon=True),
-    PartKind("crest", "Crest (helmet)", "head", LOADOUT_ROLES, "crest", "strip",
+    PartKind("crest", "Crest (helmet)", "head", LOADOUT_ROLES, "crest", "atlas",
              {"base": Param(1.9, -1.0, 5.0, "Base height", tip="above the head joint; fitted: the helmet top less 0.25"),
               "height": Param(1.2, 0.2, 4.0, "Crest height"),
               "radius": Param(1.4, 0.5, 3.0, "Arc radius", tip="fitted: 1.1 x the head's front or back reach"),
@@ -147,7 +149,7 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "centre_z": Param(0.0, -2.0, 2.0, "Centre fore/aft", tip="forward (-) or back (+) of the head joint"),
               "orientation": Choice(("fore_aft", "transverse"), "fore_aft", "Orientation")},
              (ZoneDef("hair", "Horsehair", HAIR, 3),)),
-    PartKind("horse_ears", "Horse ears (pair)", "head", LOADOUT_ROLES, "ears", "strip",
+    PartKind("horse_ears", "Horse ears (pair)", "head", LOADOUT_ROLES, "ears", "atlas",
              {"base": Param(1.7, -1.0, 4.0, "Base height", tip="above the head joint; fitted: the helmet top less 0.45"),
               "spread": Param(0.62, 0.1, 2.0, "Spread", 0.02, "x of each ear's base; fitted: 0.63 x the head's half-width"),
               "length": Param(1.3, 0.3, 3.0, "Length", tip="base to tip"),
@@ -158,7 +160,7 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "centre_z": Param(0.1, -1.5, 1.5, "Fore/aft", tip="forward (-) or back (+) of the head joint")},
              (ZoneDef("outer", "Outer", (95, 70, 50), 3), ZoneDef("inner", "Inner (front)", (150, 105, 95), 3)),
              scaled=("length", "width", "depth")),
-    PartKind("greek_helmet", "Greek helmet", "head", LOADOUT_ROLES, "helmet", "strip",
+    PartKind("greek_helmet", "Greek helmet", "head", LOADOUT_ROLES, "helmet", "atlas",
              {"style": Choice(("attic", "corinthian", "pilos"), "attic", "Style",
                               "attic: open face, cheek guards; corinthian: the face covered, an eye slot; pilos: a cone, "
                               "level rim"),
@@ -294,7 +296,19 @@ class BuiltParts:
     entities: list[dict]  # entity template records
     files: list[GeneratedFile]
     raw_meshes: dict[str, bytes] = field(default_factory=dict)  # entity name -> .mesh bytes (also in files)
+    atlas: dict[str, dict] = field(default_factory=dict)  # entity name -> {"size", "density", "tris"} (atlas parts)
     log: str = ""
+
+    def images(self, b: "PartBuild") -> dict[str, Image.Image]:
+        """The part's {diffuse, normal, specular} images: painted on its unwrap (atlas layout), else
+        the swatch or disc layout."""
+        p = b.part.params
+        atlas = self.atlas.get(b.name)
+        if atlas is not None:
+            return atlas_images(b.part.zones, atlas["size"], atlas["tris"])
+        layout = KINDS[b.part.kind].layout
+        return part_images(b.part.zones, "strip" if layout == "atlas" else layout, b.blazon,
+                           int(p.get("blazon_rotate", 0)), p.get("blazon_mirror") == "yes")
 
 
 def _names(naming: Naming, set_name: str, b: PartBuild) -> dict[str, str]:
@@ -308,7 +322,7 @@ def job_entry(naming: Naming, set_name: str, b: PartBuild) -> dict:
     """The Blender job's description of one part (no paths: also the cache key)."""
     k = KINDS[b.part.kind]
     return {"kind": b.part.kind, "builder": k.builder, "shape": f"{b.name}Shape", "shader": b.part.shader,
-            "zones": len(b.part.zones), "layout": k.layout,
+            "zones": len(b.part.zones), "layout": k.layout, "density": TEXEL_DENSITY,
             "zone_uvs": [list(uv) for uv in zone_uvs(len(b.part.zones), k.layout)],
             "params": b.part.params, "textures": _names(naming, set_name, b)}
 
@@ -325,6 +339,8 @@ def build_parts(runner, naming: Naming, set_name: str, builds: list[PartBuild], 
     entries = [job_entry(naming, set_name, b) for b in builds]
     todo = [i for i, e in enumerate(entries) if cache is None or _key(e) not in cache]
     meshes: dict[int, bytes] = {i: cache[_key(e)] for i, e in enumerate(entries) if i not in todo}
+    atlases: dict[int, dict] = {i: json.loads(cache[_key(e) + "#atlas"]) for i, e in enumerate(entries)
+                                if i not in todo and _key(e) + "#atlas" in cache}
     if todo and runner is None:
         raise GenerationError("parts need Blender to build (Settings: Blender path)")
     if todo:
@@ -334,16 +350,20 @@ def build_parts(runner, naming: Naming, set_name: str, builds: list[PartBuild], 
             out.log = res.log
             for i, built in zip(todo, res.result["parts"]):
                 meshes[i] = strip_mesh_props(Path(built["out_mesh"]).read_bytes())
+                if built.get("atlas"):
+                    atlases[i] = built["atlas"]
                 if cache is not None:
                     cache[_key(entries[i])] = meshes[i]
+                    if built.get("atlas"):
+                        cache[_key(entries[i]) + "#atlas"] = json.dumps(built["atlas"]).encode("utf-8")
     for i, b in enumerate(builds):
         kind, role, tier = b.part.kind, b.part.role, b.tier
         mesh_rel = naming.part_mesh_file(set_name, kind, tier, role)
         out.files.append(GeneratedFile(mesh_rel, meshes[i], OWNED, procedural=True))
         out.raw_meshes[b.name] = meshes[i]
-        p = b.part.params
-        dds = part_textures(b.part.zones, KINDS[kind].layout, b.blazon,
-                            int(p.get("blazon_rotate", 0)), p.get("blazon_mirror") == "yes")
+        if i in atlases:
+            out.atlas[b.name] = atlases[i]
+        dds = encode_part_textures(out.images(b))
         for tex, data in dds.items():
             rel = f"{naming.part_dir(set_name)}/{naming.part_texture(set_name, kind, tier, tex, role)}"
             out.files.append(GeneratedFile(rel, data, OWNED, procedural=True))

@@ -307,12 +307,32 @@ def main():
     for add in a["additions"]:
         me, rings, around = SHAPES[add["shape"]](body, add.get("params", {})).finish(add["name"])
         last = max(rings) or 1
+        # Q1: use only as much of the hair region as gives ~``density`` texels per mesh unit (all of it
+        # when the region is too small for that, e.g. the tail, until a dedicated hair swatch exists).
+        # Map at full size, measure the real density over the triangles, scale once.
+        def uvs(f):
+            return [((x0 + 1 + (x1 - x0 - 2) * (0.1 + 0.8 * around[i] * f)),
+                     (y0 + 1 + (y1 - y0 - 2) * (rings[i] / last) * f)) for i in range(len(me.vertices))]
+
+        def measured(uv):
+            area3 = area_uv = 0.0
+            for poly in me.polygons:
+                vs = list(poly.vertices)
+                for k in range(1, len(vs) - 1):
+                    t = (vs[0], vs[k], vs[k + 1])
+                    (ax, ay), (bx, by), (cx, cy) = (uv[i] for i in t)
+                    area_uv += abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)) / 2
+            area3 = sum(poly.area for poly in me.polygons)
+            return (area_uv / area3) ** 0.5 if area3 > 0 else 0.0
+
+        d1 = measured(uvs(1.0))
+        f = min(1.0, a.get("density", 32.0) / d1) if d1 > 0 else 1.0
+        uv = uvs(f)
         p, n, u0 = [], [], []
         for v in me.vertices:
             p += pdx(v.co)
             n += pdx(v.normal)
-            u0 += [(x0 + 1 + (x1 - x0 - 2) * (0.1 + 0.8 * around[v.index])) / tex,
-                   (y0 + 1 + (y1 - y0 - 2) * (rings[v.index] / last)) / tex]
+            u0 += [uv[v.index][0] / tex, uv[v.index][1] / tex]
         tri = [i for poly in me.polygons for i in poly.vertices]
         out.append({"name": add["name"], "p": p, "n": n, "u0": u0, "tri": tri, "rings": rings})
     _pdx.write_result(a, {"additions": out})

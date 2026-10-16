@@ -276,3 +276,16 @@ def test_additions_span_the_hair_region(project, nation, body_game):
     generate(project, nation, files, idx, loadout=Loadout.from_json(LOADOUT), runner=runner)
     job = next(a for j, a in runner.calls if j == "build_additions")
     assert job["patch_px"] == [100, 20, 120, 50]
+
+
+def test_atlas_images_paint_each_triangle_in_its_zone():
+    from eu4unitgen.textures.procedural import Zone, atlas_images
+
+    zones = [Zone((110, 75, 40), 3), Zone((180, 130, 60), 13), Zone((0, 0, 0), 5, "country1")]
+    tris = [[1, 0.1, 0.1, 0.4, 0.1, 0.1, 0.4], [2, 0.6, 0.6, 0.9, 0.6, 0.6, 0.9]]
+    imgs = atlas_images(zones, 64, tris)
+    assert imgs["diffuse"].size == (64, 64)
+    assert imgs["diffuse"].getpixel((10, 10))[:3] == (180, 130, 60)  # zone 1
+    assert imgs["diffuse"].getpixel((42, 42))[:3] == (170, 170, 170)  # country zone: neutral grey
+    assert imgs["specular"].getpixel((42, 42))[:3] == (255, 0, 0)  # its mask in spec R
+    assert imgs["diffuse"].getpixel((60, 2))[:3] == (110, 75, 40)  # background: zone 0

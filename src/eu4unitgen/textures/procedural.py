@@ -1,6 +1,10 @@
 """Textures made from scratch (no base-game pixels) for procedural parts (Phase 3).
 
-Each part has colour zones (dory: wood shaft, bronze head). Two layouts:
+Each part has colour zones (dory: wood shaft, bronze head). Three layouts:
+
+* ``atlas`` (Q1): the part is unwrapped for real in Blender (islands packed, a power-of-two size
+  chosen for ~32 texels per mesh unit, like the base-game bodies) and each triangle's zone is
+  painted where its UVs fall (``atlas_images``).
 
 * ``strip``: one flat swatch per zone side by side; every face of a zone has its UVs at that
   swatch's centre.
@@ -25,7 +29,8 @@ from PIL import Image, ImageChops, ImageDraw
 from eu4unitgen.textures.dds import DDSFormat, full_mip_count, write_dds
 
 Colour = tuple[int, int, int]
-SIZE = {"strip": 64, "disc": 256}
+SIZE = {"strip": 64, "disc": 256, "atlas": 64}  # atlas: the job's chosen size replaces this
+TEXEL_DENSITY = 32.0  # texels per mesh unit for atlas parts (western type1 body: 32.8; base-game weapons 17-27)
 FLAT_NORMAL = (128, 128, 255)
 COUNTRY_CHANNELS = ("country1", "country2", "country3")  # spec R, G, B
 COUNTRY_GREY = (170, 170, 170)  # diffuse under a country zone: the shader multiplies it by the colour
@@ -52,7 +57,7 @@ def shader_for(zones: list[Zone]) -> str:
 def zone_uvs(count: int, layout: str) -> list[tuple[float, float]]:
     """Each zone's UV point in image coordinates. Disc: zone 0 is planar-mapped (its point is
     the centre, unused by faces that carry their own UVs); zones 1-4 are corners."""
-    if layout == "strip":
+    if layout in ("strip", "atlas"):  # atlas: placeholders, replaced by the job's unwrap
         return [((i + 0.5) / count, 0.5) for i in range(count)]
     if layout == "disc":
         if count > 1 + len(DISC_CORNERS):
@@ -122,6 +127,21 @@ def part_images(zones: list[Zone], layout: str = "strip", blazon: Image.Image | 
         cleared = Image.new("RGBA", spec.size, (0, 0, 0, _spec_of(zones[0])[3]))
         spec = Image.composite(cleared, spec, layer.getchannel("A").point(lambda a: 255 if a >= 128 else 0))
     size = SIZE[layout]
+    return {"diffuse": diffuse, "normal": Image.new("RGBA", (size, size), (*FLAT_NORMAL, 255)), "specular": spec}
+
+
+def atlas_images(zones: list[Zone], size: int, tris: list[list[float]]) -> dict[str, Image.Image]:
+    """{diffuse, normal, specular} for an unwrapped part: each triangle ([zone, u0, v0, u1, v1, u2,
+    v2], image coordinates) painted in its zone's diffuse and spec, edges bled 2 px so mip levels
+    don't pull in the background; the background is zone 0's."""
+    diffuse = Image.new("RGBA", (size, size), (*_diffuse_of(zones[0]), 255))
+    spec = Image.new("RGBA", (size, size), _spec_of(zones[0]))
+    dd, sd = ImageDraw.Draw(diffuse), ImageDraw.Draw(spec)
+    for t in tris:
+        z = zones[int(t[0]) if 0 <= int(t[0]) < len(zones) else 0]
+        pts = [(t[1 + 2 * k] * size, t[2 + 2 * k] * size) for k in range(3)]
+        for draw, fill in ((dd, (*_diffuse_of(z), 255)), (sd, _spec_of(z))):
+            draw.polygon(pts, fill=fill, outline=fill, width=2)
     return {"diffuse": diffuse, "normal": Image.new("RGBA", (size, size), (*FLAT_NORMAL, 255)), "specular": spec}
 
 
