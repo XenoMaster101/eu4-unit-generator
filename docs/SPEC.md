@@ -1000,6 +1000,8 @@ Constraints carried over:
   - tuft below the helmet rim;
   - map-scale read.
 
+**H1 result (2026-10-16): a full head is under type1's helmet.** The helmet is 369 triangles skinned to `head` with UVs in the diffuse's px 128-240 × 0-200 (the face and hair use px 0-127). Without them, type1 is a bareheaded soldier with a closed, textured hair cap. The rest of the head is one connected piece of 506 triangles; one stray helmet triangle sits on the UV boundary (px 128, 99). Renders: `build/plan11/h1/h1_heads.png` (`scripts/plan11/head_render_job.py`). **H1 (derived type1 with the helmet removed) is the way; H2 stays the fallback.**
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

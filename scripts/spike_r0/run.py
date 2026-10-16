@@ -17,7 +17,7 @@ def run_job(args: dict, job: str = "spike_job.py") -> dict:
         ap.write_text(json.dumps({**args, "result_path": str(res), "eu4": os.environ["EU4_PATH"],
                                   "out_dir": args.get("out_dir_override") or str(OUT)}), encoding="utf-8")
         p = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
-                            str(Path(__file__).with_name(job)), "--", str(ap)],
+                            str(Path(job) if "/" in job or "\\" in job else Path(__file__).with_name(job)), "--", str(ap)],
                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3600)
         (OUT / "blender.log").write_text(p.stdout + "\n--- stderr ---\n" + p.stderr, encoding="utf-8")
         if p.returncode != 0 or not res.is_file():
