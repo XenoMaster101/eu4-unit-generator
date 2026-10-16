@@ -1248,7 +1248,22 @@ Constraints carried over:
 - **Texture:** Q2 paint by default; projecting the reference image is experimental.
 - **Acceptance:** one organic part (e.g. a tail) generated from an original reference image passes all R-I checks and reads better than the procedural one in renders.
 
-**Order:** R-D (spec, data libraries, GUI, hoplite proof, gap report) → R-I → R-T.
+**Order:** R-D (spec, data libraries, GUI, hoplite proof, gap report) → R-I → R-T. **Changed by the user (2026-10-16):** spec format and data libraries → the hoplite from a spec file via `--spec` → fix the gaps it finds (texture recipes on derived bodies included) → the GUI Character page on the settled format → R-I → R-T. Plus a converter from the old files and flags.
+
+**R-D 1 (2026-10-16): data libraries and the spec format.**
+- **Data libraries** (`eu4unitgen/library/{bodies,additions,materials}.json`, read by `library.data.library`):
+  - removable parts and hair regions per base body;
+  - the tail, tuft and ears (shape, params, chain, exempt rings, behind joint);
+  - paint styles, relief, the hair swatch, helmet styles and slot.
+  - Code keeps only builders and checks; the part job receives the values it needs in its entry.
+  - A rebuild of the test-11 set is byte-identical (57 files).
+- **`core/character.py` `CharacterSpec`** (schema 1, strict, unknown keys refused): sections `set`, `textures` (recipe, inline), `loadout` (inline), `hair` (swatch colours → `Loadout.hair` → the hair swatch), `export` (prefix, version, pack order), `test` (sprite techs, base mod/name, give cores; only the test mod reads it). Relative paths resolve against the spec's folder.
+- **CLI:**
+  - `--spec character.json` on generate, test-mod and parts-preview; the spec's export and test sections give defaults, and explicit flags win;
+  - `to-spec` converts the old flags plus `--loadout`/`--texture-recipe` (and test options) into a spec, embedding both files and rebasing their relative paths (recipe images and masks, `mask:` regions, blazons) onto the spec's folder.
+- **Converted:** `build/specs/test11.json` (built from it alone, the stage is byte-identical to the flag-built one) and `build/specs/test8.json` (blazon rebased; validates with 0 errors).
+- **Q6 now warns on test 8:** sarissa_2 density 11.4 (a long pike at the 512 cap; a non-square atlas for long shafts would fix it, the dory too), crest_2 detail 5.3 and shading 3.5.
+
 
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.

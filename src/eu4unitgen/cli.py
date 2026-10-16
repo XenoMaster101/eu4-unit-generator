@@ -44,15 +44,17 @@ def _set_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--culture", dest="cultures", nargs="+", default=[], type=str.lower,
                    help="primary cultures the set's sprite pack also matches (OR with the tags), so the look "
                         "survives tag changes; with no --tag, --set is required")
-    p.add_argument("--gfx", required=True, help="the nation's graphical culture, e.g. hellenicgfx")
+    p.add_argument("--spec", type=Path, help="a character spec (character.json): the whole set in one file. "
+                   "Its export and test sections give defaults; flags given here still win")
+    p.add_argument("--gfx", help="the nation's graphical culture, e.g. hellenicgfx (required without --spec)")
     p.add_argument("--set", dest="set_name", default="", help="unit set name (default: the tag in lowercase)")
     p.add_argument("--base-gfx", default="westerngfx", help="vanilla culture whose set is copied")
     p.add_argument("--name", default="")
     p.add_argument("--adjective", default="")
     p.add_argument("--colour", type=int, nargs=3, default=None, metavar=("R", "G", "B"))
-    p.add_argument("--prefix", default="hr_")
-    p.add_argument("--version", type=int, default=DEFAULT_ENTITY_VERSION, help="entity version")
-    p.add_argument("--pack-order", type=int, default=DEFAULT_TAG_PACK_ORDER)
+    p.add_argument("--prefix", default=None, help="name prefix (default hr_)")
+    p.add_argument("--version", type=int, default=None, help=f"entity version (default {DEFAULT_ENTITY_VERSION})")
+    p.add_argument("--pack-order", type=int, default=None, help=f"sprite pack order (default {DEFAULT_TAG_PACK_ORDER})")
     p.add_argument("--diff-out", type=Path, help="also write the diff to this file")
     p.add_argument("--unit-colours", type=int, nargs=9, metavar="V",
                    help="unit colours color1 color2 color3 as 9 numbers (R G B R G B R G B) for every tag "
@@ -79,15 +81,37 @@ def _unit_colours(args: argparse.Namespace):
     return out or None
 
 
+def _character(args: argparse.Namespace):
+    """The --spec character spec, loaded once (None without --spec)."""
+    from eu4unitgen.core.character import CharacterError, CharacterSpec
+
+    if not getattr(args, "spec", None):
+        return None
+    if not hasattr(args, "_character"):
+        try:
+            args._character = CharacterSpec.load(args.spec)
+        except CharacterError as exc:
+            raise SpecError(str(exc)) from exc
+    return args._character
+
+
 def _settings(args: argparse.Namespace, **kw) -> Settings:
     if getattr(args, "blender", None):
         kw.setdefault("blender_path", args.blender)
-    return Settings(eu4_path=args.eu4, owned_dlc=list(args.owned_dlc), prefix=args.prefix,
-                    entity_version=args.version, tag_pack_order=args.pack_order,
+    export = (_character(args).export if _character(args) else {})
+    pick = lambda flag, key, default: flag if flag is not None else export.get(key, default)  # noqa: E731
+    return Settings(eu4_path=args.eu4, owned_dlc=list(args.owned_dlc), prefix=pick(args.prefix, "prefix", "hr_"),
+                    entity_version=pick(args.version, "version", DEFAULT_ENTITY_VERSION),
+                    tag_pack_order=pick(args.pack_order, "pack_order", DEFAULT_TAG_PACK_ORDER),
                     mod_dir=getattr(args, "mod_dir", None), **kw)
 
 
 def _spec(args: argparse.Namespace) -> SetSpec:
+    character = _character(args)
+    if character is not None:
+        return character.set_spec()
+    if not args.gfx:
+        raise SpecError("pass --gfx (or a character spec with --spec)")
     return SetSpec(tags=list(args.tags), cultures=list(args.cultures), gfx=args.gfx, set_name=args.set_name, base_gfx=args.base_gfx, name=args.name,
                    adjective=args.adjective, colour=tuple(args.colour) if args.colour else None,
                    tech_group=args.tech_group or "", gfx_set_base=getattr(args, "gfx_set_base", None),
@@ -165,9 +189,13 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
     write = "apply" if args.apply else "stage" if args.stage_dir else "dry"
     session = Session(_settings(args, stage_dir=args.stage_dir or Path("build") / "test_mod"))
     techs = dict(zip((2, 3, 4), args.test_sprite_techs)) if args.test_sprite_techs else None
+    test = _character(args).test_options() if _character(args) else {}
     try:
-        res = session.build_test_mod(_spec(args), suite=args.suite, textures=args.textures, sprite_techs=techs,
-                                     base_mod=args.base_mod, give_cores=args.give_cores, base_name=args.base_name,
+        res = session.build_test_mod(_spec(args), suite=args.suite, textures=args.textures,
+                                     sprite_techs=techs or test.get("sprite_techs"),
+                                     base_mod=args.base_mod or test.get("base_mod"),
+                                     give_cores=args.give_cores or test.get("give_cores", False),
+                                     base_name=args.base_name or test.get("base_name"),
                                      rival_gfx=args.rival_gfx, write=write,
                                      fallback_tags=dict(zip("abc", args.fallback_tags)) if args.fallback_tags else None)
     except ExportError as exc:
@@ -194,6 +222,28 @@ def cmd_test_mod(args: argparse.Namespace) -> int:
     return code
 
 
+def cmd_to_spec(args: argparse.Namespace) -> int:
+    """Convert the set flags, --loadout and --texture-recipe (and test-mod options) into a character spec."""
+    from eu4unitgen.core.character import CharacterError, from_parts
+
+    if not args.gfx:
+        raise SpecError("pass --gfx")
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        spec = from_parts(out.parent, tags=args.tags, cultures=args.cultures, gfx=args.gfx, set_name=args.set_name,
+                          base_gfx=args.base_gfx, name=args.name, adjective=args.adjective, colour=args.colour,
+                          tech_group=args.tech_group or "", unit_colours=_unit_colours(args), recipe=args.texture_recipe,
+                          loadout=args.loadout, prefix=args.prefix, version=args.version, pack_order=args.pack_order,
+                          sprite_techs=args.test_sprite_techs, base_mod=args.base_mod, base_name=args.base_name,
+                          give_cores=args.give_cores, label=args.label)
+    except CharacterError as exc:
+        raise SpecError(str(exc)) from exc
+    spec.save(out)
+    print(f"wrote {out}")
+    return 0
+
+
 def cmd_parts_preview(args: argparse.Namespace) -> int:
     """Render one loadout slot (a body with its parts, front and side, and each part alone) in
     background Blender, to <out>/part_previews/<set>/<tier>_<role>.png."""
@@ -204,7 +254,7 @@ def cmd_parts_preview(args: argparse.Namespace) -> int:
         spec = _spec(args)
         loadout = load_loadout(spec)
         if loadout is None:
-            raise SpecError("pass --loadout")
+            raise SpecError("pass --loadout (or a character spec with a loadout)")
         pv = session.parts_preview(spec, args.tier, args.role, loadout)
     finally:
         session.close()
@@ -266,6 +316,19 @@ def main(argv: list[str] | None = None) -> int:
                    help="vanilla culture the --gfx default set copies (default: --base-gfx). The suite "
                         "uses a different look here so case c can be told apart from a westerngfx fallback")
     t.set_defaults(func=cmd_test_mod)
+
+    c = sub.add_parser("to-spec", help="write a character spec (character.json) from the set flags, a loadout "
+                                       "and a recipe: the old way of describing a set, in one file")
+    _set_args(c)
+    _common(c)
+    c.add_argument("--tech-group", default=None, help="unit_type for the units")
+    c.add_argument("--out", type=Path, required=True, help="the character.json to write (paths are rebased onto its folder)")
+    c.add_argument("--label", default="", help="the spec's name (free text)")
+    c.add_argument("--test-sprite-techs", type=int, nargs=3, metavar=("T2", "T3", "T4"))
+    c.add_argument("--base-mod", type=Path)
+    c.add_argument("--base-name")
+    c.add_argument("--give-cores", action="store_true")
+    c.set_defaults(func=cmd_to_spec)
 
     v = sub.add_parser("parts-preview", help="render one loadout slot (body + parts) in background Blender")
     _set_args(v)

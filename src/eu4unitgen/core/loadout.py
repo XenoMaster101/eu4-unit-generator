@@ -145,6 +145,7 @@ class Loadout:
     points: dict[str, str] = field(default_factory=dict)  # role -> "up"/"down" for weapons left on "auto"
     derived: dict[int, dict] = field(default_factory=dict)  # tier -> {"add": [...], "remove": [...]} on its infantry body
     accept_clipping: list[str] = field(default_factory=list)  # addition kinds whose clipping (C2) is a known limit
+    hair: dict = field(default_factory=dict)  # a character spec's "hair" (swatch colours); empty: the library's
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -395,7 +396,7 @@ class _Prebuilt:
 
 
 def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, pdx: "_Meshes", game,
-              runner) -> _Prebuilt:
+              runner, hair: dict | None = None) -> _Prebuilt:
     """Build the tier's derived body before its parts are fitted (a removed helmet changes the head):
     the infantry pdxmesh's base-game .mesh without ``spec["remove"]`` parts and with ``spec["add"]``
     additions (core.derived_body)."""
@@ -418,7 +419,7 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
     try:
         removed = removed_triangles(base, base_file, spec["remove"]) if spec["remove"] else []
         if spec["add"]:
-            swatch = _hair_swatch(base, base_file, removed, game)
+            swatch = _hair_swatch(base, base_file, removed, game, hair)
             if swatch is None:
                 data, adds = build_derived(runner, base, spec["add"], remove=removed, base_file=base_file)
             else:
@@ -439,7 +440,7 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
 SWATCH_MIN_WIDTH = 8  # px; and at least an eighth of the texture tall: else keep the base texture's hair region
 
 
-def _hair_swatch(base: bytes, base_file: str, removed: list[int], game):
+def _hair_swatch(base: bytes, base_file: str, removed: list[int], game, hair: dict | None = None):
     """Q5: derived copies of the base body's diffuse/normal/specular with a painted hair swatch in
     the largest texture area no remaining base triangle uses (a removed part's area is free too).
     -> (rect, size, {kind: (dds bytes, base texture path)}), or None when there's no room."""
@@ -463,7 +464,7 @@ def _hair_swatch(base: bytes, base_file: str, removed: list[int], game):
     except (OSError, ValueError, DDSError):  # undecodable base textures: keep the base texture's hair region
         return None
     scaled = {k: (im if im.size == (size, size) else im.resize((size, size))) for k, im in imgs.items()}
-    d, n, s = paint_swatch(scaled["diffuse"], scaled["normal"], scaled["specular"], rect)
+    d, n, s = paint_swatch(scaled["diffuse"], scaled["normal"], scaled["specular"], rect, hair)
     out = {}
     for k, im in (("diffuse", d), ("normal", n), ("specular", s)):
         fmt = DDSFormat.of(read_header(raw[k]))
@@ -561,7 +562,7 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
                 res.notes.append(f"tier {tier}: {loadout.bodies[tier]} has no artillery_attack; "
                                  f"{inf['pdxmesh']} adds it (= its attack) for the gun crew")
         base_inf = copy.deepcopy(inf)
-        prebuilt = (_prebuild(naming, set_name, tier, inf, loadout.derived[tier], pdx, game, runner)
+        prebuilt = (_prebuild(naming, set_name, tier, inf, loadout.derived[tier], pdx, game, runner, loadout.hair)
                     if tier in loadout.derived else None)
         for role in ("infantry", "crew", "rider"):
             slot = active.get((tier, role))
