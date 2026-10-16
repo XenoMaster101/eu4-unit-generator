@@ -13,6 +13,10 @@ Spaces: everything here is PDX mesh space (Y up, the unit faces -Z), UVs in imag
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+
+from eu4unitgen.core.chain_weights import MAX_INFLUENCES, check_weights
+from eu4unitgen.library.scanner import parse_pdx_mesh, write_pdx_mesh
 
 
 def _sub(a, b):
@@ -80,3 +84,148 @@ def tangent_agreement(stored: list[float], computed: list[float]) -> dict:
     ordered = sorted(angles)
     return {"within_10deg": sum(1 for x in angles if x <= 10) / count, "median_deg": ordered[len(ordered) // 2],
             "w_agrees": same_w / count}
+
+
+# --------------------------------------------------------------------------- the writer
+
+VERTEX_ARRAYS = (("p", 3), ("n", 3), ("ta", 4), ("u0", 2))
+
+
+class DerivedBodyError(ValueError):
+    pass
+
+
+@dataclass
+class Addition:
+    """One skinned addition in PDX mesh space: flattened ``p``/``n`` (x, y, z), ``u0`` (u, v,
+    image convention), triangles over its own vertices, and per-vertex weights (bone -> w)."""
+    name: str
+    p: list[float]
+    n: list[float]
+    u0: list[float]
+    tri: list[int]
+    weights: list[dict[str, float]]
+    chain: tuple[str, ...] = ()  # the bones it may use (validator: nothing outside)
+
+    @property
+    def count(self) -> int:
+        return len(self.p) // 3
+
+
+def _only_mesh(tree: dict) -> tuple[dict, dict]:
+    """The single shape's single ``mesh`` node and the shape's ``skeleton`` node (bodies with more
+    shapes or materials are refused: no base-game unit mesh has them, 1.37.5)."""
+    objects = [c for c in tree["children"] if c["name"] == "object"]
+    shapes = [s for o in objects for s in o["children"]]
+    if len(shapes) != 1:
+        raise DerivedBodyError(f"a derived body needs a one-shape base mesh, not {len(shapes)} shapes")
+    meshes = [c for c in shapes[0]["children"] if c["name"] == "mesh"]
+    skeletons = [c for c in shapes[0]["children"] if c["name"] == "skeleton"]
+    if len(meshes) != 1 or len(skeletons) != 1:
+        raise DerivedBodyError("a derived body needs a base mesh with one mesh block and a skeleton")
+    return meshes[0], skeletons[0]
+
+
+def _child(node: dict, name: str) -> dict | None:
+    return next((c for c in node["children"] if c["name"] == name), None)
+
+
+def bone_indices(skeleton: dict) -> dict[str, int]:
+    return {b["name"]: b["props"]["ix"][0] for b in skeleton["children"]}
+
+
+def append_additions(base: bytes, additions: list[Addition]) -> bytes:
+    """The base body's .mesh bytes with ``additions`` appended (see the module doc)."""
+    tree = parse_pdx_mesh(base)
+    mesh, skeleton = _only_mesh(tree)
+    skin = _child(mesh, "skin")
+    if skin is None or skin["props"].get("bones") != [MAX_INFLUENCES]:
+        raise DerivedBodyError(f"the base mesh isn't skinned with {MAX_INFLUENCES} influences per vertex")
+    if "boundingsphere" in mesh["props"]:
+        raise DerivedBodyError("the base mesh has a boundingsphere (not a base-game body)")
+    index = bone_indices(skeleton)
+    props = mesh["props"]
+    for add in additions:
+        if not (len(add.p) == len(add.n) == add.count * 3 and len(add.u0) == add.count * 2
+                and len(add.weights) == add.count and len(add.tri) % 3 == 0):
+            raise DerivedBodyError(f"{add.name}: array lengths don't match its {add.count} vertices")
+        if any(not 0 <= i < add.count for i in add.tri):
+            raise DerivedBodyError(f"{add.name}: a triangle points outside its vertices")
+        problems = check_weights(add.weights, list(index), set(add.chain) if add.chain else None)
+        if problems:
+            raise DerivedBodyError(f"{add.name}: " + "; ".join(problems[:5]))
+        first = len(props["p"]) // 3
+        props["p"] += [float(x) for x in add.p]
+        props["n"] += [float(x) for x in add.n]
+        props["ta"] += tangents(add.p, add.n, add.u0, add.tri)
+        props["u0"] += [float(x) for x in add.u0]
+        props["tri"] += [first + i for i in add.tri]
+        for row in add.weights:
+            items = sorted(row.items(), key=lambda kv: -kv[1])
+            skin["props"]["ix"] += [index[b] for b, _ in items] + [-1] * (MAX_INFLUENCES - len(items))
+            skin["props"]["w"] += [float(w) for _, w in items] + [0.0] * (MAX_INFLUENCES - len(items))
+    box = _child(mesh, "aabb")
+    if box is not None:
+        pts = props["p"]
+        box["props"]["min"] = [min(box["props"]["min"][j], *pts[j::3]) for j in range(3)]
+        box["props"]["max"] = [max(box["props"]["max"][j], *pts[j::3]) for j in range(3)]
+    return write_pdx_mesh(tree)
+
+
+def check_derived(base: bytes, derived: bytes) -> tuple[list[str], dict]:
+    """Problems with ``derived`` as a derived body of ``base``, and counts. Every vanilla block must
+    be unchanged (skeleton, locators, material, every vertex array, skin rows, triangles); only
+    appended vertices, skin rows and triangles may differ, and the aabb may only grow to hold them."""
+    problems: list[str] = []
+    try:
+        bt, dt = parse_pdx_mesh(base), parse_pdx_mesh(derived)
+        bm, bs = _only_mesh(bt)
+        dm, ds = _only_mesh(dt)
+    except (ValueError, DerivedBodyError) as exc:
+        return [f"can't read: {exc}"], {}
+    if ds != bs:
+        problems.append("skeleton differs from the base body's")
+    if [c for c in dt["children"] if c["name"] != "object"] != [c for c in bt["children"] if c["name"] != "object"]:
+        problems.append("locators differ from the base body's")
+    if _child(dm, "material") != _child(bm, "material"):
+        problems.append("material differs from the base body's")
+    if sorted(dm["props"]) != sorted(bm["props"]):
+        problems.append(f"mesh properties {sorted(dm['props'])} differ from the base's {sorted(bm['props'])}")
+    nb, nd = len(bm["props"]["p"]) // 3, len(dm["props"]["p"]) // 3
+    for key, width in VERTEX_ARRAYS:
+        b, d = bm["props"].get(key, []), dm["props"].get(key, [])
+        if d[:len(b)] != b:
+            problems.append(f"the base's {key} values changed")
+        if len(d) != nd * width:
+            problems.append(f"{key} holds {len(d) // width} vertices, not {nd}")
+    if dm["props"]["tri"][:len(bm["props"]["tri"])] != bm["props"]["tri"]:
+        problems.append("the base's triangles changed")
+    if any(not 0 <= i < nd for i in dm["props"]["tri"]):
+        problems.append("a triangle points outside the vertices")
+    bskin, dskin = _child(bm, "skin"), _child(dm, "skin")
+    if dskin is None or dskin["props"].get("bones") != bskin["props"].get("bones"):
+        problems.append("skin influence count differs from the base's")
+    else:
+        for key in ("ix", "w"):
+            b, d = bskin["props"][key], dskin["props"][key]
+            if d[:len(b)] != b:
+                problems.append(f"the base's skin {key} changed")
+            if len(d) != nd * MAX_INFLUENCES:
+                problems.append(f"skin {key} covers {len(d) // MAX_INFLUENCES} vertices, not {nd}")
+        ix, w = dskin["props"]["ix"], dskin["props"]["w"]
+        nbones = len(ds["children"])
+        for v in range(nb, nd):
+            row = [(ix[v * 4 + k], w[v * 4 + k]) for k in range(MAX_INFLUENCES) if ix[v * 4 + k] >= 0]
+            if any(not 0 <= i < nbones for i, _ in row) or abs(sum(x for _, x in row) - 1) > 1e-4:
+                problems.append(f"added vertex {v}: bad skin row {row}")
+                break
+    pts = dm["props"]["p"]
+    box = _child(dm, "aabb")
+    if box is None or any(min(pts[j::3]) < box["props"]["min"][j] - 1e-5 or max(pts[j::3]) > box["props"]["max"][j] + 1e-5
+                          for j in range(3)):
+        problems.append("aabb doesn't hold every vertex")
+    if "boundingsphere" in dm["props"]:
+        problems.append("has a boundingsphere (none of the base-game meshes has one)")
+    return problems, {"base_vertices": nb, "added_vertices": nd - nb,
+                      "base_triangles": len(bm["props"]["tri"]) // 3,
+                      "added_triangles": (len(dm["props"]["tri"]) - len(bm["props"]["tri"])) // 3}
