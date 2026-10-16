@@ -100,7 +100,8 @@ def test_append_keeps_every_base_block():
     derived = append_additions(base, [_tail()])
     problems, counts = check_derived(base, derived)
     assert problems == [], problems
-    assert counts == {"base_vertices": 3, "added_vertices": 3, "base_triangles": 1, "added_triangles": 1}
+    assert counts == {"base_vertices": 3, "added_vertices": 3, "base_triangles": 1, "removed_triangles": 0,
+                      "added_triangles": 1}
     mesh = next(c for c in parse_pdx_mesh(derived)["children"][0]["children"][0]["children"] if c["name"] == "mesh")
     assert mesh["props"]["tri"] == [0, 1, 2, 3, 4, 5]
     skin = next(c for c in mesh["children"] if c["name"] == "skin")["props"]

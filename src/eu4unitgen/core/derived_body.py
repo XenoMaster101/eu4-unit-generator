@@ -157,8 +157,10 @@ def bone_indices(skeleton: dict) -> dict[str, int]:
     return {b["name"]: b["props"]["ix"][0] for b in skeleton["children"]}
 
 
-def append_additions(base: bytes, additions: list[Addition]) -> bytes:
-    """The base body's .mesh bytes with ``additions`` appended (see the module doc)."""
+def append_additions(base: bytes, additions: list[Addition], remove: list[int] | tuple[int, ...] = ()) -> bytes:
+    """The base body's .mesh bytes with the base triangles numbered in ``remove`` dropped (their
+    vertices stay, unreferenced, so every vertex array keeps the base's values) and ``additions``
+    appended (see the module doc)."""
     tree = parse_pdx_mesh(base)
     mesh, skeleton = _only_mesh(tree)
     skin = _child(mesh, "skin")
@@ -169,6 +171,11 @@ def append_additions(base: bytes, additions: list[Addition]) -> bytes:
     index = bone_indices(skeleton)
     props = mesh["props"]
     sign = winding_sign(props["p"], props["n"], props["tri"])
+    if remove:
+        count = len(props["tri"]) // 3
+        if any(not 0 <= t < count for t in remove):
+            raise DerivedBodyError(f"a removed triangle is outside the base's {count} triangles")
+        props["tri"] = kept_triangles(props["tri"], remove)
     for add in additions:
         if not (len(add.p) == len(add.n) == add.count * 3 and len(add.u0) == add.count * 2
                 and len(add.weights) == add.count and len(add.tri) % 3 == 0):
@@ -197,10 +204,17 @@ def append_additions(base: bytes, additions: list[Addition]) -> bytes:
     return write_pdx_mesh(tree)
 
 
-def check_derived(base: bytes, derived: bytes) -> tuple[list[str], dict]:
+def kept_triangles(tri: list[int], remove) -> list[int]:
+    """``tri`` without the triangles numbered in ``remove`` (order kept)."""
+    gone = set(remove)
+    return [i for k in range(0, len(tri), 3) if k // 3 not in gone for i in tri[k:k + 3]]
+
+
+def check_derived(base: bytes, derived: bytes, remove: list[int] | tuple[int, ...] = ()) -> tuple[list[str], dict]:
     """Problems with ``derived`` as a derived body of ``base``, and counts. Every vanilla block must
-    be unchanged (skeleton, locators, material, every vertex array, skin rows, triangles); only
-    appended vertices, skin rows and triangles may differ, and the aabb may only grow to hold them."""
+    be unchanged (skeleton, locators, material, every vertex array, skin rows, triangles) except
+    that exactly the base triangles numbered in ``remove`` are gone; only appended vertices, skin
+    rows and triangles may differ, and the aabb may only grow to hold them."""
     problems: list[str] = []
     try:
         bt, dt = parse_pdx_mesh(base), parse_pdx_mesh(derived)
@@ -223,8 +237,9 @@ def check_derived(base: bytes, derived: bytes) -> tuple[list[str], dict]:
             problems.append(f"the base's {key} values changed")
         if len(d) != nd * width:
             problems.append(f"{key} holds {len(d) // width} vertices, not {nd}")
-    if dm["props"]["tri"][:len(bm["props"]["tri"])] != bm["props"]["tri"]:
-        problems.append("the base's triangles changed")
+    base_tri = kept_triangles(bm["props"]["tri"], remove)
+    if dm["props"]["tri"][:len(base_tri)] != base_tri:
+        problems.append("the base's triangles changed" + (f" (beyond the {len(set(remove))} removed)" if remove else ""))
     if any(not 0 <= i < nd for i in dm["props"]["tri"]):
         problems.append("a triangle points outside the vertices")
     bskin, dskin = _child(bm, "skin"), _child(dm, "skin")
@@ -252,8 +267,8 @@ def check_derived(base: bytes, derived: bytes) -> tuple[list[str], dict]:
     if "boundingsphere" in dm["props"]:
         problems.append("has a boundingsphere (none of the base-game meshes has one)")
     return problems, {"base_vertices": nb, "added_vertices": nd - nb,
-                      "base_triangles": len(bm["props"]["tri"]) // 3,
-                      "added_triangles": (len(dm["props"]["tri"]) - len(bm["props"]["tri"])) // 3}
+                      "base_triangles": len(bm["props"]["tri"]) // 3, "removed_triangles": len(set(remove)),
+                      "added_triangles": (len(dm["props"]["tri"]) - len(base_tri)) // 3}
 
 
 # --------------------------------------------------------------------------- addition kinds and building
@@ -268,10 +283,61 @@ HAIR_PATCH = (105, 30, 115, 40)  # western_generic_01_type1 diffuse px: the face
 PATCH_TEX = 512
 
 
+@dataclass(frozen=True)
+class Removal:
+    """Base triangles to drop: any triangle with a vertex mostly on ``bone`` whose UV centroid lies
+    in ``uv_px`` (x0, y0, x1, y1, image pixels of a ``tex``-px texture; x1, y1 exclusive)."""
+    bone: str
+    uv_px: tuple[float, float, float, float]
+    tex: int = 512
+
+
+# Per base body (its .mesh path): named parts that can be removed. type1's helmet (H1, 2026-10-16):
+# 369 head triangles with UVs in px 128-240 x 0-200 plus one boundary triangle at (128, 99); a
+# closed, textured hair cap is underneath.
+REMOVALS: dict[str, dict[str, Removal]] = {
+    "gfx/models/units/western_generic_01_type1.mesh": {"helmet": Removal("head", (127.5, 0, 240, 200))},
+}
+
+
+def removable(base_file: str) -> list[str]:
+    return sorted(REMOVALS.get(base_file.lower(), {}))
+
+
+def removed_triangles(base: bytes, base_file: str, names: list[str]) -> list[int]:
+    """Indices of the base triangles the named removals drop (sorted, unique)."""
+    table = REMOVALS.get(base_file.lower(), {})
+    tree = parse_pdx_mesh(base)
+    mesh, skeleton = _only_mesh(tree)
+    props, skin = mesh["props"], _child(mesh, "skin")["props"]
+    index = bone_indices(skeleton)
+    out: set[int] = set()
+    for name in names:
+        r = table.get(name)
+        if r is None:
+            raise DerivedBodyError(f"{base_file} has no removable {name!r} (known: {', '.join(removable(base_file)) or 'none'})")
+        bone = index[r.bone]
+
+        def mostly(v):
+            ws = skin["w"][v * 4:v * 4 + 4]
+            return skin["ix"][v * 4 + max(range(4), key=lambda k: ws[k])] == bone
+
+        x0, y0, x1, y1 = r.uv_px
+        tri, u0 = props["tri"], props["u0"]
+        for k in range(0, len(tri), 3):
+            vs = tri[k:k + 3]
+            u = sum(u0[v * 2] for v in vs) / 3 * r.tex
+            w = sum(u0[v * 2 + 1] for v in vs) / 3 * r.tex
+            if x0 <= u < x1 and y0 <= w < y1 and any(mostly(v) for v in vs):
+                out.add(k // 3)
+    return sorted(out)
+
+
 def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, int, int] = HAIR_PATCH,
-                  tex: int = PATCH_TEX) -> tuple[bytes, list[Addition]]:
-    """The derived body: ``base`` (.mesh bytes of a base-game body) with the ``kinds`` additions
-    built in background Blender (``build_additions``), weighted by their chains, appended."""
+                  tex: int = PATCH_TEX, remove: list[int] | tuple[int, ...] = ()) -> tuple[bytes, list[Addition]]:
+    """The derived body: ``base`` (.mesh bytes of a base-game body) without the triangles in
+    ``remove`` and with the ``kinds`` additions built in background Blender (``build_additions``,
+    which measures the body without the removed parts), weighted by their chains, appended."""
     import tempfile
     from pathlib import Path
 
@@ -287,7 +353,7 @@ def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, 
             raise DerivedBodyError(f"{k}: {exc}") from exc
     with tempfile.TemporaryDirectory(prefix="eu4unitgen_derived_") as tmp:
         body = Path(tmp) / "base.mesh"
-        body.write_bytes(base)
+        body.write_bytes(append_additions(base, [], remove) if remove else base)
         res = runner.run_job("build_additions", {
             "body": str(body), "patch_px": list(patch), "tex": tex,
             "additions": [{"name": k, "shape": ADDITION_KINDS[k]["shape"], "params": ADDITION_KINDS[k]["params"]}
@@ -296,4 +362,4 @@ def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, 
     for k, raw in zip(kinds, res["additions"]):
         chain = ADDITION_KINDS[k]["chain"]
         adds.append(Addition(k, raw["p"], raw["n"], raw["u0"], raw["tri"], weights(chain, raw["rings"]), chain.bones))
-    return append_additions(base, adds), adds
+    return append_additions(base, adds, remove), adds

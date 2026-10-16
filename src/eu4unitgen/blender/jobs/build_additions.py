@@ -33,9 +33,13 @@ SIDES = 8
 
 
 def back_profile(body):
-    """Blender z (quarter steps) -> the body's rearmost y (+Y = the unit's back) near the midline."""
+    """Blender z (quarter steps) -> the body's rearmost y (+Y = the unit's back) near the midline.
+    Only vertices a face uses: a derived base keeps removed parts' vertices loose."""
     prof = {}
+    used = {i for poly in body.data.polygons for i in poly.vertices}
     for v in body.data.vertices:
+        if v.index not in used:
+            continue
         co = body.matrix_world @ v.co
         if abs(co.x) < 0.8:
             k = round(co.z * 4) / 4

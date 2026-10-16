@@ -69,9 +69,15 @@ def body_game(game, fake_install: Path):
 
 def test_loadout_derived_round_trip_and_errors():
     lo = Loadout.from_json(LOADOUT)
-    assert lo.derived == {1: ["tail", "tuft"]} and lo.needs_blender() and lo.changes_anything()
+    assert lo.derived == {1: {"add": ["tail", "tuft"], "remove": []}} and lo.needs_blender() and lo.changes_anything()
+    both = Loadout.from_json({"schema": 1, "derived": {"2": {"add": ["tail"], "remove": ["helmet"]}}})
+    assert both.derived == {2: {"add": ["tail"], "remove": ["helmet"]}}
+    assert both.to_json()["derived"] == {"2": {"add": ["tail"], "remove": ["helmet"]}}
+    only = Loadout.from_json({"schema": 1, "derived": {"2": {"remove": ["helmet"]}}})
+    assert not only.needs_blender() and only.changes_anything()
     assert Loadout.from_json(lo.to_json()).to_json() == lo.to_json()
-    for bad in ({"1": ["wings"]}, {"5": ["tail"]}, {"1": []}, {"1": ["tail", "tail"]}):
+    for bad in ({"1": ["wings"]}, {"5": ["tail"]}, {"1": []}, {"1": ["tail", "tail"]}, {"1": {"remove": []}},
+                {"1": {"add": ["tail"], "hat": []}}, {"1": {"remove": ["helmet", "helmet"]}}):
         with pytest.raises(LoadoutError, match="derived"):
             Loadout.from_json({"schema": 1, "derived": bad})
 
@@ -160,3 +166,35 @@ def test_checklist_lists_the_derived_body(project, nation, body_game):
     assert "derived bodies" in text.splitlines()[0]
     assert "[ ] 1D1 infantry wears a derived body (gfx/models/Units/hr_mac_body_1.mesh)" in text
     assert "[ ] 1D5 the gun crew and the cavalry rider wear the plain base body (no tail or tuft)" in text
+
+
+@pytest.fixture
+def removable_helmet(monkeypatch):
+    """The fake body's one triangle counts as its 'helmet' (on hip, any UV)."""
+    from eu4unitgen.core import derived_body
+
+    monkeypatch.setitem(derived_body.REMOVALS, "gfx/models/units/generic_01.mesh",
+                        {"helmet": derived_body.Removal("hip", (0, 0, 512, 512))})
+
+
+def test_generate_with_a_removed_part(project, nation, body_game, removable_helmet):
+    files, idx = body_game
+    lo = Loadout.from_json({"schema": 1, "derived": {"1": {"add": ["tail"], "remove": ["helmet"]}},
+                            "slots": {"1/infantry": {"parts": [{"kind": "dory"}]}}})
+    gen = generate(project, nation, files, idx, loadout=lo, runner=AdditionsRunner())
+    data = gen.files["gfx/models/Units/hr_mac_body_1.mesh"].data
+    base = files.read("gfx/models/Units/generic_01.mesh")
+    problems, counts = check_derived(base, data, [0])
+    assert problems == [] and counts["removed_triangles"] == 1 and counts["added_triangles"] == 2
+    assert check_derived(base, data)[0] == ["the base's triangles changed"]  # without the removal it's a change
+    assert gen.loadout.derived[1].removed == ["helmet"]
+    report = validate(project, nation, gen, files, idx)
+    assert not report.errors, [str(i) for i in report.errors]
+    assert any("- helmet (1 triangles removed)" in i.message for i in report.issues if i.rule == "derived_body")
+
+
+def test_unknown_removal_is_refused(project, nation, body_game):
+    files, idx = body_game
+    lo = Loadout.from_json({"schema": 1, "derived": {"1": {"remove": ["helmet"]}}})
+    with pytest.raises(GenerationError, match="no removable 'helmet'"):
+        generate(project, nation, files, idx, loadout=lo, runner=AdditionsRunner())

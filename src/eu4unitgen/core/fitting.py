@@ -62,7 +62,8 @@ def rigid(bind: list[float]) -> tuple[list[float], bool]:
 
 def _skin_points(tree: dict, bone_ix: int, bind: list[float]) -> list[list[float]]:
     """Vertices whose largest weight is on bone ``bone_ix`` (> HEAD_WEIGHT), in that bone's frame:
-    p_local = R^T (p - t), with bind = [R | t] row-major 3x4."""
+    p_local = R^T (p - t), with bind = [R | t] row-major 3x4. Only vertices a triangle uses count:
+    a derived body keeps removed parts' vertices (e.g. type1's helmet) unreferenced."""
     bind, _ = rigid(bind)
     rot = [bind[0:3], bind[4:7], bind[8:11]]
     t = [bind[3], bind[7], bind[11]]
@@ -77,7 +78,10 @@ def _skin_points(tree: dict, bone_ix: int, bind: list[float]) -> list[list[float
         k = (skin["props"].get("bones") or [0])[0]
         if not k or len(ix) < k * (len(p) // 3):
             continue
+        used = set(node["props"].get("tri", [])) or set(range(len(p) // 3))
         for i in range(len(p) // 3):
+            if i not in used:
+                continue
             ws, bs = w[i * k:(i + 1) * k], ix[i * k:(i + 1) * k]
             j = max(range(k), key=lambda q: ws[q])
             if bs[j] == bone_ix and ws[j] > HEAD_WEIGHT:

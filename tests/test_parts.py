@@ -74,7 +74,7 @@ def _skinned_body(top=2.15, half_z=1.27, height=16.65, joint=REFERENCE_STATURE) 
     tree = {"name": "root", "props": {"pdxasset": [1, 0]}, "children": [
         {"name": "object", "props": {}, "children": [
             {"name": "bodyShape", "props": {}, "children": [
-                {"name": "mesh", "props": {"p": p, "tri": [0, 1, 2]}, "children": [
+                {"name": "mesh", "props": {"p": p, "tri": [0, 1, 2, 1, 3, 2]}, "children": [
                     {"name": "aabb", "props": {"min": [-6.0, 0.0, -1.5], "max": [6.0, height, 1.5]}, "children": []},
                     {"name": "material", "props": {"shader": ["PdxMeshColor"]}, "children": []},
                     {"name": "skin", "props": {"bones": [4], "ix": ix, "w": w}, "children": []}]},

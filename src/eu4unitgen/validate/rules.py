@@ -436,7 +436,7 @@ def derived_body(ctx: Context) -> list[Issue]:
     additions appended; their weights stay on their declared bone chains; within the triangle
     budget; its material's textures resolve in its folder; its name is no game file's; its
     infantry entity wears it."""
-    from eu4unitgen.core.derived_body import bone_indices, check_derived
+    from eu4unitgen.core.derived_body import DerivedBodyError, bone_indices, check_derived, removed_triangles
     from eu4unitgen.library.scanner import _walk, parse_pdx_mesh
 
     res = ctx.generated.loadout
@@ -457,11 +457,17 @@ def derived_body(ctx: Context) -> list[Issue]:
             out.append(Issue(ERROR, "derived_body", f"doesn't record its base body ({f.derived_from!r})", f.path))
         if game.exists(rec.file):
             out.append(Issue(ERROR, "derived_body", "has a game file's name: it would replace it for everyone", f.path))
-        problems, counts = check_derived(game.read(rec.base_file), f.data)
+        base = game.read(rec.base_file)
+        try:
+            removed = removed_triangles(base, rec.base_file, rec.removed) if rec.removed else []
+        except DerivedBodyError as exc:
+            out.append(Issue(ERROR, "derived_body", str(exc), f.path))
+            continue
+        problems, counts = check_derived(base, f.data, removed)
         out += [Issue(ERROR, "derived_body", f"{p} (base {rec.base_file})", f.path) for p in problems]
         if problems:
             continue
-        tris = counts["base_triangles"] + counts["added_triangles"]
+        tris = counts["base_triangles"] - counts["removed_triangles"] + counts["added_triangles"]
         if tris > DERIVED_TRI_BUDGET:
             out.append(Issue(ERROR, "derived_body", f"{tris} triangles (budget {DERIVED_TRI_BUDGET})", f.path))
         tree = parse_pdx_mesh(f.data)
@@ -489,8 +495,10 @@ def derived_body(ctx: Context) -> list[Issue]:
         if w.resolve(rec.entity, "pdxmesh") != rec.pdxmesh or (pdx.get("file") or "").lower() != rec.file.lower():
             out.append(Issue(ERROR, "derived_body", f"{rec.entity} doesn't wear {rec.pdxmesh} ({rec.file})",
                              subject=rec.entity))
-        out.append(Issue(INFO, "derived_body", f"tier {tier}: {rec.entity} wears {rec.file} = {rec.base_file} + "
-                                               f"{', '.join(k for k, _, _ in rec.additions)} "
+        out.append(Issue(INFO, "derived_body", f"tier {tier}: {rec.entity} wears {rec.file} = {rec.base_file}"
+                                               + "".join(f" - {x}" for x in rec.removed)
+                                               + f" ({counts['removed_triangles']} triangles removed) + "
+                                               f"{', '.join(k for k, _, _ in rec.additions) or 'nothing'} "
                                                f"({counts['added_vertices']} vertices, {counts['added_triangles']} "
                                                "triangles added). UNVERIFIED in game: textures resolving from the "
                                                "base folder for a mod .mesh", f.path))

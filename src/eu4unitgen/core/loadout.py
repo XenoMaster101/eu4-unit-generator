@@ -35,7 +35,9 @@ Loadout-wide settings (both optional):
     "weapon_point": {"rider": "up"}     role -> what a weapon's "auto" point means (up/down;
         default up for infantry and crews, down for riders).
     "derived": {"1": ["tail", "tuft"]}     tier -> skinned additions (core.derived_body.ADDITION_KINDS)
-        appended to that tier's infantry body: a derived body (SPEC Track R). The infantry only:
+        appended to that tier's infantry body: a derived body (SPEC Track R). Or {"add": [...],
+        "remove": ["helmet"]}: also drop named base parts (core.derived_body.REMOVALS, per base body:
+        type1's helmet). Parts on that infantry are fitted to the derived body. The infantry only:
         the rider and a crew slot's crew keep the base body (a tail on a rider is untested).
 
 Paths (blazons) are relative to the loadout file.
@@ -141,7 +143,7 @@ class Loadout:
     root: Path = Path(".")
     bodies: dict[int, str] = field(default_factory=dict)  # tier -> base-game infantry pdxmesh
     points: dict[str, str] = field(default_factory=dict)  # role -> "up"/"down" for weapons left on "auto"
-    derived: dict[int, list[str]] = field(default_factory=dict)  # tier -> skinned additions on its infantry body
+    derived: dict[int, dict] = field(default_factory=dict)  # tier -> {"add": [...], "remove": [...]} on its infantry body
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -178,13 +180,20 @@ class Loadout:
                 raise LoadoutError(f"bodies: {exc}") from exc
         from eu4unitgen.core.derived_body import ADDITION_KINDS
 
-        for key, kinds in (doc.get("derived") or {}).items():
+        for key, raw in (doc.get("derived") or {}).items():
             if not str(key).isdigit() or int(key) not in TIERS:
                 raise LoadoutError(f"derived: {key!r} must be a tier {TIERS}")
-            if not isinstance(kinds, list) or not kinds or any(k not in ADDITION_KINDS for k in kinds)                     or len(set(kinds)) != len(kinds):
+            spec = {"add": raw, "remove": []} if isinstance(raw, list) else raw
+            if not isinstance(spec, dict) or set(spec) - {"add", "remove"}:
+                raise LoadoutError(f"derived: tier {key} must be a list of additions or an object with add/remove "
+                                   f"lists, not {raw!r}")
+            add, remove = list(spec.get("add") or []), list(spec.get("remove") or [])
+            if any(k not in ADDITION_KINDS for k in add) or len(set(add)) != len(add):
                 raise LoadoutError(f"derived: tier {key} must list additions from {sorted(ADDITION_KINDS)}, "
-                                   f"each once, not {kinds!r}")
-            out.derived[int(key)] = list(kinds)
+                                   f"each once, not {add!r}")
+            if not all(isinstance(r, str) for r in remove) or len(set(remove)) != len(remove) or not (add or remove):
+                raise LoadoutError(f"derived: tier {key} needs additions or removals (each once), not {raw!r}")
+            out.derived[int(key)] = {"add": add, "remove": remove}
         for role, point in (doc.get("weapon_point") or {}).items():
             if role not in LOADOUT_ROLES or point not in POINTS:
                 raise LoadoutError(f"weapon_point: {role!r} must be one of {LOADOUT_ROLES} and {point!r} one of {POINTS}")
@@ -196,7 +205,9 @@ class Loadout:
         if self.bodies:
             out["bodies"] = {str(t): b for t, b in sorted(self.bodies.items())}
         if self.derived:
-            out["derived"] = {str(t): list(k) for t, k in sorted(self.derived.items())}
+            out["derived"] = {str(t): (list(d["add"]) if not d["remove"]
+                                       else {"add": list(d["add"]), "remove": list(d["remove"])})
+                              for t, d in sorted(self.derived.items())}
         points = {r: p for r, p in sorted(self.points.items()) if p != DEFAULT_POINTS[r]}
         if points:
             out["weapon_point"] = points
@@ -216,7 +227,7 @@ class Loadout:
         return bool(self.active() or self.bodies or self.derived)
 
     def needs_blender(self) -> bool:
-        return bool(self.derived) or any(s.parts for s in self.active().values())
+        return any(d["add"] for d in self.derived.values()) or any(s.parts for s in self.active().values())
 
     def path(self, rel: str) -> Path:
         p = Path(rel)
@@ -272,6 +283,7 @@ class DerivedRecord:
     file: str
     base_file: str
     additions: list[tuple[str, tuple[str, ...], int]]  # (kind, chain bones, vertex count), in file order
+    removed: list[str] = field(default_factory=list)  # named base parts removed (core.derived_body.REMOVALS)
 
 
 class _Meshes:
@@ -361,29 +373,53 @@ def apply_bodies(naming: Naming, owner: str, entities: list[dict], loadout: Load
     return notes
 
 
-def _derive(naming: Naming, set_name: str, tier: int, inf: dict, kinds: list[str], pdx: "_Meshes",
-            res: LoadoutResult, game, runner) -> GeneratedFile:
-    """Give ``inf`` (the tier's infantry entity, after its stance) a derived body: its pdxmesh's
-    base-game .mesh with ``kinds`` appended (core.derived_body), on a new pdxmesh with the same
-    animations, scale and keys and no meshsettings (the copied material names the base game's
-    textures, which resolve in the base body's folder)."""
-    from eu4unitgen.core.derived_body import DerivedBodyError, build_derived
+@dataclass
+class _Prebuilt:
+    data: bytes
+    adds: list
+    removed: list[int]
+    base_file: str
+    fit: object  # core.fitting.BodyFit of the derived body (what parts on this infantry are fitted to)
 
-    source = inf["pdxmesh"]
-    src = pdx.get(source)
+
+def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, pdx: "_Meshes", game,
+              runner) -> _Prebuilt:
+    """Build the tier's derived body before its parts are fitted (a removed helmet changes the head):
+    the infantry pdxmesh's base-game .mesh without ``spec["remove"]`` parts and with ``spec["add"]``
+    additions (core.derived_body)."""
+    from eu4unitgen.core.derived_body import DerivedBodyError, append_additions, build_derived, removed_triangles
+    from eu4unitgen.core.fitting import measure_body
+
+    src = pdx.get(inf["pdxmesh"])
     if src.get("settings"):
         raise GenerationError(f"tier {tier}: a derived body can't combine with a texture recipe's retextured "
-                              f"body ({source}) yet")
+                              f"body ({inf['pdxmesh']}) yet")
     base_file = src.get("file") or ""
     if not game.in_base_game(base_file):
         raise GenerationError(f"tier {tier}: derived bodies come from base-game meshes only, not {base_file!r}")
-    if runner is None:
+    if runner is None and spec["add"]:
         raise GenerationError("derived bodies need Blender to build their additions (Settings: Blender path)")
+    base = game.read(base_file)
     try:
-        data, adds = build_derived(runner, game.read(base_file), kinds)
+        removed = removed_triangles(base, base_file, spec["remove"]) if spec["remove"] else []
+        if spec["add"]:
+            data, adds = build_derived(runner, base, spec["add"], remove=removed)
+        else:
+            data, adds = append_additions(base, [], removed), []
     except DerivedBodyError as exc:
         raise GenerationError(f"tier {tier}: derived body: {exc}") from exc
     file = naming.derived_body_file(set_name, tier, base_file)
+    return _Prebuilt(data, adds, removed, base_file, measure_body(data, file))
+
+
+def _derive(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, built: _Prebuilt, pdx: "_Meshes",
+            res: LoadoutResult) -> GeneratedFile:
+    """Give ``inf`` (the tier's infantry entity, after its stance) its derived body, on a new pdxmesh
+    with the same animations, scale and keys and no meshsettings (the copied material names the
+    base game's textures, which resolve in the base body's folder)."""
+    source = inf["pdxmesh"]
+    src = pdx.get(source)
+    file = naming.derived_body_file(set_name, tier, built.base_file)
     name = naming.derived_body_pdxmesh(set_name, tier)
     rec = {"name": name, "file": file, "base": src.get("base", source), "animations": dict(src.get("animations") or {}),
            "scale": src.get("scale"), "extra": dict(src.get("extra") or {}), "settings": []}
@@ -392,9 +428,11 @@ def _derive(naming: Naming, set_name: str, tier: int, inf: dict, kinds: list[str
     inf["pdxmesh"] = name
     if inf["name"] in res.stances:
         res.stances[inf["name"]] = (res.stances[inf["name"]][0], name)
-    res.derived[tier] = DerivedRecord(inf["name"], name, file, base_file, [(a.name, a.chain, a.count) for a in adds])
-    res.notes.append(f"tier {tier}: {inf['name']} wears a derived body ({file}: {base_file} + {', '.join(kinds)})")
-    return GeneratedFile(file, data, OWNED, derived_from=base_file)
+    res.derived[tier] = DerivedRecord(inf["name"], name, file, built.base_file,
+                                      [(a.name, a.chain, a.count) for a in built.adds], list(spec["remove"]))
+    what = [f"- {r}" for r in spec["remove"]] + [f"+ {k}" for k in spec["add"]]
+    res.notes.append(f"tier {tier}: {inf['name']} wears a derived body ({file}: {built.base_file} {' '.join(what)})")
+    return GeneratedFile(file, built.data, OWNED, derived_from=built.base_file)
 
 
 def _drop_hand_attaches(entity: dict) -> list[str]:
@@ -448,6 +486,8 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
                 res.notes.append(f"tier {tier}: {loadout.bodies[tier]} has no artillery_attack; "
                                  f"{inf['pdxmesh']} adds it (= its attack) for the gun crew")
         base_inf = copy.deepcopy(inf)
+        prebuilt = (_prebuild(naming, set_name, tier, inf, loadout.derived[tier], pdx, game, runner)
+                    if tier in loadout.derived else None)
         for role in ("infantry", "crew", "rider"):
             slot = active.get((tier, role))
             if slot is None:
@@ -465,7 +505,7 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
                 target = crew
             else:
                 target = inf["name"] if role == "infantry" else naming.rider_entity(owner, tier)
-            fit = body(by_name[target]["pdxmesh"])
+            fit = prebuilt.fit if prebuilt is not None and role == "infantry" else body(by_name[target]["pdxmesh"])
             weapon = next((p.kind for p in slot.parts if KINDS[p.kind].bone == "Right_hand_node"), None)
             if weapon is not None:
                 dropped = _drop_hand_attaches(by_name[target])
@@ -506,8 +546,8 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
                         source, naming.pdxmesh(set_name, "crew", tier), want)
                 if stance != "base":
                     res.stances[target] = (stance, chosen)
-        if tier in loadout.derived:
-            derived_files.append(_derive(naming, set_name, tier, inf, loadout.derived[tier], pdx, res, game, runner))
+        if prebuilt is not None:
+            derived_files.append(_derive(naming, set_name, tier, inf, loadout.derived[tier], prebuilt, pdx, res))
     built = build_parts(runner, naming, set_name, builds, version, cache)
     for target, bone, name in assigned:
         attach(by_name[target], bone, name)
