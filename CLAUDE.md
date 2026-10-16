@@ -14,12 +14,13 @@ Desktop GUI app that generates complete Europa Universalis IV **land unit** sets
 
 ## Hard rules
 1. **Never copy, bundle or commit Paradox game assets** (meshes, textures, anims, vanilla script files) into this repo or the template library. Read them from the user's EU4 install path at runtime. DLC assets must never be redistributed.
-2. Reference vanilla names and paths; never copy vanilla files into the mod unchanged. **Derived textures and meshes** (recoloured, edited or extended from base-game files) are allowed in generated mod output only: never in the repo or the app, and never derived from DLC files. No derived meshes are planned: parts are rigid meshes made from scratch and attached to bones (`head` attach verified, in-game test 7). Generated files never `clone =` a vanilla entity: clones resolve in load order and vanilla's files load after ours (SPEC §3). Write full entity definitions that reference vanilla pdxmesh, animation and attach names instead.
+2. Reference vanilla names and paths; never copy vanilla files into the mod unchanged. **Derived textures and meshes** (recoloured, edited or extended from base-game files) are allowed in generated mod output only: never in the repo or the app, and never derived from DLC files. Derived body meshes (a base-game body edited or extended, e.g. with skinned tail, hair or cloth) are allowed on the same terms as derived textures (decided 2026-10-16, SPEC Track R). Rigid parts stay meshes made from scratch and attached to bones (`head` attach verified, in-game test 7). Generated files never `clone =` a vanilla entity: clones resolve in load order and vanilla's files load after ours (SPEC §3). Write full entity definitions that reference vanilla pdxmesh, animation and attach names instead.
 3. All generated entity, sprite pack and pdxmesh names come from `core/naming.py`. No string-building of names anywhere else.
 4. Every generator must have a matching validator rule. Generated output must pass `validate/` before export.
 5. Export is non-destructive: dry-run diff first, write a manifest of generated files, and never overwrite files the tool didn't generate.
 6. Don't invent EU4 syntax. If something isn't in SPEC.md or verified against the user's vanilla files, stop and ask, or add a `# UNVERIFIED` comment and a TODO.
 7. Build in roadmap phase order. Don't start mesh or Blender work before Phases 0–1 are done and working.
+8. All supplied reference images and generated outputs must be original, appropriately licensed, or otherwise authorized for the intended use. Do not reproduce protected character designs, franchise-specific uniforms, names, or logos without appropriate authorization. Reference images must be actively analyzed and incorporated into the planning process rather than ignored.
 
 ## Conventions
 - Code in `src/eu4unitgen/`, tests in `tests/` (pytest). Test template output against golden files.

@@ -682,6 +682,117 @@ The user's mod `mod/Victorias_Secret` (launcher name "Victoria's Secret"; a git 
 - **In-game test 9 — result (2026-10-16): parts PASS, colours FAIL, caused by the mod.** T1-T4 parts all as designed (dory + hoplon with the Vergina sun, sarissas, xyston Companions, xiphos crews, crests per tier, steel-grey type4). Colours wrong on every tier (olive cloth, blue trousers, yellow hoplon = MAC's map colour). Cause: Color Your Subject's startup `restore_country_color` on every country (§4 "Mod scripts that recolour countries"); A/B with `cys.1` disabled in the staged copy (commit `20c845f`): purple tunic, purple hoplon with the gold Vergina sun. Rule `colour_scripts` now warns about it (it ran before as 0 warnings because no rule looked at mod scripts). error.log: none of ours. The mod's own (for its author): ~29.8k "Unknown culture group byzantine/gaelic" from vanilla scripts after the culture regrouping, ~1.7k mission-file parse errors, province history warnings, parse errors in `history/provinces/149 - Edirne.txt` and `151 - Constantinople.txt`.
 - **Git:** because the user's repo tracks almost nothing, a branch in it can't isolate edits (untracked files are shared by every branch, and committing them on a branch would delete them from disk on switching back to main). The test is staged as its own git repo instead: `main` = a baseline copy of the working tree, `unitgen-test` = the set integrated, then a TEST ONLY commit.
 
+### Track R: Reference-driven full characters (PLANNING, 2026-10-16)
+Goal: "reference in, full unit out": from one or more reference images, a game-ready unit with new body geometry, hair, clothing, armour, accessories, weapons, textures and skinning. **Status: planning only.** Nothing is built except the approved deformation spike (R0). Builds on Phase 3 (parts, bodies, stances) and step 8 (AI backend).
+
+**Measured constraints (1.37.5, base game):**
+- Skeleton `western_generic_01_type1` (shared by `western_generic_01-04_type1` and DAN 1-4): 28 bones. `root > lower_spine > mid_spine > top_spine > head`; arms off `top_spine` (`*_shoulder > *_arm > *_elbow > *_hand > *_hand_node`, `*_wrist` off the elbow); `hip` off `lower_spine` (`*_thigh > *_knee > *_foot > *_toe`); `attach_back` (mid_spine), `attach_free` (root). **No neck, tail, hair or cloth bones.** The skin holds up to 4 influences per vertex.
+- Triangles (whole .mesh): bodies `western_generic_01_type1` 2,883 (1,809 verts), `western_generic_02_type1` 4,360, `eastern_generic_01_type1` 1,724; `cavalry_horse` 1,874; weapons `cavalry_saber` 146, `western_halbard` 220, `western_musket` 714; shields (indian, south american, AZT) 80. **Budget for a full character: body + skinned additions ≤ 4,500 tris (the largest vanilla body), each rigid part ≤ 300 tris** (rule `part_mesh` allows up to 3,000; a tighter warning per kind is a TODO).
+- The type1 body plays `polearm_twohanded_{idle,moving,attack,death,retreat}.anim` (infantry), `cavalry_rider_*` (rider) and `polearm_twohanded_attack` (artillery_attack); scale 0.5. Stature ~14.5 units; the head top is 2.15 above the `head` joint.
+- The type1 **helmet is part of the body mesh**: a new helmet (e.g. with ear openings) needs a bareheaded body, or a body mesh edited to remove the helmet (a derived mesh).
+- EU4 has no cloth or hair physics. Deforming geometry moves only by skinning to existing bones.
+- Attached entities (`attach = { bone = entity }`) are rigid and follow one bone (in-game tests 7-8). Skinned additions must live **inside the body's .mesh**: a body mesh with new skinned geometry, i.e. a **derived mesh** of a base-game body (rule 2: generated output only, never DLC). This contradicts CLAUDE.md's "no derived meshes are planned" and **needs the user's decision before R2**. UNVERIFIED: whether an attached entity's skinned mesh can follow the parent's skeleton.
+
+**R-1. Reference ingestion and analysis** (no images supplied yet):
+- Input: 1-n images (front/side/back ideal) + a rights declaration (original / licensed / authorised; CLAUDE.md hard rule 8).
+- Analysis output: `reference_analysis.json` + a mapping table the user confirms or edits in the GUI. Fields:
+  - proportions (head-to-height ratio, shoulder/hip width, leg length vs the type1 skeleton);
+  - silhouette features;
+  - per component: description, colours (median cut, Phase 2), material class (skin / cloth / metal / leather / hair / wood), visibility (visible / partial / not shown), confidence.
+- Method: proposed by Claude from the images (vision), always confirmed by the user. Not automatic CV. Unknowns are flagged "uncertain"; never invented silently.
+- **Scale rule:** anything under ~1/50 of stature (≈0.3 units: faces, rivets, frills, embroidery, buckles) is texture detail, not geometry. Units are seen at a few dozen pixels.
+
+**Reference-to-Geometry Mapping (stress-test character: original horse-eared, horse-tailed soldier).** R = rigid part on a bone (proven attach); S = skinned into the body mesh (derived); T = texture only; B = the base body.
+
+| Component | Rep. | Bone(s) / weights | Tris | Notes / uncertain |
+|---|---|---|---|---|
+| Body, proportions | B | the skeleton's bind pose | ~2,900 | Proportions must match the bind pose. Animations set bone transforms, so longer limbs or a bigger head need a new mesh on the same joints; joint positions can't move. |
+| Head, face | B + T | head | (body) | Face is texture-only at map scale. |
+| Horse ears (2) | R | head | 2×~30 | Proven attach. Must poke through the helmet's openings. |
+| Bronze crested helmet with ear openings | R (+ bareheaded body) | head | ~200 | The type1 helmet is baked into the body, so this needs a bareheaded body or a derived body without it (open). Crest = the existing `crest` part. |
+| Long tied-back hair / ponytail | R (short) or S (long) | R: head. S: head → top_spine gradient | ~100-150 | R is proven but clips the back when the head turns. S is the spike question. |
+| Horse tail | R (fallback) or S | R: hip. S: hip → lower_spine | ~100-200 | No tail bones. Spike R0 decides. |
+| Muscle cuirass | S (or B's torso) | top/mid/lower_spine (copy weights from the body) | ~400 | Tight to the torso, so it deforms like the body. Muscle relief is normal map + texture. |
+| Articulated shoulder guards (pteruges) | R per shoulder, or S | L/R_shoulder | 2×~60 | Rigid on the shoulder bone is plausible; check clipping in the attack anim. |
+| Short crimson chiton (skirt) | S | hip + L/R_thigh blend | ~250 | Vanilla coats' tails are skinned this way (plausible). Front/back clipping at walk extremes; colour can be a unit colour. |
+| Kopis with decorated hilt | R | Right_hand_node | ~120 | New `kopis` part kind (like xiphos). Decoration is texture. |
+| Round bronze-and-wood shield | R | Left_hand_node | ~100 | The existing `hoplon` (proven test 8); bronze/wood = texture zones. |
+| Greaves | S or T | knees/shins (copy weights) | ~150 | At map scale probably texture plus a slight shell; uncertain whether geometry is worth it. |
+| Sandals, belt, belt accessories | T (+ belt S) | hip | ≤100 | Straps and buckles are texture. |
+| Hidden/back details (not described) | — | — | — | Uncertain: flagged, not invented. |
+
+**Per-component feasibility.** Status legend: **P** proven in this project (in game), **Pl** technically plausible, **X** experimental.
+
+| Component | Method | Tools | Compatibility | Quality / limits | Risk | Manual work | From refs alone? | Status |
+|---|---|---|---|---|---|---|---|---|
+| Rigid parts (ears, helmet, weapons, shield, guards) | procedural builders (`core/parts.py`), parameters read from the reference | Blender 4.2 + io_pdx_mesh | attach to bones: proven | clean low-poly, stylised; shape detail limited to builder parameters | Low | little | **No:** the builder is chosen and parameters are set from the reference, with confirmation | P (dory, sarissa, xiphos, xyston, hoplon, crest) |
+| Rigid parts, unusual shapes | image-to-3D (TripoSG local, Tripo API opt-in) → decimate to budget → UV → bake | TripoSG env, Blender | static mesh: fine | single-image geometry is approximate (hidden sides guessed), dense, needs retopology/decimation and clean-up; untextured | Med-High | likely | Partly: an approximation, not an accurate reconstruction | X (step 8) |
+| Body with new proportions / bareheaded | (a) choose the closest vanilla body (`body_candidates`); (b) edit a derived body (remove helmet, adjust) | Blender | same skeleton: yes; bind pose fixed | (a) zero risk, limited choice; (b) quality depends on manual editing | (a) Low, (b) High | (b) yes | No | (a) P, (b) Pl |
+| Skinned additions (tail, long hair, skirt, cuirass) | geometry built (procedural/AI) + weights: copied from the nearest body surface (Data Transfer) or authored gradients; auto (heat) weights evaluated in R0 | Blender | needs a derived body .mesh with the new geometry; UNVERIFIED in game | clipping at animation extremes; no secondary motion | Med (skirt, cuirass), High (tail, long hair) | likely | No | Pl → R0 |
+| New bones (tail chain) | add bones + author **every** animation the body plays (11 ids on type1, more per stance), vanilla tracks re-exported + new tracks (baked procedural lag) | Blender, io_pdx_mesh anim export | UNVERIFIED that the engine accepts extra bones with vanilla .anim; new .anim files are derived output | best motion; frozen without new anims | High | yes | No | X (last resort; est. 3-5 sessions + an in-game test) |
+| Textures / materials | Phase 2 recipes (recolour, palette, pattern, spec masks) + procedural material swatches; painted blazons/decor from user PNGs | Pillow, texconv | proven chain | reference palette accurate; painted ornament needs a source image | Low | for ornament | Colours yes; ornament partly (projection from the reference is plausible but needs aligned UVs) | P (recipes), Pl (projection) |
+| AI texture generation | image model inpaints UV layouts from the reference | none chosen | — | inconsistent seams; licence questions | High | yes | partly | X (not planned) |
+| Full character from one image | image-to-3D whole figure | TripoSG/Tripo | fused, unrigged, arbitrary pose; doesn't fit the skeleton | not game-usable without full retopology and rigging | High | heavy | **No.** No available tool reconstructs a rigged, skeleton-matched character from one image. The pipeline assembles one from a base body + parts + skinned additions instead. | X (rejected as the main path) |
+
+**Architecture (proposed):** reference images → `reference_analysis` (vision proposal, user-confirmed mapping) → a **character recipe** (JSON, like `loadout.json`):
+- `body` (vanilla candidate or derived edit);
+- `parts` (rigid, existing kinds + new kinds);
+- `skinned` (meshes + weight method);
+- `textures` (Phase 2 recipe);
+- `colours`.
+
+Generators (Blender jobs, subprocess only) → package → validator. New rules: skinned geometry in budget, ≤4 influences per vertex, only skeleton bones, weights sum to 1; derived body only from base-game bodies. Loadout slots stay the unit of output (tier × role).
+
+**R0. Deformation spike (APPROVAL PENDING; plan below). Answers: can a tail and a ponytail be skinned to the unmodified skeleton well enough?**
+- Inputs: placeholder meshes made by the job, no copyrighted input:
+  - tail: tapered tube, 8 sides × 10 rings ≈ 160 tris, root at the back of the pelvis, length ~5 units hanging down and back at 30°;
+  - ponytail: tapered tube ≈ 120 tris from the back of the head (below the helmet rim), length ~4 units down the back.
+- Read from the install at run time: `western_generic_01_type1.mesh` (io_pdx_mesh `import_meshfile`) and `polearm_twohanded_idle/moving/attack.anim` (`import_animfile`). Nothing is written outside `build/spike_r0/` (git-ignored). No .mesh/.anim export, no mod files.
+- Weighting variants (each part, all on the unmodified 28-bone skeleton):
+  - **A auto:** Blender automatic (heat) weights, limited to plausible bones (tail: hip, lower_spine, mid_spine, L/R_thigh; ponytail: head, top_spine, mid_spine, shoulders), then cut to the 4 largest and normalised;
+  - **B rigid:** tail 100% hip; ponytail 100% head;
+  - **C gradient:** tail hip → lower_spine along the length (root 100% hip, tip 50/50); ponytail head → top_spine (root 100% head, tip 30/70).
+- Animations: each of idle, moving, attack, every frame.
+- Renders (Eevee, orthographic, neutral grey materials, body semi-dark, additions coloured):
+  - front, side, rear at 8 evenly spaced frames per animation, plus the frame with the worst metric;
+  - one contact sheet per variant × animation;
+  - a "map-scale" render (the unit ~48 px tall) per variant.
+- Metrics per frame (JSON):
+  - **stretch:** edge length / rest length (min, max, 95th percentile);
+  - **penetration:** addition vertices inside the body mesh (ray-parity test) and the deepest one (units);
+  - **flips:** triangles whose normal turns > 90° from rest, relative to the driving bone;
+  - **root drift:** root-ring vertices' distance from rest in the hip/head frame;
+  - **tail-through-legs:** the tail's lowest point vs the thighs' rear surface;
+  - **ponytail-through-back:** penetration into the torso.
+- **Pass criteria** (per part and variant, in all three animations):
+  1. stretch within 0.85-1.20 for every edge, and 95th percentile within 0.92-1.08;
+  2. penetration: idle and moving 0 vertices deeper than 0.10 units (~1.2 cm); attack ≤ 3% of vertices, none deeper than 0.30;
+  3. no flipped triangles;
+  4. root drift ≤ 0.05 units;
+  5. tail never passes in front of the thigh plane; ponytail never enters the torso by more than criterion 2 allows;
+  6. **user sign-off** on the contact sheets and map-scale renders (reads as a tail/ponytail, no visible popping or twisting).
+- **Outcome:**
+  - The technique is **acceptable without modifying the skeleton** if at least one variant per part passes 1-6. Automatic weights (A) are reported on their own: passing with B/C only means "authored weights, not auto".
+  - If no variant passes: report which criterion fails where, and estimate the alternatives (rigid fallback, shorter geometry, new bones + animations).
+- Limits: the spike shows Blender's playback of the vanilla .anim through io_pdx_mesh. UNVERIFIED that it matches the game exactly (stances were verified in game, the importer's playback wasn't). The in-game check (a derived body .mesh with the tail, in a test mod) is a separate step after R0, needing the derived-mesh decision.
+- Code: one throwaway Blender job + runner call under `scripts/spike_r0/` (not part of the app; removed or promoted after the decision).
+
+**Phases and acceptance (after R0):**
+- R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.
+- R2: derived bodies (bareheaded, merged skinned additions). Needs the derived-mesh decision. Accept on an in-game test with no error.log lines and no visible artefacts in idle/walk/attack.
+- R3: new rigid kinds (ears, kopis, guards, helmet-with-openings). Accept in game like tests 7-8.
+- R4: skinned clothing (chiton, cuirass) with copied weights. Accept on the R0 metrics + in game.
+- R5: step-8 AI geometry for unusual rigid parts. Accept when decimated output ≤ budget and passes `part_mesh`.
+- R6 (only if R0 fails and the user accepts the cost): extra bones + re-authored animations.
+
+**Open questions:**
+1. Derived body meshes: allowed (needed for R2/R4)?
+2. Which reference images, and their rights status?
+3. Is a bareheaded base-game body available (search `body_candidates` for a head without a hat)?
+4. Does io_pdx_mesh anim playback match the game?
+5. Can attached entities be skinned to the parent skeleton? (UNVERIFIED; would avoid derived bodies.)
+6. Cavalry: the same character as a rider needs the `cavalry_rider_*` anims in R0's successor.
+
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
 
