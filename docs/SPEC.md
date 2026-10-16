@@ -1113,6 +1113,14 @@ Constraints carried over:
   - DXT compression on small textures (measure after encoding);
   - painted style is subjective: the metrics bound it, the user signs it off from renders before the game.
 
+**Q0 (2026-10-16): ears redesigned (awaiting the user's shape approval).** `build_additions` `ears`:
+- **Shape:** 1.5 long, at most 0.36 wide (about 4:1); pinched base (0.26); widest at a third (0.36); narrowing rings close into a short blunt cap (a rounded tip).
+- **Section:** lens-shaped, convex behind, the front cupped (centre 0.4 × the depth back from the edges), 0.12 thick at the base.
+- **Placement:** on the sides of the crown (spread 0.85 × the head's half-width, 0.35 below its top), tilted 25° out and leaning 15° back (measured on type1: the tip 0.33 back and 0.6 out over 1.32 up), the opening turned 25° out.
+- **Size:** 114 vertices, 220 triangles for both ears.
+- **Deformation check:** clean on both bodies (`spear_shield`).
+- **Renders:** `build/q0/ears_q0.png` (both bodies, bare and with the Greek helmet; front, side, rear-quarter); silhouettes `build/q0/ear_silhouettes.png` (schematic horse and cat outlines drawn from typical proportions, not traced; the old and new ear profiles).
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

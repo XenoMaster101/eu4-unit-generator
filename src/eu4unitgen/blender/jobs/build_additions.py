@@ -15,9 +15,9 @@ Shapes (plan after test 10, SPEC Track R):
     ellipse, wider side to side) widening to ~40% of the length and tapering to a 5-point tip.
   * ``tuft``: a tied lock at the back of the head: a tight wrap near the root, a flattened brush,
     a 3-point tip; within pre-check P1's envelope (1.5 units at 45 degrees).
-  * ``ears``: two horse ears on top of the bare head, each a thin shell with a crescent cross-section
-    cupped towards the front, pinched at the base, widest a quarter up, pointed; placed from the
-    head's own vertices (those mostly on ``head`` that a face uses).
+  * ``ears``: two horse ears on the sides of the crown (Q0): about 4:1, pinched base, widest a third
+    up, a rounded tip; a lens-shaped section ~0.12 thick, cupped in front; tilted out and leaning
+    back; placed from the head's own vertices (those mostly on ``head`` that a face uses).
 
 args: {"body": abs .mesh, "additions": [{"name", "shape", "params": {...}}], "patch_px": [x0, y0, x1, y1],
        "tex": px, "result_path"}
@@ -231,20 +231,28 @@ def tuft(body, p):
     return m
 
 
-EAR_PROFILE = [(0.0, 0.30, 0.10), (0.25, 0.50, 0.13), (0.5, 0.46, 0.12), (0.75, 0.32, 0.09), (1.0, 0.16, 0.06)]
+# Horse ear (Q0, user feedback after test 11: the first ears read as cat ears and were paper-thin):
+# (t along the length, width, depth). About 4:1, pinched at the base, widest a third of the way up,
+# closing in narrowing rings to a rounded tip. Depth = the back's bulge; the front is cupped.
+EAR_PROFILE = [(0.00, 0.26, 0.20), (0.18, 0.34, 0.19), (0.35, 0.36, 0.17), (0.55, 0.32, 0.14), (0.72, 0.25, 0.11),
+               (0.85, 0.17, 0.08), (0.94, 0.10, 0.05)]
+EAR_CUP = 0.4  # the front's centre sits this share of the depth back from the edges: a cupped (concave) front
 
 
 def ears(body, p):
-    """Both ears in one mesh (two shells)."""
+    """Both ears in one mesh (two closed shells). Each ear: rings along a line from a base on the
+    side of the crown, tilted ``tilt_deg`` out and leaning ``lean_deg`` back, its opening turned
+    ``yaw_deg`` outwards; a lens-shaped section, convex behind and cupped in front, ~0.12 thick at
+    the base (0.6 x the depth); narrowing rings close into a rounded tip."""
     lo, hi = head_box(body)
     half_w = (hi.x - lo.x) / 2
     cx, cy = (hi.x + lo.x) / 2, (hi.y + lo.y) / 2
-    length, rings = p.get("length", 1.1), 5
-    tilt, lean = math.radians(p.get("tilt_deg", 12)), math.radians(p.get("lean_deg", 8))
+    length = p.get("length", 1.5)
+    tilt, lean = math.radians(p.get("tilt_deg", 25)), math.radians(p.get("lean_deg", 15))
     m = RingMesh()
     for s in (-1.0, 1.0):
-        base = Vector((cx + s * p.get("spread", 0.5) * half_w, cy + p.get("back", 0.05), hi.z - p.get("sink", 0.22)))
-        d = Vector((s * math.sin(tilt), -math.sin(lean), math.cos(tilt) * math.cos(lean))).normalized()
+        base = Vector((cx + s * p.get("spread", 0.85) * half_w, cy + p.get("back", 0.05), hi.z - p.get("sink", 0.35)))
+        d = Vector((s * math.sin(tilt), math.sin(lean), math.cos(tilt) * math.cos(lean))).normalized()  # +Y = back
         side, _ = frame(d)
         back = d.cross(side).normalized()
         if back.y < 0:  # depth axis towards the unit's back (+Y), so the cup opens to the front
@@ -252,27 +260,25 @@ def ears(body, p):
         turn = Matrix.Rotation(-s * math.radians(p.get("yaw_deg", 25)), 3, d)  # opening turned out, like a horse's
         side, back = turn @ side, turn @ back
         start = len(m.rings)
-        for i in range(rings):
-            t = i / rings
-            w, dep = lerp_profile(EAR_PROFILE, t)
+        for t, w, dep in EAR_PROFILE:
             c = base + d * length * t
             outer = [(math.sin(a) * w / 2, math.cos(a) * dep) for a in (math.radians(x) for x in (-90, -45, 0, 45, 90))]
-            inner = [(math.sin(a) * w / 2 * 0.75, math.cos(a) * dep * 0.35) for a in (math.radians(x) for x in (45, 0, -45))]
+            inner = [(math.sin(a) * w / 2 * 0.72, math.cos(a) * dep * EAR_CUP)
+                     for a in (math.radians(x) for x in (60, 0, -60))]
             m.ring([c + side * x + back * y for x, y in outer + inner])
-        # this ear's own bands, root cap and point (RingMesh works on the last ring range)
         ear_rings = m.rings[start:]
-        for a, b in zip(ear_rings, ear_rings[1:]):
-            n = len(a)
+        for ra, rb in zip(ear_rings, ear_rings[1:]):
+            n = len(ra)
             for k in range(n):
-                m.bm.faces.new((a[k], a[(k + 1) % n], b[(k + 1) % n], b[k]))
+                m.bm.faces.new((ra[k], ra[(k + 1) % n], rb[(k + 1) % n], rb[k]))
         m.bm.faces.new(list(reversed(ear_rings[0])))
-        tip = m.bm.verts.new(base + d * length)
-        m.ring_of[tip], m.around[tip] = rings, 0.5
         last = ear_rings[-1]
+        centre = sum((v.co for v in last), Vector()) / len(last)
+        tip = m.bm.verts.new(centre + d * length * 0.05)  # a short, blunt cap: the rounded tip
+        m.ring_of[tip], m.around[tip] = len(ear_rings), 0.5
         for k in range(len(last)):
             m.bm.faces.new((last[k], last[(k + 1) % len(last)], tip))
-        # rings of the second ear count from 0 again (rigid: only the root ring matters)
-        for i, r in enumerate(ear_rings):
+        for i, r in enumerate(ear_rings):  # each ear counts its rings from 0 (rigid: only the root ring matters)
             for v in r:
                 m.ring_of[v] = i
     return m
