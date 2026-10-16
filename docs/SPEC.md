@@ -990,7 +990,7 @@ Constraints carried over:
   - textured renders (front, side, rear, rear-quarter, map scale).
 - **Side-view camera procedure** (the EU4 camera can't rotate; units face the way they move):
   - march the army east or west across two or more provinces and pause mid-march, zoomed fully in: units walk side-on;
-  - after arriving, they idle facing the direction they came from;
+  - after arriving they idle facing their last direction of movement (UNVERIFIED);
   - for fighting side-on, attack an army in the province directly east or west.
 - **Checklist lines:**
   - tail visible side-on and from the rear;
