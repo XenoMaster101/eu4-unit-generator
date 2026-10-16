@@ -234,21 +234,22 @@ def tuft(body, p):
 # Horse ear (Q0, user feedback after test 11: the first ears read as cat ears and were paper-thin):
 # (t along the length, width, depth). About 4:1, pinched at the base, widest a third of the way up,
 # closing in narrowing rings to a rounded tip. Depth = the back's bulge; the front is cupped.
-EAR_PROFILE = [(0.00, 0.26, 0.20), (0.18, 0.34, 0.19), (0.35, 0.36, 0.17), (0.55, 0.32, 0.14), (0.72, 0.25, 0.11),
-               (0.85, 0.17, 0.08), (0.94, 0.10, 0.05)]
+EAR_PROFILE = [(0.00, 0.30, 0.20), (0.18, 0.39, 0.19), (0.35, 0.42, 0.17), (0.55, 0.38, 0.14), (0.72, 0.30, 0.11),
+               (0.85, 0.20, 0.08), (0.94, 0.12, 0.05)]  # Q0 round 2: shorter and broader mid-ear
 EAR_CUP = 0.4  # the front's centre sits this share of the depth back from the edges: a cupped (concave) front
 
 
 def ears(body, p):
     """Both ears in one mesh (two closed shells). Each ear: rings along a line from a base on the
     side of the crown, tilted ``tilt_deg`` out and leaning ``lean_deg`` back, its opening turned
-    ``yaw_deg`` outwards; a lens-shaped section, convex behind and cupped in front, ~0.12 thick at
+    ``yaw_deg`` outwards, curving ``curve`` towards the midline by the tip; a lens-shaped section, convex behind and cupped in front, ~0.12 thick at
     the base (0.6 x the depth); narrowing rings close into a rounded tip."""
     lo, hi = head_box(body)
     half_w = (hi.x - lo.x) / 2
     cx, cy = (hi.x + lo.x) / 2, (hi.y + lo.y) / 2
-    length = p.get("length", 1.5)
-    tilt, lean = math.radians(p.get("tilt_deg", 25)), math.radians(p.get("lean_deg", 15))
+    length = p.get("length", 1.15)
+    tilt, lean = math.radians(p.get("tilt_deg", 13)), math.radians(p.get("lean_deg", 15))
+    curve = p.get("curve", 0.12)  # the tips bend this far towards the midline (a gentle inward curve)
     m = RingMesh()
     for s in (-1.0, 1.0):
         base = Vector((cx + s * p.get("spread", 0.85) * half_w, cy + p.get("back", 0.05), hi.z - p.get("sink", 0.35)))
@@ -260,8 +261,9 @@ def ears(body, p):
         turn = Matrix.Rotation(-s * math.radians(p.get("yaw_deg", 25)), 3, d)  # opening turned out, like a horse's
         side, back = turn @ side, turn @ back
         start = len(m.rings)
+        inward = Vector((-s, 0, 0))
         for t, w, dep in EAR_PROFILE:
-            c = base + d * length * t
+            c = base + d * length * t + inward * curve * t * t
             outer = [(math.sin(a) * w / 2, math.cos(a) * dep) for a in (math.radians(x) for x in (-90, -45, 0, 45, 90))]
             inner = [(math.sin(a) * w / 2 * 0.72, math.cos(a) * dep * EAR_CUP)
                      for a in (math.radians(x) for x in (60, 0, -60))]
@@ -274,7 +276,7 @@ def ears(body, p):
         m.bm.faces.new(list(reversed(ear_rings[0])))
         last = ear_rings[-1]
         centre = sum((v.co for v in last), Vector()) / len(last)
-        tip = m.bm.verts.new(centre + d * length * 0.05)  # a short, blunt cap: the rounded tip
+        tip = m.bm.verts.new(centre + (d * length + inward * curve * 1.88).normalized() * length * 0.05)  # rounded tip
         m.ring_of[tip], m.around[tip] = len(ear_rings), 0.5
         for k in range(len(last)):
             m.bm.faces.new((last[k], last[(k + 1) % len(last)], tip))

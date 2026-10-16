@@ -1121,6 +1121,13 @@ Constraints carried over:
 - **Deformation check:** clean on both bodies (`spear_shield`).
 - **Renders:** `build/q0/ears_q0.png` (both bodies, bare and with the Greek helmet; front, side, rear-quarter); silhouettes `build/q0/ear_silhouettes.png` (schematic horse and cat outlines drawn from typical proportions, not traced; the old and new ear profiles).
 
+**Q0 round 2 (2026-10-16, user feedback: in 3D round 1 read as rabbit ears or horns):**
+- length 1.15; mid-ear width 0.42 (profile 0.30 / 0.39 / 0.42 / 0.38 / 0.30 / 0.20 / 0.12); rounded tip kept;
+- outward tilt 13°; a gentle inward curve (`curve` 0.12: the tips bend towards the midline); lean back 15° kept;
+- measured per ear, base to tip: up 1.09, out 0.11, back 0.24;
+- deformation check clean on both bodies; renders `build/q0/ears_q0_round2.png` and `ear_silhouettes_round2.png`.
+- **Requirement for Q2/Q5 (user):** the ears and the tuft must be **matte and hair-coloured, not glossy black, with a lighter inner ear**. The black gloss makes them read as horns.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**
