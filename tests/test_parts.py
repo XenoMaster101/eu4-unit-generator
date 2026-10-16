@@ -405,7 +405,7 @@ def test_parts_test_mod_and_checklist(project, game, tmp_path):
         assert p in paths, p
     assert not tm.report.errors, [str(i) for i in tm.report.errors]
     text = loadout_checklist(tm.package, "eu4unitgen_test", {2: 2, 3: 3, 4: 4})
-    assert "IN-GAME TEST 8" in text and "TIER 1" in text and "TIER 2" in text and "TIER 3" not in text
+    assert "IN-GAME TEST CHECKLIST (loadout: procedural parts)" in text and "TIER 1" in text and "TIER 2" in text and "TIER 3" not in text
     assert "[ ] 1C  artillery gun crew: crest, on head, front-to-back, horsehair in the secondary unit colour" in text
     assert "[ ] 2C  artillery gun crew: the infantry entity itself" in text
     assert "[ ] 1R  cavalry rider: xiphos, on Right_hand_node, point -Z (like the sabre); crest, on head" in text

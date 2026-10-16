@@ -893,6 +893,43 @@ A validator rule checks the result: influences, sums, bone names, and that no we
     - (b) weld the exporter's output and restore vanilla's skeleton block.
     - (c) take the export as it is into the game.
 
+**Standard path for derived bodies (decided 2026-10-16, option (a)): io_pdx_mesh's export is NOT used for skinned bodies.**
+- `core/derived_body.py` parses the base-game body's `.mesh` and keeps every block as it is: skeleton (`attach_free`'s all-zero bind included), locators, material, every vertex array, skin rows and triangles.
+- It appends only the additions' vertices (`p n ta u0`), skin rows and triangles, and grows the `aabb` to hold them. `scanner.write_pdx_mesh` writes the result.
+- Supporting pieces:
+  - `tangents()` computes `ta` in the file's convention. On base-game bodies and the horse it matches the stored tangents: median 0.07-0.13°, ~99% within 10°, handedness ~99%.
+  - Additions follow the base's triangle winding (`winding_sign`; +1 on every base-game unit mesh checked).
+  - `check_derived(base, derived)` verifies all of this. It is used by rule `derived_body` and by the P2 re-check.
+- Bodies with more than one shape or mesh block are refused (none exist in the base game).
+- **Additions** (`ADDITION_KINDS`) are built in background Blender by `blender/jobs/build_additions.py`: geometry and smooth normals only, in the base body's bind pose, converted Blender (x, y, z) → PDX (x, z, y). Weights come from `core/chain_weights.py`.
+  - `tail`: length gradient `hip` → `lower_spine`, tip 50/50, flared base 0.75/0.6.
+  - `tuft`: rigid on `head`, 1.5 units at 45°.
+- **UVs:** the face texture's hair patch of the type1 diffuse, px 105-115 × 30-40 (`HAIR_PATCH`, image convention v down). The file's `u0` uses that convention: a vanilla head vertex's u0 maps into the helmet's texture region.
+- **P2 re-check (2026-10-16): PASS.**
+  - `check_derived` clean: 1,809 + 120 vertices, 2,883 + 232 triangles; every vanilla block identical.
+  - Blender re-imports 1,929 vertices, 28 bones and 8 locators, and `spear_shield_attack` moves the added vertices.
+  - Check render: textures loaded from the install in place, through a material built for the render (io_pdx_mesh looks for textures beside the .mesh). Tail and tuft show dark brown.
+  - The added vertices sample mean diffuse 41 33 29 with country mask 0, so the unit colours don't tint them.
+- **Loadout `"derived": {"<tier>": ["tail", "tuft"]}`:**
+  - That tier's infantry wears `hr_<set>_body_<tier>.mesh`, placed in the base body's folder (`gfx/models/Units`) so the copied material's bare texture names resolve to the base game's textures there (UNVERIFIED in game; test 10).
+  - It gets a new pdxmesh with the stance animations, scale and keys, and no `meshsettings`.
+  - The rider and a crew slot's crew keep the base body. Not combinable with a texture recipe's retextured body yet.
+- **Rule `derived_body`:**
+  - base body from the base game, never DLC; `derived_from` recorded;
+  - `check_derived` clean;
+  - additions' weights only on their declared chain;
+  - ≤4,500 triangles (`DERIVED_TRI_BUDGET`);
+  - material textures resolve in the file's folder;
+  - not a game file's name;
+  - the infantry wears it.
+- `part_mesh` skips derived bodies. `loadout`'s body check accepts a derived body of the chosen body.
+- **New part kind `horse_ears`** (on `head`, both ears in one mesh): cones on oval bases, tilted 25° out and leaning 10° back, outer zone (95 70 50) and inner zone (150 105 95). Fitting puts the base 0.45 below the helmet top and the spread at 0.63 × the head's half-width (1.702 / 0.622 on type1).
+
+**In-game test 10 — STAGED (2026-10-16):** `build/test10/stage` (mod `eu4unitgen_test`). HDA / `macedonian_test` / hellenicgfx, loadout `build/test10/loadout.json`, unit colours blue 40 60 160 / yellow 220 190 40 / black 20 20 20, vanilla sprite techs (tier 1 at start).
+- T1 infantry: derived type1 body (tail + tuft), dory, hoplon (primary-colour face), horse ears, `spear_shield` stance.
+- T1 crew slot: its own entity on the plain body. Rider: plain body.
+- Validator 0 errors, 0 warnings. Checklist `build/test10/checklist.txt`.
+
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.
 - R2: derived bodies (bareheaded, merged skinned additions). Accept on an in-game test with no error.log lines and no visible artefacts in idle/walk/attack.

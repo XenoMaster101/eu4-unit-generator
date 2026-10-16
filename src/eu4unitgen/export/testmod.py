@@ -534,13 +534,38 @@ def _describe_part(r) -> str:
     return ", ".join(bits)
 
 
+DERIVED_LOOK = {
+    "tail": "a dark brown horse tail hanging from the back of the hips, its flared base over the tunic hem",
+    "tuft": "a short dark tuft sticking out back and down from the back of the helmet",
+}
+
+
+def _derived_lines(tier: int, rec) -> list[str]:
+    kinds = [k for k, _, _ in rec.additions]
+    looks = "; ".join(DERIVED_LOOK.get(k, k) for k in kinds)
+    return [
+        f"[ ] {tier}D1 infantry wears a derived body ({rec.file}): {looks}. Unit missing, invisible or black = the "
+        "derived .mesh or its textures fail -> stop, send error.log.",
+        f"[ ] {tier}D2 the rest of the body looks like the vanilla soldier (face, helmet, cloth in the unit colours); "
+        f"{' and '.join(kinds)} dark brown, not black, pink or untextured.",
+        f"[ ] {tier}D3 {' and '.join(kinds)} stay attached and move with the body in idle, walk and attack: no "
+        "stretching, spikes or flicker; the tail never swings through the legs.",
+        f"[ ] {tier}D4 attack: note any visible clipping (the tuft comes near the neck; the tail's base overlaps the "
+        "tunic hem by design).",
+        f"[ ] {tier}D5 the gun crew and the cavalry rider wear the plain base body (no {' or '.join(kinds)}).",
+        f"[ ] {tier}D6 zoomed out to map scale: does the tail read from behind or the side? (invisible from the front "
+        "is expected)",
+    ]
+
+
 def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict[int, int] | None) -> str:
-    """In-game test 8: what each tier's bodies should carry, from the loadout the set was built with."""
+    """In-game tests 8 and 10: what each tier's bodies should carry (parts, stances, derived bodies),
+    from the loadout the set was built with."""
     res, nation = generated.loadout, generated.nation
     techs = (", ".join(f"tier {lvl} at MIL {t}" for lvl, t in sorted(sprite_techs.items())) if sprite_techs
              else "vanilla sprite techs")
     lines = [
-        "IN-GAME TEST 8 CHECKLIST (procedural parts: the full set)",
+        "IN-GAME TEST CHECKLIST (loadout: procedural parts" + (", derived bodies" if res.derived else "") + ")",
         f"Enable only {mod_name} (disable every other eu4unitgen mod). Play {nation.tag}. Sprite tiers: tier 1 at "
         f"start, {techs}.",
         "At each tier make one army per type (infantry, cavalry, artillery); watch them stand, march and fight. "
@@ -565,6 +590,8 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
         for entity, (stance, _) in sorted(res.stances.items()):
             if entity.endswith((f"_INFANTRY_{tier}", f"_{tier}_crew")):
                 lines.append(f"[ ] {tier}S  {entity}: {stance} animations; " + STANCE_LOOK.get(stance, ""))
+        if tier in res.derived:
+            lines += _derived_lines(tier, res.derived[tier])
     lines += [
         "",
         "GENERAL",
