@@ -936,6 +936,72 @@ A validator rule checks the result: influences, sums, bone names, and that no we
   - Tail and tuft are present but weren't visually confirmed: the camera angles hid them. **The next test needs a side-view check.**
   - error.log clean: no `hr_`, `.mesh`, entity, attach, texture or animation lines. Only Workshop `.mod` noise, the news banner, vanilla GUI warnings (incl. `end_of_combat.gui`) and vanilla `economic_ideas`.
 
+**Plan after test 10 (PLANNED 2026-10-16, nothing built): make the character look intentional; in-game test 11.**
+
+Constraints carried over:
+- The body is one shape with one material, so tail, tuft and anything skinned use the body's texture.
+- One attached part per bone.
+- Skinned shapes must pass the R0 criteria on the stance they'll play.
+- The tuft must stay within the P1 envelope (≤1.5 units, 45°, root at the back of the head) unless re-checked.
+
+**Base body without the medieval helmet** (read-only scan, 1.37.5):
+- 101 base-game infantry bodies share type1's 28-bone skeleton.
+- Head renders (`build/plan11/heads_sheet.png`) show bare heads on `african_generic_03_type1` (short hair, plain tunic and sash), `african_generic_02`, `african_generic_01_type1` (bead necklace) and `north_american_generic_03_type1` (mohawk). All are PdxMeshColor.
+- Options:
+  - **H1 (recommended first):** check in Blender what is under type1's helmet. Delete the triangles whose UVs fall in the helmet's texture islands and render the head.
+    - If a full skull or hair cap is there, a derived type1 with the helmet removed keeps the Greek-looking tunic.
+    - The writer needs a "remove triangles" mode: it drops the listed base triangles and keeps every vertex array unchanged (unreferenced vertices stay). `check_derived` then verifies everything else is identical and that only those triangles are gone.
+    - If there's a hole, a scalp-cap addition (rigid `head`, hair UVs) closes it; the Greek helmet covers most of it anyway.
+  - **H2:** a bareheaded base body (`african_generic_03_type1` is the closest to a plain tunic). Clothing and skin tone come from that body; a texture recipe can recolour. No mesh editing needed.
+  - **H3:** both, side by side in one test (two tiers).
+- **Greek helmet:** a new rigid part kind on `head`, `greek_helmet`, with styles attic, corinthian and pilos, an integrated crest zone, and cheek guards for attic/corinthian. It is fitted from the bareheaded head's measured extents.
+- **Ear openings:** faked by placement (the ears come out through the helmet shell where openings would be). Real holes only if the in-game look needs them.
+
+**Ears, tail and tuft go into the derived body**, all skinned and rigid on their bones. This frees the `head` attach for the helmet, which carries the crest.
+- **Horse ears:**
+  - lanceolate, about 2.2× as long as wide, pointed, base pinched;
+  - front cupped (concave, opening forward and out);
+  - on top of the head, closer together than the placeholder, upright and slightly forward;
+  - 2 × ~60 tris;
+  - outer in the hair texture, inner a darker part of the same region (no pink).
+  - The placeholder looked rat-like because of the round cone base, pink inner zone, wide spread and outward tilt.
+- **Tail:**
+  - a short dock under the tunic hem, then a broad hair plume;
+  - cross-section a flattened ellipse, wider side to side;
+  - widening to ~40% of the length, then tapering;
+  - a **flared, tufted base** and an uneven tip (3-5 strand points);
+  - ≤350 tris. Same chain (`hip` → `lower_spine`).
+- **Tuft:** a tied lock (a wrap ring near the root), flaring to a flattened brush with a split tip, within the P1 envelope. If the Greek helmet's neck guard covers the root, it moves down to the helmet's rear rim, which is a new envelope and needs a re-check (P1's nape bun failed narrowly).
+
+**Texture for skinned additions:**
+- **T1 (first):** spread their UVs over the face texture's whole hair region (streaks), not the 10 px patch.
+- **T2 (if flat):** a derived copy of the body's diffuse/normal/spec (base game only, `hr_` names, same folder) with a procedural hair swatch painted into an unused grey region (flat grey 101 islands exist, e.g. around px 240-250 × 120-160). Mask 0 and a flat normal there. The derived body's material then names the derived textures.
+  - Rule `derived_body` would allow exactly that material change.
+  - Rule `dds_format` already checks derived textures against their base.
+
+**Automated deformation check:** the spike's R0 metrics become a reusable Blender job (`check_deform`). It runs at generation for every derived body on the stance its infantry plays: idle, walk and attack.
+- Criteria as R0, with the facing-frame C5. Base rings and flared-base rings are exempt from C2.
+- It reports to the validator as errors (C1-C3) and warnings (C4-C5), plus worst-frame renders for the GUI.
+
+**In-game test 11 (planned):** HDA tier 1 (and tier 2 if H3), the new bareheaded body, ears + tail + tuft in the derived body, `greek_helmet` (with crest), dory and hoplon, `spear_shield`.
+- **Pre-checks:**
+  - `check_deform` passes on `spear_shield`;
+  - P2-style `check_derived`;
+  - textured renders (front, side, rear, rear-quarter, map scale).
+- **Side-view camera procedure** (the EU4 camera can't rotate; units face the way they move):
+  - march the army east or west across two or more provinces and pause mid-march, zoomed fully in: units walk side-on;
+  - after arriving, they idle facing the direction they came from;
+  - for fighting side-on, attack an army in the province directly east or west.
+- **Checklist lines:**
+  - tail visible side-on and from the rear;
+  - flared base hides the hem join;
+  - ears read as horse ears;
+  - helmet sits on a bare head with no medieval helmet showing through;
+  - tuft below the helmet rim;
+  - map-scale read.
+
+**Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
+
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.
 - R2: derived bodies (bareheaded, merged skinned additions). Accept on an in-game test with no error.log lines and no visible artefacts in idle/walk/attack.
