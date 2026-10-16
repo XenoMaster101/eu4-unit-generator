@@ -691,7 +691,7 @@ Goal: "reference in, full unit out": from one or more reference images, a game-r
 - The type1 body plays `polearm_twohanded_{idle,moving,attack,death,retreat}.anim` (infantry), `cavalry_rider_*` (rider) and `polearm_twohanded_attack` (artillery_attack); scale 0.5. Stature ~14.5 units; the head top is 2.15 above the `head` joint.
 - The type1 **helmet is part of the body mesh**: a new helmet (e.g. with ear openings) needs a bareheaded body, or a body mesh edited to remove the helmet (a derived mesh).
 - EU4 has no cloth or hair physics. Deforming geometry moves only by skinning to existing bones.
-- Attached entities (`attach = { bone = entity }`) are rigid and follow one bone (in-game tests 7-8). Skinned additions must live **inside the body's .mesh**: a body mesh with new skinned geometry, i.e. a **derived mesh** of a base-game body (rule 2: generated output only, never DLC). This contradicts CLAUDE.md's "no derived meshes are planned" and **needs the user's decision before R2**. UNVERIFIED: whether an attached entity's skinned mesh can follow the parent's skeleton.
+- Attached entities (`attach = { bone = entity }`) are rigid and follow one bone (in-game tests 7-8). Skinned additions must live **inside the body's .mesh**: a body mesh with new skinned geometry, i.e. a **derived mesh** of a base-game body (rule 2: generated output only, never DLC). **Decided 2026-10-16: allowed** on the same terms as derived textures (base game only, never in the repo or app, never from DLC; CLAUDE.md rule 2). UNVERIFIED: whether an attached entity's skinned mesh can follow the parent's skeleton.
 
 **R-1. Reference ingestion and analysis** (no images supplied yet):
 - Input: 1-n images (front/side/back ideal) + a rights declaration (original / licensed / authorised; CLAUDE.md hard rule 8).
@@ -743,7 +743,7 @@ Goal: "reference in, full unit out": from one or more reference images, a game-r
 
 Generators (Blender jobs, subprocess only) → package → validator. New rules: skinned geometry in budget, ≤4 influences per vertex, only skeleton bones, weights sum to 1; derived body only from base-game bodies. Loadout slots stay the unit of output (tier × role).
 
-**R0. Deformation spike (APPROVAL PENDING; plan below). Answers: can a tail and a ponytail be skinned to the unmodified skeleton well enough?**
+**R0. Deformation spike (approved 2026-10-16). Answers: can a tail and a ponytail be skinned to the unmodified skeleton well enough?**
 - Inputs: placeholder meshes made by the job, no copyrighted input:
   - tail: tapered tube, 8 sides × 10 rings ≈ 160 tris, root at the back of the pelvis, length ~5 units hanging down and back at 30°;
   - ponytail: tapered tube ≈ 120 tris from the back of the head (below the helmet rim), length ~4 units down the back.
@@ -774,20 +774,20 @@ Generators (Blender jobs, subprocess only) → package → validator. New rules:
 - **Outcome:**
   - The technique is **acceptable without modifying the skeleton** if at least one variant per part passes 1-6. Automatic weights (A) are reported on their own: passing with B/C only means "authored weights, not auto".
   - If no variant passes: report which criterion fails where, and estimate the alternatives (rigid fallback, shorter geometry, new bones + animations).
-- Limits: the spike shows Blender's playback of the vanilla .anim through io_pdx_mesh. UNVERIFIED that it matches the game exactly (stances were verified in game, the importer's playback wasn't). The in-game check (a derived body .mesh with the tail, in a test mod) is a separate step after R0, needing the derived-mesh decision.
+- Limits: the spike shows Blender's playback of the vanilla .anim through io_pdx_mesh. UNVERIFIED that it matches the game exactly (stances were verified in game, the importer's playback wasn't). The in-game check (a derived body .mesh with the tail, in a test mod) is a separate step after R0.
 - Code: one throwaway Blender job + runner call under `scripts/spike_r0/` (not part of the app; removed or promoted after the decision).
 
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.
-- R2: derived bodies (bareheaded, merged skinned additions). Needs the derived-mesh decision. Accept on an in-game test with no error.log lines and no visible artefacts in idle/walk/attack.
+- R2: derived bodies (bareheaded, merged skinned additions). Accept on an in-game test with no error.log lines and no visible artefacts in idle/walk/attack.
 - R3: new rigid kinds (ears, kopis, guards, helmet-with-openings). Accept in game like tests 7-8.
 - R4: skinned clothing (chiton, cuirass) with copied weights. Accept on the R0 metrics + in game.
 - R5: step-8 AI geometry for unusual rigid parts. Accept when decimated output ≤ budget and passes `part_mesh`.
 - R6 (only if R0 fails and the user accepts the cost): extra bones + re-authored animations.
 
 **Open questions:**
-1. Derived body meshes: allowed (needed for R2/R4)?
-2. Which reference images, and their rights status?
+1. ~~Derived body meshes~~: allowed (2026-10-16).
+2. Reference images: none yet; the user supplies original or licensed ones later. Until then the written test character is used.
 3. Is a bareheaded base-game body available (search `body_candidates` for a head without a hat)?
 4. Does io_pdx_mesh anim playback match the game?
 5. Can attached entities be skinned to the parent skeleton? (UNVERIFIED; would avoid derived bodies.)
