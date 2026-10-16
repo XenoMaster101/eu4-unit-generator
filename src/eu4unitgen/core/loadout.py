@@ -280,6 +280,7 @@ class LoadoutResult:
     chosen_bodies: dict[int, str] = field(default_factory=dict)  # tier -> body pdxmesh the loadout picked
     carried: dict[tuple[int, str], list[str]] = field(default_factory=dict)  # slot -> part entities it carries
     derived: dict[int, "DerivedRecord"] = field(default_factory=dict)  # tier -> its infantry's derived body
+    texture_files: list[GeneratedFile] = field(default_factory=list)  # derived bodies' derived textures (Q5)
 
 
 @dataclass
@@ -292,6 +293,7 @@ class DerivedRecord:
     additions: list[tuple[str, tuple[str, ...], int]]  # (kind, chain bones, vertex count), in file order
     removed: list[str] = field(default_factory=list)  # named base parts removed (core.derived_body.REMOVALS)
     deform: dict | None = None  # core.deform_check result on the infantry's idle/walk/attack (None: not run)
+    textures: dict = field(default_factory=dict)  # kind -> derived texture path (Q5 hair swatch), or empty
     accept_clipping: list[str] = field(default_factory=list)  # kinds whose C2 findings are known limits
 
 
@@ -389,6 +391,7 @@ class _Prebuilt:
     removed: list[int]
     base_file: str
     fit: object  # core.fitting.BodyFit of the derived body (what parts on this infantry are fitted to)
+    textures: dict = field(default_factory=dict)  # kind -> (bare name, DDS bytes, base texture path): Q5 hair swatch
 
 
 def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, pdx: "_Meshes", game,
@@ -396,7 +399,9 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
     """Build the tier's derived body before its parts are fitted (a removed helmet changes the head):
     the infantry pdxmesh's base-game .mesh without ``spec["remove"]`` parts and with ``spec["add"]``
     additions (core.derived_body)."""
-    from eu4unitgen.core.derived_body import DerivedBodyError, append_additions, build_derived, removed_triangles
+    from eu4unitgen.core.derived_body import (
+        DerivedBodyError, append_additions, build_derived, removed_triangles, retexture_material,
+    )
     from eu4unitgen.core.fitting import measure_body
 
     src = pdx.get(inf["pdxmesh"])
@@ -409,17 +414,62 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
     if runner is None and spec["add"]:
         raise GenerationError("derived bodies need Blender to build their additions (Settings: Blender path)")
     base = game.read(base_file)
+    textures: dict = {}
     try:
         removed = removed_triangles(base, base_file, spec["remove"]) if spec["remove"] else []
         if spec["add"]:
-            data, adds = build_derived(runner, base, spec["add"], remove=removed, base_file=base_file)
+            swatch = _hair_swatch(base, base_file, removed, game)
+            if swatch is None:
+                data, adds = build_derived(runner, base, spec["add"], remove=removed, base_file=base_file)
+            else:
+                rect, size, images = swatch
+                data, adds = build_derived(runner, base, spec["add"], remove=removed, swatch=rect, tex=size)
+                names = {k: naming.derived_body_texture(set_name, tier, k) for k in images}
+                data = retexture_material(data, names)
+                textures = {k: (names[k], dds, path) for k, (dds, path) in images.items()}
         else:
             data, adds = append_additions(base, [], removed), []
     except DerivedBodyError as exc:
         raise GenerationError(f"tier {tier}: derived body: {exc}") from exc
     file = naming.derived_body_file(set_name, tier, base_file)
     # fitted on the base after removals, without the additions (head-skinned ears would pass for the head)
-    return _Prebuilt(data, adds, removed, base_file, measure_body(append_additions(base, [], removed), file))
+    return _Prebuilt(data, adds, removed, base_file, measure_body(append_additions(base, [], removed), file), textures)
+
+
+SWATCH_MIN_WIDTH = 8  # px; and at least an eighth of the texture tall: else keep the base texture's hair region
+
+
+def _hair_swatch(base: bytes, base_file: str, removed: list[int], game):
+    """Q5: derived copies of the base body's diffuse/normal/specular with a painted hair swatch in
+    the largest texture area no remaining base triangle uses (a removed part's area is free too).
+    -> (rect, size, {kind: (dds bytes, base texture path)}), or None when there's no room."""
+    from eu4unitgen.core.derived_body import append_additions, free_rect
+    from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
+    from eu4unitgen.textures.dds import DDSError, DDSFormat, read_dds, read_header, write_dds
+    from eu4unitgen.textures.hair import paint_swatch
+
+    shape = summarize_mesh(parse_pdx_mesh(base))["shapes"][0]
+    folder = base_file.rsplit("/", 1)[0]
+    paths = {k: f"{folder}/{shape[k]}" for k in ("diffuse", "normal", "specular") if shape.get(k)}
+    raw = {k: game.read(p) for k, p in paths.items()}
+    if len(raw) != 3 or any(v is None or not game.in_base_game(paths[k]) for k, v in raw.items()):
+        return None
+    size = read_header(raw["diffuse"])["width"]
+    rect = free_rect(append_additions(base, [], removed) if removed else base, size)
+    if rect is None or rect[2] - rect[0] < SWATCH_MIN_WIDTH or rect[3] - rect[1] < size // 8:
+        return None
+    try:
+        imgs = {k: read_dds(v) for k, v in raw.items()}
+    except (OSError, ValueError, DDSError):  # undecodable base textures: keep the base texture's hair region
+        return None
+    scaled = {k: (im if im.size == (size, size) else im.resize((size, size))) for k, im in imgs.items()}
+    d, n, s = paint_swatch(scaled["diffuse"], scaled["normal"], scaled["specular"], rect)
+    out = {}
+    for k, im in (("diffuse", d), ("normal", n), ("specular", s)):
+        fmt = DDSFormat.of(read_header(raw[k]))
+        out[k] = (write_dds(im.resize((fmt.width, fmt.height)) if im.size != (fmt.width, fmt.height) else im, fmt),
+                  paths[k])
+    return rect, size, out
 
 
 def _derive(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, built: _Prebuilt, pdx: "_Meshes",
@@ -447,11 +497,16 @@ def _derive(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, bui
         deform = run_check(runner, built.data, base_vertex_count(built.data, built.adds), built.adds, ADDITION_KINDS,
                            [(s, d) for s, d in anims if d is not None])
         res.notes.append(f"tier {tier}: deformation check on {', '.join(s for s, _ in anims)}: {summary(deform)}")
-    res.derived[tier] = DerivedRecord(inf["name"], name, file, built.base_file,
-                                      [(a.name, a.chain, a.count) for a in built.adds], list(spec["remove"]),
-                                      deform, [k for k in (accept or []) if k in {a.name for a in built.adds}])
+    res.derived[tier] = DerivedRecord(
+        inf["name"], name, file, built.base_file, [(a.name, a.chain, a.count) for a in built.adds],
+        removed=list(spec["remove"]), deform=deform,
+        accept_clipping=[k for k in (accept or []) if k in {a.name for a in built.adds}],
+        textures={k: f"{file.rsplit('/', 1)[0]}/{tex}" for k, (tex, _, _) in built.textures.items()})
     what = [f"- {r}" for r in spec["remove"]] + [f"+ {k}" for k in spec["add"]]
     res.notes.append(f"tier {tier}: {inf['name']} wears a derived body ({file}: {built.base_file} {' '.join(what)})")
+    folder = file.rsplit("/", 1)[0]
+    res.texture_files += [GeneratedFile(f"{folder}/{name}", dds, OWNED, derived_from=base_path)
+                          for name, dds, base_path in built.textures.values()]
     return GeneratedFile(file, built.data, OWNED, derived_from=built.base_file)
 
 
@@ -574,7 +629,7 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
         attach(by_name[target], bone, name)
     meshes.extend(built.meshes)
     entities.extend(built.entities)
-    res.files = built.files + derived_files
+    res.files = built.files + derived_files + res.texture_files
     for file, fit in sorted(res.bodies.items()):
         head = f", head top {fit.head['top']} above the joint" if fit.head else ""
         res.notes.append(f"fitting: parts sized for {file} (stature {fit.stature}, scale {fit.scale:.3f}{head})")

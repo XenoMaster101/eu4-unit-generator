@@ -24,7 +24,7 @@ LOADOUT = {"schema": 1, "derived": {"1": ["tail", "tuft"]},
                      "1/crew": {"parts": []}}}
 
 
-def skinned_body(diff="g1_d.dds") -> bytes:
+def skinned_body(diff="g1_d.dds", uv=(0.0, 0, 1, 0, 0, 1)) -> bytes:
     """A made-up one-shape skinned body with the generic infantry's bone names (attach_free's bind
     matrix all zeros, as in vanilla), one triangle on ``hip``."""
     ident = [1.0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
@@ -32,7 +32,7 @@ def skinned_body(diff="g1_d.dds") -> bytes:
                                    "tx": [0.0] * 12 if b == "attach_free" else ident}, "children": []}
              for i, b in enumerate(BONES)]
     mesh = {"name": "mesh", "props": {"p": [0.0, 8, 0, 1, 8, 0, 0, 9, 0], "n": [0.0, 0, -1] * 3,
-                                      "ta": [1.0, 0, 0, 1] * 3, "u0": [0.0, 0, 1, 0, 0, 1], "tri": [0, 2, 1]},
+                                      "ta": [1.0, 0, 0, 1] * 3, "u0": list(uv), "tri": [0, 2, 1]},
             "children": [{"name": "aabb", "props": {"min": [0.0, 8, 0], "max": [1.0, 9, 0]}, "children": []},
                          {"name": "material", "props": {"shader": ["PdxMeshColor"], "diff": [diff], "n": ["g_n.dds"],
                                                         "spec": ["g_s.dds"]}, "children": []},
@@ -305,3 +305,33 @@ def test_paint_shades_flat_zones():
     assert ImageStat.Stat(out.convert("L")).stddev[0] > 10  # flat colour became shaded and grained
     again = paint(flat, zmap, zones, maps)
     assert out.tobytes() == again.tobytes()  # deterministic
+
+
+def test_hair_swatch_textures(project, nation, body_game, fake_install):
+    """Q5: with decodable base textures and free texture space, the derived body gets derived
+    copies of its textures with a hair swatch, and its material names them."""
+    from fakes import make_textures_decodable
+    from eu4unitgen.textures.dds import DDSFormat, read_dds, write_dds
+    from fakes import synthetic_diffuse
+
+    make_textures_decodable(fake_install)
+    units = fake_install / "gfx/models/Units"
+    (units / "g_n.dds").write_bytes(write_dds(synthetic_diffuse(), DDSFormat("DXT1", 64, 64, 7)))
+    (units / "generic_01.mesh").write_bytes(skinned_body(uv=(0.0, 0, 0.2, 0, 0, 0.2)))  # the body uses a corner
+    files, idx = body_game
+    gen = generate(project, nation, files, idx, loadout=Loadout.from_json(LOADOUT), runner=AdditionsRunner())
+    rec = gen.loadout.derived[1]
+    assert set(rec.textures) == {"diffuse", "normal", "specular"}
+    for kind, path in rec.textures.items():
+        assert path == f"gfx/models/Units/hr_mac_body_1_{kind}.dds"
+        f = gen.files[path]
+        assert f.derived_from == f"gfx/models/Units/{ {'diffuse': 'g1_d', 'normal': 'g_n', 'specular': 'g_s'}[kind]}.dds"
+    mesh = next(c for c in parse_pdx_mesh(gen.files["gfx/models/Units/hr_mac_body_1.mesh"].data)["children"][0]
+                ["children"][0]["children"] if c["name"] == "mesh")
+    material = next(c for c in mesh["children"] if c["name"] == "material")["props"]
+    assert material["diff"] == ["hr_mac_body_1_diffuse.dds"] and material["spec"] == ["hr_mac_body_1_specular.dds"]
+    spec = read_dds(gen.files[rec.textures["specular"]].data).convert("RGBA")
+    raw = spec.tobytes()
+    assert any(raw[i:i + 4] == bytes((0, 0, 0, 6)) for i in range(0, len(raw), 4))  # the swatch: no mask, matte
+    report = validate(project, nation, gen, files, idx)
+    assert not report.errors, [str(i) for i in report.errors]

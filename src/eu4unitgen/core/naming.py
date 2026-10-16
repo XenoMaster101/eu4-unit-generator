@@ -178,6 +178,13 @@ class Naming:
         """hr_mac_body_1: a base-game body with skinned additions (tail, tuft) appended."""
         return f"{self.prefix}{check_set_name(set_name)}_body_{_check_tier(tier)}"
 
+    def derived_body_texture(self, set_name: str, tier: int, kind: str) -> str:
+        """hr_mac_body_1_diffuse.dds: a derived body's derived texture (its base texture plus a hair
+        swatch, Q5), a bare name in the derived .mesh's folder."""
+        if kind not in TEXTURE_KINDS:
+            raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
+        return f"{self.derived_body(set_name, tier)}_{kind}.dds"
+
     def derived_body_pdxmesh(self, set_name: str, tier: int) -> str:
         return f"{self.derived_body(set_name, tier)}_mesh"
 

@@ -218,7 +218,54 @@ def kept_triangles(tri: list[int], remove) -> list[int]:
     return [i for k in range(0, len(tri), 3) if k // 3 not in gone for i in tri[k:k + 3]]
 
 
-def check_derived(base: bytes, derived: bytes, remove: list[int] | tuple[int, ...] = ()) -> tuple[list[str], dict]:
+def free_rect(base: bytes, size: int, cell: int = 4) -> tuple[int, int, int, int] | None:
+    """The largest rectangle (image px, x0 y0 x1 y1) of a ``size``-px texture that no triangle of
+    ``base`` maps onto (with a 3 px margin): room for a derived texture's hair swatch (Q5)."""
+    from PIL import Image, ImageDraw
+
+    mesh, _ = _only_mesh(parse_pdx_mesh(base))
+    u, tri = mesh["props"].get("u0", []), mesh["props"].get("tri", [])
+    if not u:
+        return None
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    for k in range(0, len(tri), 3):
+        draw.polygon([(u[i * 2] * size, u[i * 2 + 1] * size) for i in tri[k:k + 3]], fill=255, outline=255, width=3)
+    n = size // cell
+    free = [[mask.crop((x * cell, y * cell, x * cell + cell, y * cell + cell)).getextrema()[1] == 0 for x in range(n)]
+            for y in range(n)]
+    best, heights = (0, None), [0] * n
+    for y in range(n):
+        heights = [h + 1 if free[y][x] else 0 for x, h in enumerate(heights)]
+        stack: list[tuple[int, int]] = []
+        for x in range(n + 1):
+            h = heights[x] if x < n else 0
+            start = x
+            while stack and stack[-1][1] >= h:
+                sx, sh = stack.pop()
+                if sh * (x - sx) > best[0]:
+                    best = (sh * (x - sx), (sx * cell, (y - sh + 1) * cell, x * cell, (y + 1) * cell))
+                start = sx
+            stack.append((start, h))
+    return best[1]
+
+
+TEXTURE_SLOTS = (("diff", "diffuse"), ("n", "normal"), ("spec", "specular"))
+
+
+def retexture_material(derived: bytes, names: dict[str, str]) -> bytes:
+    """``derived`` with its material's diffuse/normal/specular names replaced (bare file names)."""
+    tree = parse_pdx_mesh(derived)
+    mesh, _ = _only_mesh(tree)
+    material = _child(mesh, "material")
+    for slot, kind in TEXTURE_SLOTS:
+        if kind in names:
+            material["props"][slot] = [names[kind]]
+    return write_pdx_mesh(tree)
+
+
+def check_derived(base: bytes, derived: bytes, remove: list[int] | tuple[int, ...] = (),
+                  textures: dict[str, str] | None = None) -> tuple[list[str], dict]:
     """Problems with ``derived`` as a derived body of ``base``, and counts. Every vanilla block must
     be unchanged (skeleton, locators, material, every vertex array, skin rows, triangles) except
     that exactly the base triangles numbered in ``remove`` are gone; only appended vertices, skin
@@ -234,7 +281,12 @@ def check_derived(base: bytes, derived: bytes, remove: list[int] | tuple[int, ..
         problems.append("skeleton differs from the base body's")
     if [c for c in dt["children"] if c["name"] != "object"] != [c for c in bt["children"] if c["name"] != "object"]:
         problems.append("locators differ from the base body's")
-    if _child(dm, "material") != _child(bm, "material"):
+    bmat, dmat = _child(bm, "material"), _child(dm, "material")
+    if textures:  # Q5: only the texture names may differ, and they must be the derived textures'
+        expect = {**bmat["props"], **{slot: [textures[kind]] for slot, kind in TEXTURE_SLOTS if kind in textures}}
+        if dmat is None or dmat["props"] != expect:
+            problems.append("material differs from the base body's beyond its derived texture names")
+    elif dmat != bmat:
         problems.append("material differs from the base body's")
     if sorted(dm["props"]) != sorted(bm["props"]):
         problems.append(f"mesh properties {sorted(dm['props'])} differ from the base's {sorted(bm['props'])}")
@@ -363,7 +415,8 @@ def removed_triangles(base: bytes, base_file: str, names: list[str]) -> list[int
 
 def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, int, int] = HAIR_PATCH,
                   tex: int = PATCH_TEX, remove: list[int] | tuple[int, ...] = (),
-                  base_file: str | None = None) -> tuple[bytes, list[Addition]]:
+                  base_file: str | None = None,
+                  swatch: tuple[int, int, int, int] | None = None) -> tuple[bytes, list[Addition]]:
     """The derived body: ``base`` (.mesh bytes of a base-game body) without the triangles in
     ``remove`` and with the ``kinds`` additions built in background Blender (``build_additions``,
     which measures the body without the removed parts), weighted by their chains, appended."""
@@ -380,14 +433,21 @@ def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, 
             ADDITION_KINDS[k]["chain"].check(names)
         except WeightError as exc:
             raise DerivedBodyError(f"{k}: {exc}") from exc
-    if base_file is not None:
+    per_kind: dict[str, tuple[int, int, int, int]] = {}
+    if swatch is not None:  # Q5: a painted hair swatch in the derived textures (``tex`` = their size)
+        from eu4unitgen.textures.hair import patches
+
+        per_kind = patches(swatch)
+    elif base_file is not None:
         patch, tex = hair_region(base_file)
     with tempfile.TemporaryDirectory(prefix="eu4unitgen_derived_") as tmp:
         body = Path(tmp) / "base.mesh"
         body.write_bytes(append_additions(base, [], remove) if remove else base)
         res = runner.run_job("build_additions", {
             "body": str(body), "patch_px": list(patch), "tex": tex, "density": TEXEL_DENSITY,
-            "additions": [{"name": k, "shape": ADDITION_KINDS[k]["shape"], "params": ADDITION_KINDS[k]["params"]}
+            "additions": [{"name": k, "shape": ADDITION_KINDS[k]["shape"], "params": ADDITION_KINDS[k]["params"],
+                           **({"patch_px": list(per_kind[k])} if k in per_kind else {}),
+                           **({"inner_patch_px": list(per_kind[k + "_inner"])} if k + "_inner" in per_kind else {})}
                           for k in kinds]}, timeout=300).result
     adds = []
     for k, raw in zip(kinds, res["additions"]):

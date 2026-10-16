@@ -112,8 +112,9 @@ def _spear(tip, butt, head_length, head_width, shaft_radius, spike) -> dict:
             "point": POINT}
 
 
+# gloss percents (Q5): metal 8, paint 4, the rest 3: the base game's spec alpha is 4-18 of 255
 SPEAR_ZONES = (ZoneDef("shaft", "Shaft", WOOD, 3, material="wood"),
-               ZoneDef("metal", "Head and butt spike", BRONZE, 13, material="bronze"))
+               ZoneDef("metal", "Head and butt spike", BRONZE, 8, material="bronze"))
 
 KINDS: dict[str, PartKind] = {k.name: k for k in (
     PartKind("dory", "Dory (spear)", "Right_hand_node", LOADOUT_ROLES, "spear", "atlas",
@@ -131,7 +132,7 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "grip_length": Param(1.0, 0.4, 2.5, "Grip length", 0.1),
               "guard_width": Param(0.9, 0.2, 2.5, "Guard width"),
               "point": POINT},
-             (ZoneDef("blade", "Blade and guard", IRON, 13, material="iron"),
+             (ZoneDef("blade", "Blade and guard", IRON, 8, material="iron"),
               ZoneDef("hilt", "Grip and pommel", WOOD, 3, material="leather")),
              scaled=("blade_length", "grip_length")),
     PartKind("hoplon", "Hoplon (round shield)", "Left_hand_node", ("infantry", "crew"), "shield", "disc",
@@ -144,8 +145,8 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "centre_z": Param(0.0, -4.0, 4.0, "Centre fore/aft", 0.1, "forward (-) or back (+) of the hand"),
               "blazon_rotate": Choice(("0", "90", "180", "270"), "0", "Blazon rotation", "degrees, counter-clockwise"),
               "blazon_mirror": Choice(("no", "yes"), "no", "Mirror the blazon")},
-             (ZoneDef("face", "Face", (150, 110, 60), 10, "country1", material="paint"),
-              ZoneDef("rim", "Rim", BRONZE, 13, material="bronze"),
+             (ZoneDef("face", "Face", (150, 110, 60), 4, "country1", material="paint"),
+              ZoneDef("rim", "Rim", BRONZE, 8, material="bronze"),
               ZoneDef("back", "Inside", (120, 85, 50), 3, material="wood")),
              scaled=("radius", "centre_y"), blazon=True),
     PartKind("crest", "Crest (helmet)", "head", LOADOUT_ROLES, "crest", "atlas",
@@ -181,7 +182,7 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "thickness": Param(0.08, 0.02, 0.3, "Thickness", 0.01),
               "crest": Choice(("fore_aft", "transverse", "none"), "fore_aft", "Crest"),
               "crest_height": Param(0.9, 0.2, 3.0, "Crest height")},
-             (ZoneDef("metal", "Bronze", BRONZE, 13, material="bronze"),
+             (ZoneDef("metal", "Bronze", BRONZE, 8, material="bronze"),
               ZoneDef("crest", "Crest", HAIR, 3, material="hair"),
               ZoneDef("slot", "Eye slot and lining", (25, 20, 15), 3, material="leather"))),
 )}

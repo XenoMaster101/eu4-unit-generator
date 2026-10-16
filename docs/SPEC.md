@@ -1165,6 +1165,16 @@ Constraints carried over:
 - **Bake:** `bake_maps` adds a `normal` pass, tangent space on the part's UVs (MikkTSpace, as io_pdx_mesh exports `ta`). Each zone's shading normal is Bevel (radius 0.04, rounded edge highlights instead of bevel geometry) feeding Bump (the 3D material pattern, strength per material in `BUMP`, 0.35-1.4). `BuiltParts.images` uses the baked map.
 - **Measured tilt:** dory 9.1°, hoplon 8.2°, helmet 6.0° (was 2.3° flat; base game 4-20°). Normal maps: `build/q3/normals.png`.
 
+**Q5 (2026-10-16): gloss and the hair swatch.**
+- **Part gloss** into the base game's 4-18: metal zones 13% → 8%, the hoplon's painted face 10% → 4%, the rest 3%. Measured spec alpha: dory 10, hoplon 10, helmet 13 (was 12-26).
+- **Hair swatch** (`textures/hair.py`, `loadout._hair_swatch`): a derived body with additions gets derived copies of its base diffuse, normal and specular (base game only; same DDS format, size and mips as each base; `hr_<set>_body_<tier>_{diffuse,normal,specular}.dds` beside the derived .mesh; `derived_from` recorded).
+  - **Where:** in the largest texture area no remaining base triangle uses (`derived_body.free_rect`, found from the mesh's own UVs, so a removed part's area is free too) at least 8 px wide and an eighth of the texture tall (type1 32×292 px; african_generic_03 32×144 of 256).
+  - **What is painted:** warm brown horsehair (112 78 50) in strands along the length, a lighter inner-ear patch (168 128 104), strand relief in the normal map (green up), spec RGB 0 (no country mask) and a matte alpha of 6.
+  - **Layout:** split along its length: tail 0-62%, tuft 64-78%, ears 80-92%, inner ears 93-100%. The ears' cupped-front vertices map to the inner patch.
+  - **Material:** the derived .mesh's material names the derived textures (`retexture_material`). `check_derived(..., textures=)` allows exactly that change, and rule `derived_body` checks that the derived textures were generated and record their base. Undecodable base textures or too little room fall back to `HAIR_REGIONS`.
+- **Measured:** type1 tail 32.0, tuft 32.0, ears 64.4 texels/unit (was 15.7 / 32 / 32); african_generic_03 tail 14.5, tuft 16.2, ears 31.0 (its own body texture: 16.5).
+- **Renders:** `build/q5/renders/hair_swatch.png`: brown, strand-textured tail and tuft; brown ears with a lighter inner ear. They no longer read as horns.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

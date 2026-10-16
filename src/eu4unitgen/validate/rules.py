@@ -463,7 +463,14 @@ def derived_body(ctx: Context) -> list[Issue]:
         except DerivedBodyError as exc:
             out.append(Issue(ERROR, "derived_body", str(exc), f.path))
             continue
-        problems, counts = check_derived(base, f.data, removed)
+        names = {k: p.rsplit("/", 1)[-1] for k, p in (rec.textures or {}).items()}
+        problems, counts = check_derived(base, f.data, removed, names or None)
+        for kind, path in sorted((rec.textures or {}).items()):
+            tex = ctx.generated.files.get(path)
+            if tex is None:
+                problems.append(f"its derived {kind} texture {path} wasn't generated")
+            elif not tex.derived_from:
+                problems.append(f"its derived {kind} texture {path} doesn't record its base texture")
         out += [Issue(ERROR, "derived_body", f"{p} (base {rec.base_file})", f.path) for p in problems]
         if problems:
             continue

@@ -305,14 +305,24 @@ def main():
     tex = a["tex"]
     out = []
     for add in a["additions"]:
+        x0, y0, x1, y1 = add.get("patch_px") or a["patch_px"]  # Q5: each addition's own part of the hair swatch
+        inner = add.get("inner_patch_px")  # ears: the cupped front's vertices go to a lighter patch
         me, rings, around = SHAPES[add["shape"]](body, add.get("params", {})).finish(add["name"])
         last = max(rings) or 1
         # Q1: use only as much of the hair region as gives ~``density`` texels per mesh unit (all of it
         # when the region is too small for that, e.g. the tail, until a dedicated hair swatch exists).
         # Map at full size, measure the real density over the triangles, scale once.
         def uvs(f):
-            return [((x0 + 1 + (x1 - x0 - 2) * (0.1 + 0.8 * around[i] * f)),
-                     (y0 + 1 + (y1 - y0 - 2) * (rings[i] / last) * f)) for i in range(len(me.vertices))]
+            out_uv = []
+            for i in range(len(me.vertices)):
+                if inner and around[i] >= 0.6:  # inner (front) ring points: the lighter inner-ear patch
+                    ix0, iy0, ix1, iy1 = inner
+                    out_uv.append((ix0 + 1 + (ix1 - ix0 - 2) * (around[i] - 0.6) / 0.4,
+                                   iy0 + 1 + (iy1 - iy0 - 2) * (rings[i] / last)))
+                else:
+                    out_uv.append(((x0 + 1 + (x1 - x0 - 2) * (0.1 + 0.8 * around[i] * f)),
+                                   (y0 + 1 + (y1 - y0 - 2) * (rings[i] / last) * f)))
+            return out_uv
 
         def measured(uv):
             area3 = area_uv = 0.0
