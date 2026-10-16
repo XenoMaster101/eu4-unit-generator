@@ -507,7 +507,8 @@ def derived_body(ctx: Context) -> list[Issue]:
         for kind, path in sorted((rec.textures or {}).items()):
             tex = ctx.generated.files.get(path)
             if tex is None:
-                problems.append(f"its derived {kind} texture {path} wasn't generated")
+                if not game.in_base_game(path):  # a base-game texture used as it is (e.g. the recipe left it) is fine
+                    problems.append(f"its {kind} texture {path} is neither generated nor a base-game file")
             elif not tex.derived_from:
                 problems.append(f"its derived {kind} texture {path} doesn't record its base texture")
         out += [Issue(ERROR, "derived_body", f"{p} (base {rec.base_file})", f.path) for p in problems]

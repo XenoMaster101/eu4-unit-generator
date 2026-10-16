@@ -488,7 +488,7 @@ def generate(project: Project, nation: Nation, game: GameFiles, idx: Index, mod:
         from eu4unitgen.core.loadout import apply_loadout
 
         out.loadout = apply_loadout(naming, set_name, tag, tag_entities, meshes, loadout, game, idx, version, runner,
-                                    part_cache)
+                                    part_cache, {f.path: f for f in out.files.values() if f.derived_from})
         for f in out.loadout.files:
             out.add(f)
         out.notes += out.loadout.notes

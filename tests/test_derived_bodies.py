@@ -350,3 +350,34 @@ def test_texture_quality_flags_flat_parts(project, nation, game):
     good = {"density": 30.0, "detail": 12.0, "shading": 10.0, "normal": 8.0, "gloss": 10.0}
     assert outside(good) == [] and outside({**good, "normal": 25.0}) == ["normal 25.0 > 20"]
     assert set(RANGES) == set(good)
+
+
+RECOLOUR = {"schema": 1, "slots": {"1/infantry": {"ops": [{"op": "recolour", "region": "cloth", "colour": [200, 190, 170]}]}}}
+
+
+@pytest.mark.parametrize("adds", [[], ["tail"]])
+def test_derived_body_on_a_texture_recipe(project, nation, body_game, fake_install, removable_helmet, adds):
+    """Gap 1 (hoplite proof): a derived body takes the recipe's recoloured textures; with additions
+    the hair swatch is painted on top of them, still derived from the base game's file."""
+    from fakes import make_textures_decodable, synthetic_diffuse
+    from eu4unitgen.core.recipe import TextureRecipe
+    from eu4unitgen.textures.dds import DDSFormat, write_dds
+
+    make_textures_decodable(fake_install)
+    (fake_install / "gfx/models/Units/g_n.dds").write_bytes(write_dds(synthetic_diffuse(), DDSFormat("DXT1", 64, 64, 7)))
+    (fake_install / "gfx/models/Units/generic_01.mesh").write_bytes(skinned_body(uv=(0.0, 0, 0.2, 0, 0, 0.2)))
+    files, idx = body_game
+    lo = Loadout.from_json({"schema": 1, "derived": {"1": {"add": adds, "remove": ["helmet"]}},
+                            "slots": {"1/infantry": {"parts": [{"kind": "dory"}]}}})
+    gen = generate(project, nation, files, idx, loadout=lo, recipe=TextureRecipe.from_json(RECOLOUR),
+                   runner=AdditionsRunner())
+    mesh = next(c for c in parse_pdx_mesh(gen.files["gfx/models/Units/hr_mac_body_1.mesh"].data)["children"][0]
+                ["children"][0]["children"] if c["name"] == "mesh")
+    diff = next(c for c in mesh["children"] if c["name"] == "material")["props"]["diff"][0]
+    if adds:
+        assert diff == "hr_mac_body_1_diffuse.dds"  # the hair swatch over the recipe's colours
+        assert gen.files["gfx/models/Units/hr_mac_body_1_diffuse.dds"].derived_from == "gfx/models/Units/g1_d.dds"
+    else:
+        assert diff == N.texture("mac", "infantry", 1, "diffuse")  # the recipe's own texture
+    report = validate(project, nation, gen, files, idx)
+    assert not report.errors, [str(i) for i in report.errors]

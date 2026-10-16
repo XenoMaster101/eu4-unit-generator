@@ -1264,6 +1264,18 @@ Constraints carried over:
 - **Converted:** `build/specs/test11.json` (built from it alone, the stage is byte-identical to the flag-built one) and `build/specs/test8.json` (blazon rebased; validates with 0 errors).
 - **Q6 now warns on test 8:** sarissa_2 density 11.4 (a long pike at the 512 cap; a non-square atlas for long shafts would fix it, the dory too), crest_2 detail 5.3 and shading 3.5.
 
+**R-D 2 (2026-10-16): the hoplite proof, from `build/specs/hoplite/hoplite.json` only.**
+- **The spec:** HDA / `hoplite_test` / hellenicgfx, unit colours crimson / bronze / off-white.
+  - **Texture recipe** on 1/infantry: cloth recoloured to linen (226 214 184), a `pattern` of linen bands (`linothorax_bands.png`, an original 64 px tile in the spec's folder, multiplied at 0.55), cloth gloss 3; skin and metal protected.
+  - **Loadout:** `derived {"1": {"remove": ["helmet"]}}` (type1's bare head is already bearded); dory, hoplon and a corinthian `greek_helmet` with a fore-aft crest; an empty crew slot.
+- **Gap found, one: gap 1** ("a derived body can't combine with a texture recipe's retextured body"). Without the recipe, or without the derived body, the spec built clean (0 errors, 0 warnings).
+- **Generic fix:** `apply_loadout` gets the recipe's generated textures.
+  - The derived body's material names the recipe's textures (they sit in the derived .mesh's folder).
+  - With additions, the hair swatch is painted over the recipe's textures, keeping their base-game origin as `derived_from`.
+  - Rule `derived_body` accepts a material texture that is generated or a base-game file used as it is (the recipe left the normal map alone).
+- **Result:** 0 errors, 0 warnings, built from the spec with **no other code changes**. Staged: `build/hoplite/stage`.
+
+
 
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.

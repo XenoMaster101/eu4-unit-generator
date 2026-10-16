@@ -396,7 +396,7 @@ class _Prebuilt:
 
 
 def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, pdx: "_Meshes", game,
-              runner, hair: dict | None = None) -> _Prebuilt:
+              runner, hair: dict | None = None, retextured: dict | None = None) -> _Prebuilt:
     """Build the tier's derived body before its parts are fitted (a removed helmet changes the head):
     the infantry pdxmesh's base-game .mesh without ``spec["remove"]`` parts and with ``spec["add"]``
     additions (core.derived_body)."""
@@ -406,10 +406,16 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
     from eu4unitgen.core.fitting import measure_body
 
     src = pdx.get(inf["pdxmesh"])
-    if src.get("settings"):
-        raise GenerationError(f"tier {tier}: a derived body can't combine with a texture recipe's retextured "
-                              f"body ({inf['pdxmesh']}) yet")
     base_file = src.get("file") or ""
+    # a texture recipe's retextured body: its meshsettings name the recipe's textures (generated, bare
+    # names in the base mesh's folder, where the derived .mesh goes too); the derived body's material
+    # names them instead, and a hair swatch is painted on top of them
+    recipe_tex = {}
+    for st in src.get("settings") or []:
+        folder = base_file.rsplit("/", 1)[0]
+        for kind in ("diffuse", "normal", "specular"):
+            if st.get(kind):
+                recipe_tex[kind] = f"{folder}/{st[kind]}"
     if not game.in_base_game(base_file):
         raise GenerationError(f"tier {tier}: derived bodies come from base-game meshes only, not {base_file!r}")
     if runner is None and spec["add"]:
@@ -419,7 +425,7 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
     try:
         removed = removed_triangles(base, base_file, spec["remove"]) if spec["remove"] else []
         if spec["add"]:
-            swatch = _hair_swatch(base, base_file, removed, game, hair)
+            swatch = _hair_swatch(base, base_file, removed, game, hair, recipe_tex, retextured or {})
             if swatch is None:
                 data, adds = build_derived(runner, base, spec["add"], remove=removed, base_file=base_file)
             else:
@@ -430,6 +436,9 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
                 textures = {k: (names[k], dds, path) for k, (dds, path) in images.items()}
         else:
             data, adds = append_additions(base, [], removed), []
+        if recipe_tex and not textures:  # no swatch: the recipe's textures as they are
+            data = retexture_material(data, {k: p.rsplit("/", 1)[-1] for k, p in recipe_tex.items()})
+            textures = {k: (p.rsplit("/", 1)[-1], None, None) for k, p in recipe_tex.items()}
     except DerivedBodyError as exc:
         raise GenerationError(f"tier {tier}: derived body: {exc}") from exc
     file = naming.derived_body_file(set_name, tier, base_file)
@@ -440,7 +449,8 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
 SWATCH_MIN_WIDTH = 8  # px; and at least an eighth of the texture tall: else keep the base texture's hair region
 
 
-def _hair_swatch(base: bytes, base_file: str, removed: list[int], game, hair: dict | None = None):
+def _hair_swatch(base: bytes, base_file: str, removed: list[int], game, hair: dict | None = None,
+                 recipe_tex: dict | None = None, retextured: dict | None = None):
     """Q5: derived copies of the base body's diffuse/normal/specular with a painted hair swatch in
     the largest texture area no remaining base triangle uses (a removed part's area is free too).
     -> (rect, size, {kind: (dds bytes, base texture path)}), or None when there's no room."""
@@ -455,6 +465,10 @@ def _hair_swatch(base: bytes, base_file: str, removed: list[int], game, hair: di
     raw = {k: game.read(p) for k, p in paths.items()}
     if len(raw) != 3 or any(v is None or not game.in_base_game(paths[k]) for k, v in raw.items()):
         return None
+    for kind, path in (recipe_tex or {}).items():  # paint over a texture recipe's output; keep its base-game origin
+        f = (retextured or {}).get(path)
+        if f is not None and f.derived_from:
+            raw[kind], paths[kind] = f.data, f.derived_from
     size = read_header(raw["diffuse"])["width"]
     rect = free_rect(append_additions(base, [], removed) if removed else base, size)
     if rect is None or rect[2] - rect[0] < SWATCH_MIN_WIDTH or rect[3] - rect[1] < size // 8:
@@ -507,7 +521,7 @@ def _derive(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, bui
     res.notes.append(f"tier {tier}: {inf['name']} wears a derived body ({file}: {built.base_file} {' '.join(what)})")
     folder = file.rsplit("/", 1)[0]
     res.texture_files += [GeneratedFile(f"{folder}/{name}", dds, OWNED, derived_from=base_path)
-                          for name, dds, base_path in built.textures.values()]
+                          for name, dds, base_path in built.textures.values() if dds is not None]
     return GeneratedFile(file, built.data, OWNED, derived_from=built.base_file)
 
 
@@ -527,7 +541,8 @@ def _drop_hand_attaches(entity: dict) -> list[str]:
 
 
 def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict], meshes: list[dict],
-                  loadout: Loadout, game, idx, version: int, runner, cache: dict | None = None) -> LoadoutResult:
+                  loadout: Loadout, game, idx, version: int, runner, cache: dict | None = None,
+                  retextured: dict | None = None) -> LoadoutResult:
     """Dress ``owner``'s entities (from ``unit_entities``, after retexturing) with ``loadout``.
     ``entities`` and ``meshes`` (the set's generated pdxmesh records) are changed in place: part
     entities, crew entities and stance pdxmeshes are added. Parts are built in background Blender
@@ -562,7 +577,8 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
                 res.notes.append(f"tier {tier}: {loadout.bodies[tier]} has no artillery_attack; "
                                  f"{inf['pdxmesh']} adds it (= its attack) for the gun crew")
         base_inf = copy.deepcopy(inf)
-        prebuilt = (_prebuild(naming, set_name, tier, inf, loadout.derived[tier], pdx, game, runner, loadout.hair)
+        prebuilt = (_prebuild(naming, set_name, tier, inf, loadout.derived[tier], pdx, game, runner, loadout.hair,
+                              retextured or {})
                     if tier in loadout.derived else None)
         for role in ("infantry", "crew", "rider"):
             slot = active.get((tier, role))
