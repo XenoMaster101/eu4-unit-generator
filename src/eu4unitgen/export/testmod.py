@@ -520,6 +520,9 @@ def _describe_part(r) -> str:
     bits = [k.label.split(" (")[0].lower(), f"on {r.bone}"]
     if "point" in p:
         bits.append("point " + ("+Z (up/forward, like the halberd)" if p["point"] == "up" else "-Z (like the sabre)"))
+    if r.kind == "greek_helmet":
+        bits.append(f"{p.get('style', 'attic')} style, crest {p.get('crest', 'fore_aft').replace('_', '-')}; "
+                    "the ears and the tuft come out through it")
     if r.kind == "crest":
         bits.append("front-to-back" if p.get("orientation") == "fore_aft" else "side-to-side (transverse)")
     names = {"country1": "primary", "country2": "secondary", "country3": "tertiary"}
@@ -535,31 +538,50 @@ def _describe_part(r) -> str:
 
 
 DERIVED_LOOK = {
-    "tail": "a dark brown horse tail hanging from the back of the hips, its flared base over the tunic hem",
-    "tuft": "a short dark tuft sticking out back and down from the back of the helmet",
+    "tail": "a dark horse tail from the back of the hips: a tufted, flared base over the tunic hem, a plume curving "
+            "down and back, a split (tufted) tip",
+    "tuft": "a short tied tuft coming out back and down from the back of the head or helmet",
+    "ears": "two horse ears on top of the head (pointed, cupped forward and a little out)",
 }
+REMOVED_LOOK = {"helmet": "the base body's own helmet is gone: a bare head with short hair (under the Greek helmet)"}
+
+SIDE_VIEW = [
+    "SIDE-VIEW CHECK (the camera can't rotate; units face the way they move):",
+    "[ ] V1 march the army east or west across 2+ provinces, zoom all the way in, pause mid-march: the units walk "
+    "side-on. Look at the tail (plume, base, tip) and the tuft.",
+    "[ ] V2 after it arrives it idles facing its last direction of movement (UNVERIFIED: note which way it faces); "
+    "check side-on idle.",
+    "[ ] V3 attack an enemy army in the province directly east or west: the fight is side-on. Check the tail and "
+    "tuft in the attack lunge.",
+    "[ ] V4 from behind: march north (away from the camera) and look at the tail from the rear.",
+]
 
 
 def _derived_lines(tier: int, rec) -> list[str]:
     kinds = [k for k, _, _ in rec.additions]
     looks = "; ".join(DERIVED_LOOK.get(k, k) for k in kinds)
-    return [
-        f"[ ] {tier}D1 infantry wears a derived body ({rec.file}): {looks}. Unit missing, invisible or black = the "
-        "derived .mesh or its textures fail -> stop, send error.log.",
-        f"[ ] {tier}D2 the rest of the body looks like the vanilla soldier (face, helmet, cloth in the unit colours); "
-        f"{' and '.join(kinds)} dark brown, not black, pink or untextured.",
-        f"[ ] {tier}D3 {' and '.join(kinds)} stay attached and move with the body in idle, walk and attack: no "
-        "stretching, spikes or flicker; the tail never swings through the legs.",
-        f"[ ] {tier}D4 attack: note any visible clipping (the tuft comes near the neck; the tail's base overlaps the "
-        "tunic hem by design).",
-        f"[ ] {tier}D5 the gun crew and the cavalry rider wear the plain base body (no {' or '.join(kinds)}).",
-        f"[ ] {tier}D6 zoomed out to map scale: does the tail read from behind or the side? (invisible from the front "
-        "is expected)",
+    lines = [
+        f"[ ] {tier}D1 infantry wears a derived body ({rec.file}, from {rec.base_file.rsplit('/', 1)[-1]}): {looks}. "
+        "Unit missing, invisible or black = the derived .mesh or its textures fail -> stop, send error.log.",
     ]
+    for r in getattr(rec, "removed", []) or []:
+        lines.append(f"[ ] {tier}D1r {REMOVED_LOOK.get(r, r + ' removed')}; no hole or stray piece of it shows.")
+    lines += [
+        f"[ ] {tier}D2 the rest of the body looks like the base soldier (face, cloth in the unit colours); "
+        f"{', '.join(kinds)} in the body's hair colour, not pink or untextured.",
+        f"[ ] {tier}D3 {', '.join(kinds)} stay attached and move with the body in idle, walk and attack: no "
+        "stretching, spikes or flicker; the tail never swings through the legs.",
+        f"[ ] {tier}D4 attack: note visible clipping. Known and accepted: the tuft dips into the top of the back in the "
+        "lunge. By design: the tail's base overlaps the tunic hem.",
+        f"[ ] {tier}D5 the gun crew and the cavalry rider wear the plain base body (no {' or '.join(kinds)}).",
+        f"[ ] {tier}D6 zoomed out to map scale: do the tail and ears read at all? (pre-check renders: barely, dark on "
+        "dark; this decides a lighter hair texture)",
+    ]
+    return lines
 
 
 def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict[int, int] | None) -> str:
-    """In-game tests 8 and 10: what each tier's bodies should carry (parts, stances, derived bodies),
+    """In-game tests 8, 10 and 11: what each tier's bodies should carry (parts, stances, derived bodies),
     from the loadout the set was built with."""
     res, nation = generated.loadout, generated.nation
     techs = (", ".join(f"tier {lvl} at MIL {t}" for lvl, t in sorted(sprite_techs.items())) if sprite_techs
@@ -592,6 +614,14 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
                 lines.append(f"[ ] {tier}S  {entity}: {stance} animations; " + STANCE_LOOK.get(stance, ""))
         if tier in res.derived:
             lines += _derived_lines(tier, res.derived[tier])
+    if res.derived:
+        lines += ["", *SIDE_VIEW]
+        if len(res.derived) > 1:
+            bodies = ", ".join(f"tier {t}: {r.base_file.rsplit('/', 1)[-1][:-5]}" + "".join(f" - {x}" for x in r.removed)
+                               for t, r in sorted(res.derived.items()))
+            lines += ["", f"BODY COMPARISON ({bodies})",
+                      "[ ] B1 which body reads better as a Hellenistic soldier with the Greek helmet, up close and at "
+                      "map scale? Note why (clothing, skin, silhouette, how the helmet sits)."]
     lines += [
         "",
         "GENERAL",

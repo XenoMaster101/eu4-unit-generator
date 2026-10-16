@@ -1040,6 +1040,12 @@ Constraints carried over:
   - close-ups `build/test11/precheck/precheck_close.png`: helmet, dory and hoplon follow their bones; the tail reads clearly side-on and from the rear, most of all in the attack;
   - map scale `precheck_map.png` (48 px from above, camera angle UNVERIFIED): the helmet and hoplon read; **the dark tail and ears barely read** (dark on dark, foreshortened from above). This is the case for T2 (lighter hair swatch).
 
+**In-game test 11 — STAGED (2026-10-16):** `build/test11/stage` (mod `eu4unitgen_test`). HDA / `macedonian_test` / hellenicgfx, loadout `build/test11/loadout.json`, unit colours blue / yellow / black, test sprite techs 2 3 4 (tier 2 at MIL 2).
+- **T1:** derived `western_generic_01_type1` - helmet + tail, tuft, ears.
+- **T2:** loadout body `african_generic_03_type1` + tail, tuft, ears.
+- **Both:** attic `greek_helmet` (fore-aft crest), dory, hoplon, `spear_shield`, their own crew slots on plain bodies; `accept_clipping: ["tuft"]`.
+- Validator 0 errors, 4 warnings (step 6). Checklist `build/test11/checklist.txt`: per-tier derived-body lines (removal included), a side-view procedure (V1-V4), a body comparison (B1), and map-scale reading (D6, which decides the lighter hair texture).
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

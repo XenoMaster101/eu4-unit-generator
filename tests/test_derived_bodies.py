@@ -179,8 +179,9 @@ def test_checklist_lists_the_derived_body(project, nation, body_game):
     gen = generate(project, nation, files, idx, loadout=Loadout.from_json(LOADOUT), runner=AdditionsRunner())
     text = loadout_checklist(gen, "eu4unitgen_test", None)
     assert "derived bodies" in text.splitlines()[0]
-    assert "[ ] 1D1 infantry wears a derived body (gfx/models/Units/hr_mac_body_1.mesh)" in text
+    assert "[ ] 1D1 infantry wears a derived body (gfx/models/Units/hr_mac_body_1.mesh, from generic_01.mesh)" in text
     assert "[ ] 1D5 the gun crew and the cavalry rider wear the plain base body (no tail or tuft)" in text
+    assert "SIDE-VIEW CHECK" in text
 
 
 @pytest.fixture
