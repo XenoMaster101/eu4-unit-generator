@@ -1046,6 +1046,73 @@ Constraints carried over:
 - **Both:** attic `greek_helmet` (fore-aft crest), dory, hoplon, `spear_shield`, their own crew slots on plain bodies; `accept_clipping: ["tuft"]`.
 - Validator 0 errors, 4 warnings (step 6). Checklist `build/test11/checklist.txt`: per-tier derived-body lines (removal included), a side-view procedure (V1-V4), a body comparison (B1), and map-scale reading (D6, which decides the lighter hair texture).
 
+- **Result (2026-10-16): PASS.** Both tiers look fine; every part and both derived bodies work in game. error.log and "tail side-on": **not reported** (the user's report left them as placeholders).
+  - **Feedback 1, ears:** they read as cat ears, not a horse's ("catboy Spartans"), and look paper-thin. Wanted: longer and narrower, a softer rounded tip, set wider apart on the sides of the crown, angled slightly out and back, real thickness, a cupped inner side.
+  - **Feedback 2, quality:** our parts look flat next to the vanilla body's hand-painted textures.
+
+**Quality measurements (2026-10-16, `scripts/plan11/measure_quality.py`; read-only):**
+- **Definitions:**
+  - texel density = sqrt(UV area in texels / surface area), texels per mesh unit;
+  - detail = mean std dev of luminance in 8×8 blocks;
+  - shading = luminance std dev after a 16 px blur (broad painted light, shadow and AO);
+  - normal tilt = mean tangent-space tilt from flat;
+  - gloss = spec alpha.
+- **Base game:**
+
+  | Mesh | Texture | Density | Detail | Shading | Value range | Normal tilt | Gloss |
+  |---|---|---|---|---|---|---|---|
+  | `western_generic_01_type1` | 512 | 32.8 | 12.6 | 21.6 | 13-132 | 12.9° | 6 |
+  | `african_generic_03_type1` | 256 | 16.5 | 12.1 | 26.0 | 10-116 | 11.7° | 4 |
+  | `western_halbard` | 512 | 25.2 | 11.3 | 6.9 | | 5.1° | 6 |
+  | `western_musket` | 512 | 21.0 | 18.9 | 3.8 | | 13.4° | 18 |
+  | `cavalry_saber` | 256 | 17.5 | 21.5 | 11.3 | | 4.2° | 8 |
+  | indian shield | 256 | 26.9 | 12.0 | 12.0 | | 19.6° | 11 |
+  | south american shield | 256 | 9.8 | 18.5 | 16.7 | | 7.6° | 6 |
+
+- **Ours (test 11):**
+  - **Strip-layout parts (dory, helmet, crest), 64 px: density 0.** Every face of a zone maps to one swatch texel, so each zone is a flat colour with no detail and no painted shading.
+  - Hoplon (disc, 256): density 22.9 but detail 0 (flat colours).
+  - All of them: normal maps flat (2.3°, compression); gloss 16-26, shinier than vanilla's 4-18.
+  - Additions on the body texture: tail 15.7, tuft 40.3, ears 62.2 texels/unit against the body's 32.8 (inconsistent).
+
+**Plan: ear redesign + "match vanilla quality" pass (PLANNED, nothing built).**
+- **Q0 ears** (feedback 1; `build_additions` `ears`, rigid `head`, in the derived body):
+  - length 1.1 → ~1.5; widest 0.50 → ~0.36 (about 4:1 instead of 2.2:1);
+  - **rounded tip**: the last rings close in a small dome instead of a point;
+  - placed **on the sides of the crown**: spread 0.5 → ~0.85 × half-width, base a little lower;
+  - angled **out ~25° and back ~15°** (they leaned forward 8°);
+  - **real thickness** (~0.12 at the base, a solid lens section, not a thin crescent) with a **cupped inner side**: the front face concave, its UVs on the darkest part of the hair region;
+  - they come out through the Greek helmet's sides.
+  - Acceptance: renders next to the old ears; `check_deform` clean (rigid on `head`); in game, reads as horse, not cat.
+- **Q1 UV unwrap and texel density.** Replace swatch-point UVs with real unwraps:
+  - shafts: cylindrical, the length along v;
+  - blades and fins: planar;
+  - helmet: spherical / dome projection plus a skirt strip;
+  - shield: keep the disc, plus a rim strip.
+  - Texture size from the area, targeting the body's density (≈33 texels/unit; base-game weapons 17-27). The dory's long shaft gets a tall strip (e.g. 64×512).
+  - Additions on the body texture get UV scales normalised to ~33. Where the hair region is too small for that, Q5's derived hair swatch is used.
+  - Acceptance: measured density within 17-35 for every part.
+- **Q2 painted base colour** (procedural, per zone, in vanilla's style):
+  - material noise: wood grain, hammered bronze, horsehair strands, leather;
+  - **baked AO** and a **curvature** pass (cavities darker, edges lighter: painted wear);
+  - a soft top-light gradient, like vanilla's painted lighting.
+  - Bakes in background Blender (Cycles, CPU, a few seconds a part; cached by job hash, like parts now).
+  - Acceptance: detail 11-20, shading 7-20, value range comparable to the vanilla item of the same material.
+- **Q3 normal maps** baked from higher-detail versions of each part (subdivided and displaced: grain, hammer marks, the rim bead, crest hair strands), tangent space in the .mesh's convention (`core.derived_body.tangents` matches vanilla's). Acceptance: tilt 5-15°.
+- **Q4 geometry:**
+  - smooth normals on curved parts (hard edges only where materials meet);
+  - thickness for thin parts (ears, crest fin, cheek guards) and a small bevel on rims and edges, so they catch highlights;
+  - triangle budgets kept (rigid parts ≤300-400; the helmet now 404).
+- **Q5 gloss and hair:**
+  - spec alpha into vanilla's 4-18 per material (bronze ~13 → ~10, wood and cloth ~4);
+  - **T2 hair swatch** (deferred since step 5): a derived copy of the body's diffuse/normal/spec (base game only, `hr_` names) with a painted horsehair swatch in an unused grey island, sized for Q1's density. It also fixes the map-scale read: a lighter, warmer brown than the soldier's hair.
+- **Q6 measurement as a check:** `measure_quality` becomes a validator report (`texture_quality`): warnings when a generated part's density, detail, shading, normal tilt or gloss falls outside the base-game range for its material.
+- **Order:** Q0 → Q1 → Q4 → Q2 → Q3 → Q5 → Q6 → renders side by side with vanilla (close and 48 px) → in-game test 12.
+- **Risks:**
+  - Cycles baking in background Blender on CPU (time; cached);
+  - DXT compression on small textures (measure after encoding);
+  - painted style is subjective: the metrics bound it, the user signs it off from renders before the game.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**
