@@ -32,3 +32,35 @@ for f in (sc.frame_start, (sc.frame_start + sc.frame_end) // 2, sc.frame_end):
     moved = max(moved, max((co[i] - rest[i]).length for i in range(base_n, len(co))))
 out["added_max_move"] = moved
 _pdx.write_result(a, out)
+
+# ---- step 4: textured check render. io_pdx_mesh resolves textures beside the .mesh (our build
+# folder has none), so build a plain material from the install's diffuse, read in place.
+if a.get("render"):
+    diff_path = os.path.join(units, "western_generic_01_type1_diffuse.dds")
+    img = bpy.data.images.load(diff_path, check_existing=True)
+    out["texture"] = {"path": diff_path, "size": list(img.size), "has_data": bool(img.has_data or img.pixels[:4])}
+    mat = bpy.data.materials.new("p2b_check")
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    bsdf = next(n for n in nodes if n.type == "BSDF_PRINCIPLED")
+    tex = nodes.new("ShaderNodeTexImage"); tex.image = img
+    mat.node_tree.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    nodes.active = tex
+    body.data.materials.clear(); body.data.materials.append(mat)
+    sc.render.engine = "BLENDER_WORKBENCH"
+    sh = sc.display.shading
+    sh.light, sh.color_type = "STUDIO", "TEXTURE"
+    world = sc.world or bpy.data.worlds.new("p2b"); sc.world = world; world.color = (0.82, 0.84, 0.86)
+    cam = bpy.data.objects.new("p2b_cam", bpy.data.cameras.new("p2b_cam")); sc.collection.objects.link(cam)
+    cam.data.type = "ORTHO"; sc.camera = cam
+    for o in new:
+        if o.type != "MESH":
+            o.hide_render = True
+    out["renders"] = []
+    for f, tag in ((sc.frame_start, "f1"), ((sc.frame_start + sc.frame_end) // 2, "mid")):
+        sc.frame_set(f)
+        lo, hi = sj.bounds([body], evaluated_pts=True)
+        for view, d in (("side", (-1, 0, 0)), ("rear", (0, -1, 0)), ("rear_quarter", (0.6, -0.7, -0.35))):
+            sj.frame_cam(cam, d, lo, hi)
+            out["renders"].append(sj.render(sc, os.path.join(a["out_dir_override"], f"p2b_{tag}_{view}.png"), 420))
+    _pdx.write_result(a, out)
