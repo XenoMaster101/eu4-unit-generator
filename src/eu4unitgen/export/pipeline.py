@@ -433,7 +433,8 @@ class Session:
                                          give_cores=give_cores, name=base_name, **self._parts_args(spec))
                 mods = [tm]
                 if tm.package.loadout is not None:
-                    checklist = loadout_checklist(tm.package, tm.plan.manifest_rel.split("/", 1)[0], sprite_techs)
+                    checklist = loadout_checklist(tm.package, tm.plan.manifest_rel.split("/", 1)[0], sprite_techs,
+                                                  load_recipe(spec))
             elif suite:
                 built = build_suite(project, nation, game, idx, mod_dir, facts, culture_groups(game),
                                     rival_gfx=rival_gfx, test_sprite_techs=sprite_techs, fallback_tags=fallback_tags)
@@ -443,7 +444,7 @@ class Session:
                                     recipe=load_recipe(spec), **self._parts_args(spec))
                 mods = [tm]
                 if tm.package.loadout is not None:
-                    checklist = loadout_checklist(tm.package, TEST_MOD_NAME, sprite_techs)
+                    checklist = loadout_checklist(tm.package, TEST_MOD_NAME, sprite_techs, load_recipe(spec))
         except GenerationError as exc:
             raise SpecError(str(exc)) from exc
         reports = [(tm.plan.manifest_rel.split("/", 1)[0], tm.report) for tm in mods]

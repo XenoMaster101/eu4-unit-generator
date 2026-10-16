@@ -1285,6 +1285,7 @@ Constraints carried over:
   - **Usability gaps for the GUI:** writing the recipe needed knowledge of type1's texture layout (which islands are unit-colour, where the hair is). Proposed:
     - named texture islands per body in the body library (data: `head`, `torso`, `legs`, … as UV boxes or island masks) so recipes can target `island:torso`;
     - the GUI shows the body texture with its regions and islands overlaid, with mask painting.
+  - **In-game test 12 — STAGED (2026-10-16):** the hoplite from `build/specs/hoplite/hoplite.json` on HDA tier 1 (`test-mod --spec`), `build/test12/stage`, validator 0 errors, 0 warnings. It verifies a texture recipe on a derived body in game. Checklist `build/test12/checklist.txt`, now **data-driven**: lines only for what each tier has (removals, additions with their `look` from `additions.json`, accepted clipping, parts on the head), one line per texture-recipe slot listing its operations, and a side-view and map-scale section naming what to look at. The horse wording is gone from code.
   - **Not yet checked in game:** the hoplite (no test requested). The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
 
 

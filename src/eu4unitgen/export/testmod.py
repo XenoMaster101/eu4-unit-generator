@@ -521,8 +521,7 @@ def _describe_part(r) -> str:
     if "point" in p:
         bits.append("point " + ("+Z (up/forward, like the halberd)" if p["point"] == "up" else "-Z (like the sabre)"))
     if r.kind == "greek_helmet":
-        bits.append(f"{p.get('style', 'attic')} style, crest {p.get('crest', 'fore_aft').replace('_', '-')}; "
-                    "the ears and the tuft come out through it")
+        bits.append(f"{p.get('style', 'attic')} style, crest {p.get('crest', 'fore_aft').replace('_', '-')}")
     if r.kind == "crest":
         bits.append("front-to-back" if p.get("orientation") == "fore_aft" else "side-to-side (transverse)")
     names = {"country1": "primary", "country2": "secondary", "country3": "tertiary"}
@@ -537,50 +536,85 @@ def _describe_part(r) -> str:
     return ", ".join(bits)
 
 
-DERIVED_LOOK = {
-    "tail": "a dark horse tail from the back of the hips: a tufted, flared base over the tunic hem, a plume curving "
-            "down and back, a split (tufted) tip",
-    "tuft": "a short tied tuft coming out back and down from the back of the head or helmet",
-    "ears": "two horse ears on top of the head (pointed, cupped forward and a little out)",
-}
-REMOVED_LOOK = {"helmet": "the base body's own helmet is gone: a bare head with short hair (under the Greek helmet)"}
-
-SIDE_VIEW = [
-    "SIDE-VIEW CHECK (the camera can't rotate; units face the way they move):",
-    "[ ] V1 march the army east or west across 2+ provinces, zoom all the way in, pause mid-march: the units walk "
-    "side-on. Look at the tail (plume, base, tip) and the tuft.",
-    "[ ] V2 after it arrives it idles facing its last direction of movement (UNVERIFIED: note which way it faces); "
-    "check side-on idle.",
-    "[ ] V3 attack an enemy army in the province directly east or west: the fight is side-on. Check the tail and "
-    "tuft in the attack lunge.",
-    "[ ] V4 from behind: march north (away from the camera) and look at the tail from the rear.",
-]
+REMOVED_LOOK = {"helmet": "the base body's own helmet is gone: a bare head (under any helmet part)"}
 
 
-def _derived_lines(tier: int, rec) -> list[str]:
+def _derived_lines(tier: int, rec, head_parts: list[str]) -> list[str]:
+    """Checklist lines for one tier's derived body: only what it has (removals, additions, accepted clipping)."""
+    from eu4unitgen.core.derived_body import ADDITION_KINDS
+
     kinds = [k for k, _, _ in rec.additions]
-    looks = "; ".join(DERIVED_LOOK.get(k, k) for k in kinds)
-    lines = [
-        f"[ ] {tier}D1 infantry wears a derived body ({rec.file}, from {rec.base_file.rsplit('/', 1)[-1]}): {looks}. "
-        "Unit missing, invisible or black = the derived .mesh or its textures fail -> stop, send error.log.",
-    ]
+    names = ", ".join(kinds)
+    lines = [f"[ ] {tier}D1 infantry wears a derived body ({rec.file}, from {rec.base_file.rsplit('/', 1)[-1]})"
+             + (": " + "; ".join(ADDITION_KINDS.get(k, {}).get("look", k) for k in kinds) if kinds else "")
+             + ". Unit missing, invisible or black = the derived .mesh or its textures fail -> stop, send error.log."]
     for r in getattr(rec, "removed", []) or []:
         lines.append(f"[ ] {tier}D1r {REMOVED_LOOK.get(r, r + ' removed')}; no hole or stray piece of it shows.")
-    lines += [
-        f"[ ] {tier}D2 the rest of the body looks like the base soldier (face, cloth in the unit colours); "
-        f"{', '.join(kinds)} in the body's hair colour, not pink or untextured.",
-        f"[ ] {tier}D3 {', '.join(kinds)} stay attached and move with the body in idle, walk and attack: no "
-        "stretching, spikes or flicker; the tail never swings through the legs.",
-        f"[ ] {tier}D4 attack: note visible clipping. Known and accepted: the tuft dips into the top of the back in the "
-        "lunge. By design: the tail's base overlaps the tunic hem.",
-        f"[ ] {tier}D5 the gun crew and the cavalry rider wear the plain base body (no {' or '.join(kinds)}).",
-        f"[ ] {tier}D6 zoomed out to map scale: do the tail and ears read at all? (pre-check renders: barely, dark on "
-        "dark; this decides a lighter hair texture)",
-    ]
+    lines.append(f"[ ] {tier}D2 the rest of the body looks like the base soldier (face, textures as the spec sets them)"
+                 + (f"; {names} in the hair swatch's colour, matte, not pink or untextured" if kinds else "") + ".")
+    if kinds:
+        lines.append(f"[ ] {tier}D3 {names} stay attached and move with the body in idle, walk and attack: no "
+                     "stretching, spikes or flicker.")
+        on_head = [k for k in kinds if ADDITION_KINDS.get(k, {}).get("chain") and
+                   ADDITION_KINDS[k]["chain"].bones[0] == "head"]
+        if on_head and head_parts:
+            lines.append(f"[ ] {tier}D3h {', '.join(on_head)} come out through the {', '.join(head_parts)} where openings "
+                         "would be (no gap, nothing floating).")
+        accepted = getattr(rec, "accept_clipping", []) or []
+        lines.append(f"[ ] {tier}D4 attack: note visible clipping"
+                     + (f" (known and accepted: {', '.join(accepted)})" if accepted else "") + ".")
+        lines.append(f"[ ] {tier}D5 the gun crew and the cavalry rider wear the plain base body (no {' or '.join(kinds)}).")
     return lines
 
 
-def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict[int, int] | None) -> str:
+def _part_label(r) -> str:
+    """A part record's short label ("greek helmet")."""
+    from eu4unitgen.core.parts import KINDS
+
+    return KINDS[r.kind].label.split(" (")[0].lower()
+
+
+def _recipe_lines(recipe) -> list[str]:
+    """One line per texture-recipe slot: what its operations should show."""
+    out = []
+    for (tier, role), slot in sorted((recipe.active() if recipe else {}).items()):
+        bits = []
+        for op in slot.ops:
+            kind = op.get("op")
+            if kind == "recolour":
+                bits.append(f"{op.get('region')} recoloured to rgb {' '.join(map(str, op.get('colour', [])))}")
+            elif kind == "pattern":
+                bits.append(f"{Path(op.get('image', '')).name} pattern on {op.get('region')}")
+            elif kind == "palette":
+                bits.append(f"{', '.join(op.get('targets') or [])} from {Path(op.get('image', '')).name}"
+                            + (" (fixed colours: no unit colour there)" if op.get("fixed") else ""))
+            elif kind == "hue_shift":
+                bits.append(f"{op.get('region')} hue shifted {op.get('degrees')} degrees")
+            else:
+                bits.append(kind)
+        out.append(f"[ ] {tier}T  {role} textures: {'; '.join(bits)}. Black, pink or vanilla-coloured = the recipe "
+                   "didn't apply.")
+    return out
+
+
+def _side_view(res) -> list[str]:
+    kinds = sorted({k for rec in res.derived.values() for k, _, _ in rec.additions})
+    look = ", ".join(kinds) if kinds else "the body, the helmet and the shield"
+    return [
+        "SIDE-VIEW CHECK (the camera can't rotate; units face the way they move):",
+        f"[ ] V1 march the army east or west across 2+ provinces, zoom all the way in, pause mid-march: the units walk "
+        f"side-on. Look at {look}.",
+        "[ ] V2 after it arrives it idles facing its last direction of movement (UNVERIFIED: note which way it faces); "
+        "check side-on idle.",
+        f"[ ] V3 attack an enemy army in the province directly east or west: the fight is side-on. Check {look} in the "
+        "attack lunge.",
+        "[ ] V4 march north (away from the camera) and look at the unit from behind.",
+        f"[ ] M  zoomed out to map scale: does the unit read (its colours, the helmet, the shield{', ' + ', '.join(kinds) if kinds else ''})?",
+    ]
+
+
+def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict[int, int] | None,
+                      recipe=None) -> str:
     """In-game tests 8, 10 and 11: what each tier's bodies should carry (parts, stances, derived bodies),
     from the loadout the set was built with."""
     res, nation = generated.loadout, generated.nation
@@ -613,9 +647,11 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
             if entity.endswith((f"_INFANTRY_{tier}", f"_{tier}_crew")):
                 lines.append(f"[ ] {tier}S  {entity}: {stance} animations; " + STANCE_LOOK.get(stance, ""))
         if tier in res.derived:
-            lines += _derived_lines(tier, res.derived[tier])
+            head_parts = [_part_label(r) for r in res.parts if r.tier == tier and r.role == "infantry" and r.bone == "head"]
+            lines += _derived_lines(tier, res.derived[tier], head_parts)
+        lines += [ln for ln in _recipe_lines(recipe) if ln.startswith(f"[ ] {tier}T")]
     if res.derived:
-        lines += ["", *SIDE_VIEW]
+        lines += ["", *_side_view(res)]
         if len(res.derived) > 1:
             bodies = ", ".join(f"tier {t}: {r.base_file.rsplit('/', 1)[-1][:-5]}" + "".join(f" - {x}" for x in r.removed)
                                for t, r in sorted(res.derived.items()))
