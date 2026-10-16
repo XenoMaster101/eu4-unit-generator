@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from io import BytesIO
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -326,6 +327,9 @@ class BuiltParts:
             size = imgs["diffuse"].size[0]
             zmap = zone_map(b.part.zones, layout, size, atlas["tris"] if atlas else None)
             imgs["diffuse"] = paint(imgs["diffuse"], zmap, b.part.zones, maps)
+            if "normal" in maps:  # Q3: the baked tangent-space normal map (bevelled edges, material relief)
+                normal = Image.open(BytesIO(maps["normal"])).convert("RGBA")
+                imgs["normal"] = normal.resize((size, size), Image.Resampling.BILINEAR) if normal.size != (size, size)                     else normal
         return imgs
 
 

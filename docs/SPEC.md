@@ -1160,6 +1160,11 @@ Constraints carried over:
 - **Noted:** the dory's long shaft islands pack into a narrow column of its 512 px atlas. The density (20.1) is in the base-game weapon range, so the wasted space is accepted for now.
 - Textures: `build/q2/textures.png`.
 
+**Q3 (2026-10-16): baked normal maps.**
+- **Convention, measured:** the base game's normal maps are plain RGB (type1 mean 126 127 250) and **OpenGL-style, green up the image**. Over 122 rivet points on the type1 helmet, red rises to the right of each bump (+26.7) and green upwards (+30.7). That is Blender's default bake axes, and our bake images keep Blender's v-up as image-up, so no flip is needed.
+- **Bake:** `bake_maps` adds a `normal` pass, tangent space on the part's UVs (MikkTSpace, as io_pdx_mesh exports `ta`). Each zone's shading normal is Bevel (radius 0.04, rounded edge highlights instead of bevel geometry) feeding Bump (the 3D material pattern, strength per material in `BUMP`, 0.35-1.4). `BuiltParts.images` uses the baked map.
+- **Measured tilt:** dory 9.1°, hoplon 8.2°, helmet 6.0° (was 2.3° flat; base game 4-20°). Normal maps: `build/q3/normals.png`.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

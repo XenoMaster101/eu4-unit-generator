@@ -304,5 +304,4 @@ def test_paint_shades_flat_zones():
     out = paint(flat, zmap, zones, maps)
     assert ImageStat.Stat(out.convert("L")).stddev[0] > 10  # flat colour became shaded and grained
     again = paint(flat, zmap, zones, maps)
-    assert list(out.getdata()) == list(again.getdata())  # deterministic
-    assert paint(flat, zmap, zones, {}).getpixel((5, 5))[:3] != (180, 130, 60) or True  # grain only, no maps
+    assert out.tobytes() == again.tobytes()  # deterministic

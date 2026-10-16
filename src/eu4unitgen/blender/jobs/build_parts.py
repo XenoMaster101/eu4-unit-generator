@@ -398,7 +398,7 @@ def _pattern(nodes, links, material):
     mapping.inputs["Scale"].default_value = scale
     noise = nodes.new("ShaderNodeTexNoise")
     noise.inputs["Scale"].default_value = {"wood": 20, "bronze": 30, "iron": 1.5, "hair": 1.5, "leather": 18,
-                                           "paint": 5, "plain": 10}.get(material, 10)
+                                           "paint": 14, "plain": 10}.get(material, 10)
     noise.inputs["Detail"].default_value = 6
     links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
     fine = nodes.new("ShaderNodeTexNoise")  # a second, finer octave: detail at the texel scale
@@ -428,6 +428,10 @@ def _pattern(nodes, links, material):
     links.new(noise_out, mix.inputs["A"])
     links.new(out2, mix.inputs["B"])
     return mix.outputs["Result"]
+
+
+# relief strength per material; tuned against the base game's measured normal tilt (4-20 degrees)
+BUMP = {"wood": 0.80, "bronze": 0.70, "iron": 0.45, "hair": 0.90, "leather": 0.70, "paint": 1.40, "plain": 0.35}
 
 
 def bake_maps(obj, size, materials, prefix):
@@ -462,24 +466,44 @@ def bake_maps(obj, size, materials, prefix):
         links.new(sep.outputs["Z"], up.inputs[0])
         up.inputs[1].default_value, up.inputs[2].default_value = 0.5, 0.5
         pattern = _pattern(nodes, links, material)
+        # Q3: the shading normal for the tangent-space normal bake: rounded edges (Bevel) and the
+        # pattern as relief (Bump), strength per material
+        bevel = nodes.new("ShaderNodeBevel")
+        bevel.samples = 8
+        bevel.inputs["Radius"].default_value = 0.04
+        bump = nodes.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value = BUMP.get(material, 0.15)
+        bump.inputs["Distance"].default_value = 0.02
+        links.new(pattern, bump.inputs["Height"])
+        links.new(bevel.outputs["Normal"], bump.inputs["Normal"])
+        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+        links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
         target = nodes.new("ShaderNodeTexImage")
         nodes.active = target
         me.materials.append(mat)
-        mats.append((mat, emit, {"curv": curv.outputs[0], "up": up.outputs[0], "pattern": pattern}, target))
+        mats.append((mat, emit, {"curv": curv.outputs[0], "up": up.outputs[0], "pattern": pattern}, target, bsdf, out))
     for poly in me.polygons:
         poly.material_index = zone.data[poly.index].value if zone is not None else 0
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
     paths = {}
-    for name in ("ao", "curv", "up", "pattern"):
+    for name in ("ao", "curv", "up", "pattern", "normal"):
         img = bpy.data.images.new(f"{prefix}_{name}", size, size, alpha=False)
         img.colorspace_settings.name = "Non-Color"
-        for mat, emit, sockets, target in mats:
+        for mat, emit, sockets, target, bsdf, out in mats:
             target.image = img
-            if name != "ao":
+            if name == "normal":
+                mat.node_tree.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+            elif name != "ao":
                 mat.node_tree.links.new(sockets[name], emit.inputs["Color"])
-        bpy.ops.object.bake(type="AO" if name == "ao" else "EMIT")
+        if name == "normal":
+            # tangent space on the active UVs; Blender's default axes (+X, +Y, +Z) are the base game's
+            # convention (green up the image: measured on the type1 helmet's rivets)
+            bpy.context.scene.render.bake.normal_space = "TANGENT"
+            bpy.ops.object.bake(type="NORMAL")
+        else:
+            bpy.ops.object.bake(type="AO" if name == "ao" else "EMIT")
         path = f"{prefix}_{name}.png"
         img.filepath_raw = path
         img.file_format = "PNG"
