@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from eu4unitgen.core.chain_weights import MAX_INFLUENCES, Chain, check_weights, weights
+from eu4unitgen.core.chain_weights import MAX_INFLUENCES, Chain, WeightError, check_weights, weights
 from eu4unitgen.library.scanner import parse_pdx_mesh, write_pdx_mesh
 
 
@@ -281,7 +281,10 @@ def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, 
     for k in kinds:
         if k not in ADDITION_KINDS:
             raise DerivedBodyError(f"unknown addition {k!r}; known: {', '.join(ADDITION_KINDS)}")
-        ADDITION_KINDS[k]["chain"].check(names)
+        try:
+            ADDITION_KINDS[k]["chain"].check(names)
+        except WeightError as exc:
+            raise DerivedBodyError(f"{k}: {exc}") from exc
     with tempfile.TemporaryDirectory(prefix="eu4unitgen_derived_") as tmp:
         body = Path(tmp) / "base.mesh"
         body.write_bytes(base)

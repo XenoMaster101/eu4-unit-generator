@@ -34,6 +34,9 @@ Loadout-wide settings (both optional):
         texture recipe and fitting follow it.
     "weapon_point": {"rider": "up"}     role -> what a weapon's "auto" point means (up/down;
         default up for infantry and crews, down for riders).
+    "derived": {"1": ["tail", "tuft"]}     tier -> skinned additions (core.derived_body.ADDITION_KINDS)
+        appended to that tier's infantry body: a derived body (SPEC Track R). The infantry only:
+        the rider and a crew slot's crew keep the base body (a tail on a rider is untested).
 
 Paths (blazons) are relative to the loadout file.
 """
@@ -46,7 +49,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from eu4unitgen.core.generator import GeneratedFile, GenerationError
+from eu4unitgen.core.generator import OWNED, GeneratedFile, GenerationError
 from eu4unitgen.core.naming import LOADOUT_ROLES, TIERS, Naming
 from eu4unitgen.core.naming import check_identifier
 from eu4unitgen.core.parts import (
@@ -138,6 +141,7 @@ class Loadout:
     root: Path = Path(".")
     bodies: dict[int, str] = field(default_factory=dict)  # tier -> base-game infantry pdxmesh
     points: dict[str, str] = field(default_factory=dict)  # role -> "up"/"down" for weapons left on "auto"
+    derived: dict[int, list[str]] = field(default_factory=dict)  # tier -> skinned additions on its infantry body
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -172,6 +176,15 @@ class Loadout:
                 out.bodies[int(key)] = check_identifier(body, "body pdxmesh")
             except ValueError as exc:
                 raise LoadoutError(f"bodies: {exc}") from exc
+        from eu4unitgen.core.derived_body import ADDITION_KINDS
+
+        for key, kinds in (doc.get("derived") or {}).items():
+            if not str(key).isdigit() or int(key) not in TIERS:
+                raise LoadoutError(f"derived: {key!r} must be a tier {TIERS}")
+            if not isinstance(kinds, list) or not kinds or any(k not in ADDITION_KINDS for k in kinds)                     or len(set(kinds)) != len(kinds):
+                raise LoadoutError(f"derived: tier {key} must list additions from {sorted(ADDITION_KINDS)}, "
+                                   f"each once, not {kinds!r}")
+            out.derived[int(key)] = list(kinds)
         for role, point in (doc.get("weapon_point") or {}).items():
             if role not in LOADOUT_ROLES or point not in POINTS:
                 raise LoadoutError(f"weapon_point: {role!r} must be one of {LOADOUT_ROLES} and {point!r} one of {POINTS}")
@@ -182,6 +195,8 @@ class Loadout:
         out = {"schema": SCHEMA}
         if self.bodies:
             out["bodies"] = {str(t): b for t, b in sorted(self.bodies.items())}
+        if self.derived:
+            out["derived"] = {str(t): list(k) for t, k in sorted(self.derived.items())}
         points = {r: p for r, p in sorted(self.points.items()) if p != DEFAULT_POINTS[r]}
         if points:
             out["weapon_point"] = points
@@ -198,10 +213,10 @@ class Loadout:
                 if s.parts or s.resolved_stance() != "base" or k[1] == "crew"}
 
     def changes_anything(self) -> bool:
-        return bool(self.active() or self.bodies)
+        return bool(self.active() or self.bodies or self.derived)
 
     def needs_blender(self) -> bool:
-        return any(s.parts for s in self.active().values())
+        return bool(self.derived) or any(s.parts for s in self.active().values())
 
     def path(self, rel: str) -> Path:
         p = Path(rel)
@@ -246,6 +261,17 @@ class LoadoutResult:
     slots: list[tuple[int, str]] = field(default_factory=list)  # the (tier, role) slots that were applied
     chosen_bodies: dict[int, str] = field(default_factory=dict)  # tier -> body pdxmesh the loadout picked
     carried: dict[tuple[int, str], list[str]] = field(default_factory=dict)  # slot -> part entities it carries
+    derived: dict[int, "DerivedRecord"] = field(default_factory=dict)  # tier -> its infantry's derived body
+
+
+@dataclass
+class DerivedRecord:
+    """What the validator needs to know about one derived body (rule derived_body)."""
+    entity: str
+    pdxmesh: str
+    file: str
+    base_file: str
+    additions: list[tuple[str, tuple[str, ...], int]]  # (kind, chain bones, vertex count), in file order
 
 
 class _Meshes:
@@ -335,6 +361,42 @@ def apply_bodies(naming: Naming, owner: str, entities: list[dict], loadout: Load
     return notes
 
 
+def _derive(naming: Naming, set_name: str, tier: int, inf: dict, kinds: list[str], pdx: "_Meshes",
+            res: LoadoutResult, game, runner) -> GeneratedFile:
+    """Give ``inf`` (the tier's infantry entity, after its stance) a derived body: its pdxmesh's
+    base-game .mesh with ``kinds`` appended (core.derived_body), on a new pdxmesh with the same
+    animations, scale and keys and no meshsettings (the copied material names the base game's
+    textures, which resolve in the base body's folder)."""
+    from eu4unitgen.core.derived_body import DerivedBodyError, build_derived
+
+    source = inf["pdxmesh"]
+    src = pdx.get(source)
+    if src.get("settings"):
+        raise GenerationError(f"tier {tier}: a derived body can't combine with a texture recipe's retextured "
+                              f"body ({source}) yet")
+    base_file = src.get("file") or ""
+    if not game.in_base_game(base_file):
+        raise GenerationError(f"tier {tier}: derived bodies come from base-game meshes only, not {base_file!r}")
+    if runner is None:
+        raise GenerationError("derived bodies need Blender to build their additions (Settings: Blender path)")
+    try:
+        data, adds = build_derived(runner, game.read(base_file), kinds)
+    except DerivedBodyError as exc:
+        raise GenerationError(f"tier {tier}: derived body: {exc}") from exc
+    file = naming.derived_body_file(set_name, tier, base_file)
+    name = naming.derived_body_pdxmesh(set_name, tier)
+    rec = {"name": name, "file": file, "base": src.get("base", source), "animations": dict(src.get("animations") or {}),
+           "scale": src.get("scale"), "extra": dict(src.get("extra") or {}), "settings": []}
+    pdx.records.append(rec)
+    pdx.by_name[name] = rec
+    inf["pdxmesh"] = name
+    if inf["name"] in res.stances:
+        res.stances[inf["name"]] = (res.stances[inf["name"]][0], name)
+    res.derived[tier] = DerivedRecord(inf["name"], name, file, base_file, [(a.name, a.chain, a.count) for a in adds])
+    res.notes.append(f"tier {tier}: {inf['name']} wears a derived body ({file}: {base_file} + {', '.join(kinds)})")
+    return GeneratedFile(file, data, OWNED, derived_from=base_file)
+
+
 def _drop_hand_attaches(entity: dict) -> list[str]:
     """Remove the base's hand-held items (a weapon part replaces the whole hand loadout); returns them."""
     dropped, kept = [], []
@@ -373,6 +435,7 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
         return res.bodies[file]
 
     builds: list[PartBuild] = []
+    derived_files: list[GeneratedFile] = []
     shared: dict[str, str] = {}  # part identity -> entity
     assigned: list[tuple[str, str, str]] = []  # (entity, bone, part entity)
     active = loadout.active()
@@ -443,12 +506,14 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
                         source, naming.pdxmesh(set_name, "crew", tier), want)
                 if stance != "base":
                     res.stances[target] = (stance, chosen)
+        if tier in loadout.derived:
+            derived_files.append(_derive(naming, set_name, tier, inf, loadout.derived[tier], pdx, res, game, runner))
     built = build_parts(runner, naming, set_name, builds, version, cache)
     for target, bone, name in assigned:
         attach(by_name[target], bone, name)
     meshes.extend(built.meshes)
     entities.extend(built.entities)
-    res.files = built.files
+    res.files = built.files + derived_files
     for file, fit in sorted(res.bodies.items()):
         head = f", head top {fit.head['top']} above the joint" if fit.head else ""
         res.notes.append(f"fitting: parts sized for {file} (stature {fit.stature}, scale {fit.scale:.3f}{head})")

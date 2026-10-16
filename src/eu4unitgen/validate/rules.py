@@ -285,8 +285,8 @@ def part_mesh(ctx: Context) -> list[Issue]:
 
     out = []
     for f in ctx.generated.files.values():
-        if not f.path.lower().endswith(".mesh"):
-            continue
+        if not f.path.lower().endswith(".mesh") or f.derived_from:
+            continue  # derived bodies: rule derived_body
         try:
             tree = parse_pdx_mesh(f.data)
         except (ValueError, IndexError) as exc:
@@ -398,6 +398,9 @@ def loadout(ctx: Context) -> list[Issue]:
         if brec is None or not w.game.in_base_game(brec.get("file") or ""):
             out.append(Issue(ERROR, "loadout", f"tier {tier} body {body!r} isn't a base-game pdxmesh", subject=inf))
             continue
+        derived = res.derived.get(tier)
+        if derived is not None and (mine.get("file") or "").lower() == derived.file.lower():
+            mine = {**mine, "file": derived.base_file}  # a derived body of the chosen body (rule derived_body)
         if (mine.get("file") or "").lower() != brec["file"].lower():
             out.append(Issue(ERROR, "loadout", f"{inf} should wear tier {tier}'s body {body} ({brec['file']}), "
                                                f"not {mine.get('file')}", subject=inf))
@@ -420,6 +423,77 @@ def loadout(ctx: Context) -> list[Issue]:
                 out.append(Issue(WARNING, "loadout", f"{name} carries {sorted(carried)} but doesn't use the "
                                                      "spear_shield animations: the left arm may not hold it up",
                                  subject=name))
+    return out
+
+
+DERIVED_TRI_BUDGET = 4500  # the largest base-game infantry body: western_generic_02_type1, 4,360 (1.37.5)
+
+
+@rule("derived_body")
+def derived_body(ctx: Context) -> list[Issue]:
+    """Derived bodies (SPEC Track R, core.derived_body): a base-game body (never DLC) whose every
+    block is kept (skeleton, locators, material, vertices, skin rows, triangles) with only skinned
+    additions appended; their weights stay on their declared bone chains; within the triangle
+    budget; its material's textures resolve in its folder; its name is no game file's; its
+    infantry entity wears it."""
+    from eu4unitgen.core.derived_body import bone_indices, check_derived
+    from eu4unitgen.library.scanner import _walk, parse_pdx_mesh
+
+    res = ctx.generated.loadout
+    if res is None or not res.derived:
+        return []
+    w, game, out = ctx.world, ctx.world.game, []
+    for tier, rec in sorted(res.derived.items()):
+        f = ctx.generated.files.get(rec.file)
+        if f is None:
+            out.append(Issue(ERROR, "derived_body", f"tier {tier}: {rec.file} wasn't generated", subject=rec.entity))
+            continue
+        if not game.in_base_game(rec.base_file):
+            what = "a DLC file" if game.exists(rec.base_file) else "missing from the install"
+            out.append(Issue(ERROR, "derived_body", f"base body {rec.base_file} is {what}; derived bodies come from "
+                                                    "base-game files only", f.path))
+            continue
+        if f.derived_from != rec.base_file:
+            out.append(Issue(ERROR, "derived_body", f"doesn't record its base body ({f.derived_from!r})", f.path))
+        if game.exists(rec.file):
+            out.append(Issue(ERROR, "derived_body", "has a game file's name: it would replace it for everyone", f.path))
+        problems, counts = check_derived(game.read(rec.base_file), f.data)
+        out += [Issue(ERROR, "derived_body", f"{p} (base {rec.base_file})", f.path) for p in problems]
+        if problems:
+            continue
+        tris = counts["base_triangles"] + counts["added_triangles"]
+        if tris > DERIVED_TRI_BUDGET:
+            out.append(Issue(ERROR, "derived_body", f"{tris} triangles (budget {DERIVED_TRI_BUDGET})", f.path))
+        tree = parse_pdx_mesh(f.data)
+        mesh = next(n for n in _walk(tree) if n["name"] == "mesh")
+        names = {i: b for b, i in bone_indices(next(n for n in _walk(tree) if n["name"] == "skeleton")).items()}
+        skin = next(c for c in mesh["children"] if c["name"] == "skin")["props"]
+        first = counts["base_vertices"]
+        if sum(n for _, _, n in rec.additions) != counts["added_vertices"]:
+            out.append(Issue(ERROR, "derived_body", f"{counts['added_vertices']} added vertices, but its additions "
+                                                    f"account for {sum(n for _, _, n in rec.additions)}", f.path))
+        for kind, chain, n in rec.additions:
+            used = {names.get(skin["ix"][v * 4 + k]) for v in range(first, first + n) for k in range(4)
+                    if skin["ix"][v * 4 + k] >= 0}
+            if not used <= set(chain):
+                out.append(Issue(ERROR, "derived_body", f"{kind}: weights on {sorted(used - set(chain))}, outside its "
+                                                        f"chain {list(chain)}", f.path))
+            first += n
+        folder = rec.file.rsplit("/", 1)[0]
+        material = next(c for c in mesh["children"] if c["name"] == "material")["props"]
+        for slot in ("diff", "n", "spec"):
+            for tex in material.get(slot, []):
+                if not w.exists(f"{folder}/{tex}"):
+                    out.append(Issue(ERROR, "derived_body", f"texture {tex} doesn't resolve in {folder}", f.path))
+        pdx = w.pdxmesh(w.resolve(rec.entity, "pdxmesh") or "") or {}
+        if w.resolve(rec.entity, "pdxmesh") != rec.pdxmesh or (pdx.get("file") or "").lower() != rec.file.lower():
+            out.append(Issue(ERROR, "derived_body", f"{rec.entity} doesn't wear {rec.pdxmesh} ({rec.file})",
+                             subject=rec.entity))
+        out.append(Issue(INFO, "derived_body", f"tier {tier}: {rec.entity} wears {rec.file} = {rec.base_file} + "
+                                               f"{', '.join(k for k, _, _ in rec.additions)} "
+                                               f"({counts['added_vertices']} vertices, {counts['added_triangles']} "
+                                               "triangles added). UNVERIFIED in game: textures resolving from the "
+                                               "base folder for a mod .mesh", f.path))
     return out
 
 

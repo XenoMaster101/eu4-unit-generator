@@ -173,6 +173,20 @@ class Naming:
             raise NamingError(f"texture kind {tex!r} must be one of {TEXTURE_KINDS}")
         return f"{self.part(set_name, kind, tier, role)}_{tex}.dds"
 
+    # ------------------------------------------------------------------ derived bodies (Track R)
+    def derived_body(self, set_name: str, tier: int) -> str:
+        """hr_mac_body_1: a base-game body with skinned additions (tail, tuft) appended."""
+        return f"{self.prefix}{check_set_name(set_name)}_body_{_check_tier(tier)}"
+
+    def derived_body_pdxmesh(self, set_name: str, tier: int) -> str:
+        return f"{self.derived_body(set_name, tier)}_mesh"
+
+    def derived_body_file(self, set_name: str, tier: int, base_file: str) -> str:
+        """In the base body's own folder (gfx/models/Units), so the material's bare texture names
+        resolve to the base game's textures there (SPEC §4); the prefix keeps it apart from vanilla."""
+        folder = base_file.rsplit("/", 1)[0] if "/" in base_file else ""
+        return f"{folder}/{self.derived_body(set_name, tier)}.mesh" if folder else f"{self.derived_body(set_name, tier)}.mesh"
+
     @staticmethod
     def part_preview_dir(set_name: str) -> str:
         """Fit previews (a body with its parts, rendered in Blender), under the output folder:
