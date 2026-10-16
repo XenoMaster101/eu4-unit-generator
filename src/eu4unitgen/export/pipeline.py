@@ -574,7 +574,7 @@ class Session:
                 removed = removed_triangles(data, file, spec_d["remove"]) if spec_d["remove"] else []
                 fit = measure_body(append_additions(data, [], removed), file)
                 if build and spec_d["add"]:
-                    data, _ = build_derived(self.runner(), data, spec_d["add"], remove=removed)
+                    data, _ = build_derived(self.runner(), data, spec_d["add"], remove=removed, base_file=file)
                 else:
                     data = append_additions(data, [], removed)
             except DerivedBodyError as exc:

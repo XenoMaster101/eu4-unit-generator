@@ -291,6 +291,20 @@ ADDITION_KINDS: dict[str, dict] = {
 }
 HAIR_PATCH = (105, 30, 115, 40)  # western_generic_01_type1 diffuse px: the face's dark hair, no country mask
 PATCH_TEX = 512
+# Per base body: the diffuse's hair (px, x0 y0 x1 y1 of a PATCH_TEX texture) the additions' UVs span,
+# strands running down it (step 5: the largest unmasked hair-coloured rectangle, mean 40 32 28, kept
+# clear of the neck skin). A body without one is refused.
+HAIR_REGIONS: dict[str, tuple[int, int, int, int]] = {
+    "gfx/models/units/western_generic_01_type1.mesh": (70, 30, 118, 92),
+}
+
+
+def hair_region(base_file: str) -> tuple[int, int, int, int]:
+    region = HAIR_REGIONS.get(base_file.lower())
+    if region is None:
+        raise DerivedBodyError(f"{base_file} has no known hair region for skinned additions' textures "
+                               "(core.derived_body.HAIR_REGIONS)")
+    return region
 
 
 @dataclass(frozen=True)
@@ -344,7 +358,8 @@ def removed_triangles(base: bytes, base_file: str, names: list[str]) -> list[int
 
 
 def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, int, int] = HAIR_PATCH,
-                  tex: int = PATCH_TEX, remove: list[int] | tuple[int, ...] = ()) -> tuple[bytes, list[Addition]]:
+                  tex: int = PATCH_TEX, remove: list[int] | tuple[int, ...] = (),
+                  base_file: str | None = None) -> tuple[bytes, list[Addition]]:
     """The derived body: ``base`` (.mesh bytes of a base-game body) without the triangles in
     ``remove`` and with the ``kinds`` additions built in background Blender (``build_additions``,
     which measures the body without the removed parts), weighted by their chains, appended."""
@@ -361,6 +376,8 @@ def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, 
             ADDITION_KINDS[k]["chain"].check(names)
         except WeightError as exc:
             raise DerivedBodyError(f"{k}: {exc}") from exc
+    if base_file is not None:
+        patch = hair_region(base_file)
     with tempfile.TemporaryDirectory(prefix="eu4unitgen_derived_") as tmp:
         body = Path(tmp) / "base.mesh"
         body.write_bytes(append_additions(base, [], remove) if remove else base)

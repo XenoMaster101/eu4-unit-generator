@@ -1030,6 +1030,8 @@ Constraints carried over:
 - **Preview:** shows a tier's derived body and adds head close-ups (three-quarter, side, rear) whenever a part hangs on `head` (`render_parts` `close`/`close_views`).
 - Renders: `build/plan11/helmets_close.png`, `corinthian_close.png`.
 
+**Step 5 (2026-10-16): hair textures, option T1.** `core.derived_body.HAIR_REGIONS` gives per base body the diffuse's hair that additions' UVs span, strands running down it (each addition's length runs down the region). type1: px 70-118 × 30-92, the back-of-head hair (the largest unmasked hair-coloured rectangle, 68-120 × 28-100, kept clear of the neck skin; mean 40 32 28). A body without a region is refused. Result (`build/plan11/s5/hair_textured.png`): dark brown with faint strands, matching the soldier's hair; reads as dark hair at map scale. **T2 (a derived texture copy with a painted, lighter hair swatch) is deferred until after test 11.**
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

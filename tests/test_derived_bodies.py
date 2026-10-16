@@ -73,9 +73,12 @@ class AdditionsRunner(FakeRunner):
 
 
 @pytest.fixture
-def body_game(game, fake_install: Path):
-    """The fake install with a skinned tier-1 body."""
+def body_game(game, fake_install: Path, monkeypatch):
+    """The fake install with a skinned tier-1 body (and a hair region for its additions' UVs)."""
+    from eu4unitgen.core import derived_body
+
     (fake_install / "gfx/models/Units/generic_01.mesh").write_bytes(skinned_body())
+    monkeypatch.setitem(derived_body.HAIR_REGIONS, "gfx/models/units/generic_01.mesh", (100, 20, 120, 50))
     return game
 
 
@@ -255,3 +258,20 @@ def test_greek_helmet_fits_the_bare_head():
     assert fitted_params("greek_helmet", bare) == {"top": 1.915, "half_width": 0.85, "front": -1.115, "back": 1.046}
     part = resolve(PartSpec("greek_helmet", {"style": "corinthian", "crest": "transverse"}), "infantry", bare)
     assert part.bone == "head" and KINDS["greek_helmet"].builder == "helmet" and len(part.zones) == 3
+
+
+def test_body_without_a_hair_region_is_refused(project, nation, body_game, monkeypatch):
+    from eu4unitgen.core import derived_body
+
+    monkeypatch.delitem(derived_body.HAIR_REGIONS, "gfx/models/units/generic_01.mesh")
+    files, idx = body_game
+    with pytest.raises(GenerationError, match="no known hair region"):
+        generate(project, nation, files, idx, loadout=Loadout.from_json(LOADOUT), runner=AdditionsRunner())
+
+
+def test_additions_span_the_hair_region(project, nation, body_game):
+    files, idx = body_game
+    runner = AdditionsRunner()
+    generate(project, nation, files, idx, loadout=Loadout.from_json(LOADOUT), runner=runner)
+    job = next(a for j, a in runner.calls if j == "build_additions")
+    assert job["patch_px"] == [100, 20, 120, 50]

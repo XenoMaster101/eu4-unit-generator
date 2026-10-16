@@ -412,7 +412,7 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
     try:
         removed = removed_triangles(base, base_file, spec["remove"]) if spec["remove"] else []
         if spec["add"]:
-            data, adds = build_derived(runner, base, spec["add"], remove=removed)
+            data, adds = build_derived(runner, base, spec["add"], remove=removed, base_file=base_file)
         else:
             data, adds = append_additions(base, [], removed), []
     except DerivedBodyError as exc:
