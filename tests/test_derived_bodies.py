@@ -244,3 +244,14 @@ def test_judge_criteria():
     assert any(s == "warning" and m.startswith("C4 tail in attack") for s, m in found)
     assert any(s == "warning" and m.startswith("C5 tail in attack") for s, m in found)
     assert not any("ears" in m for _, m in found)
+
+
+def test_greek_helmet_fits_the_bare_head():
+    from eu4unitgen.core.fitting import BodyFit, fitted_params
+    from eu4unitgen.core.parts import KINDS, PartSpec, resolve
+
+    bare = BodyFit("x.mesh", stature=14.499, head={"top": 1.795, "xmin": -0.72, "xmax": 0.72, "zmin": -1.269,
+                                                   "zmax": 0.846, "count": 10})
+    assert fitted_params("greek_helmet", bare) == {"top": 1.915, "half_width": 0.85, "front": -1.115, "back": 1.046}
+    part = resolve(PartSpec("greek_helmet", {"style": "corinthian", "crest": "transverse"}), "infantry", bare)
+    assert part.bone == "head" and KINDS["greek_helmet"].builder == "helmet" and len(part.zones) == 3

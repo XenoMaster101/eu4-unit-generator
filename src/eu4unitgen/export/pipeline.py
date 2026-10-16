@@ -544,9 +544,11 @@ class Session:
         return out
 
     # ------------------------------------------------------------------ parts (Phase 3)
-    def _body(self, spec: SetSpec, tier: int, loadout=None):
+    def _body(self, spec: SetSpec, tier: int, loadout=None, role: str = "infantry", build: bool = False):
         """The body a tier's parts are fitted on: the loadout's body for that tier, else the base
-        culture's infantry pdxmesh (riders and crews use the same .mesh).
+        culture's infantry pdxmesh (riders and crews use the same .mesh). The tier's infantry with a
+        derived body is fitted on its base after removals; with ``build`` the returned bytes are the
+        whole derived body (its additions built in Blender), for the preview.
         -> (pdxmesh, mesh file, mesh bytes, BodyFit)."""
         from eu4unitgen.core.fitting import measure_body
         from eu4unitgen.core.generator import BaseChain
@@ -564,6 +566,20 @@ class Session:
         data = game.read(file)
         if data is None:
             raise SpecError(f"body mesh {file} not found in the EU4 install")
+        spec_d = (loadout.derived.get(tier) if loadout else None) if role == "infantry" else None
+        if spec_d:
+            from eu4unitgen.core.derived_body import DerivedBodyError, append_additions, build_derived, removed_triangles
+
+            try:
+                removed = removed_triangles(data, file, spec_d["remove"]) if spec_d["remove"] else []
+                fit = measure_body(append_additions(data, [], removed), file)
+                if build and spec_d["add"]:
+                    data, _ = build_derived(self.runner(), data, spec_d["add"], remove=removed)
+                else:
+                    data = append_additions(data, [], removed)
+            except DerivedBodyError as exc:
+                raise SpecError(f"tier {tier}: derived body: {exc}") from exc
+            return name, file, data, fit
         return name, file, data, measure_body(data, file)
 
     def fitted(self, spec: SetSpec, tier: int, role: str, kind: str) -> dict:
@@ -608,7 +624,7 @@ class Session:
             check_slot(tier, role, slot)
         except LoadoutError as exc:
             raise SpecError(str(exc)) from exc
-        body_name, body_file, body_data, fit = self._body(spec, tier, loadout)
+        body_name, body_file, body_data, fit = self._body(spec, tier, loadout, role, build=True)
         notes += fit.notes
         colours, more = self._preview_colours(spec)
         notes += more
@@ -656,15 +672,22 @@ class Session:
                     notes.append(f"{body_file}: {b.part.bone}'s bind pose is scaled; the preview uses its rotation "
                                  "(the game animates from the .anim)")
                 parts_args.append({"name": b.name, "mesh": str(mesh_path), "matrix": list(bind) + [0, 0, 0, 1]})
+            head = [b.name for b in builds if b.part.bone == "head"]
             res = self.runner().run_job("render_parts", {"body": str(body_path), "parts": parts_args,
                                                          "views": ["front", "side"], "size": 360,
+                                                         "close": head, "close_views": ["three_quarter", "side", "rear"],
                                                          "thumbs": bool(parts_args), "out_dir": tmp}, timeout=300)
             views = [Image.open(res.result["views"][v]).convert("RGB") for v in ("front", "side")]
+            closes = [(v, Image.open(res.result["views"][f"{v}_close"]).convert("RGB"))
+                      for v in ("three_quarter", "side", "rear") if f"{v}_close" in res.result["views"]]
+            for _, img in closes:
+                img.load()
             thumbs = [(n, Image.open(path).convert("RGB")) for n, path in res.result.get("thumbs", {}).items()]
             for img in views + [t for _, t in thumbs]:
                 img.load()
         thumb = 150
-        sheet = Image.new("RGB", (720, 360 + (thumb + 20 if thumbs else 0)), (40, 40, 42))
+        close_h = 240 if closes else 0
+        sheet = Image.new("RGB", (720, 360 + (thumb + 20 if thumbs else 0) + close_h), (40, 40, 42))
         sheet.paste(views[0], (0, 0))
         sheet.paste(views[1], (360, 0))
         draw = ImageDraw.Draw(sheet)
@@ -674,6 +697,10 @@ class Session:
             x = i * (thumb + 30)
             sheet.paste(img.resize((thumb, thumb)), (x, 360 + 18))
             draw.text((x + 2, 362), name.removeprefix(f"{naming.prefix}{set_name}_"), fill=(230, 230, 230))
+        y0 = 360 + (thumb + 20 if thumbs else 0)
+        for i, (view, img) in enumerate(closes):
+            sheet.paste(img.resize((220, 220)), (i * 240, y0 + 18))
+            draw.text((i * 240 + 2, y0 + 2), f"head close-up: {view.replace('_', ' ')}", fill=(230, 230, 230))
         out = self.settings.output_dir / naming.part_preview_dir(set_name) / naming.part_preview(tier, role)
         out.parent.mkdir(parents=True, exist_ok=True)
         sheet.save(out)

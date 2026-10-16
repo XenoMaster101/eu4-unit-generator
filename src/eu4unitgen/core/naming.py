@@ -14,7 +14,7 @@ UNIT_TYPES = ("infantry", "cavalry", "artillery")
 TIERS = (1, 2, 3, 4)
 MESH_ROLES = ("infantry", "horse", "cannon")  # retexturable meshes per tier; the rider uses the infantry's
 TEXTURE_KINDS = ("diffuse", "normal", "specular")
-PART_KINDS = ("dory", "sarissa", "xyston", "xiphos", "hoplon", "crest", "horse_ears")  # procedural rigid parts (Phase 3)
+PART_KINDS = ("dory", "sarissa", "xyston", "xiphos", "hoplon", "crest", "horse_ears", "greek_helmet")  # procedural rigid parts (Phase 3)
 LOADOUT_ROLES = ("infantry", "rider", "crew")  # bodies a loadout dresses (Phase 3)
 
 _TAG = re.compile(r"^[A-Z][A-Z0-9]{2}$")

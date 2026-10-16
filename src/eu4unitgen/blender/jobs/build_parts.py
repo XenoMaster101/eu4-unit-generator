@@ -228,7 +228,112 @@ def build_ears(b, p):
         b.face(list(reversed(ring)), 0)
 
 
-BUILDERS = {"spear": build_spear, "sword": build_sword, "shield": build_shield, "crest": build_crest, "ears": build_ears}
+RIM_DROP = {  # style -> how far the rim hangs below the crown at the front, the side and the back
+    "attic": (0.75, 2.05, 1.45),       # the brow, cheek guards to the jaw, a short neck guard
+    "corinthian": (2.2, 2.15, 1.5),    # the face covered (eye slot: a zone-2 band), cheek and neck guards
+    "pilos": (1.05, 1.05, 1.05),       # a level rim
+}
+SLOT = (1.15, 1.45)  # corinthian eye slot: this far below the crown, at the front
+
+
+def build_helmet(b, p):
+    """A Greek helmet in the head bone frame (the unit faces -Z): a bronze shell with thickness. A
+    dome (an ellipsoid fitted to the bare head: ``top``, ``half_width``, ``front``/``back``) down to
+    its equator, then a skirt that drops nearly straight to a rim whose depth varies around the
+    head by style (``RIM_DROP``); pilos raises the crown into a cone; corinthian reaches further
+    forward to cover the nose. An integrated crest (zone 1) runs fore-aft or across the crown.
+    Zone 2: the eye slot (corinthian) and the inner lining."""
+    n_az, dome_n, skirt_n = 12, 4, 3
+    style = p.get("style", "attic")
+    front = p["front"] - (0.22 if style == "corinthian" else 0.0)
+    rx = p["half_width"]
+    cz = (front + p["back"]) / 2
+    rz = (p["back"] - front) / 2
+    ry = rx * 1.05
+    cy = p["top"] - ry
+    th = p["thickness"]
+    drops = RIM_DROP[style]
+
+    def rim_y(phi):  # phi 0 = front (-Z), pi/2 = the side, pi = back
+        c = math.cos(phi)
+        f, sd, bk = drops
+        return p["top"] - (sd + (f - sd) * c if c >= 0 else sd + (bk - sd) * -c)
+
+    def point(phi, theta, inset):
+        """Dome point at azimuth phi, elevation theta (0 = crown, 90 degrees = the equator), ``inset`` inwards."""
+        sx, sy, sz = rx - inset, ry - inset, rz - inset
+        st = math.sin(theta)
+        y = cy + sy * math.cos(theta)
+        if style == "pilos" and theta < math.radians(70):
+            y += (1 - theta / math.radians(70)) * ry * 0.9  # the cone
+        return (sx * st * math.sin(phi), y, cz - sz * st * math.cos(phi))
+
+    def column(phi, inset):
+        """The points from just below the crown down to the rim at azimuth phi."""
+        bottom = rim_y(phi)
+        if bottom >= cy:  # the rim is on the dome
+            t_rim = math.acos(max(-1.0, min(1.0, (bottom - cy) / ry)))
+            n = dome_n + skirt_n
+            return [point(phi, t_rim * j / n, inset) for j in range(1, n + 1)]
+        pts = [point(phi, math.radians(90) * j / dome_n, inset) for j in range(1, dome_n + 1)]
+        ex, _, ez = pts[-1]
+        for j in range(1, skirt_n + 1):
+            f = j / skirt_n
+            taper = 1 - 0.06 * f
+            pts.append((ex * taper, cy + (bottom - cy) * f, cz + (ez - cz) * taper))
+        return pts
+
+    phis = [2 * math.pi * i / n_az for i in range(n_az)]
+    crown_o = b.vert(*point(0, 0, 0))
+    crown_i = b.vert(*point(0, 0, th))
+    outer = [[b.vert(*q) for q in column(phi, 0)] for phi in phis]
+    inner = [[b.vert(*q) for q in column(phi, th)] for phi in phis]
+    rows = dome_n + skirt_n
+
+    eye = p["top"] - (SLOT[0] + SLOT[1]) / 2
+
+    def slot_row(i):  # the front columns' row nearest eye height (the slot is narrower than a row)
+        return min(range(rows - 1), key=lambda j: abs((b.pdx[outer[i][j]][1] + b.pdx[outer[i][j + 1]][1]) / 2 - eye))
+
+    def zone(i, j):
+        if style != "corinthian" or math.cos(phis[i]) < 0.55:
+            return 0
+        return 2 if j == slot_row(i) else 0
+
+    for i in range(n_az):
+        k = (i + 1) % n_az
+        b.face([crown_o, outer[i][0], outer[k][0]], 0)
+        b.face([crown_i, inner[k][0], inner[i][0]], 2)
+        for j in range(rows - 1):
+            b.face([outer[i][j], outer[i][j + 1], outer[k][j + 1], outer[k][j]], zone(i, j))
+            b.face([inner[i][j], inner[k][j], inner[k][j + 1], inner[i][j + 1]], 2)
+        b.face([outer[i][-1], inner[i][-1], inner[k][-1], outer[k][-1]], 0)  # the rim's edge
+    if p.get("crest", "fore_aft") != "none":
+        transverse = p.get("crest") == "transverse"
+        steps, half, h = 8, 0.12, p["crest_height"]
+        span = math.radians(75)
+        rows = []
+        for i in range(steps + 1):
+            a = -span + 2 * span * i / steps
+            base = point(math.pi / 2 if transverse else 0.0, abs(a), -0.02)
+            along = (base[0] if transverse else base[2])
+            if a < 0:
+                along = -along
+            hh = h * (1 - 0.35 * abs(math.sin(a)))
+            def at(side, up, _along=along, _y=base[1]):
+                return b.vert(_along, _y + up, side) if transverse else b.vert(side, _y + up, _along)
+            rows.append((at(-half, 0), at(half, 0), at(-half, hh), at(half, hh)))
+        for (bl0, br0, tl0, tr0), (bl1, br1, tl1, tr1) in zip(rows, rows[1:]):
+            b.face([bl0, bl1, tl1, tl0], 1)
+            b.face([br0, tr0, tr1, br1], 1)
+            b.face([tl0, tl1, tr1, tr0], 1)
+            b.face([bl0, br0, br1, bl1], 1)
+        for bl, br, tl, tr in (rows[0], rows[-1]):
+            b.face([bl, tl, tr, br], 1)
+
+
+BUILDERS = {"spear": build_spear, "sword": build_sword, "shield": build_shield, "crest": build_crest, "ears": build_ears,
+            "helmet": build_helmet}
 
 
 def main() -> None:

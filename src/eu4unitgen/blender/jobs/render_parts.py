@@ -11,6 +11,7 @@ The unit faces PDX -Z = Blender -Y: the "front" camera looks from -Y, the "side"
 (the unit's left, the shield side). Workbench, flat studio light, textures.
 
 args: {"body": .mesh or null, "parts": [{"mesh", "matrix": [16], "name"}], "views": ["front", "side"],
+       "close": [part names] (optional close-up framing), "close_views": ["front", "side", ...],
        "size": px, "thumbs": bool, "out_dir": ..., "result_path": ...}
 """
 import math
@@ -83,7 +84,8 @@ def render(scene, cam, objs, direction, path):
     return path
 
 
-VIEWS = {"front": (0, 1, 0), "side": (-1, 0, 0), "three_quarter": (-0.7, 0.7, -0.35)}
+VIEWS = {"front": (0, 1, 0), "side": (-1, 0, 0), "three_quarter": (-0.7, 0.7, -0.35), "rear": (0, -1, 0),
+         "rear_quarter": (0.6, -0.7, -0.35)}
 
 
 def main() -> None:
@@ -107,6 +109,22 @@ def main() -> None:
     out = {"views": {}, "thumbs": {}, "imported": {name: [f"{o.name}:{o.type}" for o in objs] for name, objs in parts}}
     for view in a.get("views", ["front", "side"]):
         out["views"][view] = render(scene, cam, everything, VIEWS[view], os.path.join(a["out_dir"], f"view_{view}.png"))
+    close = [o for name, objs in parts if name in set(a.get("close") or []) for o in objs]
+    for view in (a.get("close_views") or []) if close else []:
+        lo, hi = bounds(close)
+        pad = (hi - lo) * 0.45
+        marker = bpy.data.objects.new("close_box", None)  # frame the parts plus a margin (an empty has no bound box)
+        box = [lo - pad, hi + pad]
+        box_mesh = bpy.data.meshes.new("close_box")
+        box_mesh.from_pydata([(x, y, z) for x in (box[0].x, box[1].x) for y in (box[0].y, box[1].y)
+                              for z in (box[0].z, box[1].z)], [], [])
+        frame_obj = bpy.data.objects.new("close_box", box_mesh)
+        frame_obj.hide_render = True
+        scene.collection.objects.link(frame_obj)
+        out["views"][f"{view}_close"] = render(scene, cam, [frame_obj], VIEWS[view],
+                                               os.path.join(a["out_dir"], f"view_{view}_close.png"))
+        bpy.data.objects.remove(frame_obj, do_unlink=True)
+        del marker
     if a.get("thumbs"):
         for o in body_objs:
             o.hide_render = True

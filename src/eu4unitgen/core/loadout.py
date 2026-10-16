@@ -418,7 +418,8 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
     except DerivedBodyError as exc:
         raise GenerationError(f"tier {tier}: derived body: {exc}") from exc
     file = naming.derived_body_file(set_name, tier, base_file)
-    return _Prebuilt(data, adds, removed, base_file, measure_body(data, file))
+    # fitted on the base after removals, without the additions (head-skinned ears would pass for the head)
+    return _Prebuilt(data, adds, removed, base_file, measure_body(append_additions(base, [], removed), file))
 
 
 def _derive(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, built: _Prebuilt, pdx: "_Meshes",

@@ -158,6 +158,20 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "centre_z": Param(0.1, -1.5, 1.5, "Fore/aft", tip="forward (-) or back (+) of the head joint")},
              (ZoneDef("outer", "Outer", (95, 70, 50), 3), ZoneDef("inner", "Inner (front)", (150, 105, 95), 3)),
              scaled=("length", "width", "depth")),
+    PartKind("greek_helmet", "Greek helmet", "head", LOADOUT_ROLES, "helmet", "strip",
+             {"style": Choice(("attic", "corinthian", "pilos"), "attic", "Style",
+                              "attic: open face, cheek guards; corinthian: the face covered, an eye slot; pilos: a cone, "
+                              "level rim"),
+              "top": Param(1.92, 0.5, 4.0, "Top", tip="y of the crown above the head joint; fitted: the head top + 0.12"),
+              "half_width": Param(0.98, 0.3, 2.0, "Half width", 0.02, "fitted: the head's half-width + 0.13"),
+              "front": Param(-1.12, -2.5, 0.0, "Front", 0.02, "z of the brow (the unit faces -Z); fitted from the head"),
+              "back": Param(1.05, 0.0, 2.5, "Back", 0.02, "z of the back; fitted: the head's back + 0.2 (type1's old "
+                            "helmet back, where the tuft comes out)"),
+              "thickness": Param(0.08, 0.02, 0.3, "Thickness", 0.01),
+              "crest": Choice(("fore_aft", "transverse", "none"), "fore_aft", "Crest"),
+              "crest_height": Param(0.9, 0.2, 3.0, "Crest height")},
+             (ZoneDef("metal", "Bronze", BRONZE, 13), ZoneDef("crest", "Crest", HAIR, 3),
+              ZoneDef("slot", "Eye slot and lining", (25, 20, 15), 3))),
 )}
 assert set(KINDS) == set(PART_KINDS), "naming.PART_KINDS and parts.KINDS must list the same kinds"
 

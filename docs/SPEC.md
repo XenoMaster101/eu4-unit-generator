@@ -1018,6 +1018,18 @@ Constraints carried over:
   - **The tuft fails C2:** spear_shield attack 29.6% / 0.97 deep, idle one vertex 0.56; polearm attack 11.1% / 0.69, idle 0.84. Real in the attack: the torso leans and the shoulders hunch, and the tip sinks into the top of the back by the collar (`tuft_attack_diag.png`).
   - Per the user's rule closing the ponytail rounds (accept the clipping as a known limit, judged in game), the loadout's `"accept_clipping": ["tuft"]` turns the tuft's C2 findings into warnings marked as accepted. They are still reported.
 
+**Step 4 (2026-10-16): part kind `greek_helmet`** (rigid on `head`, builder `helmet`).
+- **Shell:** a bronze shell with thickness. A dome (an ellipsoid fitted to the bare head) to its equator, then a near-vertical skirt to a rim whose depth below the crown varies around the head by style (`RIM_DROP`):
+  - **attic:** brow 0.75, cheek guards 2.05, neck guard 1.45;
+  - **corinthian:** face 2.2, sides 2.15, back 1.5, reaching 0.22 further forward over the nose, with an eye slot (zone 2) on the front row nearest eye height;
+  - **pilos:** level 1.05, the crown raised into a cone.
+- **Crest:** integrated (zone 1), fore-aft, transverse or none.
+- **Fitting:** top = head top + 0.12, half-width + 0.13, brow at 0.8 × the head's front reach − 0.1, back = head back + 0.2. On bare type1: top 1.915, half-width 0.85, back 1.046, at type1's old helmet back, so the tuft comes out of it.
+- **One attached part per bone:** the helmet takes `head`; ears, tail and tuft live in the derived body.
+- **Fitting basis:** derived bodies are fitted on the base after removals and **without** additions (head-skinned ears would otherwise pass for the head). This applies both in `apply_loadout` and in the preview (`_body`).
+- **Preview:** shows a tier's derived body and adds head close-ups (three-quarter, side, rear) whenever a part hangs on `head` (`render_parts` `close`/`close_views`).
+- Renders: `build/plan11/helmets_close.png`, `corinthian_close.png`.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**
