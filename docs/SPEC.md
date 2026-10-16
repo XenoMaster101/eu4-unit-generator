@@ -1147,6 +1147,19 @@ Constraints carried over:
 - **Rim bevels skipped:** smooth shading plus Q3's normal maps give the edge highlight without more triangles.
 - Before/after: `build/q4/before_after.png`.
 
+**Q2 (2026-10-16): painted base colour.**
+- Each colour zone has a material class (`ZoneDef.material`: wood, bronze, iron, hair, leather, paint, plain).
+- **Bake** (`build_parts.bake_maps`): after export, Cycles (CPU, 16 samples, 4 px margin) bakes four maps on the part's own unwrap (or the hoplon's disc) with temporary per-zone materials:
+  - `ao` (ambient occlusion);
+  - `curv` (pointiness: edges);
+  - `up` (world Z of the normal: top light);
+  - `pattern`: a 3D material pattern in object coordinates, seamless across UV seams: noise plus a 4× finer octave; wood adds a wave texture, bronze Voronoi hammering; iron and hair stretch along the length.
+- The maps are cached with the mesh (`#maps`).
+- **`textures/paint.paint`** composes per texel: zone colour × pattern × AO × top light, plus convex-edge wear and a deterministic per-texel brush grain, with per-material strengths (`STYLE`, tuned against the base game's measured style). Country zones stay neutral grey, shaded the same way.
+- **Measured** (test-11 parts): detail dory 12.0, hoplon 10.3, helmet 9.5 (was 0; base game 11-22); shading dory 12.5, hoplon 11.1 (base game 4-26). The helmet's 51 counts its dark lining next to the bronze in one texture.
+- **Noted:** the dory's long shaft islands pack into a narrow column of its 512 px atlas. The density (20.1) is in the base-game weapon range, so the wasted space is accepted for now.
+- Textures: `build/q2/textures.png`.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

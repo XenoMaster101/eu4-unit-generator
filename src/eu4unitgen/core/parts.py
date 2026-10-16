@@ -24,6 +24,7 @@ scales the ``scaled`` lengths to other bodies and measures the head for crests.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import tempfile
@@ -36,8 +37,10 @@ from PIL import Image
 from eu4unitgen.core.generator import OWNED, GeneratedFile, GenerationError
 from eu4unitgen.core.naming import LOADOUT_ROLES, PART_KINDS, Naming
 from eu4unitgen.library.scanner import strip_mesh_props
+from eu4unitgen.textures.paint import paint
 from eu4unitgen.textures.procedural import (
-    COUNTRY_CHANNELS, TEXEL_DENSITY, Zone, atlas_images, encode_part_textures, part_images, shader_for, zone_uvs,
+    COUNTRY_CHANNELS, SIZE, TEXEL_DENSITY, Zone, atlas_images, encode_part_textures, part_images, shader_for,
+    zone_map, zone_uvs,
 )
 
 PART_SCALE = 0.5  # vanilla weapons' and shields' pdxmesh scale
@@ -72,6 +75,7 @@ class ZoneDef:
     colour: tuple[int, int, int]
     gloss: float  # percent
     channel: str | None = None  # default country channel (None: fixed colour)
+    material: str = "plain"  # textures.paint pattern class (Q2): wood, bronze, iron, hair, leather, paint, plain
 
 
 @dataclass(frozen=True)
@@ -107,7 +111,8 @@ def _spear(tip, butt, head_length, head_width, shaft_radius, spike) -> dict:
             "point": POINT}
 
 
-SPEAR_ZONES = (ZoneDef("shaft", "Shaft", WOOD, 3), ZoneDef("metal", "Head and butt spike", BRONZE, 13))
+SPEAR_ZONES = (ZoneDef("shaft", "Shaft", WOOD, 3, material="wood"),
+               ZoneDef("metal", "Head and butt spike", BRONZE, 13, material="bronze"))
 
 KINDS: dict[str, PartKind] = {k.name: k for k in (
     PartKind("dory", "Dory (spear)", "Right_hand_node", LOADOUT_ROLES, "spear", "atlas",
@@ -125,7 +130,8 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "grip_length": Param(1.0, 0.4, 2.5, "Grip length", 0.1),
               "guard_width": Param(0.9, 0.2, 2.5, "Guard width"),
               "point": POINT},
-             (ZoneDef("blade", "Blade and guard", IRON, 13), ZoneDef("hilt", "Grip and pommel", WOOD, 3)),
+             (ZoneDef("blade", "Blade and guard", IRON, 13, material="iron"),
+              ZoneDef("hilt", "Grip and pommel", WOOD, 3, material="leather")),
              scaled=("blade_length", "grip_length")),
     PartKind("hoplon", "Hoplon (round shield)", "Left_hand_node", ("infantry", "crew"), "shield", "disc",
              {"radius": Param(3.8, 1.5, 6.0, "Radius", 0.1),
@@ -137,8 +143,9 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "centre_z": Param(0.0, -4.0, 4.0, "Centre fore/aft", 0.1, "forward (-) or back (+) of the hand"),
               "blazon_rotate": Choice(("0", "90", "180", "270"), "0", "Blazon rotation", "degrees, counter-clockwise"),
               "blazon_mirror": Choice(("no", "yes"), "no", "Mirror the blazon")},
-             (ZoneDef("face", "Face", (150, 110, 60), 10, "country1"), ZoneDef("rim", "Rim", BRONZE, 13),
-              ZoneDef("back", "Inside", (120, 85, 50), 3)),
+             (ZoneDef("face", "Face", (150, 110, 60), 10, "country1", material="paint"),
+              ZoneDef("rim", "Rim", BRONZE, 13, material="bronze"),
+              ZoneDef("back", "Inside", (120, 85, 50), 3, material="wood")),
              scaled=("radius", "centre_y"), blazon=True),
     PartKind("crest", "Crest (helmet)", "head", LOADOUT_ROLES, "crest", "atlas",
              {"base": Param(1.9, -1.0, 5.0, "Base height", tip="above the head joint; fitted: the helmet top less 0.25"),
@@ -148,7 +155,7 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "thickness": Param(0.28, 0.08, 1.2, "Thickness", 0.01),
               "centre_z": Param(0.0, -2.0, 2.0, "Centre fore/aft", tip="forward (-) or back (+) of the head joint"),
               "orientation": Choice(("fore_aft", "transverse"), "fore_aft", "Orientation")},
-             (ZoneDef("hair", "Horsehair", HAIR, 3),)),
+             (ZoneDef("hair", "Horsehair", HAIR, 3, material="hair"),)),
     PartKind("horse_ears", "Horse ears (pair)", "head", LOADOUT_ROLES, "ears", "atlas",
              {"base": Param(1.7, -1.0, 4.0, "Base height", tip="above the head joint; fitted: the helmet top less 0.45"),
               "spread": Param(0.62, 0.1, 2.0, "Spread", 0.02, "x of each ear's base; fitted: 0.63 x the head's half-width"),
@@ -158,7 +165,8 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "tilt_deg": Param(25.0, 0.0, 60.0, "Outward tilt", 1.0, "degrees from vertical, away from the head"),
               "lean_deg": Param(10.0, -30.0, 45.0, "Backward lean", 1.0, "degrees from vertical, towards the back (+Z)"),
               "centre_z": Param(0.1, -1.5, 1.5, "Fore/aft", tip="forward (-) or back (+) of the head joint")},
-             (ZoneDef("outer", "Outer", (95, 70, 50), 3), ZoneDef("inner", "Inner (front)", (150, 105, 95), 3)),
+             (ZoneDef("outer", "Outer", (95, 70, 50), 3, material="hair"),
+              ZoneDef("inner", "Inner (front)", (150, 105, 95), 3, material="leather")),
              scaled=("length", "width", "depth")),
     PartKind("greek_helmet", "Greek helmet", "head", LOADOUT_ROLES, "helmet", "atlas",
              {"style": Choice(("attic", "corinthian", "pilos"), "attic", "Style",
@@ -172,8 +180,9 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "thickness": Param(0.08, 0.02, 0.3, "Thickness", 0.01),
               "crest": Choice(("fore_aft", "transverse", "none"), "fore_aft", "Crest"),
               "crest_height": Param(0.9, 0.2, 3.0, "Crest height")},
-             (ZoneDef("metal", "Bronze", BRONZE, 13), ZoneDef("crest", "Crest", HAIR, 3),
-              ZoneDef("slot", "Eye slot and lining", (25, 20, 15), 3))),
+             (ZoneDef("metal", "Bronze", BRONZE, 13, material="bronze"),
+              ZoneDef("crest", "Crest", HAIR, 3, material="hair"),
+              ZoneDef("slot", "Eye slot and lining", (25, 20, 15), 3, material="leather"))),
 )}
 assert set(KINDS) == set(PART_KINDS), "naming.PART_KINDS and parts.KINDS must list the same kinds"
 
@@ -271,11 +280,11 @@ def resolve(spec: PartSpec, role: str, body=None, points: dict[str, str] | None 
     for zd in k.zones:
         value = spec.colours.get(zd.name)
         if isinstance(value, str):
-            zones.append(Zone(zd.colour, zd.gloss, value))
+            zones.append(Zone(zd.colour, zd.gloss, value, zd.material))
         elif value is not None:
-            zones.append(Zone(tuple(value), zd.gloss, None))
+            zones.append(Zone(tuple(value), zd.gloss, None, zd.material))
         else:
-            zones.append(Zone(zd.colour, zd.gloss, zd.channel))
+            zones.append(Zone(zd.colour, zd.gloss, zd.channel, zd.material))
     return ResolvedPart(spec.kind, role, params, zones, fitted)
 
 
@@ -297,6 +306,7 @@ class BuiltParts:
     files: list[GeneratedFile]
     raw_meshes: dict[str, bytes] = field(default_factory=dict)  # entity name -> .mesh bytes (also in files)
     atlas: dict[str, dict] = field(default_factory=dict)  # entity name -> {"size", "density", "tris"} (atlas parts)
+    maps: dict[str, dict] = field(default_factory=dict)  # entity name -> baked maps {ao, curv, up, pattern}: PNG bytes
     log: str = ""
 
     def images(self, b: "PartBuild") -> dict[str, Image.Image]:
@@ -304,11 +314,19 @@ class BuiltParts:
         the swatch or disc layout."""
         p = b.part.params
         atlas = self.atlas.get(b.name)
-        if atlas is not None:
-            return atlas_images(b.part.zones, atlas["size"], atlas["tris"])
         layout = KINDS[b.part.kind].layout
-        return part_images(b.part.zones, "strip" if layout == "atlas" else layout, b.blazon,
-                           int(p.get("blazon_rotate", 0)), p.get("blazon_mirror") == "yes")
+        if atlas is not None:
+            imgs = atlas_images(b.part.zones, atlas["size"], atlas["tris"])
+        else:
+            layout = "strip" if layout == "atlas" else layout
+            imgs = part_images(b.part.zones, layout, b.blazon,
+                               int(p.get("blazon_rotate", 0)), p.get("blazon_mirror") == "yes")
+        maps = self.maps.get(b.name)
+        if maps:  # Q2: painted in vanilla's style from the baked maps
+            size = imgs["diffuse"].size[0]
+            zmap = zone_map(b.part.zones, layout, size, atlas["tris"] if atlas else None)
+            imgs["diffuse"] = paint(imgs["diffuse"], zmap, b.part.zones, maps)
+        return imgs
 
 
 def _names(naming: Naming, set_name: str, b: PartBuild) -> dict[str, str]:
@@ -323,6 +341,8 @@ def job_entry(naming: Naming, set_name: str, b: PartBuild) -> dict:
     k = KINDS[b.part.kind]
     return {"kind": b.part.kind, "builder": k.builder, "shape": f"{b.name}Shape", "shader": b.part.shader,
             "zones": len(b.part.zones), "layout": k.layout, "density": TEXEL_DENSITY,
+            "materials": [z.material for z in b.part.zones], "bake": True,
+            "bake_size": SIZE.get(k.layout, 64),
             "zone_uvs": [list(uv) for uv in zone_uvs(len(b.part.zones), k.layout)],
             "params": b.part.params, "textures": _names(naming, set_name, b)}
 
@@ -341,6 +361,8 @@ def build_parts(runner, naming: Naming, set_name: str, builds: list[PartBuild], 
     meshes: dict[int, bytes] = {i: cache[_key(e)] for i, e in enumerate(entries) if i not in todo}
     atlases: dict[int, dict] = {i: json.loads(cache[_key(e) + "#atlas"]) for i, e in enumerate(entries)
                                 if i not in todo and _key(e) + "#atlas" in cache}
+    baked: dict[int, dict] = {i: json.loads(cache[_key(e) + "#maps"]) for i, e in enumerate(entries)
+                              if i not in todo and _key(e) + "#maps" in cache}
     if todo and runner is None:
         raise GenerationError("parts need Blender to build (Settings: Blender path)")
     if todo:
@@ -352,10 +374,14 @@ def build_parts(runner, naming: Naming, set_name: str, builds: list[PartBuild], 
                 meshes[i] = strip_mesh_props(Path(built["out_mesh"]).read_bytes())
                 if built.get("atlas"):
                     atlases[i] = built["atlas"]
+                if built.get("maps"):
+                    baked[i] = {k: base64.b64encode(Path(v).read_bytes()).decode("ascii") for k, v in built["maps"].items()}
                 if cache is not None:
                     cache[_key(entries[i])] = meshes[i]
                     if built.get("atlas"):
                         cache[_key(entries[i]) + "#atlas"] = json.dumps(built["atlas"]).encode("utf-8")
+                    if i in baked:
+                        cache[_key(entries[i]) + "#maps"] = json.dumps(baked[i]).encode("utf-8")
     for i, b in enumerate(builds):
         kind, role, tier = b.part.kind, b.part.role, b.tier
         mesh_rel = naming.part_mesh_file(set_name, kind, tier, role)
@@ -363,6 +389,8 @@ def build_parts(runner, naming: Naming, set_name: str, builds: list[PartBuild], 
         out.raw_meshes[b.name] = meshes[i]
         if i in atlases:
             out.atlas[b.name] = atlases[i]
+        if i in baked:
+            out.maps[b.name] = {k: base64.b64decode(v) for k, v in baked[i].items()}
         dds = encode_part_textures(out.images(b))
         for tex, data in dds.items():
             rel = f"{naming.part_dir(set_name)}/{naming.part_texture(set_name, kind, tier, tex, role)}"

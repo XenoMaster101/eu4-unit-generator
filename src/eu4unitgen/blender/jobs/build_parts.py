@@ -387,6 +387,107 @@ def unwrap_atlas(obj, density):
     return {"size": size, "density": size * math.sqrt(area_uv / area3) if area3 else 0.0, "tris": tris}
 
 
+# Q2: maps baked on the part's own UVs for textures.paint. Patterns are computed in 3D (object
+# coordinates), so they run across UV seams; each returns ~0.5 +- 0.25.
+def _pattern(nodes, links, material):
+    coord = nodes.new("ShaderNodeTexCoord")
+    mapping = nodes.new("ShaderNodeMapping")
+    links.new(coord.outputs["Object"], mapping.inputs["Vector"])
+    scale = {"wood": (1, 1, 1), "bronze": (1, 1, 1), "iron": (30, 2, 30), "hair": (50, 50, 3),
+             "leather": (1, 1, 1), "paint": (1, 1, 1), "plain": (1, 1, 1)}.get(material, (1, 1, 1))
+    mapping.inputs["Scale"].default_value = scale
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = {"wood": 20, "bronze": 30, "iron": 1.5, "hair": 1.5, "leather": 18,
+                                           "paint": 5, "plain": 10}.get(material, 10)
+    noise.inputs["Detail"].default_value = 6
+    links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+    fine = nodes.new("ShaderNodeTexNoise")  # a second, finer octave: detail at the texel scale
+    fine.inputs["Scale"].default_value = noise.inputs["Scale"].default_value * 4
+    fine.inputs["Detail"].default_value = 2
+    links.new(mapping.outputs["Vector"], fine.inputs["Vector"])
+    both = nodes.new("ShaderNodeMix")
+    both.data_type = "FLOAT"
+    both.inputs["Factor"].default_value = 0.45
+    links.new(noise.outputs["Fac"], both.inputs["A"])
+    links.new(fine.outputs["Fac"], both.inputs["B"])
+    noise_out = both.outputs["Result"]
+    if material not in ("wood", "bronze"):
+        return noise_out
+    second = nodes.new("ShaderNodeTexWave" if material == "wood" else "ShaderNodeTexVoronoi")
+    links.new(mapping.outputs["Vector"], second.inputs["Vector"])
+    if material == "wood":
+        second.inputs["Scale"].default_value = 6
+        second.inputs["Distortion"].default_value = 4
+        out2 = second.outputs["Fac"]
+    else:
+        second.inputs["Scale"].default_value = 15
+        out2 = second.outputs["Distance"]
+    mix = nodes.new("ShaderNodeMix")
+    mix.data_type = "FLOAT"
+    mix.inputs["Factor"].default_value = 0.6 if material == "wood" else 0.4
+    links.new(noise_out, mix.inputs["A"])
+    links.new(out2, mix.inputs["B"])
+    return mix.outputs["Result"]
+
+
+def bake_maps(obj, size, materials, prefix):
+    """Bake ao, curv, up and pattern maps (PNG, ``size``) for ``obj`` (one material per zone, from
+    the ``zone`` face attribute; called after export). Returns {map: path}."""
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 16
+    scene.render.bake.margin = 4
+    me = obj.data
+    zone = me.attributes.get("zone")
+    me.materials.clear()
+    mats = []
+    for i, material in enumerate(materials or ["plain"]):
+        mat = bpy.data.materials.new(f"bake_{i}")
+        mat.use_nodes = True
+        nodes, links = mat.node_tree.nodes, mat.node_tree.links
+        nodes.clear()
+        out = nodes.new("ShaderNodeOutputMaterial")
+        emit = nodes.new("ShaderNodeEmission")
+        links.new(emit.outputs["Emission"], out.inputs["Surface"])
+        geo = nodes.new("ShaderNodeNewGeometry")
+        curv = nodes.new("ShaderNodeMath")
+        curv.operation, curv.use_clamp = "MULTIPLY_ADD", True
+        links.new(geo.outputs["Pointiness"], curv.inputs[0])
+        curv.inputs[1].default_value, curv.inputs[2].default_value = 3.0, -1.0  # (p - 0.5) * 3 + 0.5
+        sep = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(geo.outputs["Normal"], sep.inputs["Vector"])
+        up = nodes.new("ShaderNodeMath")
+        up.operation, up.use_clamp = "MULTIPLY_ADD", True
+        links.new(sep.outputs["Z"], up.inputs[0])
+        up.inputs[1].default_value, up.inputs[2].default_value = 0.5, 0.5
+        pattern = _pattern(nodes, links, material)
+        target = nodes.new("ShaderNodeTexImage")
+        nodes.active = target
+        me.materials.append(mat)
+        mats.append((mat, emit, {"curv": curv.outputs[0], "up": up.outputs[0], "pattern": pattern}, target))
+    for poly in me.polygons:
+        poly.material_index = zone.data[poly.index].value if zone is not None else 0
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    paths = {}
+    for name in ("ao", "curv", "up", "pattern"):
+        img = bpy.data.images.new(f"{prefix}_{name}", size, size, alpha=False)
+        img.colorspace_settings.name = "Non-Color"
+        for mat, emit, sockets, target in mats:
+            target.image = img
+            if name != "ao":
+                mat.node_tree.links.new(sockets[name], emit.inputs["Color"])
+        bpy.ops.object.bake(type="AO" if name == "ao" else "EMIT")
+        path = f"{prefix}_{name}.png"
+        img.filepath_raw = path
+        img.file_format = "PNG"
+        img.save()
+        paths[name] = path
+    return paths
+
+
 def main() -> None:
     a = _pdx.args()
     ie = _pdx.io_module()
@@ -404,8 +505,12 @@ def main() -> None:
                                                 part["textures"]))
         atlas = unwrap_atlas(obj, part.get("density", 32.0)) if part.get("layout") == "atlas" else None
         ie.export_meshfile(part["out_mesh"], exp_mesh=True, exp_skel=False, exp_locs=False)
+        maps = None
+        if part.get("bake"):  # after export: the baking materials never reach the .mesh
+            size = atlas["size"] if atlas else part.get("bake_size", 64)
+            maps = bake_maps(obj, size, part.get("materials"), part["out_mesh"][:-len(".mesh")])
         out.append({"kind": part["kind"], "out_mesh": part["out_mesh"], "verts": len(mesh.vertices),
-                    "faces": len(mesh.polygons), **({"atlas": atlas} if atlas else {})})
+                    "faces": len(mesh.polygons), **({"atlas": atlas} if atlas else {}), **({"maps": maps} if maps else {})})
     _pdx.write_result(a, {"parts": out})
 
 

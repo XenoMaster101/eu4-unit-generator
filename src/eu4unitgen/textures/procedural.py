@@ -44,6 +44,7 @@ class Zone:
     colour: Colour  # diffuse (ignored under a country channel, which gets COUNTRY_GREY)
     gloss: float  # percent of 255 in spec alpha
     channel: str | None = None  # country1-3: the zone takes that country colour
+    material: str = "plain"  # textures.paint pattern class (Q2)
 
     def __post_init__(self) -> None:
         if self.channel is not None and self.channel not in COUNTRY_CHANNELS:
@@ -143,6 +144,20 @@ def atlas_images(zones: list[Zone], size: int, tris: list[list[float]]) -> dict[
         for draw, fill in ((dd, (*_diffuse_of(z), 255)), (sd, _spec_of(z))):
             draw.polygon(pts, fill=fill, outline=fill, width=2)
     return {"diffuse": diffuse, "normal": Image.new("RGBA", (size, size), (*FLAT_NORMAL, 255)), "specular": spec}
+
+
+def zone_map(zones: list[Zone], layout: str, size: int, tris: list[list[float]] | None = None) -> Image.Image:
+    """An 'L' image holding each texel's zone index, laid out like the part's textures."""
+    if tris is not None:
+        img = Image.new("L", (size, size), 0)
+        draw = ImageDraw.Draw(img)
+        for t in tris:
+            z = int(t[0]) if 0 <= int(t[0]) < len(zones) else 0
+            draw.polygon([(t[1 + 2 * k] * size, t[2 + 2 * k] * size) for k in range(3)], fill=z, outline=z, width=2)
+        return img
+    ids = [Zone((i, i, i), 0) for i in range(len(zones))]
+    return _paint(ids, layout, lambda z: (z.colour[0], z.colour[0], z.colour[0], 255)).convert("L").resize(
+        (size, size), Image.Resampling.NEAREST)
 
 
 def encode_part_textures(images: dict[str, Image.Image]) -> dict[str, bytes]:

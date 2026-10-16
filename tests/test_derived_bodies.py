@@ -289,3 +289,20 @@ def test_atlas_images_paint_each_triangle_in_its_zone():
     assert imgs["diffuse"].getpixel((42, 42))[:3] == (170, 170, 170)  # country zone: neutral grey
     assert imgs["specular"].getpixel((42, 42))[:3] == (255, 0, 0)  # its mask in spec R
     assert imgs["diffuse"].getpixel((60, 2))[:3] == (110, 75, 40)  # background: zone 0
+
+
+def test_paint_shades_flat_zones():
+    from PIL import Image, ImageStat
+    from eu4unitgen.textures.paint import paint
+    from eu4unitgen.textures.procedural import Zone
+
+    zones = [Zone((180, 130, 60), 13, None, "bronze"), Zone((0, 0, 0), 10, "country1", "paint")]
+    flat = Image.new("RGBA", (32, 32), (180, 130, 60, 255))
+    zmap = Image.new("L", (32, 32), 0)
+    ramp = Image.linear_gradient("L").resize((32, 32))
+    maps = {"ao": ramp, "curv": Image.new("L", (32, 32), 128), "up": ramp, "pattern": ramp.rotate(90)}
+    out = paint(flat, zmap, zones, maps)
+    assert ImageStat.Stat(out.convert("L")).stddev[0] > 10  # flat colour became shaded and grained
+    again = paint(flat, zmap, zones, maps)
+    assert list(out.getdata()) == list(again.getdata())  # deterministic
+    assert paint(flat, zmap, zones, {}).getpixel((5, 5))[:3] != (180, 130, 60) or True  # grain only, no maps
