@@ -1139,6 +1139,14 @@ Constraints carried over:
   - african_generic_03: tail 3.6, tuft 9.2, ears 14.1 (its scalp region is 26×8 px).
   - Both are lifted by Q5's dedicated hair swatch.
 
+**Q4 (2026-10-16): smooth normals.**
+- `build_parts.smooth_normals`: every part shades smooth (`Mesh.shade_smooth`), with hard edges only where the surface turns sharper than 50° (`set_sharp_from_angle`) or where two colour zones meet (the `zone` face attribute → `sharp_edge`).
+- io_pdx_mesh writes per-corner normals, so the hard edges survive export.
+- The parts were flat-shaded before (each face lit on its own: the faceted helmet).
+- **Thickness check:** Q0 ears 0.12 at the base, crest fin 0.28, helmet shell 0.08, hoplon 0.12; no single-sided sheets.
+- **Rim bevels skipped:** smooth shading plus Q3's normal maps give the edge highlight without more triangles.
+- Before/after: `build/q4/before_after.png`.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

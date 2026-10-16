@@ -338,6 +338,28 @@ BUILDERS = {"spear": build_spear, "sword": build_sword, "shield": build_shield, 
             "helmet": build_helmet}
 
 
+SHARP_ANGLE = 50.0  # degrees: sharper turns stay hard edges (blade edges, rims); the rest shades smooth
+
+
+def smooth_normals(mesh):
+    """Q4: smooth shading with hard edges only where two colour zones meet or the surface turns
+    sharper than SHARP_ANGLE (the parts were flat-shaded: every face lit on its own)."""
+    mesh.shade_smooth()
+    mesh.set_sharp_from_angle(angle=math.radians(SHARP_ANGLE))
+    zone = mesh.attributes.get("zone")
+    if zone is None:
+        return
+    sharp = mesh.attributes.get("sharp_edge") or mesh.attributes.new("sharp_edge", "BOOLEAN", "EDGE")
+    faces_of = {}
+    for poly in mesh.polygons:
+        for key in poly.edge_keys:
+            faces_of.setdefault(key, []).append(zone.data[poly.index].value)
+    for e in mesh.edges:
+        zs = faces_of.get(tuple(sorted(e.vertices)), [])
+        if len(set(zs)) > 1:
+            sharp.data[e.index].value = True
+
+
 def unwrap_atlas(obj, density):
     """Q1: a real UV unwrap (Smart UV Project, islands packed with a margin) and the texture size
     (a power of two, 64-512) that gives about ``density`` texels per mesh unit. Returns
@@ -375,6 +397,7 @@ def main() -> None:
         builder = Builder(part["zone_uvs"], flip_z=params.get("point") == "down")
         BUILDERS[part["builder"]](builder, params)
         mesh = builder.finish(part["shape"])
+        smooth_normals(mesh)
         obj = bpy.data.objects.new(part["shape"].removesuffix("Shape"), mesh)
         bpy.context.scene.collection.objects.link(obj)
         mesh.materials.append(_pdx.pdx_material(part["shape"] + "_mat", part.get("shader", "PdxMeshStandard"),
