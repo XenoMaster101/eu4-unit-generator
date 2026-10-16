@@ -777,6 +777,31 @@ Generators (Blender jobs, subprocess only) → package → validator. New rules:
 - Limits: the spike shows Blender's playback of the vanilla .anim through io_pdx_mesh. UNVERIFIED that it matches the game exactly (stances were verified in game, the importer's playback wasn't). The in-game check (a derived body .mesh with the tail, in a test mod) is a separate step after R0.
 - Code: one throwaway Blender job + runner call under `scripts/spike_r0/` (not part of the app; removed or promoted after the decision).
 
+**R0 result (2026-10-16, Blender playback; criterion 6 = user sign-off pending).** Scripts `scripts/spike_r0/` (`run.py`, `spike_job.py`, `report.py`); output `build/spike_r0/` (`metrics.md`, `sheets/`).
+- **io_pdx_mesh fact:**
+  - The `polearm_twohanded` anims animate `attack_L_hand`/`attack_R_hand`, which the type1 mesh lacks, and `import_animfile` refuses ("Missing bones required for animation"). The spike adds unweighted dummy bones under `root`, which is equivalent to the game ignoring those tracks.
+  - Successive anim imports pile onto one action, so reload the body per animation.
+  - Clips: idle 170 frames, moving 21, attack 59, all at 15 fps.
+- **Tail (156 tris):**
+  - **B rigid (100% `hip`) and C gradient (`hip` → `lower_spine`, tip 50/50) pass C1-C5 in all three anims.** Stretch for C is 0.92-1.07 in the attack. No penetration, no flips, no root drift. The tip ranges from 34° to 58° below horizontal; it swings out behind in the attack lunge and looks natural by eye.
+  - A auto (heat) **fails**: it put 37% of the weight on the thighs, so the tail bends with the leg. Root drift reaches 0.48 and stretch 0.67.
+  - **Verdict: a tail works on the unmodified skeleton with authored weights, not automatic ones.**
+- **Ponytail (124 tris, 4 units to mid-back):**
+  - **No variant passes.** All are fine in the walk.
+  - In idle the head turns and tilts. B rigid (100% `head`) swings into the shoulder: 57% of vertices inside, 0.38 deep.
+  - In the attack the torso leans and the head tips back: B is 71% inside and 0.94 deep, and passes in front of `top_spine`. C gradient (`head` → `top_spine`, tip 30/70) is 66% inside and 0.52 deep, and stretches to 0.76.
+  - A auto put 54% on the shoulders and fails everywhere.
+  - Cause: geometry length and clearance against the head's rotation relative to `top_spine`, not a missing weighting trick.
+  - At 48 px the clipping is barely visible.
+- **Map scale (48 px):** the tail reads as a 4-6 px streak from the rear and a clear diagonal in the attack. From the front it is hidden except in the attack. Variants can't be told apart.
+- **Consequences:**
+  - The pipeline needs a **procedural weight author** (gradients along a part's bone chain). Automatic weights are rejected for skinned additions.
+  - Ponytail alternatives, untested:
+    1. a short ponytail (to the nape, ~2 units) as a **rigid part on `head`**: the proven attach path, no derived body. Low cost, one spike rerun;
+    2. long hair with more clearance and a 3-bone gradient `head` → `top_spine` → `mid_spine`: Medium;
+    3. new bones + re-authored anims: High, last resort.
+  - UNVERIFIED that Blender playback matches the game. The tail's in-game check (derived type1 body with the tail merged) is the next gate.
+
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.
 - R2: derived bodies (bareheaded, merged skinned additions). Accept on an in-game test with no error.log lines and no visible artefacts in idle/walk/attack.
