@@ -16,7 +16,7 @@ from eu4unitgen.core.naming import LOADOUT_ROLES, PART_KINDS, TIERS, UNIT_TYPES,
 from eu4unitgen.core.nation import MANEUVER, Nation
 from eu4unitgen.core.project import Project
 from eu4unitgen.library.tags import TagFacts, apply_history, coverage, culture_groups
-from eu4unitgen.pdxscript.parser import Block, Scalar, parse_bytes
+from eu4unitgen.pdxscript.parser import Block, Pair, Scalar, parse_bytes
 from eu4unitgen.validate.graph import GENERATED, MOD, VANILLA, Graph, Node, World
 
 ERROR, WARNING, INFO = "error", "warning", "info"
@@ -935,6 +935,174 @@ def unit_colours(ctx: Context) -> list[Issue]:
                                                    "use the engine's default unit colours (red in test 5; UNVERIFIED). "
                                                    "Set unit colours to choose them.", rel))
     return out
+
+
+COLOUR_EFFECTS = ("restore_country_color", "change_country_color")
+ALL, SUBJECTS, SCOPED = "every country", "subjects only", "the countries it scopes to"
+
+
+def _reach(key: str, val: Block, outer: str) -> str:
+    """How far a scope reaches: every_country (limited to ``is_subject = yes``: subjects only),
+    every_subject_country (subjects only); anything else keeps the outer reach."""
+    if key == "every_subject_country":
+        return SUBJECTS
+    if key == "every_country":
+        limit = val.get_block("limit")
+        return SUBJECTS if limit is not None and limit.get_str("is_subject") == "yes" else ALL
+    return outer
+
+
+class _ScriptWalk:
+    """Follows a mod's script (read over the game) from a block through the events and scripted
+    effects it calls, collecting the colour effects reached. Triggers and limits aren't evaluated:
+    a reached effect *may* run."""
+
+    def __init__(self, files):
+        self.files = files
+        self._effects: dict[str, tuple[str, Block]] | None = None
+        self._events: dict[str, tuple[str, Block] | None] = {}
+        self._docs: dict[str, Block] = {}
+        self._event_files: list[tuple[str, bytes]] | None = None
+        self.found: list[tuple[str, str, str]] = []  # (effect, call chain, reach)
+
+    def _doc(self, rel: str, data: bytes) -> Block:
+        if rel not in self._docs:
+            self._docs[rel] = parse_bytes(data)
+        return self._docs[rel]
+
+    def effects(self) -> dict[str, tuple[str, Block]]:
+        if self._effects is None:
+            self._effects = {}
+            for rel, _dlc, data in self.files.iter_files("common/scripted_effects", (".txt",)):
+                for p in self._doc(rel, data).pairs():
+                    if isinstance(p.value, Block):
+                        self._effects[p.key.value] = (rel, p.value)
+        return self._effects
+
+    def event(self, eid: str) -> tuple[str, Block] | None:
+        if eid not in self._events:
+            self._events[eid] = None
+            pat = re.compile(rb"\bid\s*=\s*\"?" + re.escape(eid.encode()) + rb"[\"\s}]")
+            if self._event_files is None:
+                self._event_files = [(rel, data) for rel, _dlc, data in self.files.iter_files("events", (".txt",))]
+            for rel, data in self._event_files:
+                if not pat.search(data):
+                    continue
+                for p in self._doc(rel, data).pairs():
+                    if isinstance(p.value, Block) and p.value.get_str("id") == eid:
+                        self._events[eid] = (rel, p.value)
+                        break
+                if self._events[eid] is not None:
+                    break
+        return self._events[eid]
+
+    def walk(self, block: Block, chain: str, wide: str = SCOPED, seen: frozenset = frozenset()) -> None:
+        for p in block.pairs():
+            key, val = p.key.value, p.value
+            if key in COLOUR_EFFECTS:
+                self.found.append((key, chain, wide))
+            elif key in ("country_event", "province_event") and isinstance(val, Block):
+                self._call_event(val.get_str("id"), chain, wide, seen)
+            elif key == "events" and isinstance(val, Block):  # on_actions' event lists
+                for eid in val.bare():
+                    self._call_event(eid, chain, wide, seen)
+            elif key == "random_events" and isinstance(val, Block):
+                for q in val.pairs():
+                    if isinstance(q.value, Scalar):
+                        self._call_event(q.value.value, chain, wide, seen)
+            elif key in self.effects() and key not in seen:
+                rel, body = self.effects()[key]
+                self.walk(body, f"{chain} -> scripted effect {key} ({rel})", wide, seen | {key})
+            elif isinstance(val, Block):
+                self.walk(val, chain, _reach(key, val, wide), seen)
+
+    def _call_event(self, eid: str | None, chain: str, wide: str, seen: frozenset) -> None:
+        if not eid or f"event:{eid}" in seen:
+            return
+        ev = self.event(eid)
+        if ev is not None:
+            rel, body = ev
+            self.walk(body, f"{chain} -> event {eid} ({rel})", wide, seen | {f"event:{eid}"})
+
+
+def _block_has(block: Block, keys: tuple[str, ...]) -> bool:
+    return any(p.key.value in keys or (isinstance(p.value, Block) and _block_has(p.value, keys))
+               for p in block.pairs())
+
+
+@rule("colour_scripts")
+def colour_scripts(ctx: Context) -> list[Issue]:
+    """Mod scripts that change or restore country colours. In-game test 9: Color-Your-Subject's
+    startup event ran ``restore_country_color`` on every country, and MAC's units lost their
+    country_colors unit colours (primary became the map colour); with it disabled they were right.
+    Warn when an effect is reachable from ``on_startup``; note other effects that reach every country.
+    Needs mod checks (the mod's scripts, read over the game)."""
+    from eu4unitgen.library.scanner import LayeredFiles
+
+    if ctx.world.mod is None:
+        return []
+    files = LayeredFiles(ctx.world.mod, ctx.world.game)
+    walk = _ScriptWalk(files)
+    tags = ", ".join(ctx.nation.tags) or f"the {ctx.nation.set_name} countries"
+    out: list[Issue] = []
+    startup_events: set[str] = set()
+    for rel, _dlc, data in files.iter_files("common/on_actions", (".txt",)):
+        for p in walk._doc(rel, data).pairs("on_startup"):
+            if isinstance(p.value, Block):
+                walk.walk(p.value, f"on_startup ({rel})")
+    for effect, chain, wide in dict.fromkeys(walk.found):
+        startup_events.update(re.findall(r"-> event (\S+)", chain))
+        if wide == SUBJECTS:
+            out.append(Issue(INFO, "colour_scripts", f"{chain} -> {effect} on subjects at game start: {tags} "
+                                                     "is affected only while it is a subject", subject=effect))
+            continue
+        if effect == "restore_country_color":
+            why = (f"in in-game test 9 this replaced the set's unit colours ({tags} showed its map colour as the "
+                   "primary unit colour)")
+        else:
+            why = f"it may also replace the unit colours of the countries it recolours, {tags} included (UNVERIFIED)"
+        out.append(Issue(WARNING, "colour_scripts",
+                         f"{chain} -> {effect} on {wide} at game start: {why}. Keep it off the set's countries "
+                         "(SPEC: 'Mod scripts that recolour countries')", subject=effect))
+    # outside the startup chain: colour effects inside every_country in the mod's own events/decisions
+    for folder in ("events", "decisions", "common/on_actions", "common/scripted_effects"):
+        for rel, _dlc, data in ctx.world.mod.iter_files(folder, (".txt",)):
+            if b"restore_country_color" not in data and b"change_country_color" not in data:
+                continue
+            for p in _script_units(walk._doc(rel, data)):
+                name = p.value.get_str("id") or p.key.value
+                if name in startup_events or p.key.value == "on_startup":
+                    continue
+                if any(_block_has(b, COLOUR_EFFECTS) for b in _every_country_blocks(p.value)):
+                    out.append(Issue(INFO, "colour_scripts",
+                                     f"{name} changes or restores country colours on every country: when it "
+                                     f"runs, {tags} may lose the set's unit colours (UNVERIFIED outside startup)",
+                                     rel, subject=name))
+    return out
+
+
+def _script_units(doc: Block) -> list[Pair]:
+    """Top-level script units of a file: events, on_actions, scripted effects, or each decision."""
+    units = []
+    for p in doc.pairs():
+        if not isinstance(p.value, Block):
+            continue
+        if p.key.value in ("country_decisions", "province_decisions"):
+            units += [q for q in p.value.pairs() if isinstance(q.value, Block)]
+        else:
+            units.append(p)
+    return units
+
+
+def _every_country_blocks(block: Block) -> list[Block]:
+    found = []
+    for p in block.pairs():
+        if isinstance(p.value, Block):
+            if _reach(p.key.value, p.value, SCOPED) == ALL:
+                found.append(p.value)
+            else:
+                found += _every_country_blocks(p.value)
+    return found
 
 
 class _OneFile:
