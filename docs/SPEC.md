@@ -929,6 +929,12 @@ A validator rule checks the result: influences, sums, bone names, and that no we
 - T1 infantry: derived type1 body (tail + tuft), dory, hoplon (primary-colour face), horse ears, `spear_shield` stance.
 - T1 crew slot: its own entity on the plain body. Rider: plain body.
 - Validator 0 errors, 0 warnings. Checklist `build/test10/checklist.txt`.
+- **Result (2026-10-16): derived body PASS (geometry and textures); tail and tuft not yet visually confirmed.**
+  - The unit renders textured with the derived body. **A mod `.mesh` in `gfx/models/Units` resolves the base game's textures by bare name (verified)**, and new skinned geometry appended to a base-game body works in game.
+  - Horse ears sit on the helmet and follow the head. As placeholders they look rat-like (expected).
+  - Spear-and-shield combat plays with no visible breakage.
+  - Tail and tuft are present but weren't visually confirmed: the camera angles hid them. **The next test needs a side-view check.**
+  - error.log clean: no `hr_`, `.mesh`, entity, attach, texture or animation lines. Only Workshop `.mod` noise, the news banner, vanilla GUI warnings (incl. `end_of_combat.gui`) and vanilla `economic_ideas`.
 
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.
