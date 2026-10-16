@@ -9,8 +9,10 @@ from PIL import Image, ImageDraw
 OUT = Path(__file__).resolve().parents[2] / "build" / "spike_r0"
 if len(sys.argv) > 1:
     OUT = OUT / sys.argv[1]  # e.g. rerun_ponytail
-SHORT = {"polearm_twohanded_idle": "idle", "polearm_twohanded_moving": "walk", "polearm_twohanded_attack": "attack"}
-VARIANT = {"A": "A auto", "B": "B rigid", "C": "C gradient", "D": "D short rigid", "E": "E long chain"}
+SHORT = {"polearm_twohanded_idle": "idle", "polearm_twohanded_moving": "walk", "polearm_twohanded_attack": "attack",
+         "spear_shield_idle": "idle", "spear_shield_moving": "walk", "spear_shield_attack": "attack"}
+VARIANT = {"A": "A auto", "B": "B rigid", "C": "C gradient", "D": "D short rigid", "E": "E long chain",
+           "F": "F tuft 1.5@45", "G": "G bun"}
 
 
 def criteria(anim: str, part: str, rows: list[dict]) -> dict:

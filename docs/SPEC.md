@@ -868,6 +868,31 @@ A validator rule checks the result: influences, sums, bone names, and that no we
   - error.log clean for `hr_`/mesh/texture lines;
   - map-scale look.
 
+**Test 10 pre-checks (2026-10-16; `scripts/spike_r0/run.py --p1 / --p1-metrics / --p2`, output `build/spike_r0/p1_spear_shield`, `p2_export`):**
+- **P1 (`spear_shield` idle/moving/attack): PASS.**
+  - **Flared tail (C):** stretch 0.96-1.04, no flips, no drift. The only penetration is ring 1, the flare overlapping the tunic hem by design (also in the bind pose). At least 0.70 behind the hip in the facing frame.
+  - **Ponytail = F, the 1.5-unit tuft at 45°, rigid on `head`:** zero penetration in every frame. G (bun) fails the attack (3.1% > 3%, 0.28 deep); D fails again (57.5%, 0.63). Ponytail rounds are closed (user, 2026-10-16).
+  - **Corrections:**
+    - C5 for ponytails was coded stricter than agreed ("behind top_spine's axis" vs "no torso entry beyond C2"). No earlier verdict changes.
+    - The bone-axis "behind" metric misreads a forward lunge, so `behind_facing` uses the unit's facing frame (`root`).
+  - The anim importer now adds dummies for whatever bones an `.anim` names that the mesh lacks.
+- **P2 (export + re-import of the weighted body, io_pdx_mesh 0.91): FAILS two agreed checks; stopped for the user's decision.**
+  - Derived body: vanilla type1 + flared tail + tuft F joined into one shape and one material. The additions' UVs are in the face texture's hair patch, px 105-115 × 30-40, which has no country-colour mask.
+  - **Good:**
+    - re-imports, and `spear_shield_attack` plays on it;
+    - same 28 bones in the same order;
+    - skin layout as vanilla (`bones` 4, `ix`, `w`), ≤4 influences, weights sum to 1;
+    - every vanilla vertex's position, UV and weights reproduced exactly (normals: 1 vertex off by > 0.01);
+    - same 8 locators.
+  - **Fails:**
+    1. **Every face corner becomes its own vertex.** 8,649 verts for the untouched vanilla body (vanilla 1,809); 9,345 for the derived one. It is the exporter's behaviour, reproduced on an unmodified import → export, probably from per-corner tangents or normals; UNVERIFIED.
+    2. **The skeleton is not identical.** Bind-pose round-off up to 0.0013, and **`attach_free`'s all-zero vanilla bind matrix becomes identity.**
+  - `boundingsphere` is added as usual; `strip_mesh_props` handles it.
+  - Options (not tried):
+    - **(a) recommended:** write the derived body in Python from vanilla's parsed tree. Copy every vanilla block verbatim (skeleton, locators, material, vertices) and append only the additions' vertices, triangles and skin rows, which Blender computes. `scanner.write_pdx_mesh` is byte-identical on all 458 vanilla meshes. Blender export is not used for bodies.
+    - (b) weld the exporter's output and restore vanilla's skeleton block.
+    - (c) take the export as it is into the game.
+
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.
 - R2: derived bodies (bareheaded, merged skinned additions). Accept on an in-game test with no error.log lines and no visible artefacts in idle/walk/attack.

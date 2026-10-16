@@ -35,6 +35,11 @@ PARTS = {
     # rerun (alternative 1): nape-length tuft, rigid on head (D = rigid, like B)
     "pony_short": {"root": "head", "colour": (0.1, 0.75, 0.95, 1), "variants": "D"},
     # rerun (alternative 2): long, 0.6 clearance, chain head -> top_spine -> mid_spine (E = chain projection)
+    # P1 (test 10 pre-check): the signed-off tail with a flared base; last ponytail round (F, G)
+    "tail_flared": {"root": "hip", "grad": ("hip", "lower_spine", 0.5), "colour": (0.95, 0.45, 0.1, 1),
+                    "variants": "C"},
+    "pony_tuft15": {"root": "head", "colour": (0.1, 0.75, 0.95, 1), "variants": "F"},
+    "pony_bun": {"root": "head", "colour": (0.1, 0.75, 0.95, 1), "variants": "G"},
     "pony_long": {"root": "head", "chain": ["head", "top_spine", "mid_spine"], "colour": (0.1, 0.75, 0.95, 1),
                   "variants": "E"},
 }
@@ -83,6 +88,28 @@ def back_y(prof, z):
 def centreline(part, prof):
     """Points (rings) and radii of the placeholder tube, in Blender world space at rest."""
     pts, radii = [], []
+    if part == "tail_flared":
+        # as the signed-off tail, plus a flared base: wider root rings that cover the tunic hem
+        pts, radii = centreline("tail", prof)
+        radii[0], radii[1] = 0.75, 0.6
+        return pts, radii
+    if part == "pony_tuft15":
+        rings, length, z0 = 5, 1.5, 15.2
+        root = Vector((0, back_y(prof, z0) - 0.1, z0))
+        ang = math.radians(45)
+        for i in range(rings):
+            t = i / (rings - 1)
+            pts.append(root + Vector((0, math.sin(ang), -math.cos(ang))) * (length / (rings - 1)) * i)
+            radii.append(0.33 + (0.14 - 0.33) * t)
+        return pts, radii
+    if part == "pony_bun":
+        # a knot at the nape under the helmet rim: short, pointing straight back
+        z0 = 14.9
+        root = Vector((0, back_y(prof, z0) - 0.1, z0))
+        for i, (d, r) in enumerate(((0.0, 0.3), (0.25, 0.48), (0.55, 0.5), (0.8, 0.38), (0.95, 0.15))):
+            pts.append(root + Vector((0, d, -0.05 * i)))
+            radii.append(r)
+        return pts, radii
     if part == "tail":
         rings, length = 10, 5.0
         z0 = 8.0
@@ -192,7 +219,7 @@ def weight(obj, rig, part, variant):
                 if x > 0:
                     groups[b].add([v.index], x, "REPLACE")
         return {"unweighted_verts": 0}
-    if variant in ("B", "D"):
+    if variant in ("B", "D", "F", "G"):
         g = obj.vertex_groups.new(name=cfg["root"])
         g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
     else:
@@ -262,7 +289,7 @@ def measure(obj, rig, part, rest, depsgraph, body_bvh):
     flips = sum(1 for t, n0 in zip(rest.tris, rest.normals) if (rot @ tri_normal(co, t)).dot(n0) < 0)
     root_idx = [i for i, r in enumerate(rest.ring_of) if r == 0]
     drift = max((inv @ co[i] - rest.local[i]).length for i in root_idx)
-    pen, depth = 0, 0.0
+    pen, depth, pen_rings = 0, 0.0, set()
     for i, c in enumerate(co):
         if rest.ring_of[i] == 0:
             continue  # the root ring is sunk into the body by design
@@ -270,10 +297,18 @@ def measure(obj, rig, part, rest, depsgraph, body_bvh):
         if loc is not None and (c - loc).dot(nrm) < 0:
             pen += 1
             depth = max(depth, dist)
+            pen_rings.add(rest.ring_of[i])
     n_out = sum(1 for r in rest.ring_of if r != 0)
     rm = bone_matrix(rig, rest.ref)
     back = (rm.to_3x3() @ rest.back_local).normalized()
     behind = min((c - rm.translation).dot(back) for i, c in enumerate(co) if rest.ring_of[i] >= 2)
+    # facing-frame version: the unit's back direction from root (never pitches), origin at the
+    # reference joint, horizontal only. The bone-axis version above misreads a forward lunge.
+    rootm = bone_matrix(rig, "root")
+    face_back = rootm.to_3x3() @ (bone_matrix_rest_root_inv(rig) @ Vector((0, 1, 0)))
+    face_back.z = 0
+    face_back.normalize()
+    behind_facing = min((c - rm.translation).dot(face_back) for i, c in enumerate(co) if rest.ring_of[i] >= 2)
     tip = [c for i, c in enumerate(co) if rest.ring_of[i] == max(rest.ring_of)]
     root = [c for i, c in enumerate(co) if rest.ring_of[i] == 0]
     tipc, rootc = sum(tip, Vector()) / len(tip), sum(root, Vector()) / len(root)
@@ -281,7 +316,13 @@ def measure(obj, rig, part, rest, depsgraph, body_bvh):
     elev = math.degrees(math.atan2(v.z, math.hypot(v.x, v.y)))  # -90 = straight down
     return {"str_min": ratios[0], "str_max": ratios[-1], "str_p05": p95(0.05), "str_p95": p95(0.95),
             "pen_n": pen, "pen_pct": 100.0 * pen / n_out, "pen_depth": depth, "flips": flips,
-            "root_drift": drift, "behind": behind, "tip_elev": elev}
+            "root_drift": drift, "behind": behind, "tip_elev": elev,
+            "pen_rings": sorted(pen_rings), "behind_facing": behind_facing}
+
+
+def bone_matrix_rest_root_inv(rig):
+    """World +Y (the unit's back) in root's local frame at bind pose."""
+    return (rig.matrix_world @ rig.data.bones["root"].matrix_local).to_3x3().inverted()
 
 
 def body_tree(body, depsgraph):
@@ -370,7 +411,7 @@ def run_anim(a, ie, units, anim):
     # animation
     bpy.context.view_layer.objects.active = rig
     rig.select_set(True)
-    ie.import_animfile(os.path.join(units, "animation", anim + ".anim"), frame_start=1)
+    import_anim(ie, rig, os.path.join(units, "animation", anim + ".anim"))
     f0, f1 = scene.frame_start, scene.frame_end
     per_frame = {f"{p}_{v}": [] for (p, v) in objs}
     for f in range(f0, f1 + 1):
@@ -427,6 +468,29 @@ def run_anim(a, ie, units, anim):
             "per_frame": per_frame, "renders": renders}
 
 
+def import_anim(ie, rig, path):
+    """io_pdx_mesh refuses an .anim that names bones the mesh lacks; the game ignores those
+    tracks. Add unweighted dummies under root for exactly the bones it names, then retry."""
+    import re
+    try:
+        ie.import_animfile(path, frame_start=1)
+    except RuntimeError as exc:
+        missing = re.findall(r"'([^']+)'", str(exc)) if "Missing bones" in str(exc) else None
+        if not missing:
+            raise
+        bpy.context.view_layer.objects.active = rig
+        bpy.ops.object.mode_set(mode="EDIT")
+        for n in missing:
+            b = rig.data.edit_bones.new(n)
+            b.head, b.tail = (0, 0, 0), (0, 0, 0.5)
+            b.parent = rig.data.edit_bones["root"]
+        bpy.ops.object.mode_set(mode="OBJECT")
+        for n in missing:
+            rig.data.bones[n].use_deform = False
+        rig.select_set(True)
+        ie.import_animfile(path, frame_start=1)
+
+
 def bounds(objs, evaluated_pts=False):
     pts = []
     if evaluated_pts:
@@ -453,4 +517,5 @@ def main():
     _pdx.write_result(a, out)
 
 
-main()
+if __name__ == "__main__":
+    main()
