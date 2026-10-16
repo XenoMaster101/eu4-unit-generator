@@ -1274,6 +1274,19 @@ Constraints carried over:
   - With additions, the hair swatch is painted over the recipe's textures, keeping their base-game origin as `derived_from`.
   - Rule `derived_body` accepts a material texture that is generated or a base-game file used as it is (the recipe left the normal map alone).
 - **Result:** 0 errors, 0 warnings, built from the spec with **no other code changes**. Staged: `build/hoplite/stage`.
+- **Renders** (`build/hoplite/renders/hoplite_posed.png`, `build/hoplite/part_previews/hoplite_test/1_infantry.png`): an off-white linothorax with band seams, a bronze corinthian helmet (eye slot) with a red crest, dory, hoplon; at 48 px a light figure with a bronze head and shield.
+- **Gap report:**
+  - **Code gaps:**
+    1. Texture recipes on derived bodies: **fixed** generically (above).
+  - **Data-level findings** (solved in the spec, no code; inputs for the GUI step):
+    - (a) type1's torso is unit-colour-masked, not "cloth": the linothorax needs `pattern` on `country1`/`country2` plus `palette` with `fixed: true` and a linen reference image (`linen_ref.png`, original) to recolour those regions and clear their masks;
+    - (b) the automatic `cloth` region includes the hair (it isn't skin or metal), so the cloth recolour turned it linen; a protect mask (`protect_head.png`, type1's face-and-hair corner, px 0-128 × 0-150) fixes it;
+    - (c) recipe patterns run in texture space across islands, so the bands also land on the legs (already striped by the `country3` mask) and read as striped hose.
+  - **Usability gaps for the GUI:** writing the recipe needed knowledge of type1's texture layout (which islands are unit-colour, where the hair is). Proposed:
+    - named texture islands per body in the body library (data: `head`, `torso`, `legs`, … as UV boxes or island masks) so recipes can target `island:torso`;
+    - the GUI shows the body texture with its regions and islands overlaid, with mask painting.
+  - **Not yet checked in game:** the hoplite (no test requested). The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
+
 
 
 
