@@ -38,6 +38,7 @@ from PIL import Image
 from eu4unitgen.core.generator import OWNED, GeneratedFile, GenerationError
 from eu4unitgen.core.naming import LOADOUT_ROLES, PART_KINDS, Naming
 from eu4unitgen.library.scanner import strip_mesh_props
+from eu4unitgen.library.data import library
 from eu4unitgen.textures.paint import paint
 from eu4unitgen.textures.procedural import (
     COUNTRY_CHANNELS, SIZE, TEXEL_DENSITY, Zone, atlas_images, encode_part_textures, part_images, shader_for,
@@ -347,6 +348,7 @@ def job_entry(naming: Naming, set_name: str, b: PartBuild) -> dict:
     return {"kind": b.part.kind, "builder": k.builder, "shape": f"{b.name}Shape", "shader": b.part.shader,
             "zones": len(b.part.zones), "layout": k.layout, "density": TEXEL_DENSITY,
             "materials": [z.material for z in b.part.zones], "bake": True,
+            "library": {k: library("materials")[k] for k in ("bump", "helmet_styles", "helmet_slot")},
             "bake_size": SIZE.get(k.layout, 64),
             "zone_uvs": [list(uv) for uv in zone_uvs(len(b.part.zones), k.layout)],
             "params": b.part.params, "textures": _names(naming, set_name, b)}

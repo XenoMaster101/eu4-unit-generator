@@ -17,10 +17,13 @@ import math
 
 from PIL import Image
 
+from eu4unitgen.library.data import library
+
 LAYOUT = {"tail": (0.0, 0.62), "tuft": (0.64, 0.78), "ears": (0.80, 0.92), "ears_inner": (0.93, 1.0)}
-HAIR = (112, 78, 50)  # warm brown horsehair (user: matte, hair-coloured, not glossy black)
-INNER = (168, 128, 104)  # the lighter inner ear
-MATTE = 6  # spec alpha (base game gloss 4-18)
+_HAIR = library("materials")["hair"]  # library/materials.json; a character spec may override it
+HAIR = tuple(_HAIR["colour"])  # warm brown horsehair (user: matte, hair-coloured, not glossy black)
+INNER = tuple(_HAIR["inner"])  # the lighter inner ear
+MATTE = _HAIR["gloss"]  # spec alpha (base game gloss 4-18)
 
 
 def patches(rect: tuple[int, int, int, int]) -> dict[str, tuple[int, int, int, int]]:
@@ -46,20 +49,24 @@ def _strand(x: int, y: int) -> float:
 
 
 def paint_swatch(diffuse: Image.Image, normal: Image.Image, spec: Image.Image,
-                 rect: tuple[int, int, int, int]) -> tuple[Image.Image, Image.Image, Image.Image]:
-    """Copies of the three base images with the hair swatch painted into ``rect``."""
+                 rect: tuple[int, int, int, int], colours: dict | None = None) -> tuple[Image.Image, Image.Image, Image.Image]:
+    """Copies of the three base images with the hair swatch painted into ``rect``. ``colours``
+    ({colour, inner, gloss}, e.g. a character spec's "hair") overrides the library's."""
+    hair_c = tuple((colours or {}).get("colour", HAIR))
+    inner_c = tuple((colours or {}).get("inner", INNER))
+    gloss = (colours or {}).get("gloss", MATTE)
     d, n, s = diffuse.convert("RGBA").copy(), normal.convert("RGBA").copy(), spec.convert("RGBA").copy()
     inner = patches(rect)["ears_inner"]
     x0, y0, x1, y1 = rect
     for y in range(y0, y1):
         for x in range(x0, x1):
             k = _strand(x, y)
-            colour = INNER if inner[1] - 1 <= y < inner[3] + 1 else HAIR
+            colour = inner_c if inner[1] - 1 <= y < inner[3] + 1 else hair_c
             f = 1 + 0.22 * k
             d.putpixel((x, y), (*(min(255, max(0, round(c * f))) for c in colour), 255))
             slope = (_strand(x + 1, y) - _strand(x - 1, y)) * 0.35  # strand relief across the length
             nx = -slope / math.sqrt(1 + slope * slope)
             nz = 1 / math.sqrt(1 + slope * slope)
             n.putpixel((x, y), (round((nx * 0.5 + 0.5) * 255), 128, round((nz * 0.5 + 0.5) * 255), 255))
-            s.putpixel((x, y), (0, 0, 0, MATTE))
+            s.putpixel((x, y), (0, 0, 0, gloss))
     return d, n, s

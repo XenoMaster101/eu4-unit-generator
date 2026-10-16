@@ -20,17 +20,11 @@ from io import BytesIO
 
 from PIL import Image
 
-# material -> (pattern strength, AO strength, top-light strength, edge wear lightening, brush grain)
-# Tuned on test-11 parts against the base game's measured style (detail 11-20, shading 7-20).
-STYLE = {
-    "wood": (0.60, 0.45, 0.25, 18, 22),
-    "bronze": (0.55, 0.50, 0.30, 55, 19),
-    "iron": (0.40, 0.45, 0.30, 50, 16),
-    "hair": (0.65, 0.50, 0.20, 10, 24),
-    "leather": (0.50, 0.45, 0.20, 14, 19),
-    "paint": (0.30, 0.40, 0.25, 12, 16),
-    "plain": (0.30, 0.40, 0.20, 12, 14),
-}
+from eu4unitgen.library.data import library
+
+# material -> (pattern strength, AO strength, top-light strength, edge wear lightening, brush grain):
+# library/materials.json "paint" (tuned against the base game's measured style: detail 11-20, shading 7-20)
+STYLE = {name: tuple(v) for name, v in library("materials")["paint"].items()}
 
 
 def _grain(i: int) -> float:

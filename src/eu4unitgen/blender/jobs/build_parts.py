@@ -230,19 +230,14 @@ def build_ears(b, p):
         b.face(list(reversed(ring)), 0)
 
 
-RIM_DROP = {  # style -> how far the rim hangs below the crown at the front, the side and the back
-    "attic": (0.75, 2.05, 1.45),       # the brow, cheek guards to the jaw, a short neck guard
-    "corinthian": (2.2, 2.15, 1.5),    # the face covered (eye slot: a zone-2 band), cheek and neck guards
-    "pilos": (1.05, 1.05, 1.05),       # a level rim
-}
-SLOT = (1.15, 1.45)  # corinthian eye slot: this far below the crown, at the front
+LIBRARY: dict = {}  # the job entry's "library" (eu4unitgen/library/materials.json): bump, helmet_styles, helmet_slot
 
 
 def build_helmet(b, p):
     """A Greek helmet in the head bone frame (the unit faces -Z): a bronze shell with thickness. A
     dome (an ellipsoid fitted to the bare head: ``top``, ``half_width``, ``front``/``back``) down to
     its equator, then a skirt that drops nearly straight to a rim whose depth varies around the
-    head by style (``RIM_DROP``); pilos raises the crown into a cone; corinthian reaches further
+    head by style (the library's ``helmet_styles``); pilos raises the crown into a cone; corinthian reaches further
     forward to cover the nose. An integrated crest (zone 1) runs fore-aft or across the crown.
     Zone 2: the eye slot (corinthian) and the inner lining."""
     n_az, dome_n, skirt_n = 12, 4, 3
@@ -254,7 +249,7 @@ def build_helmet(b, p):
     ry = rx * 1.05
     cy = p["top"] - ry
     th = p["thickness"]
-    drops = RIM_DROP[style]
+    drops = LIBRARY["helmet_styles"][style]
 
     def rim_y(phi):  # phi 0 = front (-Z), pi/2 = the side, pi = back
         c = math.cos(phi)
@@ -292,7 +287,7 @@ def build_helmet(b, p):
     inner = [[b.vert(*q) for q in column(phi, th)] for phi in phis]
     rows = dome_n + skirt_n
 
-    eye = p["top"] - (SLOT[0] + SLOT[1]) / 2
+    eye = p["top"] - sum(LIBRARY["helmet_slot"]) / 2
 
     def slot_row(i):  # the front columns' row nearest eye height (the slot is narrower than a row)
         return min(range(rows - 1), key=lambda j: abs((b.pdx[outer[i][j]][1] + b.pdx[outer[i][j + 1]][1]) / 2 - eye))
@@ -430,10 +425,6 @@ def _pattern(nodes, links, material):
     return mix.outputs["Result"]
 
 
-# relief strength per material; tuned against the base game's measured normal tilt (4-20 degrees)
-BUMP = {"wood": 0.80, "bronze": 0.70, "iron": 0.45, "hair": 0.90, "leather": 0.70, "paint": 1.40, "plain": 0.35}
-
-
 def bake_maps(obj, size, materials, prefix):
     """Bake ao, curv, up and pattern maps (PNG, ``size``) for ``obj`` (one material per zone, from
     the ``zone`` face attribute; called after export). Returns {map: path}."""
@@ -472,7 +463,7 @@ def bake_maps(obj, size, materials, prefix):
         bevel.samples = 8
         bevel.inputs["Radius"].default_value = 0.04
         bump = nodes.new("ShaderNodeBump")
-        bump.inputs["Strength"].default_value = BUMP.get(material, 0.15)
+        bump.inputs["Strength"].default_value = LIBRARY["bump"].get(material, LIBRARY["bump"]["plain"])
         bump.inputs["Distance"].default_value = 0.02
         links.new(pattern, bump.inputs["Height"])
         links.new(bevel.outputs["Normal"], bump.inputs["Normal"])
@@ -519,6 +510,8 @@ def main() -> None:
     for part in a["parts"]:
         _pdx.clear_scene()
         params = part.get("params", {})
+        LIBRARY.clear()
+        LIBRARY.update(part.get("library") or {})
         builder = Builder(part["zone_uvs"], flip_z=params.get("point") == "down")
         BUILDERS[part["builder"]](builder, params)
         mesh = builder.finish(part["shape"])

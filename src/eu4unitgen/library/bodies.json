@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "note": "Base-game body facts (names, UV boxes and pixel regions only; no game data). Keys are .mesh paths, lowercase. removable: named parts a derived body can drop (any triangle with a vertex mostly on bone whose UV centroid lies in uv_px of a tex-px texture). hair_region: the diffuse's hair (x0 y0 x1 y1 [tex]) skinned additions use when no hair swatch fits. SPEC Track R.",
+  "bodies": {
+    "gfx/models/units/western_generic_01_type1.mesh": {
+      "removable": {"helmet": {"bone": "head", "uv_px": [127.5, 0, 240, 200], "tex": 512}},
+      "hair_region": [70, 30, 118, 92]
+    },
+    "gfx/models/units/african_generic_03_type1.mesh": {
+      "hair_region": [208, 5, 234, 13, 256]
+    }
+  }
+}

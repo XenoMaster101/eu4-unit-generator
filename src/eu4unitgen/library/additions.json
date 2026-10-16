@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "note": "Skinned additions for derived bodies: the build_additions shape builder and its params, how the addition follows the skeleton (chain: rigid or length gradient with tip shares), the rings the deformation check exempts from C2 (sunk or flared into the body by design) and the joint it must stay behind (C5, or null). SPEC Track R.",
+  "additions": {
+    "tail": {"shape": "tail", "params": {}, "chain": {"mode": "length", "bones": ["hip", "lower_spine"], "tip": {"lower_spine": 0.5}},
+             "exempt": [0, 1], "behind": "hip"},
+    "tuft": {"shape": "tuft", "params": {"length": 1.5, "angle": 45}, "chain": {"mode": "rigid", "bones": ["head"]},
+             "exempt": [0], "behind": "top_spine"},
+    "ears": {"shape": "ears", "params": {}, "chain": {"mode": "rigid", "bones": ["head"]}, "exempt": [0], "behind": null}
+  }
+}

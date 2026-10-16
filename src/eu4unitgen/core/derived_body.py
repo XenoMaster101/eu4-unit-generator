@@ -16,6 +16,7 @@ import math
 from dataclasses import dataclass
 
 from eu4unitgen.core.chain_weights import MAX_INFLUENCES, Chain, WeightError, check_weights, weights
+from eu4unitgen.library.data import library
 from eu4unitgen.library.scanner import parse_pdx_mesh, write_pdx_mesh
 from eu4unitgen.textures.procedural import TEXEL_DENSITY
 
@@ -333,24 +334,23 @@ def check_derived(base: bytes, derived: bytes, remove: list[int] | tuple[int, ..
 
 # --------------------------------------------------------------------------- addition kinds and building
 # Shapes: blender/jobs/build_additions.py (plan after test 10). Chains: spike R0 / pre-check P1 (SPEC Track R).
+def _chain(raw: dict) -> Chain:
+    return Chain(raw["mode"], tuple(raw["bones"]), dict(raw.get("tip") or {}))
+
+
+# Skinned additions (library/additions.json): shape builder + params, chain, exempt rings, behind joint.
 ADDITION_KINDS: dict[str, dict] = {
-    # exempt: rings sunk or flared into the body by design (deformation check C2); behind: the joint
-    # it must stay behind in the unit's facing frame (C5), or None.
-    "tail": {"shape": "tail", "params": {}, "chain": Chain("length", ("hip", "lower_spine"), {"lower_spine": 0.5}),
-             "exempt": [0, 1], "behind": "hip"},
-    "tuft": {"shape": "tuft", "params": {"length": 1.5, "angle": 45}, "chain": Chain("rigid", ("head",)),
-             "exempt": [0], "behind": "top_spine"},
-    "ears": {"shape": "ears", "params": {}, "chain": Chain("rigid", ("head",)), "exempt": [0], "behind": None},
+    name: {**raw, "chain": _chain(raw["chain"])} for name, raw in library("additions")["additions"].items()
 }
 HAIR_PATCH = (105, 30, 115, 40)  # western_generic_01_type1 diffuse px: the face's dark hair, no country mask
 PATCH_TEX = 512
 # Per base body: the diffuse's hair (px, x0 y0 x1 y1 of a PATCH_TEX texture) the additions' UVs span,
 # strands running down it (step 5: the largest unmasked hair-coloured rectangle, mean 40 32 28, kept
 # clear of the neck skin). A body without one is refused.
-HAIR_REGIONS: dict[str, tuple[int, int, int, int] | tuple[int, int, int, int, int]] = {
-    "gfx/models/units/western_generic_01_type1.mesh": (70, 30, 118, 92),
-    # step 6: the scalp's own UVs (head vertices at the crown and back), on a 256-px texture; black hair, mask 0
-    "gfx/models/units/african_generic_03_type1.mesh": (208, 5, 234, 13, 256),
+# Per base body (library/bodies.json): the diffuse's hair (px, x0 y0 x1 y1 [, texture size]) the
+# additions' UVs span when no hair swatch fits; a body without one is refused.
+HAIR_REGIONS: dict[str, tuple] = {
+    path: tuple(b["hair_region"]) for path, b in library("bodies")["bodies"].items() if b.get("hair_region")
 }
 
 
@@ -372,11 +372,11 @@ class Removal:
     tex: int = 512
 
 
-# Per base body (its .mesh path): named parts that can be removed. type1's helmet (H1, 2026-10-16):
-# 369 head triangles with UVs in px 128-240 x 0-200 plus one boundary triangle at (128, 99); a
-# closed, textured hair cap is underneath.
+# Per base body (library/bodies.json): named parts that can be removed. type1's helmet (H1,
+# 2026-10-16): 370 triangles; a closed, textured hair cap is underneath.
 REMOVALS: dict[str, dict[str, Removal]] = {
-    "gfx/models/units/western_generic_01_type1.mesh": {"helmet": Removal("head", (127.5, 0, 240, 200))},
+    path: {name: Removal(r["bone"], tuple(r["uv_px"]), r.get("tex", 512)) for name, r in b["removable"].items()}
+    for path, b in library("bodies")["bodies"].items() if b.get("removable")
 }
 
 
