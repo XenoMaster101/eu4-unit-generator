@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from eu4unitgen.core.chain_weights import MAX_INFLUENCES, check_weights
+from eu4unitgen.core.chain_weights import MAX_INFLUENCES, Chain, check_weights, weights
 from eu4unitgen.library.scanner import parse_pdx_mesh, write_pdx_mesh
 
 
@@ -126,6 +126,29 @@ def _only_mesh(tree: dict) -> tuple[dict, dict]:
     return meshes[0], skeletons[0]
 
 
+def winding_sign(p: list[float], n: list[float], tri: list[int]) -> int:
+    """+1 if most triangles' (v1 - v0) x (v2 - v0) points along their vertices' normals, else -1:
+    the base mesh's winding convention, which additions are made to follow."""
+    score = 0
+    for k in range(0, len(tri), 3):
+        i0, i1, i2 = tri[k:k + 3]
+        g = _cross(_sub(p[i1 * 3:i1 * 3 + 3], p[i0 * 3:i0 * 3 + 3]), _sub(p[i2 * 3:i2 * 3 + 3], p[i0 * 3:i0 * 3 + 3]))
+        avg = tuple(n[i0 * 3 + j] + n[i1 * 3 + j] + n[i2 * 3 + j] for j in range(3))
+        score += 1 if _dot(g, avg) > 0 else -1
+    return 1 if score >= 0 else -1
+
+
+def oriented(p: list[float], n: list[float], tri: list[int], sign: int) -> list[int]:
+    """``tri`` with each triangle wound so its face normal agrees with its vertex normals per ``sign``."""
+    out = []
+    for k in range(0, len(tri), 3):
+        i0, i1, i2 = tri[k:k + 3]
+        g = _cross(_sub(p[i1 * 3:i1 * 3 + 3], p[i0 * 3:i0 * 3 + 3]), _sub(p[i2 * 3:i2 * 3 + 3], p[i0 * 3:i0 * 3 + 3]))
+        avg = tuple(n[i0 * 3 + j] + n[i1 * 3 + j] + n[i2 * 3 + j] for j in range(3))
+        out += [i0, i1, i2] if (_dot(g, avg) > 0) == (sign > 0) else [i0, i2, i1]
+    return out
+
+
 def _child(node: dict, name: str) -> dict | None:
     return next((c for c in node["children"] if c["name"] == name), None)
 
@@ -145,6 +168,7 @@ def append_additions(base: bytes, additions: list[Addition]) -> bytes:
         raise DerivedBodyError("the base mesh has a boundingsphere (not a base-game body)")
     index = bone_indices(skeleton)
     props = mesh["props"]
+    sign = winding_sign(props["p"], props["n"], props["tri"])
     for add in additions:
         if not (len(add.p) == len(add.n) == add.count * 3 and len(add.u0) == add.count * 2
                 and len(add.weights) == add.count and len(add.tri) % 3 == 0):
@@ -155,11 +179,12 @@ def append_additions(base: bytes, additions: list[Addition]) -> bytes:
         if problems:
             raise DerivedBodyError(f"{add.name}: " + "; ".join(problems[:5]))
         first = len(props["p"]) // 3
+        tri = oriented(add.p, add.n, add.tri, sign)
         props["p"] += [float(x) for x in add.p]
         props["n"] += [float(x) for x in add.n]
-        props["ta"] += tangents(add.p, add.n, add.u0, add.tri)
+        props["ta"] += tangents(add.p, add.n, add.u0, tri)
         props["u0"] += [float(x) for x in add.u0]
-        props["tri"] += [first + i for i in add.tri]
+        props["tri"] += [first + i for i in tri]
         for row in add.weights:
             items = sorted(row.items(), key=lambda kv: -kv[1])
             skin["props"]["ix"] += [index[b] for b, _ in items] + [-1] * (MAX_INFLUENCES - len(items))
@@ -229,3 +254,43 @@ def check_derived(base: bytes, derived: bytes) -> tuple[list[str], dict]:
     return problems, {"base_vertices": nb, "added_vertices": nd - nb,
                       "base_triangles": len(bm["props"]["tri"]) // 3,
                       "added_triangles": (len(dm["props"]["tri"]) - len(bm["props"]["tri"])) // 3}
+
+
+# --------------------------------------------------------------------------- addition kinds and building
+# Signed off in spike R0 / pre-check P1 (SPEC Track R): shape builder params + how they follow the skeleton.
+ADDITION_KINDS: dict[str, dict] = {
+    "tail": {"shape": "tail", "params": {"flare": [0.75, 0.6]},
+             "chain": Chain("length", ("hip", "lower_spine"), {"lower_spine": 0.5})},
+    "tuft": {"shape": "tuft", "params": {"length": 1.5, "angle": 45},
+             "chain": Chain("rigid", ("head",))},
+}
+HAIR_PATCH = (105, 30, 115, 40)  # western_generic_01_type1 diffuse px: the face's dark hair, no country mask
+PATCH_TEX = 512
+
+
+def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, int, int] = HAIR_PATCH,
+                  tex: int = PATCH_TEX) -> tuple[bytes, list[Addition]]:
+    """The derived body: ``base`` (.mesh bytes of a base-game body) with the ``kinds`` additions
+    built in background Blender (``build_additions``), weighted by their chains, appended."""
+    import tempfile
+    from pathlib import Path
+
+    tree = parse_pdx_mesh(base)
+    _, skeleton = _only_mesh(tree)
+    names = list(bone_indices(skeleton))
+    for k in kinds:
+        if k not in ADDITION_KINDS:
+            raise DerivedBodyError(f"unknown addition {k!r}; known: {', '.join(ADDITION_KINDS)}")
+        ADDITION_KINDS[k]["chain"].check(names)
+    with tempfile.TemporaryDirectory(prefix="eu4unitgen_derived_") as tmp:
+        body = Path(tmp) / "base.mesh"
+        body.write_bytes(base)
+        res = runner.run_job("build_additions", {
+            "body": str(body), "patch_px": list(patch), "tex": tex,
+            "additions": [{"name": k, "shape": ADDITION_KINDS[k]["shape"], "params": ADDITION_KINDS[k]["params"]}
+                          for k in kinds]}, timeout=300).result
+    adds = []
+    for k, raw in zip(kinds, res["additions"]):
+        chain = ADDITION_KINDS[k]["chain"]
+        adds.append(Addition(k, raw["p"], raw["n"], raw["u0"], raw["tri"], weights(chain, raw["rings"]), chain.bones))
+    return append_additions(base, adds), adds

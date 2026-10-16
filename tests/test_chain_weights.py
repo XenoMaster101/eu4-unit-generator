@@ -135,3 +135,18 @@ def test_append_refuses_bad_additions(change, msg):
     change(add)
     with pytest.raises(DerivedBodyError, match=msg):
         append_additions(_body(), [add])
+
+
+def test_additions_follow_the_base_winding():
+    from eu4unitgen.core.derived_body import oriented, winding_sign
+
+    p = [0.0, 0, 0, 1, 0, 0, 0, 1, 0]
+    n = [0.0, 0, 1] * 3
+    assert winding_sign(p, n, [0, 1, 2]) == 1 and winding_sign(p, n, [0, 2, 1]) == -1
+    assert oriented(p, n, [0, 2, 1], 1) == [0, 1, 2]
+    assert oriented(p, n, [0, 1, 2], -1) == [0, 2, 1]
+    # appended triangles take the base's convention (the base's one triangle faces its normal)
+    tree = parse_pdx_mesh(append_additions(_body(), [_tail()]))
+    mesh = tree["children"][0]["children"][0]["children"][0]["props"]
+    assert winding_sign(mesh["p"][9:], mesh["n"][9:], [i - 3 for i in mesh["tri"][3:]]) == \
+        winding_sign(mesh["p"][:9], mesh["n"][:9], mesh["tri"][:3])
