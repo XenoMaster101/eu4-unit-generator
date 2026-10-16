@@ -1,13 +1,16 @@
 """Spike R0 report (app venv): contact sheets, map-scale grid, worst-frame sheets and the
 metrics table (pass/fail per SPEC Track R criteria 1-5) from build/spike_r0/result.json."""
 import json
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
 OUT = Path(__file__).resolve().parents[2] / "build" / "spike_r0"
+if len(sys.argv) > 1:
+    OUT = OUT / sys.argv[1]  # e.g. rerun_ponytail
 SHORT = {"polearm_twohanded_idle": "idle", "polearm_twohanded_moving": "walk", "polearm_twohanded_attack": "attack"}
-VARIANT = {"A": "A auto", "B": "B rigid", "C": "C gradient"}
+VARIANT = {"A": "A auto", "B": "B rigid", "C": "C gradient", "D": "D short rigid", "E": "E long chain"}
 
 
 def criteria(anim: str, part: str, rows: list[dict]) -> dict:
@@ -65,28 +68,36 @@ def main() -> None:
                 cells.append([label(Image.open(files[i * len(views) + k]).convert("RGB"), f"{SHORT[anim]} f{f} {v}")
                               for k, v in enumerate(views)])
             grid(cells).save(OUT / "sheets" / f"contact_{SHORT[anim]}_{var}.png")
-    # map scale: rows = animations, columns = variants; native 48 px and x4 nearest
     anims = list(res["anims"])
-    native = [[Image.open(res["anims"][a]["renders"]["map"][v]).convert("RGB") for v in "ABC"] for a in anims]
-    grid([[label(im.resize((im.width * 4, im.height * 4), Image.NEAREST), f"{SHORT[a]} {VARIANT[v]} (x4)")
-           for im, v in zip(row, "ABC")] for row, a in zip(native, anims)]).save(OUT / "sheets" / "map_scale_x4.png")
-    grid(native, pad=8).save(OUT / "sheets" / "map_scale_native.png")
-    # worst frame per part: rows = variant x animation, columns = views (half size)
-    for part in ("tail", "ponytail"):
+    variants = sorted(res["anims"][anims[0]]["renders"]["map"])
+    cells = []
+    for a in anims:
+        for mv in ("front_quarter", "rear_quarter"):
+            row = []
+            for v in variants:
+                im = Image.open(res["anims"][a]["renders"]["map"][v][mv]).convert("RGB")
+                row.append(label(im.resize((im.width * 4, im.height * 4), Image.NEAREST),
+                                 f"{SHORT[a]} {VARIANT[v]} {mv.split('_')[0]} (x4)"))
+            for v in variants:
+                row.append(label(Image.open(res["anims"][a]["renders"]["map"][v][mv]).convert("RGB"), "48px"))
+            cells.append(row)
+    grid(cells).save(OUT / "sheets" / "map_scale.png")
+    # worst frame per object: rows = animation, columns = views (half size)
+    for key in res["anims"][anims[0]]["renders"]["worst"]:
+        part, v = key.rsplit("_", 1)
         cells = []
-        for v in "ABC":
-            for a in anims:
-                w = res["anims"][a]["renders"]["worst"][f"{part}_{v}"]
-                cells.append([label(Image.open(f).convert("RGB").resize((240, 240), Image.LANCZOS),
-                                    f"{VARIANT[v]} {SHORT[a]} f{w['frame']} {view}")
-                              for f, view in zip(w["files"], ("front", "side", "rear"))])
-        grid(cells).save(OUT / "sheets" / f"worst_{part}.png")
+        for a in anims:
+            w = res["anims"][a]["renders"]["worst"][key]
+            cells.append([label(Image.open(f).convert("RGB").resize((240, 240), Image.LANCZOS),
+                                f"{VARIANT[v]} {SHORT[a]} f{w['frame']} {view}")
+                          for f, view in zip(w["files"], ("front", "side", "rear"))])
+        grid(cells).save(OUT / "sheets" / f"worst_{key}.png")
     # metrics table
     yes = lambda b: "pass" if b else "**FAIL**"  # noqa: E731
     lines = ["| Part | Variant | Anim | Stretch min-max (p05-p95) | Penetration max depth / % verts | Flips | "
              "Root drift | Behind (min) | Tip elevation | C1 | C2 | C3 | C4 | C5 |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-    for part, var, anim, g in sorted(table, key=lambda t: (t[0] != "tail", t[1], ["idle", "walk", "attack"].index(t[2]))):
+    for part, var, anim, g in sorted(table, key=lambda t: (t[0] != "tail", t[0], t[1], ["idle", "walk", "attack"].index(t[2]))):
         lines.append(f"| {part} | {VARIANT[var]} | {anim} | {g['str_min']:.3f}-{g['str_max']:.3f} "
                      f"({g['p05']:.3f}-{g['p95']:.3f}) | {g['pen_depth']:.3f} / {g['pen_pct']:.1f}% | {g['flips']} | "
                      f"{g['drift']:.3f} | {g['behind']:.2f} | {g['elev'][0]:.0f}..{g['elev'][1]:.0f} deg | "

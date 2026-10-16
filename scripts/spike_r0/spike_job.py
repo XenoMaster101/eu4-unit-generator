@@ -26,13 +26,17 @@ import _pdx  # noqa: E402
 
 BODY = "western_generic_01_type1"
 MISSING_IN_MESH = ["attack_L_hand", "attack_R_hand"]  # animated by the .anim, absent from the mesh
-VARIANTS = ("A", "B", "C")
 PARTS = {
     # root bone; bones heat weighting may use (A); gradient (C): (root bone, tip bone, tip share)
     "tail": {"root": "hip", "auto": ["hip", "lower_spine", "mid_spine", "L_thigh", "R_thigh"],
-             "grad": ("hip", "lower_spine", 0.5), "colour": (0.95, 0.45, 0.1, 1)},
+             "grad": ("hip", "lower_spine", 0.5), "colour": (0.95, 0.45, 0.1, 1), "variants": "ABC"},
     "ponytail": {"root": "head", "auto": ["head", "top_spine", "mid_spine", "L_shoulder", "R_shoulder"],
-                 "grad": ("head", "top_spine", 0.7), "colour": (0.1, 0.75, 0.95, 1)},
+                 "grad": ("head", "top_spine", 0.7), "colour": (0.1, 0.75, 0.95, 1), "variants": "ABC"},
+    # rerun (alternative 1): nape-length tuft, rigid on head (D = rigid, like B)
+    "pony_short": {"root": "head", "colour": (0.1, 0.75, 0.95, 1), "variants": "D"},
+    # rerun (alternative 2): long, 0.6 clearance, chain head -> top_spine -> mid_spine (E = chain projection)
+    "pony_long": {"root": "head", "chain": ["head", "top_spine", "mid_spine"], "colour": (0.1, 0.75, 0.95, 1),
+                  "variants": "E"},
 }
 SIDES = 8
 
@@ -91,9 +95,19 @@ def centreline(part, prof):
             radii.append(0.45 + (0.12 - 0.45) * t)
             ang = math.radians(50 + (15 - 50) * t)  # from vertical, toward the back: arcs out then hangs
             p = p + Vector((0, math.sin(ang), -math.cos(ang))) * step
+    elif part == "pony_short":
+        rings, length, z0 = 6, 2.0, 15.2
+        root = Vector((0, back_y(prof, z0) - 0.1, z0))
+        step = length / (rings - 1)
+        ang = math.radians(25)  # from vertical, toward the back
+        for i in range(rings):
+            t = i / (rings - 1)
+            pts.append(root + Vector((0, math.sin(ang), -math.cos(ang))) * step * i)
+            radii.append(0.35 + (0.15 - 0.35) * t)
     else:
         rings, length = 8, 4.0
         z0 = 15.2
+        clearance = 0.6 if part == "pony_long" else 0.25
         root = Vector((0, back_y(prof, z0) - 0.1, z0))
         step = length / (rings - 1)
         for i in range(rings):
@@ -101,7 +115,7 @@ def centreline(part, prof):
             z = z0 - step * i
             r = 0.35 + (0.15 - 0.35) * t
             # hangs down the back, clear of it by 0.25 beyond the root ring
-            y = root.y if i == 0 else max(root.y, back_y(prof, z) + 0.25 + r)
+            y = root.y if i == 0 else max(root.y, back_y(prof, z) + clearance + r)
             pts.append(Vector((0, y, z)))
             radii.append(r)
     return pts, radii
@@ -157,7 +171,28 @@ def weight(obj, rig, part, variant):
     obj.parent = rig
     mod = obj.modifiers.new("Armature", "ARMATURE")
     mod.object = rig
-    if variant == "B":
+    if variant == "E":
+        # chain projection: a vertex's height between two consecutive joints of the chain sets
+        # its blend of those two bones (above the first joint: all first; below the last: all last)
+        joints = [(b, (rig.matrix_world @ rig.data.bones[b].head_local).z) for b in cfg["chain"]]
+        groups = {b: obj.vertex_groups.new(name=b) for b, _ in joints}
+        for v in obj.data.vertices:
+            z = (obj.matrix_world @ v.co).z
+            if z >= joints[0][1]:
+                w = {joints[0][0]: 1.0}
+            elif z <= joints[-1][1]:
+                w = {joints[-1][0]: 1.0}
+            else:
+                for (b0, z0), (b1, z1) in zip(joints, joints[1:]):
+                    if z1 <= z <= z0:
+                        t = (z0 - z) / (z0 - z1)
+                        w = {b0: 1 - t, b1: t}
+                        break
+            for b, x in w.items():
+                if x > 0:
+                    groups[b].add([v.index], x, "REPLACE")
+        return {"unweighted_verts": 0}
+    if variant in ("B", "D"):
         g = obj.vertex_groups.new(name=cfg["root"])
         g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
     else:
@@ -313,9 +348,9 @@ def run_anim(a, ie, units, anim):
     prof = back_profile(body)
     objs, wsum = {}, {}
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    for part in PARTS:
+    for part in a.get("parts", ["tail", "ponytail"]):
         pts, radii = centreline(part, prof)
-        for var in VARIANTS:
+        for var in PARTS[part]["variants"]:
             o = tube(f"{part}_{var}", pts, radii)
             o.color = PARTS[part]["colour"]
             info = weight(o, rig, part, var)
@@ -357,7 +392,7 @@ def run_anim(a, ie, units, anim):
             hi = Vector(map(max, hi, h2))
         n = a.get("contact_frames", 8)
         frames = sorted({f0 + round(i * (f1 - f0) / max(1, n - 1)) for i in range(n)})
-        for var in VARIANTS:
+        for var in sorted({v for _, v in objs}):
             for (p, v), o in objs.items():
                 o.hide_render = v != var
             shots = []
@@ -409,6 +444,7 @@ def main():
     a = _pdx.args()
     ie = _pdx.io_module()
     units = os.path.join(a["eu4"], "gfx", "models", "Units")
+    a["out_dir"] = a.get("out_dir_override") or a["out_dir"]
     for sub in ("frames", "worst", "map"):
         os.makedirs(os.path.join(a["out_dir"], sub), exist_ok=True)
     out = {"anims": {}}

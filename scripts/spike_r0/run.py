@@ -27,6 +27,14 @@ def run_job(args: dict) -> dict:
 
 if __name__ == "__main__":
     quick = "--quick" in sys.argv
+    if "--ponytail-rerun" in sys.argv:  # R0b: alternatives 1 (D) and 2 (E), same criteria and renders
+        sub = OUT / "rerun_ponytail"
+        res = run_job({"anims": ANIMS, "parts": ["pony_short", "pony_long"], "out_dir_override": str(sub),
+                       "contact_frames": 8, "size": 220, "worst_size": 420, "map_px": 48})
+        sub.mkdir(parents=True, exist_ok=True)
+        (sub / "result.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+        print("ok rerun", list(res["anims"]))
+        sys.exit(0)
     if "--map-only" in sys.argv:
         res = run_job({"anims": ANIMS, "map_only": True, "contact_frames": 8, "size": 220, "worst_size": 420, "map_px": 48})
         (OUT / "result_map.json").write_text(json.dumps(res, indent=1), encoding="utf-8")

@@ -802,6 +802,72 @@ Generators (Blender jobs, subprocess only) → package → validator. New rules:
     3. new bones + re-authored anims: High, last resort.
   - UNVERIFIED that Blender playback matches the game. The tail's in-game check (derived type1 body with the tail merged) is the next gate.
 
+**R0 sign-off (user, 2026-10-16):**
+- **Tail signed off:** motion good (attached, smooth, no leg clipping). **Use the `hip` → `lower_spine` gradient (C).**
+- Tail part design notes:
+  - **flared/tufted base** to hide the join where the tube leaves the tunic (the plain tube's seam looked off);
+  - the base sits over the tunic hem;
+  - tuft detail is texture plus a few split vertices, not geometry.
+- **Ponytail not signed off.** Fine in walk, fails idle and attack.
+
+**R0b ponytail rerun (2026-10-16; `run.py --ponytail-rerun`, output `build/spike_r0/rerun_ponytail/`):**
+- **D (alternative 1): short nape tuft,** 2 units at 25° from vertical, 92 tris, rigid on `head`.
+  - Passes idle and walk. In idle 7.5% of verts are inside, but only 0.036 deep.
+  - **Fails attack:** 50% of verts inside, 0.58 deep; passes in front of `top_spine` (the head tips back).
+  - Looks right by eye in idle and walk. In the attack it sinks into the neck. Invisible at 48 px.
+- **E (alternative 2): long hair,** 4 units, 0.6 clearance, weights from projecting each vertex's height onto the `head` → `top_spine` → `mid_spine` joints.
+  - **Fails everything but walk drift:** stretch up to 3.37×, 12 flipped triangles, 1.03 deep.
+  - It kinks at the head joint and shoots sideways in the attack, which is visible even at 48 px.
+- **Lesson:** don't blend one long span across a high-rotation joint. Most of the head's rotation happens against `top_spine`.
+
+**Required pipeline component: procedural chain-weight tool** (automatic heat weights are rejected; R0, R0b). It sets skinned weights from the part's geometry and a declared bone chain:
+- **(a) along-length gradient** for parts that grow away from the chain (tail: root 100% first bone, tip blended; R0 C passes);
+- **(b) chain projection** for parts lying along the chain, **never blending across a high-rotation joint** (`head`/`top_spine`; R0b E fails). A span that crosses one is split or kept rigid on one side.
+
+Common to both modes:
+- ≤4 influences per vertex, normalised;
+- skeleton bones only;
+- root rings locked 100% to the root bone.
+
+A validator rule checks the result: influences, sums, bone names, and that no weight sits on a bone outside the declared chain.
+
+**In-game test 10 (PLANNED, not built): combined derived-body test, HDA tier 1** (test mod `eu4unitgen_test`, set `macedonian_test`, hellenicgfx).
+- **T1 infantry:** a **derived `western_generic_01_type1`** with the gradient tail (flared base) and the chosen ponytail merged in. The ponytail is weighted 100% `head` if rigid, because the loadout allows one attached part per bone and `head` takes the ears. Plus rigid **horse ears** on `head` (new kind `horse_ears`: both ears in one mesh), and the test-8 **dory + hoplon** with the `spear_shield` stance.
+- **Rider and gun crew** keep the vanilla body: a tail on a rider is untested against the horse.
+- **Pre-checks in Blender before anything goes in game:**
+  - **P1:** R0 metrics for the tail and ponytail on the **`spear_shield` idle/moving/attack** anims (R0 tested `polearm_twohanded`; the hoplon stance plays `spear_shield`).
+  - **P2: skinned export round-trip.** io_pdx_mesh export of the derived body is untested; only static parts have been round-tripped. Check that it:
+    - re-imports;
+    - keeps the skeleton identical (names, parents, bind pose);
+    - leaves the vanilla vertices' positions and weights unchanged;
+    - has ≤4 influences;
+    - matches vanilla's skinned layout (`skin` with `bones`, `ix`, `w`), with `boundingsphere` stripped.
+- **Textures:**
+  - **One shape, one material.** No vanilla unit mesh has more than one shape or material (1.37.5 scan), so a two-material skinned body would be untested.
+  - The additions' UVs map onto an existing flat region of the vanilla type1 diffuse that has no country-colour mask, so no new texture is needed.
+  - The derived .mesh goes in the mod's `gfx/models/Units/` so its bare texture names resolve to vanilla's files (UNVERIFIED; fallback: derived `hr_` copies of the textures).
+  - Ears get their own procedural textures.
+- **Build:**
+  - `core/naming.py` names for derived body meshes;
+  - a `derived_body` builder (Blender job) with the chain-weight tool;
+  - the `horse_ears` part kind;
+  - a loadout `"bodies"` entry that can name a derived body;
+  - a pdxmesh restating the body's animation ids and the stance.
+- **New validator rule `derived_body`:**
+  - the source is a base-game body (never DLC);
+  - the skeleton is identical to the source;
+  - weights pass the chain-weight checks;
+  - ≤4,500 tris;
+  - textures resolve;
+  - names don't collide with vanilla.
+- **In-game checklist:**
+  - the tail and ponytail are attached and move with the body (idle, walk, attack);
+  - the ears sit through the helmet (the type1 helmet is baked in; clipping with it is expected and accepted for this test);
+  - dory and hoplon as in test 8;
+  - no black or missing textures;
+  - error.log clean for `hr_`/mesh/texture lines;
+  - map-scale look.
+
 **Phases and acceptance (after R0):**
 - R1: character recipe + reference analysis + mapping UI. Accept when a user-confirmed mapping produces a loadout-equivalent recipe.
 - R2: derived bodies (bareheaded, merged skinned additions). Accept on an in-game test with no error.log lines and no visible artefacts in idle/walk/attack.
