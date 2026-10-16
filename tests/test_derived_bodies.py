@@ -137,3 +137,15 @@ def test_derived_body_needs_a_skinned_base_and_blender(project, nation, game):
     files, idx = game  # the plain fake body: no skin
     with pytest.raises(GenerationError, match="derived body"):
         generate(project, nation, files, idx, loadout=Loadout.from_json(LOADOUT), runner=AdditionsRunner())
+
+
+def test_horse_ears_fit_the_head():
+    from eu4unitgen.core.fitting import BodyFit, fitted_params
+    from eu4unitgen.core.parts import KINDS, PartSpec, resolve
+
+    fit = BodyFit("x.mesh", stature=14.499, head={"top": 2.152, "xmin": -0.988, "xmax": 0.988, "zmin": -1.269,
+                                                  "zmax": 1.107, "count": 10})
+    assert fitted_params("horse_ears", fit) == {"base": 1.702, "spread": 0.622, "length": 1.3, "width": 0.5,
+                                                "depth": 0.2}
+    part = resolve(PartSpec("horse_ears"), "infantry", fit)
+    assert part.bone == "head" and part.shader == "PdxMeshStandard" and KINDS["horse_ears"].builder == "ears"

@@ -147,6 +147,17 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
               "centre_z": Param(0.0, -2.0, 2.0, "Centre fore/aft", tip="forward (-) or back (+) of the head joint"),
               "orientation": Choice(("fore_aft", "transverse"), "fore_aft", "Orientation")},
              (ZoneDef("hair", "Horsehair", HAIR, 3),)),
+    PartKind("horse_ears", "Horse ears (pair)", "head", LOADOUT_ROLES, "ears", "strip",
+             {"base": Param(1.7, -1.0, 4.0, "Base height", tip="above the head joint; fitted: the helmet top less 0.45"),
+              "spread": Param(0.62, 0.1, 2.0, "Spread", 0.02, "x of each ear's base; fitted: 0.63 x the head's half-width"),
+              "length": Param(1.3, 0.3, 3.0, "Length", tip="base to tip"),
+              "width": Param(0.5, 0.1, 1.5, "Width"),
+              "depth": Param(0.2, 0.05, 0.8, "Depth", 0.01, "front-to-back thickness at the base"),
+              "tilt_deg": Param(25.0, 0.0, 60.0, "Outward tilt", 1.0, "degrees from vertical, away from the head"),
+              "lean_deg": Param(10.0, -30.0, 45.0, "Backward lean", 1.0, "degrees from vertical, towards the back (+Z)"),
+              "centre_z": Param(0.1, -1.5, 1.5, "Fore/aft", tip="forward (-) or back (+) of the head joint")},
+             (ZoneDef("outer", "Outer", (95, 70, 50), 3), ZoneDef("inner", "Inner (front)", (150, 105, 95), 3)),
+             scaled=("length", "width", "depth")),
 )}
 assert set(KINDS) == set(PART_KINDS), "naming.PART_KINDS and parts.KINDS must list the same kinds"
 

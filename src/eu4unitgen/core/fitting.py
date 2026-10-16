@@ -22,6 +22,8 @@ REFERENCE_STATURE = 14.499  # head joint height of western_generic_01_type1, the
 CREST_SINK = 0.25  # how far the crest's base sits into the helmet top (test 7: 1.9 on a 2.15 top)
 CREST_RADIUS_FACTOR = 1.1  # crest arc radius / the head's larger front-or-back extent (test 7: 1.4 on 1.27)
 CREST_RADIUS_RANGE = (0.8, 2.5)
+EARS_SINK = 0.45  # horse ears' base below the helmet top (UNVERIFIED in game; test 10)
+EARS_SPREAD_FACTOR = 0.63  # ear base x / the head's half-width (0.62 on western type1's 0.988)
 HEAD_WEIGHT = 0.5  # a vertex belongs to the head when its largest weight is on ``head`` and above this
 
 
@@ -126,4 +128,8 @@ def fitted_params(kind: str, body: BodyFit | None) -> dict[str, float]:
         lo, hi = CREST_RADIUS_RANGE
         out["base"] = round(h["top"] - CREST_SINK, 3)
         out["radius"] = round(min(hi, max(lo, CREST_RADIUS_FACTOR * max(-h["zmin"], h["zmax"]))), 3)
+    if kind == "horse_ears" and body.head:
+        h = body.head
+        out["base"] = round(h["top"] - EARS_SINK, 3)
+        out["spread"] = round(EARS_SPREAD_FACTOR * max(-h["xmin"], h["xmax"]), 3)
     return out

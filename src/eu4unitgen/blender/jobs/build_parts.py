@@ -207,7 +207,28 @@ def build_crest(b, p):
         b.face([bl, tl, tr, br], 0)       # end caps
 
 
-BUILDERS = {"spear": build_spear, "sword": build_sword, "shield": build_shield, "crest": build_crest}
+def build_ears(b, p):
+    """Two horse ears in the head bone frame (the unit faces -Z): each a closed cone on an oval
+    base, ``spread`` either side at height ``base``, tilted ``tilt_deg`` outwards and leaning
+    ``lean_deg`` back. Faces turned to the front (-Z) take zone 1 (inner), the rest zone 0."""
+    sides = 6
+    tilt, lean = math.radians(p["tilt_deg"]), math.radians(p["lean_deg"])
+    half_w, half_d = p["width"] * 0.5, p["depth"] * 0.5
+    for s in (-1.0, 1.0):
+        cx, cy, cz = s * p["spread"], p["base"], p.get("centre_z", 0.0)
+        d = (s * math.sin(tilt), math.cos(tilt) * math.cos(lean), math.sin(lean))
+        tip = b.vert(cx + d[0] * p["length"], cy + d[1] * p["length"], cz + d[2] * p["length"])
+        ring = [b.vert(cx + half_w * math.cos(a) * math.cos(tilt), cy - s * half_w * math.cos(a) * math.sin(tilt),
+                       cz + half_d * math.sin(a))
+                for a in (2 * math.pi * i / sides for i in range(sides))]
+        for i in range(sides):
+            a, c = ring[i], ring[(i + 1) % sides]
+            front = math.sin(2 * math.pi * (i + 0.5) / sides) < 0  # this face's side of the oval is towards -Z
+            b.face([a, c, tip], 1 if front else 0)
+        b.face(list(reversed(ring)), 0)
+
+
+BUILDERS = {"spear": build_spear, "sword": build_sword, "shield": build_shield, "crest": build_crest, "ears": build_ears}
 
 
 def main() -> None:
