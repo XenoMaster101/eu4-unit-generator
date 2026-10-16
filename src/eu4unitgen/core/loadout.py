@@ -144,6 +144,7 @@ class Loadout:
     bodies: dict[int, str] = field(default_factory=dict)  # tier -> base-game infantry pdxmesh
     points: dict[str, str] = field(default_factory=dict)  # role -> "up"/"down" for weapons left on "auto"
     derived: dict[int, dict] = field(default_factory=dict)  # tier -> {"add": [...], "remove": [...]} on its infantry body
+    accept_clipping: list[str] = field(default_factory=list)  # addition kinds whose clipping (C2) is a known limit
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -194,6 +195,10 @@ class Loadout:
             if not all(isinstance(r, str) for r in remove) or len(set(remove)) != len(remove) or not (add or remove):
                 raise LoadoutError(f"derived: tier {key} needs additions or removals (each once), not {raw!r}")
             out.derived[int(key)] = {"add": add, "remove": remove}
+        accept = doc.get("accept_clipping") or []
+        if not isinstance(accept, list) or any(k not in ADDITION_KINDS for k in accept):
+            raise LoadoutError(f"accept_clipping must list addition kinds from {sorted(ADDITION_KINDS)}, not {accept!r}")
+        out.accept_clipping = list(accept)
         for role, point in (doc.get("weapon_point") or {}).items():
             if role not in LOADOUT_ROLES or point not in POINTS:
                 raise LoadoutError(f"weapon_point: {role!r} must be one of {LOADOUT_ROLES} and {point!r} one of {POINTS}")
@@ -208,6 +213,8 @@ class Loadout:
             out["derived"] = {str(t): (list(d["add"]) if not d["remove"]
                                        else {"add": list(d["add"]), "remove": list(d["remove"])})
                               for t, d in sorted(self.derived.items())}
+        if self.accept_clipping:
+            out["accept_clipping"] = list(self.accept_clipping)
         points = {r: p for r, p in sorted(self.points.items()) if p != DEFAULT_POINTS[r]}
         if points:
             out["weapon_point"] = points
@@ -284,6 +291,8 @@ class DerivedRecord:
     base_file: str
     additions: list[tuple[str, tuple[str, ...], int]]  # (kind, chain bones, vertex count), in file order
     removed: list[str] = field(default_factory=list)  # named base parts removed (core.derived_body.REMOVALS)
+    deform: dict | None = None  # core.deform_check result on the infantry's idle/walk/attack (None: not run)
+    accept_clipping: list[str] = field(default_factory=list)  # kinds whose C2 findings are known limits
 
 
 class _Meshes:
@@ -413,7 +422,7 @@ def _prebuild(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, p
 
 
 def _derive(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, built: _Prebuilt, pdx: "_Meshes",
-            res: LoadoutResult) -> GeneratedFile:
+            res: LoadoutResult, game=None, idx=None, runner=None, accept: list[str] | None = None) -> GeneratedFile:
     """Give ``inf`` (the tier's infantry entity, after its stance) its derived body, on a new pdxmesh
     with the same animations, scale and keys and no meshsettings (the copied material names the
     base game's textures, which resolve in the base body's folder)."""
@@ -428,8 +437,18 @@ def _derive(naming: Naming, set_name: str, tier: int, inf: dict, spec: dict, bui
     inf["pdxmesh"] = name
     if inf["name"] in res.stances:
         res.stances[inf["name"]] = (res.stances[inf["name"]][0], name)
+    deform = None
+    if built.adds and runner is not None and idx is not None:
+        from eu4unitgen.core.deform_check import anim_files, run_check, summary
+        from eu4unitgen.core.derived_body import ADDITION_KINDS, base_vertex_count
+
+        anims = [(state, game.read(path)) for state, path in anim_files(rec, idx)]
+        deform = run_check(runner, built.data, base_vertex_count(built.data, built.adds), built.adds, ADDITION_KINDS,
+                           [(s, d) for s, d in anims if d is not None])
+        res.notes.append(f"tier {tier}: deformation check on {', '.join(s for s, _ in anims)}: {summary(deform)}")
     res.derived[tier] = DerivedRecord(inf["name"], name, file, built.base_file,
-                                      [(a.name, a.chain, a.count) for a in built.adds], list(spec["remove"]))
+                                      [(a.name, a.chain, a.count) for a in built.adds], list(spec["remove"]),
+                                      deform, [k for k in (accept or []) if k in {a.name for a in built.adds}])
     what = [f"- {r}" for r in spec["remove"]] + [f"+ {k}" for k in spec["add"]]
     res.notes.append(f"tier {tier}: {inf['name']} wears a derived body ({file}: {built.base_file} {' '.join(what)})")
     return GeneratedFile(file, built.data, OWNED, derived_from=built.base_file)
@@ -547,7 +566,8 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
                 if stance != "base":
                     res.stances[target] = (stance, chosen)
         if prebuilt is not None:
-            derived_files.append(_derive(naming, set_name, tier, inf, loadout.derived[tier], prebuilt, pdx, res))
+            derived_files.append(_derive(naming, set_name, tier, inf, loadout.derived[tier], prebuilt, pdx, res,
+                                         game, idx, runner, loadout.accept_clipping))
     built = build_parts(runner, naming, set_name, builds, version, cache)
     for target, bone, name in assigned:
         attach(by_name[target], bone, name)

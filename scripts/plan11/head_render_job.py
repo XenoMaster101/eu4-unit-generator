@@ -25,7 +25,8 @@ world = sc.world or bpy.data.worlds.new("w"); sc.world = world; world.color = (0
 cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam")); sc.collection.objects.link(cam); cam.data.type = "ORTHO"; sc.camera = cam
 for o in new:
     if o.type != "MESH": o.hide_render = True
-lo, hi = Vector((-1.6, -1.8, 12.9)), Vector((1.6, 1.8, 17.0))  # the head box (Blender axes; the unit faces -Y)
+box = a.get("box") or [[-1.6, -1.8, 12.9], [1.6, 1.8, 17.0]]  # default: the head (Blender axes; the unit faces -Y)
+lo, hi = Vector(box[0]), Vector(box[1])
 out = {}
 for view, d in (("front", (0, 1, 0)), ("side", (-1, 0, 0)), ("rear", (0, -1, 0)), ("top", (0, 0.001, -1)),
                 ("rear_quarter", (0.6, -0.7, -0.4))):

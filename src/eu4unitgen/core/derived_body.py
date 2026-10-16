@@ -106,6 +106,7 @@ class Addition:
     tri: list[int]
     weights: list[dict[str, float]]
     chain: tuple[str, ...] = ()  # the bones it may use (validator: nothing outside)
+    rings: tuple[int, ...] = ()  # each vertex's ring (0 = root), for the deformation check
 
     @property
     def count(self) -> int:
@@ -151,6 +152,12 @@ def oriented(p: list[float], n: list[float], tri: list[int], sign: int) -> list[
 
 def _child(node: dict, name: str) -> dict | None:
     return next((c for c in node["children"] if c["name"] == name), None)
+
+
+def base_vertex_count(derived: bytes, adds: list["Addition"]) -> int:
+    """How many vertices of ``derived`` are the base body's (all but the appended additions')."""
+    mesh, _ = _only_mesh(parse_pdx_mesh(derived))
+    return len(mesh["props"]["p"]) // 3 - sum(a.count for a in adds)
 
 
 def bone_indices(skeleton: dict) -> dict[str, int]:
@@ -272,12 +279,15 @@ def check_derived(base: bytes, derived: bytes, remove: list[int] | tuple[int, ..
 
 
 # --------------------------------------------------------------------------- addition kinds and building
-# Signed off in spike R0 / pre-check P1 (SPEC Track R): shape builder params + how they follow the skeleton.
+# Shapes: blender/jobs/build_additions.py (plan after test 10). Chains: spike R0 / pre-check P1 (SPEC Track R).
 ADDITION_KINDS: dict[str, dict] = {
-    "tail": {"shape": "tail", "params": {"flare": [0.75, 0.6]},
-             "chain": Chain("length", ("hip", "lower_spine"), {"lower_spine": 0.5})},
-    "tuft": {"shape": "tuft", "params": {"length": 1.5, "angle": 45},
-             "chain": Chain("rigid", ("head",))},
+    # exempt: rings sunk or flared into the body by design (deformation check C2); behind: the joint
+    # it must stay behind in the unit's facing frame (C5), or None.
+    "tail": {"shape": "tail", "params": {}, "chain": Chain("length", ("hip", "lower_spine"), {"lower_spine": 0.5}),
+             "exempt": [0, 1], "behind": "hip"},
+    "tuft": {"shape": "tuft", "params": {"length": 1.5, "angle": 45}, "chain": Chain("rigid", ("head",)),
+             "exempt": [0], "behind": "top_spine"},
+    "ears": {"shape": "ears", "params": {}, "chain": Chain("rigid", ("head",)), "exempt": [0], "behind": None},
 }
 HAIR_PATCH = (105, 30, 115, 40)  # western_generic_01_type1 diffuse px: the face's dark hair, no country mask
 PATCH_TEX = 512
@@ -361,5 +371,6 @@ def build_derived(runner, base: bytes, kinds: list[str], patch: tuple[int, int, 
     adds = []
     for k, raw in zip(kinds, res["additions"]):
         chain = ADDITION_KINDS[k]["chain"]
-        adds.append(Addition(k, raw["p"], raw["n"], raw["u0"], raw["tri"], weights(chain, raw["rings"]), chain.bones))
+        adds.append(Addition(k, raw["p"], raw["n"], raw["u0"], raw["tri"], weights(chain, raw["rings"]), chain.bones,
+                             tuple(raw["rings"])))
     return append_additions(base, adds, remove), adds

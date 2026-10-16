@@ -491,6 +491,14 @@ def derived_body(ctx: Context) -> list[Issue]:
             for tex in material.get(slot, []):
                 if not w.exists(f"{folder}/{tex}"):
                     out.append(Issue(ERROR, "derived_body", f"texture {tex} doesn't resolve in {folder}", f.path))
+        if rec.additions and rec.deform is None:
+            out.append(Issue(WARNING, "derived_body", f"tier {tier}: the deformation check didn't run (no Blender "
+                                                      "or no animations): skinned additions unchecked", f.path))
+        elif rec.deform is not None:
+            from eu4unitgen.core.deform_check import judge
+
+            for severity, message in judge(rec.deform, rec.accept_clipping):
+                out.append(Issue(severity, "derived_body", f"tier {tier}: deformation {message}", f.path))
         pdx = w.pdxmesh(w.resolve(rec.entity, "pdxmesh") or "") or {}
         if w.resolve(rec.entity, "pdxmesh") != rec.pdxmesh or (pdx.get("file") or "").lower() != rec.file.lower():
             out.append(Issue(ERROR, "derived_body", f"{rec.entity} doesn't wear {rec.pdxmesh} ({rec.file})",

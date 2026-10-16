@@ -1004,6 +1004,20 @@ Constraints carried over:
 
 **Removal mode (step 2, 2026-10-16):** `core.derived_body.REMOVALS` names removable parts per base body. type1's `helmet` is `Removal("head", px 127.5-240 × 0-200)`: any triangle with a vertex mostly on `head` whose UV centroid lies there, 370 triangles including the boundary one. `append_additions(base, adds, remove)` drops them and keeps every vertex array (the helmet's vertices stay, unreferenced). `check_derived(base, derived, remove)` verifies that exactly those are gone and everything else is unchanged. Fitting (`_skin_points`) and `build_additions`' back profile use only vertices a triangle uses: the bare type1 head is top 1.795 (2.152 with the helmet), back 0.846. Loadout `"derived": {"1": {"add": [...], "remove": ["helmet"]}}` (a plain list still means add only). The derived body is built at the start of its tier, so parts on that infantry are fitted to it. Rule `derived_body` recomputes the removal from the base and counts removed triangles against the budget. Render: `build/plan11/h1/h1_removed370.png` (clean bare head).
 
+**Step 3 (2026-10-16): shaped additions + automatic deformation check.**
+- **Shapes** (`blender/jobs/build_additions.py`, ring meshes, closed and manifold):
+  - `tail`: tufted flared base, slim dock, plume widest at ~40%, strand ridges, 5-point tip; 125 verts, 238 tris.
+  - `tuft`: tie, flattened brush, 3-point tip, within the P1 envelope, anchored at the base's original back (type1's helmet back: where P1 validated it; the Greek helmet's back must sit there so the tuft comes out of it); 33 verts, 58 tris.
+  - `ears`: two crescent-section shells cupped forward and turned 25° out, pinched base, widest a quarter up, pointed; on top of the bare head, placed from its head-skinned vertices; rigid `head`; 82 verts, 156 tris.
+  - type1 − helmet + all three: 2,965 triangles. Renders: `build/plan11/s3/shapes_bind.png`, `ears_turned.png`.
+- **`check_deform`** (Blender job) + `core/deform_check.py`: the R0 metrics on the infantry pdxmesh's own idle/walk/attack. About 4 s for three animations. It runs in `apply_loadout` for every derived body with additions, and rule `derived_body` reports `judge()`: C1-C3 errors, C4-C5 warnings, or a warning when the check couldn't run.
+  - Per kind: `exempt` rings for C2 (tail 0-1, tuft 0, ears 0) and the `behind` joint for C5 (tail `hip`, tuft `top_spine`, ears none).
+  - **Inside test fix:** the nearest base face's *smooth* normal (interpolated vertex normals). The flat face normal flagged a tuft tip in the air as 1.1 inside the head (renders `build/plan11/s3/tuft_diag.png`).
+- **Results (type1 − helmet):**
+  - **Tail and ears pass C1-C5 on `spear_shield` and `polearm_twohanded`.**
+  - **The tuft fails C2:** spear_shield attack 29.6% / 0.97 deep, idle one vertex 0.56; polearm attack 11.1% / 0.69, idle 0.84. Real in the attack: the torso leans and the shoulders hunch, and the tip sinks into the top of the back by the collar (`tuft_attack_diag.png`).
+  - Per the user's rule closing the ponytail rounds (accept the clipping as a known limit, judged in game), the loadout's `"accept_clipping": ["tuft"]` turns the tuft's C2 findings into warnings marked as accepted. They are still reported.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

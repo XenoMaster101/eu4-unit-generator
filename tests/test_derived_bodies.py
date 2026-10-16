@@ -47,7 +47,19 @@ def skinned_body(diff="g1_d.dds") -> bytes:
 class AdditionsRunner(FakeRunner):
     """FakeRunner that also 'builds' skinned additions: a 2-ring strip per addition."""
 
+    def __init__(self, deform=None):
+        super().__init__()
+        self.deform = deform  # name -> metric overrides for check_deform
+
     def run_job(self, job, args, timeout=None):
+        if job == "check_deform":
+            self.calls.append((job, args))
+            ok = {"str_min": 1.0, "str_max": 1.0, "str_p05": 1.0, "str_p95": 1.0, "pen_depth": 0.0, "pen_pct": 0.0,
+                  "flips": 0, "drift": 0.0, "behind": 1.0, "worst_frame": 1}
+            anims = {a["id"]: {"frames": [1, 10], "additions": {s["name"]: {**ok, **(self.deform or {}).get(s["name"], {})}
+                                                               for s in args["additions"]}}
+                     for a in args["anims"]}
+            return JobResult(job, 0, {"anims": anims}, "fake log")
         if job != "build_additions":
             return super().run_job(job, args, timeout)
         self.calls.append((job, args))
@@ -198,3 +210,37 @@ def test_unknown_removal_is_refused(project, nation, body_game):
     lo = Loadout.from_json({"schema": 1, "derived": {"1": {"remove": ["helmet"]}}})
     with pytest.raises(GenerationError, match="no removable 'helmet'"):
         generate(project, nation, files, idx, loadout=lo, runner=AdditionsRunner())
+
+
+def test_deformation_check_runs_and_reaches_the_validator(project, nation, body_game):
+    files, idx = body_game
+    runner = AdditionsRunner(deform={"tuft": {"pen_depth": 0.6, "pen_pct": 20.0}})
+    gen = generate(project, nation, files, idx, loadout=Loadout.from_json(LOADOUT), runner=runner)
+    calls = [a for j, a in runner.calls if j == "check_deform"]
+    assert len(calls) == 1 and [a["id"] for a in calls[0]["anims"]] == ["idle", "walk", "attack"]
+    assert [s["name"] for s in calls[0]["additions"]] == ["tail", "tuft"]
+    assert calls[0]["additions"][0]["start"] == 3 and calls[0]["additions"][0]["exempt"] == [0, 1]
+    report = validate(project, nation, gen, files, idx, rules=["derived_body"])
+    errs = [i.message for i in report.errors]
+    assert any("C2 tuft in attack" in m for m in errs) and any("C2 tuft in idle" in m for m in errs), errs
+    lo = Loadout.from_json({**LOADOUT, "accept_clipping": ["tuft"]})
+    gen = generate(project, nation, files, idx, loadout=lo, runner=AdditionsRunner(deform={"tuft": {"pen_depth": 0.6}}))
+    report = validate(project, nation, gen, files, idx, rules=["derived_body"])
+    assert not report.errors and any("accepted as a known limit" in i.message for i in report.warnings)
+
+
+def test_judge_criteria():
+    from eu4unitgen.core.deform_check import judge
+
+    ok = {"str_min": 1.0, "str_max": 1.0, "str_p05": 1.0, "str_p95": 1.0, "pen_depth": 0.0, "pen_pct": 0.0,
+          "flips": 0, "drift": 0.0, "behind": 1.0, "worst_frame": 3}
+    res = {"anims": {"walk": {"additions": {"tail": {**ok, "str_min": 0.8}, "ears": {**ok, "behind": None}}},
+                     "attack": {"additions": {"tail": {**ok, "pen_pct": 2.0, "pen_depth": 0.25, "flips": 1, "drift": 0.1,
+                                                       "behind": -0.1}}}}}
+    found = judge(res)
+    assert ("error", "C1 tail in walk (worst frame 3): stretch 0.80-1.00 (p05-p95 1.00-1.00)") in found
+    assert not any("C2" in m for _, m in found)  # attack allows 3% / 0.30
+    assert ("error", "C3 tail in attack (worst frame 3): 1 triangles flip") in found
+    assert any(s == "warning" and m.startswith("C4 tail in attack") for s, m in found)
+    assert any(s == "warning" and m.startswith("C5 tail in attack") for s, m in found)
+    assert not any("ears" in m for _, m in found)
