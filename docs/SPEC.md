@@ -1175,6 +1175,11 @@ Constraints carried over:
 - **Measured:** type1 tail 32.0, tuft 32.0, ears 64.4 texels/unit (was 15.7 / 32 / 32); african_generic_03 tail 14.5, tuft 16.2, ears 31.0 (its own body texture: 16.5).
 - **Renders:** `build/q5/renders/hair_swatch.png`: brown, strand-textured tail and tuft; brown ears with a lighter inner ear. They no longer read as horns.
 
+**Q6 (2026-10-16): quality as a check.**
+- `textures/quality.py` holds the measures (density, detail, shading, normal tilt, gloss; `scripts/plan11/measure_quality.py` uses the same definitions).
+- **Rule `texture_quality`** warns when a generated part (its .mesh and the three textures its material names) falls outside `RANGES`: density 15-40, detail ≥ 8, shading ≥ 4 (no upper bound: a texture may hold dark lining next to bright metal), normal tilt 4-20°, gloss 2-20.
+- **Test-11 parts now** (dory, hoplon, helmet, tiers 1-2): all in range. Detail 9.3-12.0, shading 11-51, normal 5.1-9.1°, gloss 10-13, density 20.1-34.3.
+
 **Order:** H1 check → (writer remove-triangles mode, or H2) → new shapes plus `check_deform` → `greek_helmet` → T1 textures (T2 if needed) → pre-checks → test 11.
 
 **Phases and acceptance (after R0):**

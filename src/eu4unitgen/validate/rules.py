@@ -426,6 +426,45 @@ def loadout(ctx: Context) -> list[Issue]:
     return out
 
 
+@rule("texture_quality")
+def texture_quality(ctx: Context) -> list[Issue]:
+    """Q6: each generated part's texel density, painted detail and shading, normal-map tilt and
+    gloss, against the base game's measured ranges (textures.quality.RANGES): warnings."""
+    from eu4unitgen.library.scanner import _walk, parse_pdx_mesh
+    from eu4unitgen.textures.dds import DDSError, read_dds
+    from eu4unitgen.textures.quality import measure, outside
+
+    res = ctx.generated.loadout
+    if res is None:
+        return []
+    out, seen = [], set()
+    for r in res.parts:
+        if r.mesh_file in seen:
+            continue
+        seen.add(r.mesh_file)
+        f = ctx.generated.files.get(r.mesh_file)
+        if f is None:
+            continue
+        try:
+            node = next(n for n in _walk(parse_pdx_mesh(f.data)) if n["name"] == "mesh")
+            mesh = node["props"]
+            material = next(c for c in node["children"] if c["name"] == "material")["props"]
+            folder = r.mesh_file.rsplit("/", 1)[0]
+            tex = {k: ctx.generated.files.get(f"{folder}/{material[slot][0]}") if material.get(slot) else None
+                   for k, slot in (("diffuse", "diff"), ("normal", "n"), ("specular", "spec"))}
+            if tex["diffuse"] is None or "u0" not in mesh:
+                continue
+            imgs = {k: read_dds(v.data) if v is not None else None for k, v in tex.items()}
+            m = measure(mesh["u0"], mesh["p"], mesh["tri"], imgs["diffuse"], imgs["normal"], imgs["specular"])
+        except (DDSError, OSError, ValueError, StopIteration, KeyError):
+            continue
+        found = outside(m)
+        if found:
+            out.append(Issue(WARNING, "texture_quality", f"{r.entity}: {', '.join(found)} (base-game range; "
+                                                         "SPEC Track R quality measurements)", r.mesh_file, r.entity))
+    return out
+
+
 DERIVED_TRI_BUDGET = 4500  # the largest base-game infantry body: western_generic_02_type1, 4,360 (1.37.5)
 
 

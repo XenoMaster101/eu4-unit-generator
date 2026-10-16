@@ -335,3 +335,18 @@ def test_hair_swatch_textures(project, nation, body_game, fake_install):
     assert any(raw[i:i + 4] == bytes((0, 0, 0, 6)) for i in range(0, len(raw), 4))  # the swatch: no mask, matte
     report = validate(project, nation, gen, files, idx)
     assert not report.errors, [str(i) for i in report.errors]
+
+
+def test_texture_quality_flags_flat_parts(project, nation, game):
+    """Q6: the fake runner's parts have no unwrap, no paint and flat normal maps: warnings."""
+    from test_parts import LOADOUT as PARTS_LOADOUT
+    from eu4unitgen.textures.quality import RANGES, outside
+
+    files, idx = game
+    gen = generate(project, nation, files, idx, loadout=Loadout.from_json(PARTS_LOADOUT), runner=FakeRunner())
+    found = [i for i in validate(project, nation, gen, files, idx, rules=["texture_quality"]).warnings]
+    assert found and all("base-game range" in i.message for i in found)
+    assert any("density 0.0 < 15" in i.message for i in found)
+    good = {"density": 30.0, "detail": 12.0, "shading": 10.0, "normal": 8.0, "gloss": 10.0}
+    assert outside(good) == [] and outside({**good, "normal": 25.0}) == ["normal 25.0 > 20"]
+    assert set(RANGES) == set(good)

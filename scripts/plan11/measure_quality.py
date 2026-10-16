@@ -1,4 +1,5 @@
-"""Plan: "match vanilla quality". Measure texture style and texel density of base-game unit meshes
+"""Plan: "match vanilla quality" (the measures live in eu4unitgen.textures.quality since Q6; this
+script prints them for base-game meshes next to a staged mod's parts). Measure texture style and texel density of base-game unit meshes
 against our generated parts (read-only; the install is read in place; prints numbers only).
 
   texel density: sqrt(sum UV area in texels / sum 3D surface area), texels per mesh unit (the
