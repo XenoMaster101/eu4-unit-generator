@@ -10,7 +10,8 @@ the mirror S). An attached entity keeps its own pdxmesh scale, not times its par
 bodies in in-game tests 7-8, and a 0.5 rider on a 0.48 horse looks like vanilla's riders.
 
 args: {"units": [{"name": ..., "root": node}], "frame": 1, "view": [x, y, z] (camera -> scene),
-       "size": px, "inherit_scale": false, "out_dir": ..., "result_path": ...}
+       "size": px, "inherit_scale": false, "thumbs": px or 0 (each attached rigid part alone, by entity
+       name, for the Parts cards), "out_dir": ..., "result_path": ...}
 node: {"name", "mesh", "anim": path | null, "scale": float, "hidden": bool (a helper mesh: placed, not drawn),
        "attach": [{"bone", "bind": [12] | null, "node"}]}
 """
@@ -108,7 +109,7 @@ def main() -> None:
     a = _pdx.args()
     ie = _pdx.io_module()
     scope_rig_lookup(ie)
-    out = {"tiles": {}, "seconds": {}}
+    out = {"tiles": {}, "seconds": {}, "thumbs": {}}
     for unit in a["units"]:
         start = time.time()
         _pdx.clear_scene()
@@ -135,6 +136,18 @@ def main() -> None:
         path = os.path.join(a["out_dir"], f"{unit['name']}.png")
         out["tiles"][unit["name"]] = cd.shoot(scene, cam, points(loaded), a.get("view", (-0.7, 0.7, -0.35)), path,
                                               a.get("size", 256))
+        if a.get("thumbs"):  # each rigid part alone, as posed, for the Parts cards
+            rigid = [(n, objs) for n, objs, rig in loaded if n is not unit["root"] and not n.get("anim")
+                     and not n.get("hidden") and n["name"] not in out["thumbs"]]
+            for n, objs in rigid:
+                for other, oo, _ in loaded:
+                    for o in oo:
+                        o.hide_render = o.type != "MESH" or other is not n
+                co = [o.matrix_world @ Vector(c) for o in objs if o.type == "MESH" for c in o.bound_box]
+                if co:
+                    out["thumbs"][n["name"]] = cd.shoot(scene, cam, co, a.get("view", (-0.7, 0.7, -0.35)),
+                                                        os.path.join(a["out_dir"], f"thumb_{n['name']}.png"),
+                                                        a["thumbs"])
         out["seconds"][unit["name"]] = round(time.time() - start, 2)
     _pdx.write_result(a, out)
 

@@ -135,6 +135,8 @@ class Gallery:
     result: Any  # SetResult
     seconds: dict = field(default_factory=dict)
     notes: list = field(default_factory=list)
+    thumbs: dict = field(default_factory=dict)  # part entity -> its picture (the Parts cards)
+    parts: dict = field(default_factory=dict)  # (unit type, tier) -> {bone: part entity}
 
 
 @dataclass
@@ -413,7 +415,7 @@ class Session:
                 mod.close()
 
     def gallery(self, spec: SetSpec, units: list[tuple[str, int]] | None = None, size: int = 256,
-                result: SetResult | None = None) -> "Gallery":
+                result: SetResult | None = None, thumbs: int = 0) -> "Gallery":
         """Whole units, posed at their idle frame, as the game assembles them (Track F, F9): the
         generated set (``result``: a validation already run, else one now) over the mod and the
         game, each unit's entity tree staged and rendered in one background Blender run.
@@ -423,7 +425,7 @@ class Session:
         from PIL import Image
 
         from eu4unitgen.blender.runner import BlenderError
-        from eu4unitgen.export.gallery import GalleryError, entity_tree, stage
+        from eu4unitgen.export.gallery import GalleryError, entity_tree, parts_of, stage
         from eu4unitgen.validate.graph import World
 
         result = result or self.validate(spec)[0]
@@ -436,6 +438,8 @@ class Session:
         wanted = units or [(u, t) for t in TIERS for u in UNIT_TYPES]
         images: dict[tuple[str, int], Any] = {}
         seconds: dict[tuple[str, int], float] = {}
+        pictures: dict[str, Any] = {}
+        parts: dict[tuple[str, int], dict] = {}
         try:
             world = World(game, idx, mod, result.generated, project.owned_dlc)
             with tempfile.TemporaryDirectory(prefix="eu4unitgen_gallery_") as tmp:
@@ -445,13 +449,14 @@ class Session:
                     name = f"{utype}_{tier}"
                     try:
                         tree = entity_tree(world, naming.unit_entity(owner, utype, tier))
+                        parts[(utype, tier)] = parts_of(tree)
                         jobs.append({"name": name, "root": stage(tree, world, colours, folder / name)})
                     except GalleryError as exc:
                         notes.append(f"{utype} tier {tier}: {exc}")
                 if jobs:
                     try:
                         res = self.runner().run_job("render_unit", {"units": jobs, "frame": 1, "size": size,
-                                                                    "out_dir": tmp}, timeout=900)
+                                                                    "thumbs": thumbs, "out_dir": tmp}, timeout=900)
                     except BlenderError as exc:
                         raise SpecError(f"the gallery needs Blender: {exc}") from exc
                     for utype, tier in wanted:
@@ -460,10 +465,13 @@ class Session:
                             with Image.open(path) as im:
                                 images[(utype, tier)] = im.convert("RGB")
                             seconds[(utype, tier)] = res.result["seconds"].get(f"{utype}_{tier}", 0.0)
+                    for entity, path in (res.result.get("thumbs") or {}).items():
+                        with Image.open(path) as im:
+                            pictures[entity] = im.convert("RGB")
         finally:
             if mod is not None:
                 mod.close()
-        return Gallery(images, result, seconds, notes)
+        return Gallery(images, result, seconds, notes, pictures, parts)
 
     def generate(self, spec: SetSpec, write: bool = True) -> list[SetResult]:
         """Validate, then write each set's drop-in package to <output>/<set>/ (unless any set has

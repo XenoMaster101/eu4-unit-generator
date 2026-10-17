@@ -55,6 +55,17 @@ def entity_tree(world, entity: str, state: str = "idle", depth: int = 0) -> Node
     return node
 
 
+def parts_of(node: Node) -> dict[str, str]:
+    """{bone: entity} for the rigid parts anywhere in the tree (a rider's or a crew's too): what
+    the Parts cards show."""
+    out: dict[str, str] = {}
+    for bone, child in node.attach:
+        if child.anim_file is None:
+            out[bone] = child.entity
+        out.update(parts_of(child))
+    return out
+
+
 def stage(node: Node, world, colours, folder: Path, n: list | None = None) -> dict:
     """Write ``node``'s tree into ``folder`` (one subfolder per mesh, its textures beside it as its
     materials name them) -> the Blender job's node: {"mesh", "anim", "scale", "attach": [{"bone",

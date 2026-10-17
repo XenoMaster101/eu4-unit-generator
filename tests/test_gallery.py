@@ -23,12 +23,22 @@ class GalleryRunner(FakeRunner):
         if job != "render_unit":
             return super().run_job(job, args, timeout)
         self.calls.append((job, args))
-        tiles = {}
+        tiles, thumbs = {}, {}
         for u in args["units"]:
             path = Path(args["out_dir"]) / f"{u['name']}.png"
             Image.new("RGB", (args["size"], args["size"]), (90, 120, 150)).save(path)
             tiles[u["name"]] = str(path)
-        return JobResult(job, 0, {"tiles": tiles, "seconds": {u["name"]: 0.1 for u in args["units"]}}, "fake log")
+            todo = [u["root"]]
+            while todo and args.get("thumbs"):
+                n = todo.pop()
+                for a in n["attach"]:
+                    todo.append(a["node"])
+                    if not a["node"]["anim"]:
+                        t = Path(args["out_dir"]) / f"thumb_{a['node']['name']}.png"
+                        Image.new("RGB", (args["thumbs"], args["thumbs"]), (200, 180, 90)).save(t)
+                        thumbs[a["node"]["name"]] = str(t)
+        return JobResult(job, 0, {"tiles": tiles, "thumbs": thumbs,
+                                  "seconds": {u["name"]: 0.1 for u in args["units"]}}, "fake log")
 
 
 @pytest.fixture
@@ -84,8 +94,11 @@ def test_gallery_renders_every_unit_in_one_job(session, tmp_path, monkeypatch):
     assert g.images[("cavalry", 4)].size == (64, 64) and not g.result.report.errors
     renders = [a for job, a in runner.calls if job == "render_unit"]
     assert len(renders) == 1 and len(renders[0]["units"]) == 12  # one Blender run for the lot
-    some = session.gallery(spec, [("infantry", 2)], size=32, result=g.result)  # no second validation
-    assert list(some.images) == [("infantry", 2)]
+    some = session.gallery(spec, [("infantry", 1), ("cavalry", 1)], size=32, result=g.result, thumbs=24)
+    assert list(some.images) == [("infantry", 1), ("cavalry", 1)]  # no second validation
+    assert some.parts[("infantry", 1)] == {"Right_hand_node": "hr_mac_dory_1", "Left_hand_node": "hr_mac_hoplon_1"}
+    assert some.parts[("cavalry", 1)] == {"Right_hand_node": "hr_mac_xyston_rider_1", "head": "hr_mac_crest_rider_1"}
+    assert some.thumbs["hr_mac_dory_1"].size == (24, 24) and "hr_mac_crest_rider_1" in some.thumbs
 
 
 @pytest.mark.skipif(not os.environ.get("EU4_PATH"), reason="needs the real install (EU4_PATH) and Blender")
