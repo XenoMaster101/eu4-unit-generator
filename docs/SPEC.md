@@ -1291,7 +1291,15 @@ Constraints carried over:
     - Bakes, the atlas painter, the zone map and paint take [w, h].
     - **Measured** (test 8): sarissa 22.8 texels/unit at 256×1024 (was 11.4); dory 20.1 at 128×512; xiphos 24.9 at 64×128. Test 8's only quality warning left is crest_2 (detail 5.3, shading 3.5: a transverse crest, separate).
     - **UNVERIFIED in game for our parts:** test 12 now includes the hoplite's 128×512 dory, and its checklist has a line for non-square part textures.
-  - **Not yet checked in game:** the hoplite (no test requested). The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
+  - **In-game test 12 result (2026-10-16): PASS for the code.**
+    - The unit renders textured: **a texture recipe on a derived body works in game**. Linen torso with bands; dory textured (**non-square part textures work in game**); crimson hoplon; corinthian helmet and crest attached; no stray old-helmet pieces. error.log clean.
+    - **Look issues (user):**
+      1. the helmet reads pale cream/ivory, not bronze: darken and warm the bronze (check gloss and spec too; lighting may wash it out);
+      2. the figure reads "knight in white armour": vanilla's grey mail sleeves and striped hose are medieval. A hoplite needs bare arms and legs (skin) or bronze greaves;
+      3. legs striped (finding c);
+      4. crest too thin, barely visible: taller, fuller horsehair.
+    - **Next (user):** A, the GUI Character page with named texture areas per body (arms → skin, legs → skin, shins → bronze greaves), proven by rebuilding the hoplite in the GUI with bare arms and legs, a proper bronze helmet and a fuller crest; B, import part; C, an **import full body** mode, spiked first; D, TripoSG.
+ The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
 
 
 
