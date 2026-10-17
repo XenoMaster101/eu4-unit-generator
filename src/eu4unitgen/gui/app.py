@@ -73,6 +73,10 @@ class MainWindow(QMainWindow):
         if app is not None and getattr(app, "_wheel_guard", None) is None:
             from eu4unitgen.gui.widgets import install_wheel_guard
             app._wheel_guard = install_wheel_guard(app)
+        self.theme_choice = str(store.value("theme", "system")) if store is not None else "system"
+        if app is not None:
+            from eu4unitgen.gui.theme import apply_theme
+            self.theme_mode = apply_theme(app, self.theme_choice)  # before any widget, so none keeps the system's
 
         self.settings_page = SettingsPage(self, self.session.settings)
         self.character_page = CharacterPage(self)
@@ -141,6 +145,21 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Set the EU4 install and press Load.")
         self.history = History(self.character_state())
         self._update_title()
+        i = self.settings_page.theme.findData(self.theme_choice)
+        self.settings_page.theme.blockSignals(True)
+        self.settings_page.theme.setCurrentIndex(max(i, 0))
+        self.settings_page.theme.blockSignals(False)
+
+    def set_theme(self, choice: str) -> None:
+        """Light, dark or follow Windows: the whole app, at once (gui.theme)."""
+        from eu4unitgen.gui.theme import apply_theme
+
+        app = QApplication.instance()
+        self.theme_choice = choice
+        self.theme_mode = apply_theme(app, choice)
+        self.home.restyle()
+        if self.store is not None:
+            self.store.setValue("theme", choice)
 
     # ------------------------------------------------------------------ views (Track F)
     def show_home(self) -> None:
@@ -357,7 +376,7 @@ class MainWindow(QMainWindow):
         home = self.home
         tag = home.tag()
         if not tag:
-            return home.show_message("Pick the country first (\"For:\").", error=True)
+            return home._check_ready()  # the For: field shows what's missing
         self._sync_settings()
         try:
             look = home.look()

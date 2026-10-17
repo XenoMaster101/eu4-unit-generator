@@ -27,6 +27,25 @@ def hsv(c: tuple) -> tuple[float, float, float]:
     return h * 360, s, v
 
 
+def _lab(c: tuple) -> tuple[float, float, float]:
+    """sRGB -> CIE Lab (D65), so "nearest colour name" matches what the eye sees."""
+    def lin(v: float) -> float:
+        v /= 255
+        return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = (lin(v) for v in c)
+    x, y, z = ((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047, 0.2126 * r + 0.7152 * g + 0.0722 * b,
+               (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883)
+    f = [t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116 for t in (x, y, z)]
+    return 116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])
+
+
+def colour_name(c: tuple) -> str:
+    """The plain name nearest to ``c`` (library/vocabulary.json "colour_names")."""
+    lab = _lab(c)
+    names = library("vocabulary")["colour_names"]
+    return min(names, key=lambda n: sum((a - b) ** 2 for a, b in zip(lab, _lab(tuple(names[n])))))
+
+
 def finish_for(c: tuple) -> str:
     """The finish a colour looks like (first rule that fits), else "colour"."""
     h, s, v = hsv(c)
@@ -91,15 +110,14 @@ def suggestions(img: Image.Image) -> list[Item]:
         if c is None:
             continue
         f = finish_for(c)
-        label = f"From image: {area} " + (f"rgb {c[0]} {c[1]} {c[2]}" if f == "colour" else f)
-        items.append(Item("finish", f, label, area=area, colour=c if f == "colour" else None, words="(image)"))
+        label = f"{area}: {colour_name(c)}" if f == "colour" else f"{area}: {f}"
+        items.append(Item("finish", f, label, area=area, colour=c if f == "colour" else None, words="(image)",
+                          params={"swatch": list(c)}))
     head = cols.get("head")
     if head and hsv(head)[1] >= rules["crest_saturation"] and finish_for(head) == "colour":
-        items.append(Item("crest_colour", None, f"From image: crest rgb {head[0]} {head[1]} {head[2]}",
-                          colour=head, words="(image)"))
+        items.append(Item("crest_colour", None, f"crest: {colour_name(head)}", colour=head, words="(image)"))
     vivid = [c for c in cols.values() if c and finish_for(c) == "colour"]
     if vivid:
         main = max(vivid, key=lambda c: hsv(c)[1])
-        items.append(Item("unit_colour", None, f"From image: main colour rgb {main[0]} {main[1]} {main[2]}",
-                          colour=main, words="(image)"))
+        items.append(Item("unit_colour", None, f"main colour: {colour_name(main)}", colour=main, words="(image)"))
     return items

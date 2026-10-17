@@ -148,8 +148,10 @@ class Item:
     spans: dict = field(default_factory=dict)  # "noun"/"material"/"colour"/"negation" -> (start, end) in the text
 
     def text(self) -> str:
-        who = f" ({self.utype})" if self.kind in ("weapon", "shield", "helmet", "crest") and self.utype != "infantry" else ""
-        return self.label + who
+        """The chip's text: the label, and the unit type when it isn't infantry and the label
+        doesn't already say it ("Xyston (cavalry lance)" stays as it is)."""
+        other = self.kind in ("weapon", "shield", "helmet", "crest") and self.utype != "infantry"
+        return f"{self.label} ({self.utype})" if other and self.utype not in self.label.lower() else self.label
 
 
 @dataclass

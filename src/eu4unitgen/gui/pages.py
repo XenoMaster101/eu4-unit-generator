@@ -16,7 +16,12 @@ from eu4unitgen.core.project import BLENDER_VERSION, IO_PDX_MESH_VERSION
 from eu4unitgen.export.pipeline import SetSpec, Settings
 from eu4unitgen.validate.rules import ERROR, INFO, WARNING
 
-SEVERITY_COLOUR = {ERROR: "#c62828", WARNING: "#b26a00", INFO: "#546e7a"}
+def severity_colour(severity: str) -> str:
+    """Error / warning / info text colour from the theme (readable on light and dark)."""
+    from eu4unitgen.gui.theme import tokens
+
+    t = tokens()
+    return {ERROR: t["error"], WARNING: t["warn"], INFO: t["muted"]}[severity]
 
 
 def open_folder(path: Path) -> bool:
@@ -40,7 +45,7 @@ class Page(QWidget):
         self.message.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
     def show_message(self, text: str, error: bool = False) -> None:
-        self.message.setText(f'<span style="color:{SEVERITY_COLOUR[ERROR]}">{text}</span>' if text and error else text)
+        self.message.setText(f'<span style="color:{severity_colour(ERROR)}">{text}</span>' if text and error else text)
 
     def set_busy(self, busy: bool) -> None:
         for b in self.findChildren(QPushButton):
@@ -94,6 +99,12 @@ class SettingsPage(Page):
         form.addRow("EU4 mod directory", _path_row(self.user_mods))
         form.addRow("Name prefix", self.prefix)
         form.addRow(f"Blender {BLENDER_VERSION} LTS", _path_row(self.blender, pick_dir=False))
+        self.theme = QComboBox()
+        for value, label in (("system", "Follow Windows (light or dark)"), ("light", "Light"), ("dark", "Dark")):
+            self.theme.addItem(label, value)
+        self.theme.setToolTip("The app's colours. Follow Windows picks light or dark when the app starts.")
+        self.theme.currentIndexChanged.connect(lambda _: window.set_theme(self.theme.currentData()))
+        form.addRow("Theme", self.theme)
         self.layout_.addLayout(form)
 
         buttons = QHBoxLayout()
@@ -372,7 +383,7 @@ def fill_issues(tree: QTreeWidget, results) -> None:
         tree.addTopLevelItem(top)
         for issue in report.issues:
             item = QTreeWidgetItem([issue.severity.upper(), issue.rule, issue.message, issue.path or ""])
-            item.setForeground(0, QBrush(QColor(SEVERITY_COLOUR[issue.severity])))
+            item.setForeground(0, QBrush(QColor(severity_colour(issue.severity))))
             item.setToolTip(2, issue.message)
             top.addChild(item)
         top.setExpanded(True)
