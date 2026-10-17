@@ -307,7 +307,7 @@ def build_helmet(b, p):
         b.face([outer[i][-1], inner[i][-1], inner[k][-1], outer[k][-1]], 0)  # the rim's edge
     if p.get("crest", "fore_aft") != "none":
         transverse = p.get("crest") == "transverse"
-        steps, half, h = 8, 0.12, p["crest_height"]
+        steps, half, h = 8, p.get("crest_width", 0.24) / 2, p["crest_height"]
         span = math.radians(75)
         rows = []
         for i in range(steps + 1):

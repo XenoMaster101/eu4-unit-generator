@@ -1,13 +1,120 @@
 {
   "schema": 1,
-  "note": "Painted-style material library (Q2-Q5, tuned against the base game's measured style, SPEC Track R). paint: per material [pattern strength, AO strength, top-light strength, edge-wear lightening, brush grain]. bump: normal-map relief strength. hair: the derived body's hair swatch. helmet_styles: greek_helmet rim drop below the crown at front, side, back; helmet_slot: the corinthian eye slot's depth range below the crown.",
+  "note": "Painted-style material library (Q2-Q5, tuned against the base game's measured style, SPEC Track R). paint: per material [pattern strength, AO strength, top-light strength, edge-wear lightening, brush grain]. bump: normal-map relief strength. hair: the derived body's hair swatch. helmet_styles: greek_helmet rim drop below the crown at front, side, back; helmet_slot: the corinthian eye slot's depth range below the crown. colours: part zones' default base colours (bronze darkened and warmed after test 12: it read pale ivory in game).",
   "paint": {
-    "wood": [0.60, 0.45, 0.25, 18, 22], "bronze": [0.55, 0.50, 0.30, 55, 19], "iron": [0.40, 0.45, 0.30, 50, 16],
-    "hair": [0.65, 0.50, 0.20, 10, 24], "leather": [0.50, 0.45, 0.20, 14, 19], "paint": [0.30, 0.40, 0.25, 12, 16],
-    "plain": [0.30, 0.40, 0.20, 12, 14]
+    "wood": [
+      0.6,
+      0.45,
+      0.25,
+      18,
+      22
+    ],
+    "bronze": [
+      0.55,
+      0.5,
+      0.3,
+      30,
+      19
+    ],
+    "iron": [
+      0.4,
+      0.45,
+      0.3,
+      50,
+      16
+    ],
+    "hair": [
+      0.65,
+      0.5,
+      0.2,
+      10,
+      24
+    ],
+    "leather": [
+      0.5,
+      0.45,
+      0.2,
+      14,
+      19
+    ],
+    "paint": [
+      0.3,
+      0.4,
+      0.25,
+      12,
+      16
+    ],
+    "plain": [
+      0.3,
+      0.4,
+      0.2,
+      12,
+      14
+    ]
   },
-  "bump": {"wood": 0.80, "bronze": 0.70, "iron": 0.45, "hair": 0.90, "leather": 0.70, "paint": 1.40, "plain": 0.35},
-  "hair": {"colour": [112, 78, 50], "inner": [168, 128, 104], "gloss": 6},
-  "helmet_styles": {"attic": [0.75, 2.05, 1.45], "corinthian": [2.2, 2.15, 1.5], "pilos": [1.05, 1.05, 1.05]},
-  "helmet_slot": [1.15, 1.45]
+  "bump": {
+    "wood": 0.8,
+    "bronze": 0.7,
+    "iron": 0.45,
+    "hair": 0.9,
+    "leather": 0.7,
+    "paint": 1.4,
+    "plain": 0.35
+  },
+  "hair": {
+    "colour": [
+      112,
+      78,
+      50
+    ],
+    "inner": [
+      168,
+      128,
+      104
+    ],
+    "gloss": 6
+  },
+  "helmet_styles": {
+    "attic": [
+      0.75,
+      2.05,
+      1.45
+    ],
+    "corinthian": [
+      2.2,
+      2.15,
+      1.5
+    ],
+    "pilos": [
+      1.05,
+      1.05,
+      1.05
+    ]
+  },
+  "helmet_slot": [
+    1.15,
+    1.45
+  ],
+  "colours": {
+    "wood": [
+      110,
+      75,
+      40
+    ],
+    "bronze": [
+      125,
+      85,
+      38
+    ],
+    "iron": [
+      165,
+      165,
+      170
+    ],
+    "horsehair": [
+      170,
+      20,
+      25
+    ]
+  }
 }

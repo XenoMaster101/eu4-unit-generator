@@ -1307,6 +1307,11 @@ Constraints carried over:
         - recolour `detail` 0-1 (0 = flat colour: skin over mail rings);
         - `spec_paint` channel `all` (clear only: every unit-colour mask in a region).
         - `retexture_set` passes the base mesh's areas, computed only when an op asks.
+    - **A2 (2026-10-16): bronze and crest.**
+      - Zone base colours (wood, bronze, iron, horsehair) are data (`materials.json` "colours").
+      - **Bronze:** 180 130 60 → **125 85 38** (darker, warmer), and the paint's bronze edge-wear lightening 55 → 30. The helmet's bronze diffuse peaked at 170-180 against vanilla metal's 60-100, which read as ivory in test 12.
+      - **`greek_helmet` crest:** a new `crest_width` param (default 0.36, was a fixed 0.24) and `crest_height` 0.9 → 1.3.
+      - Preview: `build/a2/helmet_close.png`.
     - **Next (user):** A, the GUI Character page with named texture areas per body (arms → skin, legs → skin, shins → bronze greaves), proven by rebuilding the hoplite in the GUI with bare arms and legs, a proper bronze helmet and a fuller crest; B, import part; C, an **import full body** mode, spiked first; D, TripoSG.
  The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
 

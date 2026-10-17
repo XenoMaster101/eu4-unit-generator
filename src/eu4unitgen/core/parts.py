@@ -37,8 +37,8 @@ from PIL import Image
 
 from eu4unitgen.core.generator import OWNED, GeneratedFile, GenerationError
 from eu4unitgen.core.naming import LOADOUT_ROLES, PART_KINDS, Naming
-from eu4unitgen.library.scanner import strip_mesh_props
 from eu4unitgen.library.data import library
+from eu4unitgen.library.scanner import strip_mesh_props
 from eu4unitgen.textures.paint import paint
 from eu4unitgen.textures.procedural import (
     COUNTRY_CHANNELS, SIZE, TEXEL_DENSITY, Zone, atlas_images, encode_part_textures, part_images, shader_for,
@@ -94,7 +94,8 @@ class PartKind:
     blazon: bool = False
 
 
-WOOD, BRONZE, IRON, HAIR = (110, 75, 40), (180, 130, 60), (165, 165, 170), (170, 20, 25)
+_COLOURS = library("materials")["colours"]  # library/materials.json: zones' default base colours
+WOOD, BRONZE, IRON, HAIR = (tuple(_COLOURS[k]) for k in ("wood", "bronze", "iron", "horsehair"))
 POINTS = ("up", "down")
 DEFAULT_POINTS = {"infantry": "up", "crew": "up", "rider": "down"}  # what "auto" means unless the loadout says
 POINT = Choice(("auto", *POINTS), "auto", "Point",
@@ -182,7 +183,8 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
                             "helmet back, where the tuft comes out)"),
               "thickness": Param(0.08, 0.02, 0.3, "Thickness", 0.01),
               "crest": Choice(("fore_aft", "transverse", "none"), "fore_aft", "Crest"),
-              "crest_height": Param(0.9, 0.2, 3.0, "Crest height")},
+              "crest_height": Param(1.3, 0.2, 3.0, "Crest height"),
+              "crest_width": Param(0.36, 0.1, 1.2, "Crest width", 0.02, "the horsehair's thickness across")},
              (ZoneDef("metal", "Bronze", BRONZE, 8, material="bronze"),
               ZoneDef("crest", "Crest", HAIR, 3, material="hair"),
               ZoneDef("slot", "Eye slot and lining", (25, 20, 15), 3, material="leather"))),
