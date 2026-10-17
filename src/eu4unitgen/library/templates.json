@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "note": "Starter looks for the prompt front end (SPEC Track F, F3). Original designs from generic historical descriptions; only our own procedural parts and base-game body names, no game files. A look: per unit type (infantry, cavalry = the rider, artillery = the gun crew) a weapon, a shield and a helmet (greek_helmet params, or a crest alone); per body area a finish (core.finishes; a list [finish, [r, g, b]] tints it); body_base: the base-game infantry pdxmesh every tier wears (type1, so the Greek helmet replaces its own). steps: the 'gets heavier with tech' look per tier, merged over the main look. Riders and crews keep type1's own helmet (derived bodies are infantry-only, core.loadout), so they get a crest, never a Greek helmet. Names: the in-game unit names (F7).",
+  "templates": {
+    "hoplite": {
+      "label": "Hoplite",
+      "blurb": "Spear, round shield, crested Corinthian helmet, linen cuirass, bronze greaves.",
+      "body_base": "western_generic_01_type1",
+      "names": {"infantry": "Hoplitai", "cavalry": "Hippeis", "artillery": "Mechanikoi"},
+      "roles": {
+        "infantry": {"weapon": "dory", "shield": "hoplon", "helmet": {"style": "corinthian", "crest": "fore_aft"}},
+        "cavalry": {"weapon": "xyston", "crest": {"orientation": "fore_aft"}},
+        "artillery": {}
+      },
+      "body": {"torso": "linen", "arms": "skin", "legs": "skin", "shins": "bronze"},
+      "steps": {
+        "1": {"roles": {"infantry": {"helmet": {"style": "pilos", "crest": "none"}}}, "body": {"shins": "skin"}},
+        "2": {"roles": {"infantry": {"helmet": {"style": "attic", "crest": "fore_aft"}}}},
+        "3": {},
+        "4": {"body": {"upper_torso": "bronze"}}
+      }
+    },
+    "phalangite": {
+      "label": "Phalangite",
+      "blurb": "Long pike, small shield, open helmet, linen cuirass.",
+      "body_base": "western_generic_01_type1",
+      "names": {"infantry": "Pezhetairoi", "cavalry": "Prodromoi", "artillery": "Mechanikoi"},
+      "roles": {
+        "infantry": {"weapon": "sarissa", "shield": "hoplon", "shield_params": {"radius": 2.8},
+                     "helmet": {"style": "attic", "crest": "none"}},
+        "cavalry": {"weapon": "xyston", "crest": {"orientation": "transverse"}},
+        "artillery": {}
+      },
+      "body": {"torso": "linen", "arms": "skin", "legs": "skin"},
+      "steps": {
+        "1": {"roles": {"infantry": {"helmet": {"style": "pilos", "crest": "none"}}}},
+        "2": {},
+        "3": {"body": {"shins": "bronze"}},
+        "4": {"body": {"shins": "bronze", "upper_torso": "bronze"},
+              "roles": {"infantry": {"helmet": {"style": "attic", "crest": "fore_aft"}}}}
+      }
+    },
+    "companion_cavalry": {
+      "label": "Companion cavalry",
+      "blurb": "Lance-armed riders in bronze; infantry with spear and shield.",
+      "body_base": "western_generic_01_type1",
+      "names": {"infantry": "Hypaspistai", "cavalry": "Hetairoi", "artillery": "Mechanikoi"},
+      "roles": {
+        "infantry": {"weapon": "dory", "shield": "hoplon", "helmet": {"style": "attic", "crest": "fore_aft"}},
+        "cavalry": {"weapon": "xyston", "crest": {"orientation": "fore_aft"}},
+        "artillery": {}
+      },
+      "body": {"torso": "linen", "upper_torso": "bronze", "arms": "skin", "legs": "skin"},
+      "steps": {
+        "1": {"body": {"upper_torso": "linen"}},
+        "2": {},
+        "3": {"body": {"shins": "bronze"}},
+        "4": {"body": {"shins": "bronze", "lower_torso": "bronze"}}
+      }
+    },
+    "peltast": {
+      "label": "Peltast",
+      "blurb": "Light infantry: short spear, small shield, felt cap, dyed tunic.",
+      "body_base": "western_generic_01_type1",
+      "names": {"infantry": "Peltastai", "cavalry": "Hippakontistai", "artillery": "Mechanikoi"},
+      "roles": {
+        "infantry": {"weapon": "dory", "shield": "hoplon", "shield_params": {"radius": 2.6},
+                     "helmet": {"style": "pilos", "crest": "none"}},
+        "cavalry": {"weapon": "xyston"},
+        "artillery": {}
+      },
+      "body": {"torso": ["colour", [150, 60, 40]], "arms": "skin", "legs": "skin"},
+      "steps": {
+        "1": {},
+        "2": {},
+        "3": {"roles": {"infantry": {"helmet": {"style": "attic", "crest": "none"}}}},
+        "4": {"roles": {"infantry": {"helmet": {"style": "attic", "crest": "fore_aft"}}}, "body": {"shins": "bronze"}}
+      }
+    }
+  }
+}

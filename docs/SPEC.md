@@ -1417,7 +1417,7 @@ The app opens on a prompt screen like the AI app builders (one box, example chip
 **Steps** (one commit each, with tests; a short report after each):
 - F1: this plan.
 - F2: Blender detection (`BLENDER_PATH`, Windows registry and Program Files, `blender` on PATH on Linux) and the first-launch status line. Done: `core.install.find_blender` reads the uninstall entries the Windows installer writes per version (DisplayVersion, InstallLocation; checked on the user's 4.2.23 and 5.2.2), then Program Files, Steam's Blender, and on Linux PATH, /opt, ~ and snap. The pinned series (4.2) wins; any other comes with a warning. Auto-setup fills the Blender box only when it is empty or names a missing file.
-- F3: starter templates with per-tier steps (U8).
+- F3: starter templates with per-tier steps (U8). Done: `library/templates.json` (hoplite, phalangite, companion cavalry, peltast) holds looks; `core/look.py` is the look model the front end edits (per unit type a weapon, shield and helmet or crest; per area a finish; steps; this-tier edits; colours; crest colour; emblem; names) and `compile_look` merges it into a spec: every tier on the type1 body, its own helmet removed under a Greek one, crew slots so gun crews drop the shield, finishes per tier slot. It replaces only the parts and `area:` finishes a look controls; painted masks and other ops and parts stay. Riders and crews get crests, not Greek helmets (derived bodies are infantry-only). The compiled specs pass `CharacterSpec.from_json`; in-game and render checks come in F9 and F12.
 - F4: vocabulary, synonyms, keyword interpreter, suggestions, leftovers, user vocabulary.
 - F5: reference image palette per horizontal band (U7).
 - F6: nation list (vanilla + mod localisation, mod-only tags).

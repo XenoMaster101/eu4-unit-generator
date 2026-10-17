@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 HERE = Path(__file__).parent
-LIBRARIES = ("bodies", "additions", "materials")
+LIBRARIES = ("bodies", "additions", "materials", "templates")
 
 
 @lru_cache(maxsize=None)

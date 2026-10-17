@@ -21,7 +21,7 @@ dev = ["pytest"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"eu4unitgen.library" = ["base_models.json", "bodies.json", "additions.json", "materials.json"]
+"eu4unitgen.library" = ["base_models.json", "bodies.json", "additions.json", "materials.json", "templates.json"]
 "eu4unitgen.pdxscript" = ["templates/*.j2"]
 "eu4unitgen.blender" = ["jobs/*.py"]
 

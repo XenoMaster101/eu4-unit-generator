@@ -46,6 +46,14 @@ def area_names() -> list[str]:
     return sorted(names)
 
 
+def area_order(base_file: str | None = None) -> list[str]:
+    """Every area and band, broad before narrow: the bone areas in library order, then the bands
+    widest first. Finishes apply in this order, so a narrow area's finish wins over its parent's."""
+    band_defs = bands(base_file)
+    widest = sorted(band_defs, key=lambda b: -(band_defs[b]["to"] - band_defs[b]["from"]))
+    return [a for a in groups(base_file) if a not in band_defs] + widest
+
+
 GROW_MAX = 32  # px, either way
 FEATHER_MAX = 32
 
@@ -102,8 +110,8 @@ def area_masks(mesh: bytes, size: tuple[int, int], base_file: str | None = None,
     triangles in no area are left out."""
     tree = parse_pdx_mesh(mesh)
     # bands after the bone areas, widest first: finishes apply in row order, so narrow ones win
-    band_defs = dict(sorted(((b, d) for b, d in bands(base_file).items() if names is None or b in names),
-                            key=lambda bd: -(bd[1]["to"] - bd[1]["from"])))
+    all_bands = bands(base_file)
+    band_defs = {b: all_bands[b] for b in area_order(base_file) if b in all_bands and (names is None or b in names)}
     masks = {a: Image.new("L", size, 0) for a in (names or groups(base_file)) if a not in band_defs}
     masks.update((b, Image.new("L", size, 0)) for b in band_defs)
     node = next((n for n in _walk(tree) if n["name"] == "mesh"), None)
