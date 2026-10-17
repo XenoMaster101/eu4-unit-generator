@@ -1316,6 +1316,20 @@ Constraints carried over:
       - type1's normal map is strongly bumped on the mail sleeves (arms std 28 per channel; thighs 14): skin painted there would look scaly.
       - New recipe op `flatten` (region, strength 0-1) blends the normal map toward flat 128 128 255 (alpha kept). Retexturing writes a derived normal map when a slot flattens, and derived bodies pick it up from the meshsettings like the diffuse and spec.
       - The texture preview now resolves `area:` regions. `Session.body_areas(spec, tier, role)` returns the base body texture, its area masks and its own skin tone (the skin region's mean colour), for "bare skin" areas.
+    - **A3b (2026-10-16): the GUI Character page (step 2 of the wizard; later steps renumbered).**
+      - **Spec files:** load a character spec into the Unit set, Textures and Parts pages; save them back as one spec (recipe and loadout paths rebased onto the spec's folder; hair, export and test kept).
+      - **Body areas:** "Show body areas" draws the tier's body texture with its areas tinted. One row per area (broad before narrow, then painted masks) with a finish:
+        - finishes are data (`materials.json` "finishes"): bare skin, bronze, iron, linen, leather, a colour of your choice;
+        - each finish becomes recipe ops tagged `"finish"`: recolour (protect off, its detail), clear every unit-colour mask, gloss, flatten (`core/finishes.py`);
+        - "Apply" replaces the slot's earlier finishes after its own ops (the Textures form keeps them as extra ops).
+      - **Mask painting:** left button paints, right erases, at the texture's own size; "Save mask" writes `<name>.png` beside the spec and adds a `mask:<name>.png` row.
+      - **Preview and render:** a 2D before/after preview, and "Render unit" (the parts preview now textures the body with the tier's recipe slot).
+      - **"Bare skin":** the body's own skin tone, the 75th percentile by brightness of the skin region inside the head and hands areas. The colour-based skin region alone catches padding and hose; the mean sinks into beard and shadow. type1: rgb 140 97 90, matching the cheek (133 101 95).
+      - **Proof:** the hoplite rebuilt headless through the page, arms and legs → bare skin, shins → bronze; spec `build/specs/hoplite_gui/hoplite.json`. Renders: `build/a3/part_previews/hoplite_test/1_infantry.png`, posed `build/a3/posed/hoplite_sheet.png` (spear_shield idle/walk/attack). Staged as in-game test 13: `build/test13/stage`, checklist `build/test13/checklist.txt`.
+      - **Known limits:**
+        - areas follow triangles, so edges are sawtoothed and the shoulder triangles of the torso islands count as arms;
+        - the mail sleeve's shape stays (only its texture changes);
+        - the flat skin reads slightly mauve in Blender's light; judge it in game.
     - **Next (user):** A, the GUI Character page with named texture areas per body (arms → skin, legs → skin, shins → bronze greaves), proven by rebuilding the hoplite in the GUI with bare arms and legs, a proper bronze helmet and a fuller crest; B, import part; C, an **import full body** mode, spiked first; D, TripoSG.
  The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
 

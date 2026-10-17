@@ -356,6 +356,9 @@ class SimpleSlot:
         seen: set[str] = set()
         for op in slot.ops:
             kind = op.get("op")
+            if "finish" in op:  # the Character page's area finishes stay as they are (core.finishes)
+                f.extra.append(op)
+                continue
             if kind == "palette" and "palette" not in seen:
                 f.palette_image, f.palette_fixed = op["image"], bool(op.get("fixed", True))
                 f.palette_targets = list(op.get("targets", list(COUNTRY_REGIONS)))

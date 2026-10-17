@@ -1,4 +1,4 @@
-"""Nation wizard: Settings -> Unit set -> Textures -> Parts -> Validate -> Generate -> Test mod.
+"""Nation wizard: Settings -> Character -> Unit set -> Textures -> Parts -> Validate -> Generate -> Test mod.
 
 Thin by design (CLAUDE.md): every action builds Settings/SetSpec from the forms and calls
 export.pipeline.Session. Long steps (loading the install takes several seconds) run on a
@@ -21,11 +21,15 @@ from eu4unitgen.core.parts import PartError
 from eu4unitgen.core.recipe import RecipeError
 from eu4unitgen.export.pipeline import Session, SetSpec, Settings, SpecError
 from eu4unitgen.export.writer import ExportError
+from eu4unitgen.core.character import CharacterError
+from eu4unitgen.core.finishes import FinishError
+from eu4unitgen.gui.character_page import CharacterPage
 from eu4unitgen.gui.pages import GeneratePage, SettingsPage, TestModPage, UnitSetPage, ValidatePage
 from eu4unitgen.gui.parts_page import PartsPage
 from eu4unitgen.gui.textures_page import TexturesPage
 
-EXPECTED = (SpecError, ExportError, GenerationError, NamingError, RecipeError, LoadoutError, PartError, OSError)
+EXPECTED = (SpecError, ExportError, GenerationError, NamingError, RecipeError, LoadoutError, PartError, CharacterError,
+            FinishError, OSError)
 KEYS = ("eu4_path", "output_dir", "mod_folder", "stage_dir", "mod_dir", "prefix", "blender_path")
 
 
@@ -63,14 +67,15 @@ class MainWindow(QMainWindow):
         self._tasks: list[_Task] = []
 
         self.settings_page = SettingsPage(self, self.session.settings)
+        self.character_page = CharacterPage(self)
         self.unit_page = UnitSetPage(self)
         self.textures_page = TexturesPage(self)
         self.parts_page = PartsPage(self)
         self.validate_page = ValidatePage(self)
         self.generate_page = GeneratePage(self)
         self.test_page = TestModPage(self)
-        self.pages = [self.settings_page, self.unit_page, self.textures_page, self.parts_page, self.validate_page,
-                      self.generate_page, self.test_page]
+        self.pages = [self.settings_page, self.character_page, self.unit_page, self.textures_page, self.parts_page,
+                      self.validate_page, self.generate_page, self.test_page]
         if store is not None:
             self.unit_page.tags.setText(str(store.value("tags", "")))
             self.unit_page.cultures.setText(str(store.value("cultures", "")))
@@ -202,6 +207,126 @@ class MainWindow(QMainWindow):
             page.show_message(str(exc), error=True)
             return None
         return spec
+
+    # ------------------------------------------------------------------ the Character page
+    def load_character(self, path: Path) -> None:
+        """A character spec into the Unit set, Textures and Parts pages (its paths stay relative to its folder)."""
+        from eu4unitgen.core.character import CharacterSpec
+        from eu4unitgen.core.loadout import Loadout
+        from eu4unitgen.core.recipe import TextureRecipe
+
+        page = self.character_page
+        try:
+            spec = CharacterSpec.load(path)
+            recipe = TextureRecipe.from_json(spec.textures, spec.root) if spec.textures is not None else None
+            loadout = Loadout.from_json(spec.loadout, spec.root) if spec.loadout is not None else None
+        except (CharacterError, RecipeError, LoadoutError) as exc:
+            return page.show_message(str(exc), error=True)
+        page.spec = spec
+        page.spec_path.setText(str(path))
+        page.name.setText(spec.name)
+        page.masks.clear()
+        self.unit_page.load_set(spec.set, spec.unit_colours())
+        self.textures_page.set_recipe(recipe, f"(in {path.name})" if recipe else "")
+        if recipe is None:
+            self.textures_page.recipe.root = spec.root
+        if loadout is not None:
+            loadout.hair = dict(spec.hair)
+        self.parts_page.set_loadout(loadout, f"(in {path.name})" if loadout else "")
+        if loadout is None:
+            self.parts_page.loadout.root = spec.root
+        page.show_message(f"Loaded {path}: {spec.name or 'unnamed'}; the Unit set, Textures and Parts pages now show it. "
+                          "Show body areas to paint areas.")
+
+    def save_character(self, path: Path) -> None:
+        """The pages -> a character spec at ``path`` (recipe and loadout paths rebased onto its folder)."""
+        from eu4unitgen.core.character import CharacterSpec, rebase_paths
+
+        page = self.character_page
+        old = page.spec
+        try:
+            self.textures_page.store()
+            self.parts_page.store()
+            recipe = self.textures_page.recipe if self.textures_page.use.isChecked() else None
+            loadout = self.parts_page.loadout if self.parts_page.use.isChecked() else None
+            dst = path.parent
+            spec = CharacterSpec(
+                set=self.unit_page.set_section(old.set if old else None), name=page.name.text().strip(),
+                textures=rebase_paths(recipe.to_json(), Path(recipe.root), dst) if recipe else None,
+                loadout=rebase_paths(loadout.to_json(), Path(loadout.root), dst) if loadout else None,
+                hair=dict(old.hair) if old else {}, export=dict(old.export) if old else {},
+                test=dict(rebase_paths(old.test, old.root, dst)) if old else {}, root=dst)
+            spec = CharacterSpec.from_json(spec.to_json(), dst)  # checks it the way loading will
+            spec.save(path)
+        except (SpecError, CharacterError, OSError) as exc:
+            return page.show_message(str(exc), error=True)
+        page.spec = spec
+        page.spec_path.setText(str(path))
+        page.show_message(f"Saved {path}.")
+
+    def character_areas(self) -> None:
+        self._sync_settings()
+        page = self.character_page
+        spec = self.unit_page.spec()
+        try:
+            spec.loadout = self.parts_page.loadout_for_preview()  # its tier bodies are what gets painted
+            self.textures_page.store()
+        except SpecError as exc:
+            return page.show_message(str(exc), error=True)
+        tier, role = page.slot_key()
+        slot = self.textures_page.recipe.slots.get((tier, role))
+        recipe = self.textures_page.recipe
+        self.run(page, "Reading body areas",
+                 lambda: self.session.body_areas(spec, tier, role, slot.base if slot else None),
+                 lambda body: page.show_areas(body, recipe))
+
+    def apply_character_finishes(self, key, chosen: dict, skin: tuple, order: list[str]) -> None:
+        """Area finishes -> the recipe slot ``key`` (replacing the slot's earlier finishes)."""
+        from eu4unitgen.core.finishes import with_finishes
+        from eu4unitgen.core.recipe import SlotRecipe
+
+        tp = self.textures_page
+        tp.store()
+        slot = tp.recipe.slots.get(key) or SlotRecipe()
+        slot.ops = with_finishes(slot.ops, chosen, skin, order)
+        if slot.ops or slot.base or slot.protect_mask:
+            tp.recipe.slots[key] = slot
+        else:
+            tp.recipe.slots.pop(key, None)
+        if slot.ops:
+            tp.use.setChecked(True)
+        tp.reshow_slot()
+
+    def character_preview(self) -> None:
+        page = self.character_page
+        tier, role = page.slot_key()
+        self.textures_page.tier.setCurrentText(str(tier))
+        self.textures_page.role.setCurrentText(role)
+        self.textures_page.reshow_slot()
+        self._sync_settings()
+        spec = self.unit_page.spec()
+        try:
+            spec.loadout = self.parts_page.loadout_for_spec()
+            slot = self.textures_page.current_slot()
+        except SpecError as exc:
+            return page.show_message(str(exc), error=True)
+        recipe = self.textures_page.recipe
+        self.run(page, "Previewing textures", lambda: self.session.texture_preview(spec, tier, role, recipe, slot),
+                 page.show_preview)
+
+    def character_render(self) -> None:
+        self._sync_settings()
+        page = self.character_page
+        spec = self.current_spec(page)
+        if spec is None:
+            return
+        tier, role = page.slot_key()
+        try:
+            loadout = self.parts_page.loadout_for_preview()
+        except SpecError as exc:
+            return page.show_message(str(exc), error=True)
+        self.run(page, "Rendering the unit", lambda: self.session.parts_preview(spec, tier, role, loadout),
+                 page.show_render)
 
     def check_blender(self) -> None:
         self._sync_settings()

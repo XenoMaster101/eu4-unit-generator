@@ -288,6 +288,10 @@ def make_textures_decodable(root: Path) -> Path:
         (units / f"{tex}.dds").write_bytes(write_dds(synthetic_diffuse(), DDSFormat("DXT1", 64, 64, 7)))
     for tex in ("g_s", "h_s", "c_s"):
         (units / f"{tex}.dds").write_bytes(write_dds(synthetic_spec(), DDSFormat("DXT5", 64, 64, 7)))
+    from PIL import Image
+    for tex in ("g_n", "h_n", "c_n"):
+        (units / f"{tex}.dds").write_bytes(write_dds(Image.new("RGBA", (64, 64), (128, 128, 255, 255)),
+                                                     DDSFormat("DXT5", 64, 64, 7)))
     (root / "gfx/FX").mkdir(parents=True, exist_ok=True)
     (root / "gfx/FX/pdxmesh.shader").write_bytes(b"# made-up stand-in\n")
     return root

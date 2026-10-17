@@ -426,3 +426,24 @@ def test_flatten_normal_and_overlay():
     out = overlay(Image.new("RGB", (8, 8), (0, 0, 0)), masks, {"arms": (200, 0, 0)})
     assert out.getpixel((1, 1))[0] == 100 and out.getpixel((6, 1)) == (0, 0, 0)
     assert skin_colour(Image.new("RGB", (8, 8), (180, 120, 90)), masks["arms"]) == (180, 120, 90)
+
+
+def test_finishes_round_trip():
+    """A3b: area finishes become recipe ops and read back."""
+    from eu4unitgen.core.finishes import finish_ops, split, with_finishes
+    from eu4unitgen.core.recipe import check_op
+
+    ops = finish_ops("area:arms", "skin", (190, 140, 110))
+    assert ops[0]["colour"] == [190, 140, 110] and any(o["op"] == "flatten" for o in ops)
+    for o in ops:
+        check_op(o)
+    base = [{"op": "recolour", "region": "cloth", "colour": [1, 2, 3]}]
+    chosen = {"area:shins": {"finish": "bronze"}, "area:legs": {"finish": "skin"},
+              "mask:greek_border.png": {"finish": "colour", "colour": (10, 20, 30)}}
+    out = with_finishes(base, chosen, (190, 140, 110), ["area:legs", "area:shins"])
+    assert out[0] == base[0]
+    regions = [o["region"] for o in out[1:] if o["op"] == "recolour"]
+    assert regions == ["area:legs", "area:shins", "mask:greek_border.png"]
+    rest, back = split(out)
+    assert rest == base and back["mask:greek_border.png"]["colour"] == (10, 20, 30)
+    assert back["area:shins"]["finish"] == "bronze"

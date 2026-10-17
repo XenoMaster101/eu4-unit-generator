@@ -32,14 +32,25 @@ def area_names() -> list[str]:
     return sorted(names)
 
 
-def skin_colour(diffuse: Image.Image, skin: Image.Image) -> tuple[int, int, int]:
-    """The body's own skin tone: the mean colour of its skin region (face, hands)."""
-    from PIL import ImageStat
+def skin_colour(diffuse: Image.Image, skin: Image.Image, where: list[Image.Image] | None = None) -> tuple[int, int, int]:
+    """The body's own skin tone: the mean colour of its skin region, inside the ``where`` masks
+    (the head and hands areas: the colour-based skin region also catches padding and hose)."""
+    from PIL import ImageChops
 
-    if skin.getbbox() is None:
+    m = skin.resize(diffuse.size).point(lambda v: 255 if v >= 128 else 0)
+    if where:
+        inside = Image.new("L", diffuse.size, 0)
+        for w in where:
+            inside = ImageChops.lighter(inside, w.resize(diffuse.size))
+        if ImageChops.multiply(m, inside).getbbox() is not None:
+            m = ImageChops.multiply(m, inside)
+    if m.getbbox() is None:
         return (196, 150, 120)  # no skin found: a neutral tan
-    mean = ImageStat.Stat(diffuse.convert("RGB"), skin.resize(diffuse.size).point(lambda v: 255 if v >= 128 else 0)).mean
-    return tuple(round(c) for c in mean)
+    # the lit skin: 75th percentile by brightness (the mean sinks into beard and shadow; type1: 115 87 78
+    # mean against 140 97 90 lit cheek)
+    px = sorted((c for c, k in zip(diffuse.convert("RGB").get_flattened_data(), m.get_flattened_data()) if k),
+                key=sum)
+    return tuple(px[int(len(px) * 0.75)])
 
 
 def overlay(diffuse: Image.Image, masks: dict[str, Image.Image], colours: dict[str, tuple],
@@ -58,11 +69,15 @@ def area_masks(mesh: bytes, size: tuple[int, int], base_file: str | None = None,
     """``{area: 'L' mask}`` at ``size`` for the body ``mesh`` (.mesh bytes). A triangle belongs to
     the area(s) holding most of its three vertices' dominant bones; triangles in no area are left out."""
     tree = parse_pdx_mesh(mesh)
-    node = next(n for n in _walk(tree) if n["name"] == "mesh")
-    skeleton = next(n for n in _walk(tree) if n["name"] == "skeleton")
+    masks = {a: Image.new("L", size, 0) for a in (names or groups(base_file))}
+    node = next((n for n in _walk(tree) if n["name"] == "mesh"), None)
+    skeleton = next((n for n in _walk(tree) if n["name"] == "skeleton"), None)
+    skin = next((c for c in node["children"] if c["name"] == "skin"), None) if node else None
+    if skeleton is None or skin is None:  # an unskinned mesh has no bone areas
+        return masks
     bone_of = {b["props"]["ix"][0]: b["name"] for b in skeleton["children"]}
     props = node["props"]
-    skin = next(c for c in node["children"] if c["name"] == "skin")["props"]
+    skin = skin["props"]
     k = (skin.get("bones") or [4])[0]
     area_of_bone = {}
     for area, bones in groups(base_file).items():
@@ -75,7 +90,6 @@ def area_masks(mesh: bytes, size: tuple[int, int], base_file: str | None = None,
         return bone_of.get(skin["ix"][v * k + max(range(k), key=lambda j: ws[j])], "")
 
     w, h = size
-    masks = {a: Image.new("L", size, 0) for a in (names or groups(base_file))}
     draws = {a: ImageDraw.Draw(m) for a, m in masks.items()}
     u0, tri = props["u0"], props["tri"]
     for t in range(0, len(tri), 3):

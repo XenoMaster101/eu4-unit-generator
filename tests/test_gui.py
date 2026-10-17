@@ -32,7 +32,8 @@ def window(qapp, fake_install, tmp_path):
 
 def test_every_screen_loads(window):
     assert [window.steps.item(i).text() for i in range(window.steps.count())] == [
-        "1. Settings", "2. Unit set", "3. Textures", "4. Parts", "5. Validate", "6. Generate", "7. Test mod"]
+        "1. Settings", "2. Character", "3. Unit set", "4. Textures", "5. Parts", "6. Validate", "7. Generate",
+        "8. Test mod"]
     for i, page in enumerate(window.pages):
         window.steps.setCurrentRow(i)
         assert window.stack.currentWidget() is page
@@ -282,3 +283,56 @@ def test_cultures_field_reaches_the_set(window):
     window.validate_page.run.click()
     top = window.validate_page.tree.topLevelItem(0)
     assert top.text(0) == "alphan testish / alphan_set" and "0 errors" in top.text(2), top.text(2)
+
+
+def test_character_page_areas_finishes_masks_and_spec(window, fake_install, tmp_path):
+    """A3b: a character spec loads into the pages; areas get finishes that land in the recipe;
+    a painted mask becomes a row; saving writes a spec that loads back the same."""
+    import json
+    from PIL import Image
+    from fakes import make_textures_decodable
+
+    make_textures_decodable(fake_install)
+    (tmp_path / "char").mkdir()
+    spec_path = tmp_path / "char" / "hoplite.json"
+    spec_path.write_text(json.dumps({
+        "schema": 1, "name": "Test hoplite",
+        "set": {"tags": ["MAC"], "gfx": "hellenicgfx", "set_name": "hop", "base_gfx": "westerngfx",
+                "unit_colours": [[150, 28, 32], [195, 150, 60], [230, 222, 200]]},
+        "textures": {"schema": 1, "slots": {"1/infantry": {"ops": [
+            {"op": "recolour", "region": "cloth", "colour": [226, 214, 184]}]}}},
+        "hair": {"colour": [40, 30, 20]}, "test": {"sprite_techs": [2, 3, 4]}}), encoding="utf-8")
+    page = window.character_page
+    window.load_character(spec_path)
+    assert window.unit_page.tags.text() == "MAC" and window.unit_page.set_name.text() == "hop"
+    assert window.textures_page.use.isChecked() and page.name.text() == "Test hoplite"
+
+    page.tier.setCurrentText("1")
+    window.character_areas()
+    assert page.body is not None, page.message.text()
+    assert page.table.rowCount() >= 10 and page.regions()[0] == "area:head"
+    page.set_finish("area:arms", "skin")
+    page.set_finish("area:shins", "bronze")
+    page.save_mask("border", Image.new("L", page.body.diffuse.size, 255))
+    assert (tmp_path / "char" / "border.png").is_file() and "mask:border.png" in page.regions()
+    assert page.chosen()["area:shins"]["finish"] == "bronze"  # kept across the new row
+    page.set_finish("mask:border.png", "colour", (10, 20, 30))
+    page.apply_finishes()
+    ops = window.textures_page.recipe.slots[(1, "infantry")].ops
+    assert ops[0]["region"] == "cloth"
+    assert [o["region"] for o in ops if o["op"] == "recolour"][1:] == ["area:arms", "area:shins", "mask:border.png"]
+    window.character_preview()
+    assert page.after.pixmap() is not None and not page.after.pixmap().isNull(), page.message.text()
+
+    out = tmp_path / "char" / "saved.json"
+    window.save_character(out)
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert doc["hair"] == {"colour": [40, 30, 20]} and doc["test"]["sprite_techs"] == [2, 3, 4]
+    assert any(o.get("finish") == "skin" for o in doc["textures"]["slots"]["1/infantry"]["ops"])
+    window.load_character(out)
+    window.character_areas()
+    assert page.chosen()["area:arms"]["finish"] == "skin"
+    assert page.chosen()["mask:border.png"]["colour"] == (10, 20, 30)
+    page.apply_finishes()  # re-applying replaces, never duplicates
+    ops = window.textures_page.recipe.slots[(1, "infantry")].ops
+    assert sum(1 for o in ops if o["op"] == "recolour" and o.get("region") == "area:arms") == 1

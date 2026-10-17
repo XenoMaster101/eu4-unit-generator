@@ -581,6 +581,14 @@ def _recipe_lines(recipe) -> list[str]:
         bits = []
         for op in slot.ops:
             kind = op.get("op")
+            if "finish" in op:  # a Character page area finish: one line per area, from its recolour
+                if kind == "recolour":
+                    from eu4unitgen.core.finishes import finishes
+                    label = finishes().get(op["finish"], {}).get("label", op["finish"]).split(" (")[0]
+                    bits.append(f"{op['region'].split(':', 1)[1]} painted as {label} (rgb "
+                                f"{' '.join(map(str, op['colour']))}, no unit colour"
+                                + (", no mail rings or seams" if op["finish"] == "skin" else "") + ")")
+                continue
             if kind == "recolour":
                 bits.append(f"{op.get('region')} recoloured to rgb {' '.join(map(str, op.get('colour', [])))}")
             elif kind == "pattern":

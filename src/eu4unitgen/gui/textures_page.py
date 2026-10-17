@@ -50,7 +50,7 @@ def _spin(lo: float, hi: float, value: float, step: float = 0.05) -> QDoubleSpin
 
 
 class TexturesPage(Page):
-    title = "3. Textures"
+    title = "4. Textures"
 
     def __init__(self, window):
         super().__init__(window)
@@ -355,13 +355,21 @@ class TexturesPage(Page):
             self.show_message(str(exc), error=True)
 
     def load_file(self, path: Path) -> None:
-        self.recipe = TextureRecipe.load(path)
-        self.recipe_path.setText(str(path))
-        self.use.setChecked(True)
+        self.set_recipe(TextureRecipe.load(path), str(path))
+        self.show_message(f"Loaded {path}: {len(self.recipe.active())} slot(s) with changes.")
+
+    def set_recipe(self, recipe: TextureRecipe | None, label: str = "") -> None:
+        """Show ``recipe`` (None: an empty one, unticked); ``label`` goes in the path box."""
+        self.recipe = recipe or TextureRecipe(root=Path.cwd())
+        self.recipe_path.setText(label)
+        self.use.setChecked(recipe is not None)
+        self.reshow_slot()
+
+    def reshow_slot(self) -> None:
+        """Re-read the shown slot from the recipe (after another page changed it)."""
         self._slot_key = self.slot_key()
         self.set_form(SimpleSlot.from_slot(self.recipe.slots.get(self._slot_key, SlotRecipe())))
         self._refresh_slots()
-        self.show_message(f"Loaded {path}: {len(self.recipe.active())} slot(s) with changes.")
 
     def _save(self) -> None:
         path = self.recipe_path.text().strip()

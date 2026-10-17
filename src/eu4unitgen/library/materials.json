@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "note": "Painted-style material library (Q2-Q5, tuned against the base game's measured style, SPEC Track R). paint: per material [pattern strength, AO strength, top-light strength, edge-wear lightening, brush grain]. bump: normal-map relief strength. hair: the derived body's hair swatch. helmet_styles: greek_helmet rim drop below the crown at front, side, back; helmet_slot: the corinthian eye slot's depth range below the crown. colours: part zones' default base colours (bronze darkened and warmed after test 12: it read pale ivory in game).",
+  "note": "Painted-style material library (Q2-Q5, tuned against the base game's measured style, SPEC Track R). paint: per material [pattern strength, AO strength, top-light strength, edge-wear lightening, brush grain]. bump: normal-map relief strength. hair: the derived body's hair swatch. helmet_styles: greek_helmet rim drop below the crown at front, side, back; helmet_slot: the corinthian eye slot's depth range below the crown. colours: part zones' default base colours (bronze darkened and warmed after test 12: it read pale ivory in game). finishes: what the Character page paints into a body area (core.finishes): a colour ('skin' = the body's own skin tone, null = the user's pick), how much of the base texture's shading survives (detail), how flat the normal map gets (flatten: 1 = no mail rings on bare skin), a gloss preset; unit colours are always cleared there (fixed colours).",
   "paint": {
     "wood": [
       0.6,
@@ -116,5 +116,65 @@
       20,
       25
     ]
+  },
+  "finishes": {
+    "skin": {
+      "label": "bare skin",
+      "colour": "skin",
+      "detail": 0.25,
+      "flatten": 1.0,
+      "gloss": "matte"
+    },
+    "bronze": {
+      "label": "bronze (greaves, cuirass)",
+      "colour": [
+        125,
+        85,
+        38
+      ],
+      "detail": 0.5,
+      "flatten": 0.7,
+      "gloss": "metal"
+    },
+    "iron": {
+      "label": "iron",
+      "colour": [
+        120,
+        120,
+        125
+      ],
+      "detail": 0.5,
+      "flatten": 0.5,
+      "gloss": "metal"
+    },
+    "linen": {
+      "label": "linen",
+      "colour": [
+        226,
+        214,
+        184
+      ],
+      "detail": 0.6,
+      "flatten": 0.0,
+      "gloss": "cloth"
+    },
+    "leather": {
+      "label": "leather",
+      "colour": [
+        105,
+        70,
+        40
+      ],
+      "detail": 0.7,
+      "flatten": 0.3,
+      "gloss": "cloth"
+    },
+    "colour": {
+      "label": "a colour of your choice",
+      "colour": null,
+      "detail": 0.6,
+      "flatten": 0.0,
+      "gloss": "cloth"
+    }
   }
 }

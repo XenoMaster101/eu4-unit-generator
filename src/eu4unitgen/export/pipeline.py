@@ -525,8 +525,9 @@ class Session:
 
         b = self._slot_base(spec, tier, role, base)
         regions = auto_regions(b.diffuse, b.specular, b.shape["shader"] == "PdxMeshColor", hide=role == "horse")
-        return BodyAreas(b.pdxmesh, b.mesh_file, b.shape["shader"], b.diffuse.convert("RGB"), self._areas(b),
-                         skin_colour(b.diffuse, regions["skin"]))
+        areas = self._areas(b)
+        return BodyAreas(b.pdxmesh, b.mesh_file, b.shape["shader"], b.diffuse.convert("RGB"), areas,
+                         skin_colour(b.diffuse, regions["skin"], [areas[a] for a in ("head", "hands") if a in areas]))
 
     def _preview_colours(self, spec: SetSpec) -> tuple[list, list[str]]:
         """The colours previews tint country regions with: the set's unit colours, else the tag's
@@ -676,8 +677,8 @@ class Session:
             body_path.write_bytes(body_data)
             try:
                 bt = base_textures(body_name, game, idx)
-                (folder / bt.shape["diffuse"]).write_bytes(
-                    dds(shade(bt.diffuse, bt.specular, colours, bt.shape["shader"])))
+                d, sp = self._recipe_body(spec, tier, bt, notes)
+                (folder / bt.shape["diffuse"]).write_bytes(dds(shade(d, sp, colours, bt.shape["shader"])))
             except GenerationError as exc:
                 notes.append(f"body untextured in the preview: {exc}")
             parts_args = []
@@ -732,6 +733,26 @@ class Session:
         parts = [{"entity": b.name, "kind": b.part.kind, "bone": b.part.bone, "params": b.part.params,
                   "fitted": b.part.fitted, "shader": b.part.shader} for b in builds]
         return PartsPreview(sheet, out, body_name, parts, notes)
+
+    def _recipe_body(self, spec: SetSpec, tier: int, bt, notes: list[str]):
+        """The body's diffuse and spec as the set's texture recipe leaves them (its tier's infantry
+        slot dresses the body of every role), for previews."""
+        from eu4unitgen.core.recipe import RecipeError, apply_slot
+
+        recipe = load_recipe(spec)
+        slot = recipe.slots.get((tier, "infantry")) if recipe is not None else None
+        if slot is None or not slot.ops:
+            return bt.diffuse, bt.specular
+        if slot.base and slot.base != bt.pdxmesh:
+            notes.append(f"the recipe's tier {tier} slot retextures {slot.base}, not this body: shown untouched")
+            return bt.diffuse, bt.specular
+        try:
+            res = apply_slot(recipe, slot, bt.diffuse, bt.specular, bt.shape["shader"], "infantry",
+                             lambda: self._areas(bt), lambda: bt.image("normal"))
+        except RecipeError as exc:
+            raise SpecError(f"texture recipe slot {tier}/infantry: {exc}") from exc
+        notes.append(f"body textured with the recipe's tier {tier} slot")
+        return res.diffuse or bt.diffuse, res.specular or bt.specular
 
     def body_candidates(self) -> list[dict]:
         """Base-game pdxmeshes a loadout can pick as a tier's body: infantry and rider animation ids,

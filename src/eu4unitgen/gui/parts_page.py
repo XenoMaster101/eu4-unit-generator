@@ -202,7 +202,7 @@ class _BoneBox(QGroupBox):
 
 
 class PartsPage(Page):
-    title = "4. Parts"
+    title = "5. Parts"
 
     def __init__(self, window):
         super().__init__(window)
@@ -452,13 +452,17 @@ class PartsPage(Page):
             self.show_message(str(exc), error=True)
 
     def load_file(self, path: Path) -> None:
-        self.loadout = Loadout.load(path)
-        self.loadout_path.setText(str(path))
-        self.use.setChecked(True)
+        self.set_loadout(Loadout.load(path), str(path))
+        self.show_message(f"Loaded {path}: {len(self.loadout.active())} slot(s) with changes.")
+
+    def set_loadout(self, loadout: Loadout | None, label: str = "") -> None:
+        """Show ``loadout`` (None: an empty one, unticked); ``label`` goes in the path box."""
+        self.loadout = loadout or Loadout(root=Path.cwd())
+        self.loadout_path.setText(label)
+        self.use.setChecked(loadout is not None)
         self._slot_key = self.slot_key()
         self._show_slot()
         self._refresh_slots()
-        self.show_message(f"Loaded {path}: {len(self.loadout.active())} slot(s) with changes.")
 
     def _save(self) -> None:
         path = self.loadout_path.text().strip()

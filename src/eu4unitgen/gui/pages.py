@@ -147,7 +147,7 @@ SAME_AS_BASE = "(same as base culture)"
 
 
 class UnitSetPage(Page):
-    title = "2. Unit set"
+    title = "3. Unit set"
 
     def __init__(self, window):
         super().__init__(window)
@@ -301,6 +301,46 @@ class UnitSetPage(Page):
             i = combo.findText(keep)
             combo.setCurrentIndex(i if i >= 0 else 0)
 
+    def load_set(self, s: dict, unit_colours: dict | None) -> None:
+        """Fill the form from a character spec's "set" section (unit_colours: tag -> three colours)."""
+        self.tags.setText(" ".join(s.get("tags") or []))
+        self.cultures.setText(" ".join(s.get("cultures") or []))
+        self.set_name.setText(s.get("set_name") or "")
+        self.gfx.setEditText(s.get("gfx") or "")
+        self.adjective.setText(s.get("adjective") or "")
+        self.tech.setText(s.get("tech_group") or "")
+        for combo, value in ((self.base, s.get("base_gfx") or "westerngfx"), (self.gfx_base, s.get("gfx_set_base"))):
+            value = value or SAME_AS_BASE
+            if combo.findText(value) < 0:
+                combo.addItem(value)
+            combo.setCurrentText(value)
+        colour = s.get("colour")
+        self.colour_on.setChecked(bool(colour))
+        if colour:
+            self._colour = QColor(*colour)
+            self._paint_colour()
+        self._per_tag_on.clear()
+        for tag, colours in (unit_colours or {}).items():
+            self.set_unit_colours(tag, colours)
+        self._refresh_colour_tags()
+
+    def set_section(self, keep: dict | None = None) -> dict:
+        """The form as a character spec's "set" section (``keep``: keys the form doesn't show)."""
+        spec = self.spec()
+        out = dict(keep or {})
+        out.update({"tags": spec.tags, "cultures": spec.cultures, "gfx": spec.gfx, "set_name": spec.set_name,
+                    "base_gfx": spec.base_gfx, "adjective": spec.adjective,
+                    "colour": list(spec.colour) if spec.colour else None, "tech_group": spec.tech_group})
+        if spec.gfx_set_base:
+            out["gfx_set_base"] = spec.gfx_set_base
+        else:
+            out.pop("gfx_set_base", None)
+        if spec.unit_colours:
+            out["unit_colours"] = {t: [list(c) for c in cs] for t, cs in spec.unit_colours.items()}
+        else:
+            out.pop("unit_colours", None)
+        return out
+
     def spec(self) -> SetSpec:
         c = self._colour
         gfx_base = self.gfx_base.currentText()
@@ -344,7 +384,7 @@ def _issue_tree() -> QTreeWidget:
 # --------------------------------------------------------------------------- validate
 
 class ValidatePage(Page):
-    title = "5. Validate"
+    title = "6. Validate"
 
     def __init__(self, window):
         super().__init__(window)
@@ -366,7 +406,7 @@ class ValidatePage(Page):
 # --------------------------------------------------------------------------- generate
 
 class GeneratePage(Page):
-    title = "6. Generate"
+    title = "7. Generate"
 
     def __init__(self, window):
         super().__init__(window)
@@ -431,7 +471,7 @@ class GeneratePage(Page):
 # --------------------------------------------------------------------------- test mod
 
 class TestModPage(Page):
-    title = "7. Test mod"
+    title = "8. Test mod"
 
     def __init__(self, window):
         super().__init__(window)
