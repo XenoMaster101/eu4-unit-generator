@@ -289,21 +289,29 @@ class MainWindow(QMainWindow):
             recipe = self.textures_page.recipe if self.textures_page.use.isChecked() else None
             loadout = self.parts_page.loadout if self.parts_page.use.isChecked() else None
             dst = path.parent
+            painted = set(self.textures_page.recipe.images)  # written into dst below, so not rebased
             spec = CharacterSpec(
                 set=self.unit_page.set_section(old.set if old else None), name=page.name.text().strip(),
-                textures=rebase_paths(recipe.to_json(), Path(recipe.root), dst) if recipe else None,
+                textures=rebase_paths(recipe.to_json(), Path(recipe.root), dst, painted) if recipe else None,
                 loadout=rebase_paths(loadout.to_json(), Path(loadout.root), dst) if loadout else None,
                 hair=dict(old.hair) if old else {}, export=dict(old.export) if old else {},
                 test=dict(rebase_paths(old.test, old.root, dst)) if old else {}, root=dst)
             spec = CharacterSpec.from_json(spec.to_json(), dst)  # checks it the way loading will
+            tp_recipe = self.textures_page.recipe
+            same = Path(tp_recipe.root).resolve() == dst.resolve()
+            masks = tp_recipe.write_images(dst) if recipe else []
             spec.save(path)
         except (SpecError, CharacterError, OSError) as exc:
             return page.show_message(str(exc), error=True)
+        wrote = f" and {len(masks)} painted mask(s) beside it" if masks else ""
+        if not same:  # paths in the pages are relative to the old folder: read it all back from the new one
+            self.load_character(path)
+            return page.show_message(f"Saved {path}{wrote}. It's in a new folder, so the undo history starts here.")
         page.spec = spec
         page.spec_path.setText(str(path))
         self.history.mark_saved(self.character_state())
         self._update_title()
-        page.show_message(f"Saved {path}.")
+        page.show_message(f"Saved {path}{wrote}.")
 
     # ------------------------------------------------------------------ the Character page's edit history (U3)
     def character_state(self) -> Snapshot | None:
@@ -317,7 +325,7 @@ class MainWindow(QMainWindow):
             return None
         return Snapshot({"name": page.name.text().strip(), "set": s,
                          "textures": tp.recipe.to_json(), "use_textures": tp.use.isChecked(),
-                         "loadout": pp.loadout.to_json(), "use_loadout": pp.use.isChecked()})
+                         "loadout": pp.loadout.to_json(), "use_loadout": pp.use.isChecked()}, tp.recipe.images)
 
     def character_edited(self) -> None:
         """Record the pages' state as an undo step if it changed (every Character page edit calls this)."""
@@ -336,7 +344,9 @@ class MainWindow(QMainWindow):
         d = state.doc
         page.name.setText(d["name"])
         self.unit_page.load_set(d["set"], CharacterSpec(set=d["set"]).unit_colours())
-        tp.set_recipe(TextureRecipe.from_json(d["textures"], tp.recipe.root), tp.recipe_path.text())
+        recipe = TextureRecipe.from_json(d["textures"], tp.recipe.root)
+        recipe.images = dict(state.images)
+        tp.set_recipe(recipe, tp.recipe_path.text())
         tp.use.setChecked(d["use_textures"])
         loadout = Loadout.from_json(d["loadout"], pp.loadout.root)
         loadout.hair = dict(pp.loadout.hair)

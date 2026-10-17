@@ -171,21 +171,22 @@ def _rebase(value: str, src: Path, dst: Path) -> str:
         return target.as_posix()
 
 
-def rebase_paths(doc: Any, src: Path, dst: Path) -> Any:
+def rebase_paths(doc: Any, src: Path, dst: Path, keep=()) -> Any:
     """``doc`` with every relative file path (recipe images and masks, ``mask:<png>`` regions,
-    blazons, the recipe's protect mask) rebased from folder ``src`` onto folder ``dst``."""
+    blazons, the recipe's protect mask) rebased from folder ``src`` onto folder ``dst``. Paths in
+    ``keep`` stay as they are (files about to be written in ``dst`` itself)."""
     if isinstance(doc, list):
-        return [rebase_paths(v, src, dst) for v in doc]
+        return [rebase_paths(v, src, dst, keep) for v in doc]
     if not isinstance(doc, dict):
         return doc
     out = {}
     for k, v in doc.items():
         if isinstance(v, str) and k in PATH_KEYS:
-            out[k] = _rebase(v, src, dst)
+            out[k] = v if v in keep else _rebase(v, src, dst)
         elif isinstance(v, str) and k == "region" and v.startswith("mask:"):
-            out[k] = "mask:" + _rebase(v[5:], src, dst)
+            out[k] = v if v[5:] in keep else "mask:" + _rebase(v[5:], src, dst)
         else:
-            out[k] = rebase_paths(v, src, dst)
+            out[k] = rebase_paths(v, src, dst, keep)
     return out
 
 

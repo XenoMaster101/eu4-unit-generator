@@ -66,6 +66,9 @@ class SlotRecipe:
 class TextureRecipe:
     slots: dict[tuple[int, str], SlotRecipe] = field(default_factory=dict)
     root: Path = Path(".")  # relative paths in ops resolve here (the recipe file's folder)
+    # images not on disk yet (masks painted on the Character page), by the relative path ops use;
+    # read before the disk, written beside the character spec when it's saved
+    images: dict[str, Image.Image] = field(default_factory=dict, compare=False)
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -97,7 +100,21 @@ class TextureRecipe:
         return {"schema": SCHEMA, "slots": {f"{t}/{r}": s.to_json() for (t, r), s in sorted(self.slots.items())}}
 
     def save(self, path: Path) -> None:
+        """Write the recipe, and its unsaved images beside it (``root`` becomes its folder)."""
+        self.write_images(Path(path).parent)
+        self.root = Path(path).parent
         Path(path).write_text(json.dumps(self.to_json(), indent=2) + "\n", encoding="utf-8")
+
+    def write_images(self, folder: Path) -> list[Path]:
+        """Write the unsaved images into ``folder`` at their relative paths; they're on disk now."""
+        out = []
+        for rel, img in sorted(self.images.items()):
+            path = Path(folder) / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            img.save(path)
+            out.append(path)
+        self.images.clear()
+        return out
 
     # ------------------------------------------------------------------ use
     def active(self) -> dict[tuple[int, str], SlotRecipe]:
@@ -109,6 +126,8 @@ class TextureRecipe:
         return p if p.is_absolute() else self.root / p
 
     def image(self, rel: str) -> Image.Image:
+        if rel in self.images:
+            return self.images[rel].copy()
         try:
             with Image.open(self.path(rel)) as im:
                 im.load()

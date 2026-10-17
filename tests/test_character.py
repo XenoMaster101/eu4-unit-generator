@@ -61,3 +61,31 @@ def test_converter_embeds_and_rebases(tmp_path):
     assert doc["test"] == {"sprite_techs": [2, 3, 4]} and doc["export"] == {"prefix": "hr_"}
     absolute = str((tmp_path / "abs.png").resolve())
     assert rebase_paths({"blazon": absolute}, old, out) == {"blazon": absolute}  # absolute paths stay
+
+
+def test_u6_unsaved_images_resolve_first_and_are_written_on_save(tmp_path):
+    """U6: painted masks live in the recipe until it (or the character) is saved."""
+    from PIL import Image
+    from eu4unitgen.core.character import rebase_paths
+    from eu4unitgen.core.recipe import SlotRecipe, TextureRecipe, apply_slot
+
+    recipe = TextureRecipe(root=tmp_path / "old")
+    mask = Image.new("L", (8, 8), 0)
+    mask.paste(255, (0, 0, 4, 8))
+    recipe.images["paint_bronze.png"] = mask
+    slot = SlotRecipe(ops=[{"op": "recolour", "region": "mask:paint_bronze.png", "colour": [200, 100, 0],
+                            "detail": 0.0, "protect": False}])
+    res = apply_slot(recipe, slot, Image.new("RGBA", (8, 8), (50, 50, 50, 255)), None, "PdxMeshStandard")
+    assert res.diffuse.getpixel((1, 1))[:3] == (200, 100, 0) and res.diffuse.getpixel((6, 1))[:3] == (50, 50, 50)
+
+    recipe.slots[(1, "infantry")] = slot
+    doc = rebase_paths(recipe.to_json(), tmp_path / "old", tmp_path / "new", {"paint_bronze.png"})
+    assert doc["slots"]["1/infantry"]["ops"][0]["region"] == "mask:paint_bronze.png"
+    assert rebase_paths(recipe.to_json(), tmp_path / "old", tmp_path / "new")["slots"]["1/infantry"]["ops"][0][
+        "region"] == "mask:../old/paint_bronze.png"
+
+    (tmp_path / "new").mkdir()
+    recipe.save(tmp_path / "new" / "recipe.json")
+    assert not recipe.images and recipe.root == tmp_path / "new"
+    assert Image.open(tmp_path / "new" / "paint_bronze.png").getpixel((1, 1)) == 255
+    assert TextureRecipe.load(tmp_path / "new" / "recipe.json").image("paint_bronze.png").getpixel((6, 1)) == 0
