@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from eu4unitgen.core.generator import GeneratedSet, GenerationError, generate
-from eu4unitgen.core.naming import TEST_MOD_NAME, NamingError, check_tag
+from eu4unitgen.core.naming import TEST_MOD_NAME, TIERS, UNIT_TYPES, NamingError, check_tag
 from eu4unitgen.core.nation import Nation
 from eu4unitgen.core.project import (
     DEFAULT_ENTITY_VERSION, DEFAULT_TAG_PACK_ORDER, Project, default_blender_path, default_mod_dir,
@@ -125,6 +125,16 @@ class TexturePreview:
     before: Any
     after: Any
     notes: list[str]
+
+
+@dataclass
+class Gallery:
+    """The Result screen's 3D previews: (unit type, tier) -> image, with the validation they came
+    from (its report is what the bottom bar shows) and per-tile render seconds."""
+    images: dict
+    result: Any  # SetResult
+    seconds: dict = field(default_factory=dict)
+    notes: list = field(default_factory=list)
 
 
 @dataclass
@@ -401,6 +411,59 @@ class Session:
         finally:
             if mod is not None:
                 mod.close()
+
+    def gallery(self, spec: SetSpec, units: list[tuple[str, int]] | None = None, size: int = 256,
+                result: SetResult | None = None) -> "Gallery":
+        """Whole units, posed at their idle frame, as the game assembles them (Track F, F9): the
+        generated set (``result``: a validation already run, else one now) over the mod and the
+        game, each unit's entity tree staged and rendered in one background Blender run.
+        ``units``: (unit type, tier), default all 12. Writes nothing outside a temporary folder."""
+        import tempfile
+
+        from PIL import Image
+
+        from eu4unitgen.blender.runner import BlenderError
+        from eu4unitgen.export.gallery import GalleryError, entity_tree, stage
+        from eu4unitgen.validate.graph import World
+
+        result = result or self.validate(spec)[0]
+        game, idx = self.game()
+        project = self.project()
+        mod = project.mod_files()
+        colours, notes = self._preview_colours(spec)
+        naming = project.naming
+        owner = naming.entity_owner(result.nation.tags, result.nation.set_name)
+        wanted = units or [(u, t) for t in TIERS for u in UNIT_TYPES]
+        images: dict[tuple[str, int], Any] = {}
+        seconds: dict[tuple[str, int], float] = {}
+        try:
+            world = World(game, idx, mod, result.generated, project.owned_dlc)
+            with tempfile.TemporaryDirectory(prefix="eu4unitgen_gallery_") as tmp:
+                folder = Path(tmp)
+                jobs = []
+                for utype, tier in wanted:
+                    name = f"{utype}_{tier}"
+                    try:
+                        tree = entity_tree(world, naming.unit_entity(owner, utype, tier))
+                        jobs.append({"name": name, "root": stage(tree, world, colours, folder / name)})
+                    except GalleryError as exc:
+                        notes.append(f"{utype} tier {tier}: {exc}")
+                if jobs:
+                    try:
+                        res = self.runner().run_job("render_unit", {"units": jobs, "frame": 1, "size": size,
+                                                                    "out_dir": tmp}, timeout=900)
+                    except BlenderError as exc:
+                        raise SpecError(f"the gallery needs Blender: {exc}") from exc
+                    for utype, tier in wanted:
+                        path = res.result["tiles"].get(f"{utype}_{tier}")
+                        if path:
+                            with Image.open(path) as im:
+                                images[(utype, tier)] = im.convert("RGB")
+                            seconds[(utype, tier)] = res.result["seconds"].get(f"{utype}_{tier}", 0.0)
+        finally:
+            if mod is not None:
+                mod.close()
+        return Gallery(images, result, seconds, notes)
 
     def generate(self, spec: SetSpec, write: bool = True) -> list[SetResult]:
         """Validate, then write each set's drop-in package to <output>/<set>/ (unless any set has
