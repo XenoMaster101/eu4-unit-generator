@@ -560,7 +560,9 @@ def test_f8_home_screen_reads_rewrites_and_generates(window, fake_install, tmp_p
     from eu4unitgen.core.look import templates
 
     make_textures_decodable(fake_install)
-    monkeypatch.setitem(templates()["phalangite"], "body_base", "generic_01")  # the fake install's body
+    monkeypatch.setitem(templates()["phalangite"], "body_base", "generic_01")  # the fake install's body,
+    monkeypatch.setitem(templates()["phalangite"], "steps", {})  # which isn't skinned: no helmet to remove
+    monkeypatch.setitem(templates()["phalangite"]["roles"]["infantry"], "helmet", None)
     home = window.home
     assert window.views.currentWidget() is home
     home.set_text("Hoplites with red crests, no shield, long spears, doru, bronze greaves")
@@ -585,11 +587,76 @@ def test_f8_home_screen_reads_rewrites_and_generates(window, fake_install, tmp_p
     assert home.tag() == "MAC"
     home.set_text("Phalangites with pikes and small shields, crimson tunics; same look on all tiers")
     assert home.tiers.currentData() == "same"
+    from test_gallery import GalleryRunner
+
+    runner = GalleryRunner()
+    monkeypatch.setattr(window.session, "runner", lambda: runner)
     home.generate.click()
     spec = window.character_page.spec
-    assert spec is not None, home.message.text()
+    assert spec is not None, window.result_page.message.text()
     assert spec.set["tags"] == ["MAC"] and spec.set["unit_names"]["infantry"] == "Pezhetairoi"
     parts = {p["kind"] for p in spec.loadout["slots"]["4/infantry"]["parts"]}
-    assert {"sarissa", "hoplon", "greek_helmet"} <= parts
-    assert window.views.currentIndex() == 1 and window.windowTitle().endswith(" *")
+    assert {"sarissa", "hoplon"} <= parts
+    assert window.views.currentWidget() is window.result_page and window.windowTitle().endswith(" *")
     assert window.textures_page.use.isChecked() and window.parts_page.use.isChecked()
+
+
+def test_f10_result_screen_gallery_parts_colours_and_names(window, fake_install, tmp_path, monkeypatch):
+    """F10: Generate shows the Result screen: 12 tiles, chips, names; a tile picks the unit type and
+    tier the Parts cards edit ("this tier only" or all); colours, emblem and names land in the spec;
+    a chip's x rewrites the description on both screens."""
+    from pathlib import Path
+    from fakes import make_textures_decodable
+    from test_gallery import GalleryRunner
+    from eu4unitgen.core.look import templates
+
+    make_textures_decodable(fake_install)
+    monkeypatch.setitem(templates()["hoplite"], "body_base", "generic_01")  # the fake install's body,
+    monkeypatch.setitem(templates()["hoplite"], "steps", {})  # which isn't skinned: no helmet to remove
+    monkeypatch.setitem(templates()["hoplite"]["roles"]["infantry"], "helmet", None)
+    runner = GalleryRunner()
+    monkeypatch.setattr(window.session, "runner", lambda: runner)
+    window.settings_page.load.click()
+    home, page = window.home, window.result_page
+    home.set_text("Hoplites with round shields and long spears; bronze greaves. Cavalry with red crests")
+    home.set_nation("MAC")
+    window.home_generate()  # (a click would hide an exception in the slot)
+    assert window.views.currentWidget() is page, page.message.text()
+    assert sum(1 for t in page.tiles.values() if t.pixmap() and not t.pixmap().isNull()) == 12
+    assert len([j for j, _ in runner.calls if j == "render_unit"]) == 3  # one run per row: tiles fill in
+    assert page.names["infantry"].text() == "Hoplitai" and "no problems" in page.status.text()
+    assert page.export.isEnabled() and page.understood_flow.count() >= 4
+
+    def slot(key):
+        return {p["kind"]: p for p in window.character_page.spec.loadout["slots"].get(key, {}).get("parts", [])}
+
+    page.tiles[("cavalry", 2)].clicked.emit()
+    assert page.selected == ("cavalry", 2) and "Cavalry, tier 2" in page.showing.text()
+    assert not page.cards["shield"].isVisible()  # riders carry no shield
+    page.scope_one.setChecked(True)
+    page._part("cavalry", "weapon", "xiphos")
+    assert "xiphos" in slot("2/rider") and "xyston" in slot("3/rider")  # tier 2 only
+    page.tiles[("infantry", 1)].clicked.emit()
+    page.scope_all.setChecked(True)
+    page._shield("infantry", "hoplon", {"radius": 2.6})
+    assert all(slot(f"{t}/infantry")["hoplon"]["params"]["radius"] == 2.6 for t in (1, 2, 3, 4))
+    page._finish("arms", "iron")
+    ops = window.character_page.spec.textures["slots"]["3/infantry"]["ops"]
+    assert any(o.get("region") == "area:arms" and o.get("finish") == "iron" for o in ops)
+
+    from eu4unitgen.core.army import Edit
+
+    window.result_edit(Edit("unit_colour", (0,), [10, 20, 30]))
+    assert window.character_page.spec.set["unit_colours"][0] == [10, 20, 30]
+    window.result_emblem("star")
+    blazon = slot("4/infantry")["hoplon"]["blazon"]
+    assert Path(blazon).is_file() and "emblem_star" in blazon
+    page.names["cavalry"].setText("Hetairoi")
+    page._name_changed("cavalry")
+    assert window.character_page.spec.set["unit_names"]["cavalry"] == "Hetairoi"
+
+    interp = window.army.interpretation(home.interp)
+    crest = next(n for n, i in enumerate(interp.items) if i.kind == "crest")
+    window.result_chip_remove(crest, False)
+    assert "crest" not in window.army.text.lower() and home.text() == window.army.text
+    assert window.army.edits and window.character_page.spec.set["unit_names"]["cavalry"] == "Hetairoi"  # edits kept

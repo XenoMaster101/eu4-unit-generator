@@ -11,7 +11,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, QThreadPool, Signal
+from PySide6.QtCore import QObject, QRunnable, QSettings, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QListWidget, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
@@ -28,6 +28,7 @@ from eu4unitgen.core.finishes import FinishError
 from eu4unitgen.core.history import History, Snapshot
 from eu4unitgen.gui.character_page import CharacterPage
 from eu4unitgen.gui.home_page import HomePage
+from eu4unitgen.gui.result_page import ResultPage
 from eu4unitgen.gui.pages import GeneratePage, SettingsPage, TestModPage, UnitSetPage, ValidatePage
 from eu4unitgen.gui.parts_page import PartsPage
 from eu4unitgen.gui.textures_page import TexturesPage
@@ -138,9 +139,17 @@ class MainWindow(QMainWindow):
         bar.addStretch(1)
         al.addLayout(bar)
         al.addWidget(central, 1)
+        self.result_page = ResultPage(self)
         self.views = QStackedWidget()
         self.views.addWidget(self.home)
         self.views.addWidget(advanced)
+        self.views.addWidget(self.result_page)
+        from eu4unitgen.core.army import Army
+
+        self.army = Army()
+        self._result_token = 0
+        self._result_dirty = False
+        self._skins: dict[str, tuple] = {}  # body pdxmesh -> its skin tone (read once)
         self.setCentralWidget(self.views)
         self.statusBar().showMessage("Set the EU4 install and press Load.")
         self.history = History(self.character_state())
@@ -158,6 +167,7 @@ class MainWindow(QMainWindow):
         self.theme_choice = choice
         self.theme_mode = apply_theme(app, choice)
         self.home.restyle()
+        self.result_page.restyle()
         if self.store is not None:
             self.store.setValue("theme", choice)
 
@@ -226,6 +236,8 @@ class MainWindow(QMainWindow):
         def finish() -> None:
             self._busy = False
             page.set_busy(False)
+            if page is getattr(self, "result_page", None) and self._result_dirty:  # an edit waited: after this step
+                QTimer.singleShot(0, self._restart_if_dirty)
 
         def done(result: Any) -> None:
             finish()
@@ -368,10 +380,10 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ the Home screen (Track F)
     def home_generate(self) -> None:
-        """The Home screen's look -> a character spec for the chosen country, shown in the pages.
-        Reads the body's skin tone first (for "bare skin"), in the background."""
-        from eu4unitgen.core.character import CharacterSpec
-        from eu4unitgen.core.look import LookError, compile_look
+        """Home's description, image chips, country and Tiers choice -> the army; on to the Result
+        screen, which checks it and renders the gallery."""
+        from eu4unitgen.core.army import Army
+        from eu4unitgen.core.look import LookError
 
         home = self.home
         tag = home.tag()
@@ -379,33 +391,148 @@ class MainWindow(QMainWindow):
             return home._check_ready()  # the For: field shows what's missing
         self._sync_settings()
         try:
-            look = home.look()
-            look.check()
+            home.look().check()
         except (LookError, ValueError) as exc:
             return home.show_message(str(exc), error=True)
+        try:
+            own = self.session.unit_colours().get(tag)
+        except SpecError:
+            own = None
+        self.army = Army(home.text(), list(home.image_items), tag, home.tiers.currentData(), [],
+                         [list(c) for c in own] if own else None)
+        self.result_page.clear_gallery()
+        self.views.setCurrentWidget(self.result_page)
+        self.result_regenerate()
+
+    # ------------------------------------------------------------------ the Result screen (Track F)
+    def _result_base(self, tag: str) -> dict:
+        """The spec a look is compiled into: the same country's spec as the pages hold it (so what the
+        Advanced editor added stays), else a new one."""
         old = self.character_page.spec
+        name = self.army.text.strip()[:80]
+        if old is not None and old.set.get("tags") == [tag]:
+            return {**old.to_json(), "name": name}
         gfx = self.unit_page.gfx.currentText().strip() or "hellenicgfx"
-        base = {"schema": 1, "name": home.text().strip()[:80],
-                "set": {"tags": [tag], "gfx": gfx, "set_name": tag.lower(),
-                        "base_gfx": self.unit_page.base.currentText() or "westerngfx"}}
-        if old is not None and old.set.get("tags") == [tag]:  # the same country again: keep what the editor added
-            base = {**old.to_json(), "name": base["name"]}
-        session = self.session
+        return {"schema": 1, "name": name, "set": {"tags": [tag], "gfx": gfx, "set_name": tag.lower(),
+                                                   "base_gfx": self.unit_page.base.currentText() or "westerngfx"}}
+
+    def result_regenerate(self) -> None:
+        """The army -> spec (shown in the pages too) -> validation -> the gallery, row by row, in the
+        background. An edit made meanwhile restarts it once the current step ends."""
+        from eu4unitgen.core.character import CharacterSpec
+        from eu4unitgen.core.look import DEFAULT_SKIN, LookError, compile_look
+
+        page, army = self.result_page, self.army
+        interp = army.interpretation(self.home.interp)
+        try:
+            look = army.look(self.home.interp)
+            look.check()
+        except (LookError, ValueError) as exc:
+            return page.show_message(str(exc), error=True)
+        page.show_army(army, look, interp, self._skins.get(look.body_base, DEFAULT_SKIN))
+        if self._busy:
+            self._result_dirty = True
+            return
+        self._result_dirty = False
+        self._result_token += 1
+        token = self._result_token
+        page.clear_gallery()
+        page.show_waiting("checking the army and building its parts…")
+        page.show_status("Checking…")
+        base = self._result_base(army.tag)
+        session, skins = self.session, dict(self._skins)
 
         def work():
-            first = CharacterSpec.from_json(compile_look(look, base), Path.cwd())
-            body = session.body_areas(first.set_spec(), 1, "infantry")
-            doc = compile_look(look, base, {t: body.skin for t in (1, 2, 3, 4)})
-            return CharacterSpec.from_json(doc, Path.cwd())
+            skin = skins.get(look.body_base)
+            if skin is None:
+                first = CharacterSpec.from_json(compile_look(look, base), Path.cwd())
+                skin = session.body_areas(first.set_spec(), 1, "infantry").skin
+            spec = CharacterSpec.from_json(compile_look(look, base, {t: skin for t in (1, 2, 3, 4)}), Path.cwd())
+            setspec = spec.set_spec()
+            return spec, setspec, session.validate(setspec)[0], skin
 
-        def done(spec) -> None:
+        def done(res) -> None:
+            spec, setspec, result, skin = res
+            self._skins[look.body_base] = skin
             if self.adopt_character(spec):
                 self.character_edited()
-                home.show_message(f"Made {len(spec.loadout['slots'])} loadout slots for {tag}. The Result screen "
-                                  "comes next (F10); for now the Advanced editor shows it.")
-                self.show_advanced(self.character_page)
+            page.show_army(army, look, interp, skin)
+            page.show_report(result.report)
+            self._result_spec = (setspec, result)
+            if not self._restart_if_dirty():
+                self._render_rows(token, setspec, result, ["infantry", "cavalry", "artillery"])
 
-        self.run(home, "Generating", work, done)
+        self.run(page, "Checking the army", work, done)
+
+    def _restart_if_dirty(self) -> bool:
+        if self._result_dirty:
+            self._result_dirty = False
+            self.result_regenerate()
+            return True
+        return False
+
+    def _render_rows(self, token: int, setspec, result, rows: list[str]) -> None:
+        """One Blender run per unit type, so tiles appear as they're ready."""
+        if token != self._result_token or not rows:
+            return
+        page, utype = self.result_page, rows[0]
+        units = [(utype, t) for t in (1, 2, 3, 4)]
+        page.show_waiting("rendering…", units)
+
+        def done(gallery) -> None:
+            if token != self._result_token:
+                return
+            page.show_gallery(gallery)
+            if gallery.notes:
+                page.show_message("; ".join(gallery.notes))
+            if not self._restart_if_dirty():
+                self._render_rows(token, setspec, result, rows[1:])
+
+        self.run(page, f"Rendering the {utype}", lambda: self.session.gallery(setspec, units, 200, result, thumbs=120),
+                 done)
+
+    def result_edit(self, *edits) -> None:
+        """Result-screen changes (core.army.Edit): recorded, replayed on top of the description."""
+        for e in edits:
+            self.army.add(e)
+        self.result_regenerate()
+
+    def result_chip_remove(self, n: int, from_image: bool) -> None:
+        interp = self.army.interpretation(self.home.interp)
+        if from_image:
+            del self.army.image_items[n - (len(interp.items) - len(self.army.image_items))]
+        else:
+            self.army.text = interp.text_without(n)
+        self.home.image_items = list(self.army.image_items)
+        self.home.set_text(self.army.text)  # Home shows the same description
+        self.result_regenerate()
+
+    def result_chip_swap(self, n: int, entry: dict, from_image: bool) -> None:
+        interp = self.army.interpretation(self.home.interp)
+        if from_image:
+            interp.swap(n, entry)
+            self.army.image_items[n - (len(interp.items) - len(self.army.image_items))] = interp.items[n]
+        else:
+            self.army.text = interp.text_swapped(n, entry)
+        self.home.image_items = list(self.army.image_items)
+        self.home.set_text(self.army.text)
+        self.result_regenerate()
+
+    def result_emblem(self, name: str) -> None:
+        """A built-in emblem in the army's second unit colour, drawn into the output folder."""
+        from eu4unitgen.core.army import Edit
+        from eu4unitgen.core.emblems import write
+
+        look = self.army.look(self.home.interp)
+        colours = look.colours or self.army.base_colours or [[150, 28, 32], [195, 150, 60], [230, 222, 200]]
+        path = write(name, self.session.settings.output_dir / "emblems", tuple(colours[1]))
+        self.result_edit(Edit("emblem", (), str(path)))
+
+    def result_test(self) -> None:
+        self.result_page.show_message("Test in game comes with F11.")
+
+    def result_export(self) -> None:
+        self.result_page.show_message("Export comes with F11.")
 
     def save_character(self, path: Path) -> None:
         """The pages -> a character spec at ``path`` (recipe and loadout paths rebased onto its folder)."""

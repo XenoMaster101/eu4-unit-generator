@@ -92,6 +92,24 @@ def place(node, world, loaded, inherit):
         place(child, at, loaded, inherit)
 
 
+def frame(loaded, pad=0.12):
+    """What the camera frames: the animated bodies (soldier, horse, crew) with a margin, so a
+    6 m sarissa or a lance doesn't shrink the soldier to a speck (it runs off the edge instead).
+    A unit with no animated body is framed whole."""
+    co = []
+    for node, objs, _ in loaded:
+        for o in objs:
+            if o.type == "MESH" and not node.get("hidden") and o.parent is not None and o.parent.type == "ARMATURE":
+                co += cd.evaluated(o)
+    if not co:
+        return points(loaded)
+    lo = Vector((min(c.x for c in co), min(c.y for c in co), min(c.z for c in co)))
+    hi = Vector((max(c.x for c in co), max(c.y for c in co), max(c.z for c in co)))
+    m = (hi - lo) * pad
+    lo, hi = lo - m, hi + m
+    return [Vector((x, y, z)) for x in (lo.x, hi.x) for y in (lo.y, hi.y) for z in (lo.z, hi.z)]
+
+
 def points(loaded):
     co = []
     for node, objs, _ in loaded:
@@ -134,7 +152,7 @@ def main() -> None:
                 if o.type != "MESH" or node.get("hidden"):
                     o.hide_render = True
         path = os.path.join(a["out_dir"], f"{unit['name']}.png")
-        out["tiles"][unit["name"]] = cd.shoot(scene, cam, points(loaded), a.get("view", (-0.7, 0.7, -0.35)), path,
+        out["tiles"][unit["name"]] = cd.shoot(scene, cam, frame(loaded), a.get("view", (-0.7, 0.7, -0.35)), path,
                                               a.get("size", 256))
         if a.get("thumbs"):  # each rigid part alone, as posed, for the Parts cards
             rigid = [(n, objs) for n, objs, rig in loaded if n is not unit["root"] and not n.get("anim")

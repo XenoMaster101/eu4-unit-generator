@@ -109,6 +109,32 @@ def test_home_is_readable_whatever_windows_says(qapp, fake_install, tmp_path, mo
     home.set_nation("MAC")
     assert home.generate.isEnabled() and not home.ready_hint.isVisible()
     assert _text_contrast(home.generate) >= MIN
+
+    # the Result screen, filled the way the window fills it (no gallery: tiles say what they wait for)
+    from types import SimpleNamespace
+    from eu4unitgen.core.army import Army
+
+    page = w.result_page
+    army = Army(home.text(), tag="MAC")
+    page.show_army(army, army.look(home.interp), army.interpretation(home.interp), (140, 97, 90))
+    page.show_report(SimpleNamespace(errors=[]))
+    page.show_waiting("rendering…")
+    page.select("cavalry", 2)
+    w.views.setCurrentWidget(page)
+    qapp.processEvents()
+    shot = _window_image(w)
+    bad, checked = [], 0
+    for widget, text in _texts(page):
+        ratio = _text_contrast(widget, shot)
+        checked += 1
+        if ratio < MIN:
+            bad.append(f"{type(widget).__name__} {text!r}: {ratio:.1f}")
+    assert checked >= 20 and not bad, bad
+    page.tabs.setCurrentIndex(1)  # the Colours tab
+    qapp.processEvents()
+    shot = _window_image(w)
+    bad = [f"{type(x).__name__} {t!r}" for x, t in _texts(page.tabs.currentWidget()) if _text_contrast(x, shot) < MIN]
+    assert not bad, bad
     w.hide()
     w.session.close()
     import shiboken6

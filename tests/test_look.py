@@ -78,3 +78,12 @@ def test_compiling_keeps_what_the_advanced_editor_added():
     assert compile_look(Look.from_template("phalangite"), SET)["set"]["unit_names"]["infantry"] == "Pezhetairoi"
     spec = CharacterSpec.from_json(compile_look(Look.from_template("companion_cavalry"), SET))
     assert spec.set_spec().unit_names["cavalry"] == "Hetairoi"
+
+
+def test_a_crest_on_a_look_without_a_helmet():
+    """A template with no Greek helmet (helmet: None) given a crest gets a helmet with that crest."""
+    look = Look.from_template("hoplite")
+    look.roles["infantry"]["helmet"] = None
+    look.steps = {}
+    look.edit(("roles", "infantry", "helmet", "crest"), "transverse")
+    assert look.tier(2)["roles"]["infantry"]["helmet"] == {"crest": "transverse"}

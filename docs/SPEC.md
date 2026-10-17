@@ -1436,6 +1436,16 @@ The app opens on a prompt screen like the AI app builders (one box, example chip
       - a crew slot without a hand weapon keeps the base weapon (halberd, musket).
       - Both are generator limits to fix (F12 or later), not preview errors.
 - F10: Result screen: gallery, interactive chips, unit names, Parts (apply to all / this tier; tile selects tier), Colours.
+  - Done:
+    - **Army model:** `core/army.py`. The description (text plus image chips) gives a look; Result-screen edits (`Edit`: part, finish, material colour, unit colour, crest colour, emblem, name; all tiers or one) are replayed on top in order, so new words never drop a picked colour and a swapped part never rewrites the words. A chip's x or swap on the Result screen rewrites the shared text, so Home shows the same.
+    - **The screen:** `gui/result_page.py`:
+      - the 12-tile gallery, rendered row by row in the background (one Blender run per unit type, about 85 s for the hoplite army on the user's machine, checks and parts included); clicking a tile picks the unit type and tier;
+      - Parts cards with pictures of each part alone (the gallery job's thumbnails) and Change menus, plus "Apply to: all tiers / tier N only";
+      - Colours: three unit colours, material tints, crest colour, shield emblem (`core/emblems.py`: six plain shapes drawn in code, or your own PNG, or none).
+      - The bottom bar shows only problems; Export is off while there are errors. An edit during a render restarts the work after the current step.
+    - **Crest colour is per unit type:** "red crests … cavalry with white plumes" gives each its own (`roles.<type>.crest_colour`); the Colours tab's crest colour sets every type.
+    - **Tile framing:** tiles frame the animated bodies with a 12% margin; long weapons may run off the edge.
+    - **Contrast:** the Result screen is in the contrast test with Home (light, dark, follow Windows).
 - F11: bottom bar: silent validation, Test in game, Export.
 - F12: end-to-end check. **Stop: real screenshots.**
 

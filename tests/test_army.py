@@ -21,10 +21,11 @@ def test_edits_survive_new_words_and_words_survive_edits(interp):
     look = army.look(interp)
     assert [look.tier(t)["roles"]["infantry"]["weapon"] for t in (1, 2, 3, 4)] == ["sarissa", "xiphos", "sarissa",
                                                                                   "sarissa"]
-    assert all(look.tier(t)["body"]["shins"] == "iron" for t in (1, 2, 3, 4)) and look.crest_colour == [170, 30, 30]
+    assert all(look.tier(t)["body"]["shins"] == "iron" for t in (1, 2, 3, 4))
+    assert look.tier(1)["roles"]["infantry"]["crest_colour"] == [170, 30, 30]
     army.text = "Hoplites with blue crests and long spears, bronze greaves"  # new words: edits replayed on top
     look = army.look(interp)
-    assert look.crest_colour == [40, 70, 160] and look.tier(4)["body"]["shins"] == "iron"
+    assert look.tier(3)["roles"]["infantry"]["crest_colour"] == [40, 70, 160] and look.tier(4)["body"]["shins"] == "iron"
     assert look.names["infantry"] == "Thureophoroi" and look.names["cavalry"] == "Hippeis"
     army.add(Edit("part", ("infantry", "weapon"), "dory"))  # all tiers: the tier-2 edit goes
     assert [e.kind for e in army.edits].count("part") == 1

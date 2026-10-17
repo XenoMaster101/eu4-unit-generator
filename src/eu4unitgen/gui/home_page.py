@@ -50,14 +50,14 @@ def arrow(colour: str) -> str:
 def css(t: dict[str, str]) -> str:
     """The Home screen's stylesheet: every colour from the theme's tokens (gui.theme)."""
     return f"""
-QWidget#home {{ background: {t['window']}; color: {t['text']}; }}
-QWidget#home QLabel {{ color: {t['text']}; background: transparent; }}
-QWidget#home QLabel#brand {{ font-weight: 700; color: {t['text']}; }}
-QWidget#home QLabel#h1 {{ font-size: 24px; font-weight: 600; color: {t['text']}; }}
-QWidget#home QLabel#muted {{ color: {t['muted']}; }}
-QWidget#home QLabel#status {{ color: {t['ok']}; }}
-QWidget#home QLabel#warn {{ color: {t['warn']}; }}
-QWidget#home QLabel#hint {{ color: {t['error']}; font-weight: 600; }}
+QWidget#front {{ background: {t['window']}; color: {t['text']}; }}
+QWidget#front QLabel {{ color: {t['text']}; background: transparent; }}
+QWidget#front QLabel#brand {{ font-weight: 700; color: {t['text']}; }}
+QWidget#front QLabel#h1 {{ font-size: 24px; font-weight: 600; color: {t['text']}; }}
+QWidget#front QLabel#muted {{ color: {t['muted']}; }}
+QWidget#front QLabel#status {{ color: {t['ok']}; }}
+QWidget#front QLabel#warn {{ color: {t['warn']}; }}
+QWidget#front QLabel#hint {{ color: {t['error']}; font-weight: 600; }}
 QPlainTextEdit#prompt {{ font-size: 15px; border: 2px solid {t['border']}; border-radius: 12px; padding: 10px;
                         background: {t['surface']}; color: {t['text']}; }}
 QComboBox, QLineEdit {{ background: {t['surface']}; color: {t['text']}; border: 1px solid {t['border']};
@@ -149,7 +149,7 @@ class HomePage(Page):
     def __init__(self, window):
         super().__init__(window)
         self.layout_.itemAt(0).widget().hide()  # Page's heading: this screen has its own
-        self.setObjectName("home")
+        self.setObjectName("front")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.restyle()
         self.interp = KeywordInterpreter()
@@ -405,14 +405,17 @@ class HomePage(Page):
             item.kind, item.kind if item.kind in ("template", "weapon", "shield", "helmet", "crest", "progression")
             else None)
 
-    def _swap_menu(self, n: int, item: Item, from_image: bool) -> QMenu | None:
+    def _swap_menu(self, n: int, item: Item, from_image: bool, on_pick=None, parent=None) -> QMenu | None:
+        """The other values of item ``n``'s kind; picking one calls ``on_pick(n, entry, from_image)``
+        (default: this screen's swap; the Result screen passes its own)."""
         kind = self._swap_kind(item)
         if kind is None or (kind == "material" and item.value is None):
             return None
-        menu = QMenu(self)
+        pick = on_pick or self._swap
+        menu = QMenu(parent or self)
         for entry in self.interp.vocab.alternatives(kind):
             act = QAction(entry["label"], menu)
-            act.triggered.connect(lambda _=False, n=n, e=entry, im=from_image: self._swap(n, e, im))
+            act.triggered.connect(lambda _=False, n=n, e=entry, im=from_image: pick(n, e, im))
             menu.addAction(act)
         return menu
 

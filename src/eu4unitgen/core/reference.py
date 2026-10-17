@@ -115,7 +115,8 @@ def suggestions(img: Image.Image) -> list[Item]:
                           params={"swatch": list(c)}))
     head = cols.get("head")
     if head and hsv(head)[1] >= rules["crest_saturation"] and finish_for(head) == "colour":
-        items.append(Item("crest_colour", None, f"crest: {colour_name(head)}", colour=head, words="(image)"))
+        items.append(Item("crest_colour", None, f"crest: {colour_name(head)}", utype="", colour=head,
+                          words="(image)"))
     vivid = [c for c in cols.values() if c and finish_for(c) == "colour"]
     if vivid:
         main = max(vivid, key=lambda c: hsv(c)[1])

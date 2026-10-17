@@ -14,7 +14,8 @@ works on.
      "progression": "heavier",             # or "same": every tier wears the main look
      "per_tier": {"4": {...}},             # "this tier only" edits, on top of either
      "colours": [[r, g, b], [r, g, b], [r, g, b]] | null,   # unit colours
-     "crest_colour": [r, g, b] | null, "emblem": "<png path>" | null,
+     "crest_colour": [r, g, b] | null,     # every unit type's crest, unless its role sets "crest_colour"
+     "emblem": "<png path>" | null,
      "names": {"infantry": "Pezhetairoi", ...}}
 
 Tier overrides merge over the main look key by key; a null removes a key (an area goes back to
@@ -139,12 +140,14 @@ class Look:
         step sets the same thing."""
         def put(d: dict, v) -> None:
             for k in path[:-1]:
-                d = d.setdefault(k, {})
+                if not isinstance(d.get(k), dict):  # missing, or set to nothing (a helmet of None)
+                    d[k] = {}
+                d = d[k]
             d[path[-1]] = v
 
         def has(d: dict) -> bool:
             for k in path[:-1]:
-                d = d.get(k) or {}
+                d = d.get(k) if isinstance(d.get(k), dict) else {}
             return path[-1] in d
 
         if tier is not None:
@@ -154,7 +157,9 @@ class Look:
         if value is None:
             node = base
             for k in path[:-1]:
-                node = node.setdefault(k, {})
+                if not isinstance(node.get(k), dict):
+                    node[k] = {}
+                node = node[k]
             node.pop(path[-1], None)
         else:
             put(base, value)
@@ -167,6 +172,7 @@ class Look:
 # --------------------------------------------------------------------------- compiling
 
 def _parts(utype: str, r: dict, crest_colour, emblem) -> list[dict]:
+    crest_colour = r.get("crest_colour") or crest_colour  # this unit type's own, else the army's
     out = []
     if r.get("weapon"):
         out.append({"kind": r["weapon"]})

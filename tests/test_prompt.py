@@ -26,7 +26,8 @@ def test_weapon_synonyms(read, words):
 @pytest.mark.parametrize("words", ["red", "crimson", "scarlet", "blood-red"])
 def test_colour_synonyms(read, words):
     r = read(f"{words} crests")
-    assert r.look().crest_colour == [170, 30, 30] and [i.kind for i in r.items] == ["crest", "crest_colour"]
+    assert r.look().tier(1)["roles"]["infantry"]["crest_colour"] == [170, 30, 30]
+    assert [i.kind for i in r.items] == ["crest", "crest_colour"]
 
 
 def test_a_full_description(read):
@@ -37,8 +38,10 @@ def test_a_full_description(read):
     t4 = look.tier(4)
     assert t4["roles"]["infantry"]["weapon"] == "sarissa" and t4["roles"]["infantry"]["shield"] == "hoplon"
     assert t4["body"]["upper_torso"] == "bronze" and t4["body"]["torso"] == "linen" and t4["body"]["arms"] == "skin"
-    assert t4["roles"]["cavalry"] == {"weapon": "xyston", "crest": {"orientation": "fore_aft"}}
-    assert look.crest_colour == [235, 230, 215]  # the last crest colour named
+    assert t4["roles"]["cavalry"] == {"weapon": "xyston", "crest": {"orientation": "fore_aft"},
+                                      "crest_colour": [235, 230, 215]}
+    assert look.tier(4)["roles"]["infantry"]["crest_colour"] == [170, 30, 30]  # each its own crest colour
+    assert look.tier(4)["roles"]["cavalry"]["crest_colour"] == [235, 230, 215]
     CharacterSpec.from_json(compile_look(look, {"schema": 1, "set": {"tags": ["ATH"], "gfx": "hellenicgfx"}}))
 
 
@@ -86,9 +89,9 @@ def test_chips_remove_and_swap(read, vocab):
     assert r.look().tier(3)["roles"]["infantry"]["weapon"] == "xiphos"
     c = next(n for n, it in enumerate(r.items) if it.kind == "crest_colour")
     r.swap(c, next(e for e in vocab.alternatives("colour") if e.get("id") == "blue"))
-    assert r.look().crest_colour == [40, 70, 160] and r.items[c].text() == "Blue crest"
+    assert r.look().tier(2)["roles"]["infantry"]["crest_colour"] == [40, 70, 160] and r.items[c].text() == "Blue crest"
     r.remove(c)
-    assert r.look().crest_colour is None
+    assert "crest_colour" not in r.look().tier(2)["roles"]["infantry"]
 
 
 def test_f8_chips_rewrite_the_text(read, vocab):

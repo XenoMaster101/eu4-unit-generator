@@ -83,8 +83,12 @@ def apply_edit(look: Look, e: Edit, base_colours=None) -> None:
         colours = [list(c) for c in (look.colours or base_colours or [[150, 28, 32], [195, 150, 60], [230, 222, 200]])]
         colours[e.key[0]] = list(e.value)
         look.colours = colours
-    elif e.kind == "crest_colour":
+    elif e.kind == "crest_colour":  # every unit type: their own crest colours give way
         look.crest_colour = list(e.value) if e.value else None
+        for d in (look.roles, *(s.get("roles") or {} for s in (*look.steps.values(), *look.per_tier.values()))):
+            for role in d.values():
+                if isinstance(role, dict):
+                    role.pop("crest_colour", None)
     elif e.kind == "emblem":
         look.emblem = e.value
     elif e.kind == "name":  # key (unit type,)

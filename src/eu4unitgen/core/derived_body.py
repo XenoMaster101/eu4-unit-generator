@@ -389,7 +389,10 @@ def removed_triangles(base: bytes, base_file: str, names: list[str]) -> list[int
     table = REMOVALS.get(base_file.lower(), {})
     tree = parse_pdx_mesh(base)
     mesh, skeleton = _only_mesh(tree)
-    props, skin = mesh["props"], _child(mesh, "skin")["props"]
+    skin_node = _child(mesh, "skin")
+    if skin_node is None:
+        raise DerivedBodyError(f"{base_file} isn't skinned, so its parts can't be removed ({', '.join(names)})")
+    props, skin = mesh["props"], skin_node["props"]
     index = bone_indices(skeleton)
     out: set[int] = set()
     for name in names:

@@ -150,7 +150,7 @@ class Item:
     def text(self) -> str:
         """The chip's text: the label, and the unit type when it isn't infantry and the label
         doesn't already say it ("Xyston (cavalry lance)" stays as it is)."""
-        other = self.kind in ("weapon", "shield", "helmet", "crest") and self.utype != "infantry"
+        other = self.kind in ("weapon", "shield", "helmet", "crest", "crest_colour") and self.utype not in ("infantry", "")
         return f"{self.label} ({self.utype})" if other and self.utype not in self.label.lower() else self.label
 
 
@@ -183,7 +183,10 @@ class Interpretation:
                 else:
                     look.edit(("roles", i.utype, "crest"), {"orientation": i.value} if i.value else None)
             elif i.kind == "crest_colour":
-                look.crest_colour = list(i.colour)
+                if i.utype in ("infantry", "cavalry", "artillery"):  # "red crests ... cavalry with white plumes"
+                    look.edit(("roles", i.utype, "crest_colour"), list(i.colour))
+                else:  # from a reference image: every unit type
+                    look.crest_colour = list(i.colour)
             elif i.kind == "finish":
                 look.edit(("body", i.area), None if i.value is None else ([i.value, list(i.colour)] if i.colour else i.value))
             elif i.kind == "unit_colour":
@@ -381,7 +384,7 @@ class KeywordInterpreter(Interpreter):
                     res.items.append(Item(kind, value, label, utype=utype, params=e.get("params"), words=words,
                                           spans={**noun, **owned}))
                     if kind == "crest" and colour and not negate:
-                        res.items.append(Item("crest_colour", None, f"{colour[0]['label']} crest",
+                        res.items.append(Item("crest_colour", None, f"{colour[0]['label']} crest", utype=utype,
                                               colour=tuple(colour[0]["value"]), words=colour[1],
                                               spans={"colour": colour[2]}))
                         colour = None
