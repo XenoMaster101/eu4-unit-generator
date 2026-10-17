@@ -23,6 +23,7 @@ from eu4unitgen.export.pipeline import Session, SetSpec, Settings, SpecError
 from eu4unitgen.export.writer import ExportError
 from eu4unitgen.core.character import CharacterError
 from eu4unitgen.core.finishes import FinishError
+from eu4unitgen.core.history import History, Snapshot
 from eu4unitgen.gui.character_page import CharacterPage
 from eu4unitgen.gui.pages import GeneratePage, SettingsPage, TestModPage, UnitSetPage, ValidatePage
 from eu4unitgen.gui.parts_page import PartsPage
@@ -109,6 +110,7 @@ class MainWindow(QMainWindow):
         for p in self.pages:
             self.stack.addWidget(p)
         self.steps.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.steps.currentRowChanged.connect(lambda _: self.character_edited())  # edits on other pages count too
         self.steps.setCurrentRow(0)
         central = QWidget()
         lay = QHBoxLayout(central)
@@ -116,6 +118,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.stack, 1)
         self.setCentralWidget(central)
         self.statusBar().showMessage("Set the EU4 install and press Load.")
+        self.history = History(self.character_state())
+        self._update_title()
 
     # ------------------------------------------------------------------ plumbing
     def _stored_settings(self) -> Settings:
@@ -266,6 +270,10 @@ class MainWindow(QMainWindow):
         self.parts_page.set_loadout(loadout, f"(in {path.name})" if loadout else "")
         if loadout is None:
             self.parts_page.loadout.root = spec.root
+        if page.body is not None:
+            page.show_areas(page.body, self.textures_page.recipe)
+        self.history.reset(self.character_state())
+        self._update_title()
         page.show_message(f"Loaded {path}: {spec.name or 'unnamed'}; the Unit set, Textures and Parts pages now show it. "
                           "Show body areas to paint areas.")
 
@@ -293,7 +301,86 @@ class MainWindow(QMainWindow):
             return page.show_message(str(exc), error=True)
         page.spec = spec
         page.spec_path.setText(str(path))
+        self.history.mark_saved(self.character_state())
+        self._update_title()
         page.show_message(f"Saved {path}.")
+
+    # ------------------------------------------------------------------ the Character page's edit history (U3)
+    def character_state(self) -> Snapshot | None:
+        """The character as the pages show it now (one undo step); None while a form is invalid."""
+        tp, pp, page = self.textures_page, self.parts_page, self.character_page
+        try:
+            tp.store()
+            pp.store()
+            s = self.unit_page.set_section(page.spec.set if page.spec else None)
+        except SpecError:
+            return None
+        return Snapshot({"name": page.name.text().strip(), "set": s,
+                         "textures": tp.recipe.to_json(), "use_textures": tp.use.isChecked(),
+                         "loadout": pp.loadout.to_json(), "use_loadout": pp.use.isChecked()})
+
+    def character_edited(self) -> None:
+        """Record the pages' state as an undo step if it changed (every Character page edit calls this)."""
+        if getattr(self, "history", None) is None:
+            return
+        self.history.push(self.character_state())
+        self._update_title()
+
+    def restore_character(self, state: Snapshot) -> None:
+        """Put a snapshot back into the Unit set, Textures, Parts and Character pages."""
+        from eu4unitgen.core.character import CharacterSpec
+        from eu4unitgen.core.loadout import Loadout
+        from eu4unitgen.core.recipe import TextureRecipe
+
+        tp, pp, page = self.textures_page, self.parts_page, self.character_page
+        d = state.doc
+        page.name.setText(d["name"])
+        self.unit_page.load_set(d["set"], CharacterSpec(set=d["set"]).unit_colours())
+        tp.set_recipe(TextureRecipe.from_json(d["textures"], tp.recipe.root), tp.recipe_path.text())
+        tp.use.setChecked(d["use_textures"])
+        loadout = Loadout.from_json(d["loadout"], pp.loadout.root)
+        loadout.hair = dict(pp.loadout.hair)
+        pp.set_loadout(loadout, pp.loadout_path.text())
+        pp.use.setChecked(d["use_loadout"])
+        if page.body is not None:
+            page.show_areas(page.body, tp.recipe)
+        self._update_title()
+
+    def character_undo(self) -> None:
+        self.character_edited()  # an edit made on another page since the last step is a step too
+        state = self.history.undo()
+        if state is None:
+            return self.character_page.show_message("Nothing to undo.")
+        self.restore_character(state)
+        self.character_page.show_message("Undone.")
+
+    def character_redo(self) -> None:
+        if self.history.current != self.character_state():
+            return self.character_page.show_message("Nothing to redo: you changed something since the undo.")
+        state = self.history.redo()
+        if state is None:
+            return self.character_page.show_message("Nothing to redo.")
+        self.restore_character(state)
+        self.character_page.show_message("Redone.")
+
+    def character_reset(self) -> None:
+        """Back to the file as last loaded or saved (itself a step, so it can be undone)."""
+        self.character_edited()
+        saved = self.history.saved
+        if saved is None or not self.history.dirty:
+            return self.character_page.show_message("No unsaved changes.")
+        self.restore_character(saved)
+        self.history.push(saved)
+        self._update_title()
+        self.character_page.show_message("Back to the saved file (Undo brings your changes back).")
+
+    def _update_title(self) -> None:
+        h = getattr(self, "history", None)
+        dirty = h is not None and h.dirty
+        path = self.character_page.spec_path.text().strip()
+        name = Path(path).name if path else "new character"
+        self.setWindowTitle(f"eu4unitgen: {name}{' *' if dirty else ''}")
+        self.character_page.show_dirty(dirty, h.can_undo if h else False, h.can_redo if h else False)
 
     def character_areas(self) -> None:
         self._sync_settings()

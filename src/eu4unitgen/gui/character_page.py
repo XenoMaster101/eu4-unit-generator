@@ -12,7 +12,7 @@ from pathlib import Path
 
 from PIL import Image
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QColorDialog, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
     QSpinBox, QSplitter, QTableWidget, QVBoxLayout, QWidget,
@@ -128,6 +128,7 @@ class CharacterPage(Page):
         self.body = None  # Session.body_areas result for the shown slot
         self.masks: dict[str, Image.Image] = {}  # mask:<png> regions painted or loaded on this page
         self._colours: dict[str, tuple] = {}  # region -> custom colour
+        self._quiet = False  # rebuilding the rows: their signals aren't edits
 
         top = QHBoxLayout()
         self.spec_path = QLineEdit()
@@ -140,11 +141,31 @@ class CharacterPage(Page):
         top.addWidget(load)
         top.addWidget(save)
         self.layout_.addLayout(top)
+        hist = QHBoxLayout()
+        self.undo_btn, self.redo_btn = QPushButton("Undo"), QPushButton("Redo")
+        self.undo_btn.setToolTip("Take back the last change (Ctrl+Z)")
+        self.redo_btn.setToolTip("Put back a change you took back (Ctrl+Y)")
+        self.reset_btn = QPushButton("Reset to saved file")
+        self.reset_btn.setToolTip("Throw away every change since the file was loaded or saved (Undo brings them back)")
+        self.undo_btn.clicked.connect(lambda: window.character_undo())
+        self.redo_btn.clicked.connect(lambda: window.character_redo())
+        self.reset_btn.clicked.connect(lambda: window.character_reset())
+        self.dirty = QLabel()
+        for w in (self.undo_btn, self.redo_btn, self.reset_btn):
+            hist.addWidget(w)
+        hist.addWidget(self.dirty, 1)
+        self.layout_.addLayout(hist)
+        for keys, fn in (("Ctrl+Z", window.character_undo), ("Ctrl+Y", window.character_redo),
+                         ("Ctrl+Shift+Z", window.character_redo)):
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)
+            sc.activated.connect(fn)
         name_row = QHBoxLayout()
         self.name = QLineEdit()
         self.name.setPlaceholderText("character name (free text)")
         name_row.addWidget(QLabel("Name"))
         name_row.addWidget(self.name, 1)
+        self.name.editingFinished.connect(lambda: window.character_edited())
         self.layout_.addLayout(name_row)
 
         slot_row = QHBoxLayout()
@@ -258,6 +279,20 @@ class CharacterPage(Page):
         self.canvas.setAlignment(Qt.AlignCenter)
         self.canvas.setStyleSheet("background: #333; color: #ddd; font-size: 13px")
 
+    def set_busy(self, busy: bool) -> None:
+        super().set_busy(busy)
+        if not busy:  # buttons that are off for a reason stay off
+            self.window_._update_title()
+            for region in self.regions() if self.body else []:
+                self._paint_button(region)
+
+    def show_dirty(self, dirty: bool, can_undo: bool, can_redo: bool) -> None:
+        self.dirty.setText("<b>● Unsaved changes</b>" if dirty else "All changes saved")
+        self.dirty.setStyleSheet("color: #c60" if dirty else "color: #4a4")
+        self.undo_btn.setEnabled(can_undo)
+        self.redo_btn.setEnabled(can_redo)
+        self.reset_btn.setEnabled(dirty)
+
     # ------------------------------------------------------------------ slot
     def slot_key(self) -> tuple[int, str]:
         return int(self.tier.currentText()), self.role.currentText()
@@ -340,18 +375,23 @@ class CharacterPage(Page):
         btn.setStyleSheet(f"background: rgb{tuple(c)}" if c else "")
 
     def _finish_changed(self, region: str) -> None:
+        if self._quiet:
+            return
         if self._finish(region) and finishes()[self._finish(region)]["colour"] is None and region not in self._colours:
-            self._pick_colour(region)
+            self._pick_colour(region, apply=False)
         self._paint_button(region)
         self._draw_map()
+        self.apply_finishes()
 
-    def _pick_colour(self, region: str) -> None:
+    def _pick_colour(self, region: str, apply: bool = True) -> None:
         start = QColor(*(self._colours.get(region) or (128, 128, 128)))
         c = QColorDialog.getColor(start, self, f"Colour for {region}")
         if c.isValid():
             self._colours[region] = (c.red(), c.green(), c.blue())
             self._paint_button(region)
             self._draw_map()
+            if apply:
+                self.apply_finishes()
 
     # ------------------------------------------------------------------ map
     def _all_masks(self) -> dict[str, Image.Image]:
@@ -412,20 +452,26 @@ class CharacterPage(Page):
         self.masks[region] = img.convert("L")
         if self.body is not None:
             keep = self.chosen()
-            self.show_areas(self.body, None)
-            for r, c in keep.items():
-                self.set_finish(r, c["finish"], c.get("colour"))
+            self._quiet = True
+            try:
+                self.show_areas(self.body, None)
+                for r, c in keep.items():
+                    self.set_finish(r, c["finish"], c.get("colour"))
+            finally:
+                self._quiet = False
         return path
 
     # ------------------------------------------------------------------ recipe
     def apply_finishes(self) -> None:
-        """The rows' finishes -> the Textures page's slot for this tier/role (replacing the old ones)."""
+        """The rows' finishes -> the Textures page's slot for this tier/role (replacing the old ones).
+        Runs on every change, so the recipe (and the undo history) always matches the rows."""
         if self.body is None:
             return self.show_message("Show the body areas first.", error=True)
         try:
             self.window_.apply_character_finishes(self.slot_key(), self.chosen(), self.body.skin, self.regions())
         except FinishError as exc:
             return self.show_message(str(exc), error=True)
+        self.window_.character_edited()
         n = len(self.chosen())
         self.show_message(f"Applied {n} area finish(es) to the texture recipe's slot "
                           f"{self.slot_key()[0]}/{self.slot_key()[1]}." if n else "Cleared this slot's area finishes.")

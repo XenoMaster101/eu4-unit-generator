@@ -338,6 +338,60 @@ def test_character_page_areas_finishes_masks_and_spec(window, fake_install, tmp_
     assert sum(1 for o in ops if o["op"] == "recolour" and o.get("region") == "area:arms") == 1
 
 
+def _hoplite_spec(fake_install, tmp_path):
+    import json
+    from fakes import make_textures_decodable
+
+    make_textures_decodable(fake_install)
+    (tmp_path / "char").mkdir(exist_ok=True)
+    spec_path = tmp_path / "char" / "hoplite.json"
+    spec_path.write_text(json.dumps({
+        "schema": 1, "name": "Test hoplite",
+        "set": {"tags": ["MAC"], "gfx": "hellenicgfx", "set_name": "hop", "base_gfx": "westerngfx",
+                "unit_colours": [[150, 28, 32], [195, 150, 60], [230, 222, 200]]},
+        "textures": {"schema": 1, "slots": {"1/infantry": {"ops": [
+            {"op": "recolour", "region": "cloth", "colour": [226, 214, 184]}]}}}}), encoding="utf-8")
+    return spec_path
+
+
+def test_u3_undo_redo_reset_and_unsaved_mark(window, fake_install, tmp_path):
+    """U3: finishes land in the recipe as you pick them; undo/redo walk them back and forth; reset
+    goes back to the file; the page and the window title show unsaved changes."""
+    page = window.character_page
+    spec_path = _hoplite_spec(fake_install, tmp_path)
+    window.load_character(spec_path)
+    page.tier.setCurrentText("1")
+    window.character_areas()
+    assert page.body is not None, page.message.text()
+    assert window.windowTitle() == "eu4unitgen: hoplite.json" and not window.history.dirty
+    assert not page.undo_btn.isEnabled() and not page.reset_btn.isEnabled()
+
+    def finished():
+        ops = window.textures_page.recipe.slots[(1, "infantry")].ops
+        return {o["region"]: o["finish"] for o in ops if o["op"] == "recolour" and "finish" in o}
+
+    page.set_finish("area:arms", "skin")  # no Apply: it's in the recipe now
+    page.set_finish("area:shins", "bronze")
+    assert finished() == {"area:arms": "skin", "area:shins": "bronze"}
+    assert window.windowTitle().endswith(" *") and "Unsaved" in page.dirty.text()
+
+    page.undo_btn.click()
+    assert finished() == {"area:arms": "skin"} and page.chosen() == {"area:arms": page.chosen()["area:arms"]}
+    page.redo_btn.click()
+    assert finished() == {"area:arms": "skin", "area:shins": "bronze"}
+    assert page._finish("area:shins") == "bronze"
+
+    page.name.setText("Renamed")
+    page.name.editingFinished.emit()
+    page.reset_btn.click()
+    assert page.name.text() == "Test hoplite" and finished() == {} and not window.history.dirty
+    page.undo_btn.click()  # the reset is a step too
+    assert page.name.text() == "Renamed" and finished() == {"area:arms": "skin", "area:shins": "bronze"}
+
+    window.save_character(tmp_path / "char" / "saved.json")
+    assert window.windowTitle() == "eu4unitgen: saved.json" and not window.history.dirty
+
+
 def test_u1_wheel_guard_splitters_and_empty_hint(window, qapp):
     """U1: the wheel never changes an unfocused dropdown; a big render keeps the areas table usable;
     the empty map explains itself."""
