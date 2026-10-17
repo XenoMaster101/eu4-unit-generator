@@ -1,7 +1,7 @@
 """U2: finding the EU4 install and the owned DLC through Steam's files (made-up Steam folders)."""
 from pathlib import Path
 
-from eu4unitgen.core.install import find_eu4, owned_dlc, parse_vdf
+from eu4unitgen.core.install import find_blender, find_eu4, owned_dlc, parse_vdf
 
 
 def _steam(tmp: Path, installed_ids: list[str]) -> tuple[Path, Path]:
@@ -61,4 +61,45 @@ def test_gui_auto_setup_fills_only_what_is_empty(tmp_path, monkeypatch):
     w.settings_page.set_owned(["dlc999_not_owned"])  # the user's ticks win
     w.auto_setup(load=False)
     assert w.settings_page.owned() == ["dlc999_not_owned"]
+    w.session.close()
+
+
+def test_f2_find_blender_prefers_the_pinned_series(tmp_path, monkeypatch):
+    """F2: of several Blenders, the pinned 4.2 series wins; others come with a warning; BLENDER_PATH wins."""
+    monkeypatch.delenv("BLENDER_PATH", raising=False)
+    new, old = tmp_path / "5.2" / "blender.exe", tmp_path / "4.2" / "blender.exe"
+    exe, note = find_blender([(new, "5.2.2"), (old, "4.2.23")], pinned="4.2")
+    assert exe == old and note == "found Blender 4.2.23"
+    exe, note = find_blender([(new, "5.2.2")], pinned="4.2")
+    assert exe == new and "needs 4.2 LTS" in note
+    assert find_blender([], pinned="4.2")[0] is None
+    assert find_blender([(new, "4.20.1")], pinned="4.2")[0] == new and "only" in find_blender([(new, "4.20.1")], pinned="4.2")[1]
+    monkeypatch.setenv("BLENDER_PATH", str(new))
+    assert find_blender([(old, "4.2.23")])[0] == new
+
+
+def test_f2_auto_setup_fills_a_missing_blender_but_keeps_a_working_one(tmp_path, monkeypatch):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtWidgets
+    from eu4unitgen.export.pipeline import Session, Settings
+    from eu4unitgen.gui.app import MainWindow
+
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    monkeypatch.delenv("EU4_PATH", raising=False)
+    monkeypatch.delenv("BLENDER_PATH", raising=False)
+    found = tmp_path / "Blender 4.2" / "blender.exe"
+    found.parent.mkdir()
+    found.write_bytes(b"")
+    mine = tmp_path / "my_blender.exe"
+    mine.write_bytes(b"")
+    monkeypatch.setattr("eu4unitgen.core.install.blender_candidates", lambda: [(found, "4.2.23")])
+    monkeypatch.setattr("eu4unitgen.core.install.steam_roots", lambda: [])
+    w = MainWindow(Session(Settings(output_dir=tmp_path / "out")), run_async=False)
+    w.settings_page.blender.setText(str(tmp_path / "missing.exe"))
+    did = w.auto_setup(load=False)
+    assert w.settings_page.blender.text() == str(found) and "found Blender 4.2.23" in did
+    w.settings_page.blender.setText(str(mine))
+    w.auto_setup(load=False)
+    assert w.settings_page.blender.text() == str(mine)
     w.session.close()

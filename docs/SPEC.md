@@ -1416,7 +1416,7 @@ The app opens on a prompt screen like the AI app builders (one box, example chip
 
 **Steps** (one commit each, with tests; a short report after each):
 - F1: this plan.
-- F2: Blender detection (`BLENDER_PATH`, Windows registry and Program Files, `blender` on PATH on Linux) and the first-launch status line.
+- F2: Blender detection (`BLENDER_PATH`, Windows registry and Program Files, `blender` on PATH on Linux) and the first-launch status line. Done: `core.install.find_blender` reads the uninstall entries the Windows installer writes per version (DisplayVersion, InstallLocation; checked on the user's 4.2.23 and 5.2.2), then Program Files, Steam's Blender, and on Linux PATH, /opt, ~ and snap. The pinned series (4.2) wins; any other comes with a warning. Auto-setup fills the Blender box only when it is empty or names a missing file.
 - F3: starter templates with per-tier steps (U8).
 - F4: vocabulary, synonyms, keyword interpreter, suggestions, leftovers, user vocabulary.
 - F5: reference image palette per horizontal band (U7).

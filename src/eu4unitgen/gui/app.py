@@ -188,7 +188,7 @@ class MainWindow(QMainWindow):
     def auto_setup(self, load: bool = True) -> list[str]:
         """Find the EU4 install and the owned DLC when the settings don't name them, then load the
         install in the background. Never replaces what the user set. Returns what it did."""
-        from eu4unitgen.core.install import find_eu4, owned_dlc
+        from eu4unitgen.core.install import find_blender, find_eu4, owned_dlc
 
         page, did = self.settings_page, []
         if not page.eu4.text().strip():
@@ -202,6 +202,12 @@ class MainWindow(QMainWindow):
             if names:
                 page.set_owned(names)
             did.append(note + ("; untick any you don't own" if names else ""))
+        current = page.blender.text().strip()
+        if not current or not Path(current).is_file():  # a working path is the user's choice: kept
+            exe, note = find_blender()
+            if exe is not None:
+                page.blender.setText(str(exe))
+            did.append(note)
         if eu4 is None:
             did.append("EU4 install not found: set its folder in 1. Settings")
         elif load:
