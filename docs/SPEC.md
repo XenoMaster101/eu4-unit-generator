@@ -1342,6 +1342,7 @@ Constraints carried over:
       - **U3, edit history:** undo/redo, "reset to saved file", and an unsaved-changes mark in the page and the window title.
         - Done: `core/history.py` keeps whole snapshots (the character as the Unit set, Textures and Parts pages show it; painted images compared by identity). Area finishes now go into the recipe the moment they are picked, so every edit is an undo step. An edit made on another page becomes a step when you switch pages or press Undo. Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z.
       - **U4, layout:** labelled sections (1 Character file, 2 Body, 3 Areas and finishes, 4 Paint, 5 Preview), spacing, a plain-words tooltip on every control.
+        - Done: five group boxes in a splitter (2 Body on the left; 3, 4 and 5 stacked on the right). "Apply" is gone because finishes apply live. Rows show plain names ("upper torso", "painted linen #961e1e"), and each area's tooltip says what it is (bands: "Part of the torso: 88-100% of its length, from the bottom up"). The selected row is tinted cyan, a colour no finish uses. A test checks that every button, dropdown, number box and text box on the page has a tooltip.
       - **U5, finer areas:**
         - collar, shoulders, upper/lower torso, belt, upper/lower sleeves from bone groups plus height splits in the library;
         - per-row grow/shrink (px) and smoothed (feathered) edges.

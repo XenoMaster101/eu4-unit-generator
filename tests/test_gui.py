@@ -500,6 +500,22 @@ def test_u6_live_map_follows_the_recipe(window, fake_install, tmp_path):
     assert not page.canvas.pixmap().isNull()
 
 
+def test_u4_sections_and_a_tooltip_on_every_control(window, fake_install, tmp_path):
+    """U4: the page is in five numbered sections, and every control says what it does."""
+    from PySide6.QtWidgets import QAbstractButton, QComboBox, QGroupBox, QLineEdit, QSpinBox
+
+    page = window.character_page
+    window.load_character(_hoplite_spec(fake_install, tmp_path))
+    window.character_areas()
+    titles = sorted(g.title() for g in page.findChildren(QGroupBox))
+    assert titles == ["1  Character file", "2  Body", "3  Areas and finishes", "4  Paint", "5  Preview"]
+    bare = [f"{type(w).__name__} {getattr(w, 'text', lambda: '')()!r}"
+            for kind in (QAbstractButton, QComboBox, QSpinBox, QLineEdit) for w in page.findChildren(kind)
+            if not w.toolTip() and not isinstance(w.parent(), (QComboBox, QSpinBox)) and w.parent() is not page.table]
+    assert not bare, bare
+    assert "Part of the torso" in page.table.cellWidget(page.regions().index("area:collar"), 0).toolTip()
+
+
 def test_u1_wheel_guard_splitters_and_empty_hint(window, qapp):
     """U1: the wheel never changes an unfocused dropdown; a big render keeps the areas table usable;
     the empty map explains itself."""

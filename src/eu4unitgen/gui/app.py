@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
         self.history.reset(self.character_state())
         self._update_title()
         page.show_message(f"Loaded {path}: {spec.name or 'unnamed'}; the Unit set, Textures and Parts pages now show it. "
-                          "Show body areas to paint areas.")
+                          "Press Show body to paint its areas.")
 
     def save_character(self, path: Path) -> None:
         """The pages -> a character spec at ``path`` (recipe and loadout paths rebased onto its folder)."""

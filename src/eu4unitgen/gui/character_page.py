@@ -30,9 +30,7 @@ KEEP = "keep (base texture)"
 VIEWS = ("Finished (live)", "Areas")
 PAINT = "mask:paint_"  # rows the brush paints: mask:paint_<finish>[_<rrggbb>].png
 MAP_SIZE = 512
-# area tints on the map; masks you paint show in white
-TINTS = [(255, 210, 0), (0, 160, 255), (150, 0, 255), (0, 210, 90), (255, 120, 0), (255, 60, 160), (255, 0, 0),
-         (0, 230, 230), (190, 255, 0), (120, 80, 255), (255, 170, 120)]
+SELECTED = (0, 230, 255)  # the selected row's tint on the map: a colour no finish uses
 
 
 def _qimage(img: Image.Image) -> QImage:
@@ -41,6 +39,31 @@ def _qimage(img: Image.Image) -> QImage:
     q = QImage()
     q.loadFromData(buf.getvalue(), "PNG")
     return q
+
+
+def label(region: str) -> str:
+    """A row's name in plain words: areas by name, painted masks by finish (and colour)."""
+    if region.startswith("mask:paint_"):
+        finish, _, colour = region[11:].removesuffix(".png").partition("_")
+        return f"painted {finish}" + (f" #{colour}" if colour else "")
+    return region.removeprefix("area:").removeprefix("mask:").replace("_", " ")
+
+
+def _describe(region: str, base: str) -> str:
+    """A row's tooltip in plain words."""
+    from eu4unitgen.textures.areas import bands
+
+    if region.startswith("mask:paint_"):
+        return "Painted with the brush (saved next to the character file)"
+    if region.startswith("mask:"):
+        return f"A mask from the file {region[5:]}"
+    name = region.removeprefix("area:")
+    band = bands().get(name)
+    if band:
+        lo, hi = round(band["from"] * 100), round(band["to"] * 100)
+        where = "from the bottom up" if band["axis"] == "height" else "from the body out"
+        return f"Part of the {band['of'].replace('_', ' ')}: {lo}-{hi}% of its length, {where}"
+    return f"The {name.replace('_', ' ')}, found from the body's bones"
 
 
 def _pil_mask(q: QImage) -> Image.Image:
@@ -136,18 +159,36 @@ class CharacterPage(Page):
         self._finished: tuple | None = None  # (key, image): the live map, until the slot changes
         self._selected: str | None = None
 
+        self.layout_.setSpacing(8)
+
+        # ---- 1 Character file
+        file_box = QGroupBox("1  Character file")
+        fl = QVBoxLayout(file_box)
         top = QHBoxLayout()
         self.spec_path = QLineEdit()
         self.spec_path.setPlaceholderText("character spec .json (one file per character; paths in it are relative to "
                                           "its folder)")
+        self.spec_path.setToolTip("The character file. Everything about the character is in it; painted masks are "
+                                  "saved next to it.")
         load, save = QPushButton("Load"), QPushButton("Save")
+        load.setToolTip("Open this character file into every page (Unit set, Textures, Parts)")
+        save.setToolTip("Save the character from every page into this file, with its painted masks beside it")
         load.clicked.connect(self._load)
         save.clicked.connect(self._save)
-        top.addWidget(_path_row(self.spec_path, pick_dir=False), 1)
+        path_row = _path_row(self.spec_path, pick_dir=False)
+        for b in path_row.findChildren(QPushButton):
+            b.setToolTip("Find a character file on disk")
+        top.addWidget(path_row, 1)
         top.addWidget(load)
         top.addWidget(save)
-        self.layout_.addLayout(top)
-        hist = QHBoxLayout()
+        fl.addLayout(top)
+        name_row = QHBoxLayout()
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("character name (free text)")
+        self.name.setToolTip("A name for your own use; the game never shows it")
+        self.name.editingFinished.connect(lambda: window.character_edited())
+        name_row.addWidget(QLabel("Name"))
+        name_row.addWidget(self.name, 1)
         self.undo_btn, self.redo_btn = QPushButton("Undo"), QPushButton("Redo")
         self.undo_btn.setToolTip("Take back the last change (Ctrl+Z)")
         self.redo_btn.setToolTip("Put back a change you took back (Ctrl+Y)")
@@ -157,80 +198,85 @@ class CharacterPage(Page):
         self.redo_btn.clicked.connect(lambda: window.character_redo())
         self.reset_btn.clicked.connect(lambda: window.character_reset())
         self.dirty = QLabel()
-        for w in (self.undo_btn, self.redo_btn, self.reset_btn):
-            hist.addWidget(w)
-        hist.addWidget(self.dirty, 1)
-        self.layout_.addLayout(hist)
+        self.dirty.setToolTip("Whether the character has changes that aren't in the file yet")
+        for w in (self.undo_btn, self.redo_btn, self.reset_btn, self.dirty):
+            name_row.addWidget(w)
+        fl.addLayout(name_row)
+        self.layout_.addWidget(file_box)
         for keys, fn in (("Ctrl+Z", window.character_undo), ("Ctrl+Y", window.character_redo),
                          ("Ctrl+Shift+Z", window.character_redo)):
             sc = QShortcut(QKeySequence(keys), self)
             sc.setContext(Qt.WidgetWithChildrenShortcut)
             sc.activated.connect(fn)
-        name_row = QHBoxLayout()
-        self.name = QLineEdit()
-        self.name.setPlaceholderText("character name (free text)")
-        name_row.addWidget(QLabel("Name"))
-        name_row.addWidget(self.name, 1)
-        self.name.editingFinished.connect(lambda: window.character_edited())
-        self.layout_.addLayout(name_row)
 
+        # ---- 2 Body: which body, and its texture map
+        body_box = QGroupBox("2  Body")
+        ll = QVBoxLayout(body_box)
         slot_row = QHBoxLayout()
         self.tier = QComboBox()
         self.tier.addItems([str(t) for t in TIERS])
+        self.tier.setToolTip("The unit's look changes with military technology; tier 1 is the earliest of the four")
         self.role = QComboBox()
         self.role.addItems(list(MESH_ROLES))
-        self.role.setToolTip("infantry also dresses the cavalry rider and the artillery crew")
-        show = QPushButton("Show body areas")
-        show.setToolTip("the tier's body texture (the Parts page's body for that tier) with its named areas")
+        self.role.setToolTip("Which soldier to dress; infantry also dresses the cavalry rider and the artillery crew")
+        show = QPushButton("Show body")
+        show.setToolTip("Show this soldier's body texture: the flat picture wrapped around the 3D model")
         show.clicked.connect(lambda: window.character_areas())
-        for w in (QLabel("Tier"), self.tier, QLabel("Role"), self.role, show):
-            slot_row.addWidget(w)
-        slot_row.addStretch(1)
-        self.layout_.addLayout(slot_row)
-
-        # resizable panes: the map | (areas table and tools / preview and render)
-        self.canvas = PaintCanvas()
-        self.canvas.stroke_done.connect(self.paint)
-        self.canvas.picked.connect(self._pick_area)
-        self.legend = QLabel()
-        self.legend.setWordWrap(True)
-        left = QWidget()
-        ll = QVBoxLayout(left)
-        ll.setContentsMargins(0, 0, 0, 0)
-        view_row = QHBoxLayout()
         self.view = QComboBox()
         self.view.addItems(VIEWS)
+        self.view.setToolTip("Finished: the texture as the unit will wear it, in its country colours. "
+                             "Areas: the plain texture with each area tinted in its finish's colour.")
         self.view.currentIndexChanged.connect(lambda _: self._draw_map(self._selected))
-        view_row.addWidget(QLabel("Show"))
-        view_row.addWidget(self.view)
-        view_row.addStretch(1)
-        ll.addLayout(view_row)
+        for w in (QLabel("Tier"), self.tier, QLabel("Soldier"), self.role, show, QLabel("Show"), self.view):
+            slot_row.addWidget(w)
+        slot_row.addStretch(1)
+        ll.addLayout(slot_row)
+        self.canvas = PaintCanvas()
+        self.canvas.setToolTip("The body texture. Brush off: click to find an area. Brush on: paint finishes.")
+        self.canvas.stroke_done.connect(self.paint)
+        self.canvas.picked.connect(self._pick_area)
         canvas_scroll = QScrollArea()
         canvas_scroll.setWidget(self.canvas)
         canvas_scroll.setAlignment(Qt.AlignCenter)
         ll.addWidget(canvas_scroll, 1)
+        self.legend = QLabel()
+        self.legend.setWordWrap(True)
         ll.addWidget(self.legend)
 
-        tools = QWidget()
-        tl = QVBoxLayout(tools)
-        tl.setContentsMargins(0, 0, 0, 0)
+        # ---- 3 Areas and finishes
+        areas_box = QGroupBox("3  Areas and finishes")
+        al = QVBoxLayout(areas_box)
+        hint = QLabel("Each row is a part of the body. Pick what it's made of; the map updates as you go. "
+                      "Lower rows paint over higher ones.")
+        hint.setWordWrap(True)
+        al.addWidget(hint)
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Area", "Finish", "Colour", "Grow", "Feather"])
+        for col, tip in enumerate(("The part of the body", "What the area is made of", "The finish's colour; click "
+                                   "to pick your own", "Make the area bigger (or smaller, below 0) by this many "
+                                   "pixels", "Soften the area's edge over this many pixels")):
+            self.table.horizontalHeaderItem(col).setToolTip(tip)
         self.table.verticalHeader().setVisible(False)
-        self.table.setColumnWidth(0, 130)
-        self.table.setColumnWidth(1, 190)
+        self.table.setColumnWidth(0, 120)
+        self.table.setColumnWidth(1, 170)
+        self.table.setColumnWidth(2, 60)
+        self.table.setColumnWidth(3, 70)
+        self.table.setColumnWidth(4, 70)
         self.table.setMinimumHeight(120)
         self.table.itemSelectionChanged.connect(self._highlight)
-        tl.addWidget(self.table, 1)
+        al.addWidget(self.table, 1)
 
-        paint = QGroupBox("Paint finishes on the map")
+        # ---- 4 Paint
+        paint = QGroupBox("4  Paint")
         pv = QVBoxLayout(paint)
         pl = QHBoxLayout()
         self.paint_btn = QPushButton("Brush on")
         self.paint_btn.setCheckable(True)
+        self.paint_btn.setToolTip("Turn the brush on to paint on the map; off, a click on the map finds the area there")
         self.paint_btn.toggled.connect(self._toggle_paint)
         self.brush_finish = QComboBox()
         self.brush_finish.addItems([f"{k}: {v['label']}" for k, v in finishes().items()])
+        self.brush_finish.setToolTip("What the brush paints: the same finishes as the areas")
         self.brush_finish.currentIndexChanged.connect(lambda _: self._brush_changed(own=True))
         self.brush_colour = QPushButton()
         self.brush_colour.clicked.connect(self._pick_brush_colour)
@@ -238,6 +284,7 @@ class CharacterPage(Page):
         self.brush.setRange(2, 80)
         self.brush.setValue(12)
         self.brush.setSuffix(" px")
+        self.brush.setToolTip("How wide the brush is, in screen pixels")
         self.brush.valueChanged.connect(lambda v: setattr(self.canvas, "brush", v))
         for w in (self.paint_btn, QLabel("Paint"), self.brush_finish, self.brush_colour, QLabel("Size"), self.brush):
             pl.addWidget(w)
@@ -246,41 +293,42 @@ class CharacterPage(Page):
         self.paint_hint = QLabel()
         self.paint_hint.setWordWrap(True)
         pv.addWidget(self.paint_hint)
-        tl.addWidget(paint)
         self._brush: tuple | None = None  # the brush's own colour (None: the finish's)
         self._toggle_paint(False)
 
+        # ---- 5 Preview
+        prev_box = QGroupBox("5  Preview")
+        vl = QVBoxLayout(prev_box)
         act = QHBoxLayout()
-        apply = QPushButton("Apply to the texture recipe")
-        apply.setToolTip("writes the finishes into the Textures page's slot for this tier/role (after its own "
-                         "operations); the set then uses the recipe")
-        apply.clicked.connect(self.apply_finishes)
-        preview = QPushButton("Preview textures")
+        preview = QPushButton("Before and after")
+        preview.setToolTip("The base texture next to yours, both in the unit's country colours")
         preview.clicked.connect(lambda: window.character_preview())
         render = QPushButton("Render unit")
-        render.setToolTip("the Parts page's 3D preview of this tier, body textured by the recipe")
+        render.setToolTip("Draw the whole soldier in 3D with your textures and parts (needs Blender; takes a while)")
         render.clicked.connect(lambda: window.character_render())
-        for w in (apply, preview, render):
+        for w in (preview, render):
             act.addWidget(w)
-        tl.addLayout(act)
-
-        self.after = QLabel("Preview and render show here.")
+        act.addStretch(1)
+        vl.addLayout(act)
+        self.after = QLabel("Before/after and renders show here.")
         self.after.setAlignment(Qt.AlignCenter)
         self.after_scroll = QScrollArea()
         self.after_scroll.setWidgetResizable(True)
         self.after_scroll.setWidget(self.after)
         self.after_scroll.setMinimumHeight(80)
+        vl.addWidget(self.after_scroll, 1)
 
+        # resizable panes: the body | (areas / paint / preview)
         self.right_split = QSplitter(Qt.Vertical)
-        self.right_split.addWidget(tools)
-        self.right_split.addWidget(self.after_scroll)
+        for w in (areas_box, paint, prev_box):
+            self.right_split.addWidget(w)
         self.right_split.setChildrenCollapsible(False)
-        self.right_split.setSizes([420, 300])
+        self.right_split.setSizes([380, 110, 260])
         self.split = QSplitter(Qt.Horizontal)
-        self.split.addWidget(left)
+        self.split.addWidget(body_box)
         self.split.addWidget(self.right_split)
         self.split.setChildrenCollapsible(False)
-        self.split.setSizes([540, 560])
+        self.split.setSizes([560, 560])
         self.layout_.addWidget(self.split, 1)
         self.layout_.addWidget(self.message)
         self.show_hint(loaded=False)
@@ -295,10 +343,10 @@ class CharacterPage(Page):
             text = "Loading the EU4 install...\n\nThis takes a few seconds."
         elif not loaded:
             text = ("The EU4 install isn't loaded yet.\n\nGo to 1. Settings, check the EU4 folder,\n"
-                    "and press \"Load EU4 install\".\nThen come back and press \"Show body areas\".")
+                    "and press \"Load EU4 install\".\nThen come back and press \"Show body\".")
         else:
             text = ("No body shown yet.\n\nPick a tier and role above\n"
-                    "and press \"Show body areas\" to see\nthe body's texture and its areas.")
+                    "and press \"Show body\" to see\nthe body's texture and its areas.")
         self.canvas.clear()
         self.canvas.setText(text)
         self.canvas.setAlignment(Qt.AlignCenter)
@@ -349,10 +397,12 @@ class CharacterPage(Page):
         names = [KEEP] + [f"{k}: {v['label']}" for k, v in finishes().items()]
         self._edges = {r: (c.get("grow", 0), c.get("feather", 0)) for r, c in chosen.items()}
         for i, region in enumerate(rows):
-            label = QLabel(region.removeprefix("area:"))
-            self.table.setCellWidget(i, 0, label)
+            name = QLabel(label(region))
+            name.setToolTip(_describe(region, body.base))
+            self.table.setCellWidget(i, 0, name)
             combo = QComboBox()
             combo.addItems(names)
+            combo.setToolTip("What this area is made of; \"keep\" leaves the base texture")
             c = chosen.get(region)
             if c:
                 combo.setCurrentIndex(1 + list(finishes()).index(c["finish"]))
@@ -367,6 +417,8 @@ class CharacterPage(Page):
                 box.setRange(lo, hi)
                 box.setValue(v)
                 box.setSuffix(" px")
+                box.setToolTip("Make the area bigger (or smaller, below 0) by this many pixels" if col == 3
+                               else "Soften the area's edge over this many pixels")
                 box.valueChanged.connect(lambda _=0, r=region: self._edge_changed(r))
                 self.table.setCellWidget(i, col, box)
             self._paint_button(region)
@@ -453,7 +505,7 @@ class CharacterPage(Page):
 
     def _pick_colour(self, region: str, apply: bool = True) -> None:
         start = QColor(*(self._colour_of(region) or (128, 128, 128)))
-        c = QColorDialog.getColor(start, self, f"Colour for {region.removeprefix('area:')}")
+        c = QColorDialog.getColor(start, self, f"Colour for {label(region)}")
         if c.isValid():
             self._colours[region] = (c.red(), c.green(), c.blue())
             self._paint_button(region)
@@ -492,14 +544,14 @@ class CharacterPage(Page):
         self._selected = highlight
         masks = self._all_masks()
         colours = {r: self._colour_of(r) for r in self.regions() if self._colour_of(r)}
-        legend = [f"{r.removeprefix('area:')} → {self._finish(r)}" for r in colours]
-        tint = {highlight: TINTS[self.regions().index(highlight) % len(TINTS)]} if highlight else {}
+        legend = [f"{label(r)} → {self._finish(r)}" for r in colours]
+        tint = {highlight: SELECTED} if highlight else {}
         if self.view.currentText() == VIEWS[0]:
             self.canvas.show_map(overlay(self.finished_map(), masks, tint, 0.45))
         else:
             self.canvas.show_map(overlay(self.body.diffuse, masks, {**colours, **tint}, 0.6))
         self.legend.setText("Finishes: " + (", ".join(legend) if legend else "none yet")
-                            + (f"<br>Selected: <b>{highlight.removeprefix('area:')}</b>" if highlight else ""))
+                            + (f"<br>Selected (in blue): <b>{label(highlight)}</b>" if highlight else ""))
 
     def _highlight(self) -> None:
         rows = {i.row() for i in self.table.selectedIndexes()}
@@ -593,8 +645,8 @@ class CharacterPage(Page):
             return self.show_message("No named area there (no area covers that part of the texture).")
         best = min(hits, key=lambda r: self._sizes.get(r, 0))
         self.table.selectRow(rows.index(best))
-        others = [h.removeprefix("area:") for h in hits if h != best]
-        self.show_message(f"<b>{best.removeprefix('area:')}</b>" + (f" (also in: {', '.join(others)})" if others else ""))
+        others = [label(h) for h in hits if h != best]
+        self.show_message(f"<b>{label(best)}</b>" + (f" (also in: {', '.join(others)})" if others else ""))
 
     # ------------------------------------------------------------------ recipe
     def apply_finishes(self, chosen: dict | None = None) -> None:
