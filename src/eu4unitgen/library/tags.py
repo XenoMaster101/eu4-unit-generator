@@ -9,6 +9,7 @@ modelled here counts as unknown, and unknown counts as "might match".
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from eu4unitgen.library.scanner import GameFiles, Index
@@ -286,3 +287,35 @@ def coverage(idx: Index, facts: TagFacts) -> Coverage:
     prefix = facts.tag + "_"
     cov.entities = sorted(n for n in idx.entities if n.startswith(prefix) and n[len(prefix):].split("_")[0] in UNIT_SUFFIXES)
     return cov
+
+
+# --------------------------------------------------------------------------- names (Track F, F6)
+
+_LOC_NAME = re.compile(r'^[ \t]*([A-Z][A-Z0-9]{2}):\d*[ \t]*"([^"\n]*)"', re.M)
+
+
+def _loc_names(files) -> dict[str, str]:
+    """TAG -> name from every ``*_l_english.yml`` under localisation/ (``replace/`` last, as the
+    game lets it win)."""
+    found = [(p, d) for p, _, d in files.iter_files("localisation", (".yml",), recursive=True)
+             if p.lower().endswith("_l_english.yml")]
+    found.sort(key=lambda pd: ("/replace/" in pd[0].lower(), pd[0].lower()))
+    out: dict[str, str] = {}
+    for _, data in found:
+        for m in _LOC_NAME.finditer(data.decode("utf-8-sig", errors="replace")):
+            out[m.group(1)] = m.group(2).strip()
+    return out
+
+
+def country_names(game: GameFiles, mod: GameFiles | None = None) -> dict[str, tuple[str, bool]]:
+    """TAG -> (name, mod-only) for every tag in common/country_tags: the game's, then the mod's
+    (its tags and localisation win). A tag without a name shows as itself."""
+    tags = set(country_files(game))
+    names = _loc_names(game)
+    mod_only: set[str] = set()
+    if mod is not None:
+        mod_tags = set(country_files(mod))
+        mod_only = mod_tags - tags
+        tags |= mod_tags
+        names.update(_loc_names(mod))
+    return {t: (names.get(t) or t, t in mod_only) for t in sorted(tags)}

@@ -269,6 +269,22 @@ class Session:
                 mod.close()
         return self._base_facts[key]
 
+    def country_list(self) -> list[tuple[str, str, bool]]:
+        """(tag, name, mod-only) for the nation picker, by name: the game's tags and the mod
+        folder's (Settings), with the mod's localisation winning (F6)."""
+        from eu4unitgen.library.scanner import GameFiles
+        from eu4unitgen.library.tags import country_names
+
+        game, _ = self.game()
+        folder = self.settings.mod_folder
+        mod = GameFiles(Path(folder), include_dlc=False) if folder and Path(folder).is_dir() else None
+        try:
+            names = country_names(game, mod)
+        finally:
+            if mod is not None:
+                mod.close()
+        return sorted(((t, n, o) for t, (n, o) in names.items()), key=lambda x: (x[1].lower(), x[0]))
+
     def available_dlc(self) -> list[str]:
         return sorted(self.game()[0].zips)
 
