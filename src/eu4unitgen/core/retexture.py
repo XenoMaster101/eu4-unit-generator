@@ -72,6 +72,7 @@ class Edited:
     """New images for a slot; None keeps the vanilla texture."""
     diffuse: Image.Image | None = None
     specular: Image.Image | None = None
+    normal: Image.Image | None = None
 
 
 @dataclass
@@ -113,7 +114,7 @@ def retextured_mesh(naming: Naming, set_name: str, r: Retexture, game: GameFiles
     edited = r.edit(base)
     names = {"diffuse": base.shape["diffuse"], "normal": base.shape["normal"], "specular": base.shape["specular"]}
     files = []
-    for kind, img in (("diffuse", edited.diffuse), ("specular", edited.specular)):
+    for kind, img in (("diffuse", edited.diffuse), ("normal", edited.normal), ("specular", edited.specular)):
         if img is None:
             continue
         raw = base.raw(kind)
@@ -183,9 +184,10 @@ def retexture_set(naming: Naming, set_name: str, owner: str, entities: list[dict
 
             def areas(b=b):  # the base body's named texture areas, computed only when an op asks
                 return area_masks(game.read(b.mesh_file), b.diffuse.size, b.mesh_file)
-            result = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role, areas)
+            result = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role, areas,
+                                lambda b=b: b.image("normal"))
             holder["notes"] = result.notes
-            return Edited(result.diffuse, result.specular)
+            return Edited(result.diffuse, result.specular, result.normal)
         try:
             mesh, made = retextured_mesh(naming, set_name, Retexture(role, tier, base, edit), game, idx)
         except RecipeError as exc:

@@ -32,6 +32,27 @@ def area_names() -> list[str]:
     return sorted(names)
 
 
+def skin_colour(diffuse: Image.Image, skin: Image.Image) -> tuple[int, int, int]:
+    """The body's own skin tone: the mean colour of its skin region (face, hands)."""
+    from PIL import ImageStat
+
+    if skin.getbbox() is None:
+        return (196, 150, 120)  # no skin found: a neutral tan
+    mean = ImageStat.Stat(diffuse.convert("RGB"), skin.resize(diffuse.size).point(lambda v: 255 if v >= 128 else 0)).mean
+    return tuple(round(c) for c in mean)
+
+
+def overlay(diffuse: Image.Image, masks: dict[str, Image.Image], colours: dict[str, tuple],
+            opacity: float = 0.5) -> Image.Image:
+    """The body texture with the given areas tinted (later areas on top): the Character page's map."""
+    out = diffuse.convert("RGB")
+    for name, colour in colours.items():
+        if name in masks:
+            m = masks[name] if masks[name].size == out.size else masks[name].resize(out.size)
+            out = Image.composite(Image.blend(out, Image.new("RGB", out.size, colour), opacity), out, m)
+    return out
+
+
 def area_masks(mesh: bytes, size: tuple[int, int], base_file: str | None = None,
                names: list[str] | None = None) -> dict[str, Image.Image]:
     """``{area: 'L' mask}`` at ``size`` for the body ``mesh`` (.mesh bytes). A triangle belongs to

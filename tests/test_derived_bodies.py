@@ -407,3 +407,22 @@ def test_area_masks_and_area_regions():
     res = apply_slot(TextureRecipe(), slot, diffuse, spec, "PdxMeshColor", areas=lambda: masks)
     assert res.diffuse.getpixel((8, 8))[:3] == (200, 150, 120) and res.diffuse.getpixel((30, 30))[:3] == (100, 100, 100)
     assert res.specular.getpixel((8, 8))[:3] == (0, 0, 0) and res.specular.getpixel((30, 30))[:3] == (255, 255, 0)
+
+
+def test_flatten_normal_and_overlay():
+    """A3a: flatten blends the normal map to flat in a region; overlay tints areas."""
+    from PIL import Image
+    from eu4unitgen.core.recipe import SlotRecipe, TextureRecipe, apply_slot
+    from eu4unitgen.textures.areas import overlay, skin_colour
+
+    masks = {"arms": Image.new("L", (8, 8), 0)}
+    masks["arms"].paste(255, (0, 0, 4, 8))
+    normal = Image.new("RGBA", (8, 8), (90, 160, 200, 255))
+    slot = SlotRecipe(ops=[{"op": "flatten", "region": "area:arms"}])
+    res = apply_slot(TextureRecipe(), slot, Image.new("RGBA", (8, 8)), None, "PdxMeshStandard", areas=masks,
+                     normal=lambda: normal)
+    assert res.normal.getpixel((1, 1)) == (128, 128, 255, 255) and res.normal.getpixel((6, 1)) == (90, 160, 200, 255)
+    assert res.diffuse is None and res.specular is None
+    out = overlay(Image.new("RGB", (8, 8), (0, 0, 0)), masks, {"arms": (200, 0, 0)})
+    assert out.getpixel((1, 1))[0] == 100 and out.getpixel((6, 1)) == (0, 0, 0)
+    assert skin_colour(Image.new("RGB", (8, 8), (180, 120, 90)), masks["arms"]) == (180, 120, 90)

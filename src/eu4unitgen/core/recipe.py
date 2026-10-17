@@ -14,11 +14,13 @@ A recipe is a JSON file in the user's project (never in this repo):
            {"op": "pattern", "region": "mask:stripes_mask.png", "image": "stripes.png",
             "blend": "multiply", "opacity": 0.6, "scale": 1.0},
            {"op": "spec_paint", "channel": "country1", "mask": "primary.png", "mode": "set"},
-           {"op": "gloss", "region": "metal", "preset": "metal"}       # or "mask": ..., "percent": 10
+           {"op": "gloss", "region": "metal", "preset": "metal"},      # or "mask": ..., "percent": 10
+           {"op": "flatten", "region": "area:arms", "strength": 1.0}   # normal map toward flat (skin over mail)
          ]}}}
 
 Slots are ``<tier>/<role>`` with role in MESH_ROLES (``infantry`` also dresses the cavalry
-rider and the artillery crew). Regions are those of ``textures.regions`` or ``mask:<png>``.
+rider and the artillery crew). Regions are those of ``textures.regions``, ``mask:<png>`` or
+``area:<name>`` (the body's named texture areas, textures.areas).
 Paths are relative to the recipe file. Diffuse operations skip the protect mask; spec
 operations (``spec_paint``, ``gloss``) don't.
 """
@@ -36,7 +38,7 @@ from eu4unitgen.textures import recolour as rc
 from eu4unitgen.textures.regions import COUNTRY_REGIONS, REGIONS, area, auto_regions, protect_mask
 
 SCHEMA = 1
-OPS = ("palette", "recolour", "hue_shift", "pattern", "spec_paint", "gloss")
+OPS = ("palette", "recolour", "hue_shift", "pattern", "spec_paint", "gloss", "flatten")
 SPEC_OPS = ("spec_paint", "gloss")
 
 
@@ -182,6 +184,10 @@ def check_op(op: dict) -> None:
             raise RecipeError(f"gloss: preset must be one of {sorted(rc.GLOSS_PRESETS)}")
         if "preset" not in op and not isinstance(op.get("percent"), (int, float)):
             raise RecipeError("gloss: needs a preset or a percent")
+    elif kind == "flatten":
+        _check_region(op)
+        if not isinstance(op.get("strength", 1.0), (int, float)) or not 0 <= op.get("strength", 1.0) <= 1:
+            raise RecipeError("flatten: strength must be 0-1")
 
 
 # --------------------------------------------------------------------------- applying a slot
@@ -193,13 +199,15 @@ class SlotResult:
     regions: dict[str, Image.Image]
     protect: Image.Image
     notes: list[str] = field(default_factory=list)
+    normal: Image.Image | None = None
 
 
 def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, specular: Image.Image | None,
-               shader: str, role: str = "infantry", areas=None) -> SlotResult:
+               shader: str, role: str = "infantry", areas=None, normal=None) -> SlotResult:
     """Run a slot's operations on decoded base textures. Returns new images (None = unchanged).
     On a horse, the ``skin`` region is the whole hide (protected by default). ``areas``: the base
-    body's named texture areas (textures.areas), a dict or a callable returning one."""
+    body's named texture areas (textures.areas), a dict or a callable returning one. ``normal``:
+    the base normal map (or a callable returning it), read only by ``flatten``."""
     colour_shader = shader == "PdxMeshColor"
     regions = auto_regions(diffuse, specular, colour_shader, hide=role == "horse")
     override = recipe.image(slot.protect_mask) if slot.protect_mask else None
@@ -207,6 +215,7 @@ def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, sp
     size = diffuse.size
     d, s = diffuse.convert("RGBA"), (specular.convert("RGBA") if specular is not None else None)
     d_changed = s_changed = False
+    n = None  # the edited normal map, once a flatten op asks for it
     notes: list[str] = []
 
     area_cache: dict = {}
@@ -278,7 +287,16 @@ def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, sp
             pct = rc.GLOSS_PRESETS[op["preset"]] if "preset" in op else float(op["percent"])
             s = rc.gloss(s, mask_or_region(op), pct)
             s_changed = True
-    return SlotResult(d if d_changed else None, s if s_changed else None, regions, protect, notes)
+        elif kind == "flatten":
+            if n is None:
+                n = normal() if callable(normal) else normal
+                if n is None:
+                    raise RecipeError("flatten: this base has no normal map")
+                n = n.convert("RGBA")
+            m = region(op["region"])
+            n = rc.flatten(n, m if m.size == n.size else m.resize(n.size, Image.Resampling.NEAREST),
+                           float(op.get("strength", 1.0)))
+    return SlotResult(d if d_changed else None, s if s_changed else None, regions, protect, notes, n)
 
 
 # --------------------------------------------------------------------------- the Textures screen's form

@@ -1312,6 +1312,10 @@ Constraints carried over:
       - **Bronze:** 180 130 60 → **125 85 38** (darker, warmer), and the paint's bronze edge-wear lightening 55 → 30. The helmet's bronze diffuse peaked at 170-180 against vanilla metal's 60-100, which read as ivory in test 12.
       - **`greek_helmet` crest:** a new `crest_width` param (default 0.36, was a fixed 0.24) and `crest_height` 0.9 → 1.3.
       - Preview: `build/a2/helmet_close.png`.
+    - **A3a (2026-10-16): normal maps in recipes; body areas for the GUI.**
+      - type1's normal map is strongly bumped on the mail sleeves (arms std 28 per channel; thighs 14): skin painted there would look scaly.
+      - New recipe op `flatten` (region, strength 0-1) blends the normal map toward flat 128 128 255 (alpha kept). Retexturing writes a derived normal map when a slot flattens, and derived bodies pick it up from the meshsettings like the diffuse and spec.
+      - The texture preview now resolves `area:` regions. `Session.body_areas(spec, tier, role)` returns the base body texture, its area masks and its own skin tone (the skin region's mean colour), for "bare skin" areas.
     - **Next (user):** A, the GUI Character page with named texture areas per body (arms → skin, legs → skin, shins → bronze greaves), proven by rebuilding the hoplite in the GUI with bare arms and legs, a proper bronze helmet and a fuller crest; B, import part; C, an **import full body** mode, spiked first; D, TripoSG.
  The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
 

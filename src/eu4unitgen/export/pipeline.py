@@ -126,6 +126,16 @@ class TexturePreview:
     notes: list[str]
 
 
+@dataclass
+class BodyAreas:
+    base: str  # the base pdxmesh
+    mesh_file: str
+    shader: str
+    diffuse: Any  # PIL RGB: the base body texture (base game: shown, never saved)
+    areas: dict  # area name -> 'L' mask at the diffuse's size
+    skin: tuple  # the body's own skin tone (the skin region's mean), for "bare skin" areas
+
+
 # Unit colours for tags without a common/country_colors entry: the file's example template.
 # UNVERIFIED engine default; in-game test 5 (HDA, no entry) showed red units.
 DEFAULT_UNIT_COLOURS = [(205, 32, 26), (255, 255, 255), (70, 50, 40)]
@@ -491,7 +501,8 @@ class Session:
 
         b = self._slot_base(spec, tier, role, slot.base)
         try:
-            res = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role)
+            res = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role,
+                             lambda: self._areas(b), lambda: b.image("normal"))
         except RecipeError as exc:
             raise SpecError(str(exc)) from exc
         colours, notes = self._preview_colours(spec)
@@ -500,6 +511,22 @@ class Session:
         return TexturePreview(b.pdxmesh, shader, guide(b.diffuse, res.regions),
                               shade(b.diffuse, b.specular, colours, shader),
                               shade(res.diffuse or b.diffuse, res.specular or b.specular, colours, shader), notes)
+
+    @staticmethod
+    def _areas(b) -> dict:
+        from eu4unitgen.textures.areas import area_masks
+
+        return area_masks(b.game.read(b.mesh_file), b.diffuse.size, b.mesh_file)
+
+    def body_areas(self, spec: SetSpec, tier: int, role: str = "infantry", base: str | None = None) -> BodyAreas:
+        """The slot's base body texture and its named texture areas (the Character page's map)."""
+        from eu4unitgen.textures.areas import skin_colour
+        from eu4unitgen.textures.regions import auto_regions
+
+        b = self._slot_base(spec, tier, role, base)
+        regions = auto_regions(b.diffuse, b.specular, b.shape["shader"] == "PdxMeshColor", hide=role == "horse")
+        return BodyAreas(b.pdxmesh, b.mesh_file, b.shape["shader"], b.diffuse.convert("RGB"), self._areas(b),
+                         skin_colour(b.diffuse, regions["skin"]))
 
     def _preview_colours(self, spec: SetSpec) -> tuple[list, list[str]]:
         """The colours previews tint country regions with: the set's unit colours, else the tag's

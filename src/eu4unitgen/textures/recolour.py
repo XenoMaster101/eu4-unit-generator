@@ -110,6 +110,18 @@ def spec_paint(spec: Image.Image, mask: Image.Image, channel: str, mode: str = "
     return Image.merge("RGBA", bands)
 
 
+FLAT_NORMAL = (128, 128, 255)  # tangent-space "no bump" (RGB, OpenGL green-up as measured on vanilla)
+
+
+def flatten(normal: Image.Image, mask: Image.Image, strength: float = 1.0) -> Image.Image:
+    """Blend the normal map toward flat inside ``mask`` (alpha kept): e.g. bare skin painted over mail."""
+    if not 0 <= strength <= 1:
+        raise RecolourError(f"flatten strength {strength} must be 0-1")
+    src = normal.convert("RGBA")
+    flat = Image.merge("RGBA", (*(Image.new("L", src.size, c) for c in FLAT_NORMAL), src.getchannel("A")))
+    return Image.composite(flat, src, _scaled(mask, strength))
+
+
 def gloss(spec: Image.Image, mask: Image.Image, percent: float) -> Image.Image:
     """Set spec alpha (gloss) to ``percent`` of 255 inside ``mask``."""
     if not 0 <= percent <= 100:
