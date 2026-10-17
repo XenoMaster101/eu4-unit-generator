@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "note": "Words the prompt front end understands (SPEC Track F, F4; core.prompt). Each entry: kind, value, label and its words (synonyms; multi-word phrases match before single words). kinds: template (a starting look), scope (which unit type the following words describe, until the next comma or full stop), weapon / shield / helmet / crest (core.look parts), material (a finish), garment (a body area; default: the material it means alone), colour (rgb; on a crest: the crest, on a shield: the main unit colour, on a garment: tints it, alone: the main unit colour), negation (no / without: the next part is removed), progression. The user's own synonyms (vocabulary.json in the config folder) are merged over this file. Colour values are plain named colours, not from any game.",
+  "stopwords": ["a", "an", "the", "and", "or", "with", "of", "in", "on", "to", "for", "their", "they", "them", "who", "that", "which", "is", "are", "be", "wear", "wears", "wearing", "worn", "carry", "carries", "carrying", "armed", "wield", "wielding", "holding", "hold", "bearing", "some", "very", "like", "style", "styled", "type", "kind", "look", "looking", "dressed", "clad", "equipped", "soldier", "soldiers", "troops", "men", "warrior", "warriors", "unit", "units", "army", "my", "our", "greek", "hellenistic", "macedonian", "ancient", "classical", "heavy", "light", "elite", "made", "has", "have", "plus", "also", "but", "by", "from", "as", "all", "every", "each", "s", "tier", "tiers", "level", "levels"],
+  "entries": [
+    {"kind": "template", "value": "hoplite", "label": "Hoplite", "words": ["hoplite", "hoplites", "hoplitai"]},
+    {"kind": "template", "value": "phalangite", "label": "Phalangite", "words": ["phalangite", "phalangites", "phalanx", "pezhetairoi", "pikemen", "pikeman"]},
+    {"kind": "template", "value": "companion_cavalry", "label": "Companion cavalry", "words": ["companion cavalry", "companions", "companion", "hetairoi"]},
+    {"kind": "template", "value": "peltast", "label": "Peltast", "words": ["peltast", "peltasts", "skirmishers", "skirmisher", "light infantry"]},
+
+    {"kind": "scope", "value": "infantry", "label": "Infantry", "words": ["infantry", "foot", "footmen", "spearmen", "infantrymen"]},
+    {"kind": "scope", "value": "cavalry", "label": "Cavalry", "words": ["cavalry", "riders", "rider", "horsemen", "horseman", "cavalrymen", "mounted", "knights"]},
+    {"kind": "scope", "value": "artillery", "label": "Artillery", "words": ["artillery", "crew", "crews", "gunners", "gun crew", "gun crews", "siege crews"]},
+
+    {"kind": "weapon", "value": "dory", "label": "Dory (spear)", "words": ["dory", "spear", "spears", "short spear", "short spears", "thrusting spear"]},
+    {"kind": "weapon", "value": "sarissa", "label": "Sarissa (long pike)", "words": ["sarissa", "sarissas", "sarissai", "pike", "pikes", "long spear", "long spears", "long pike", "long pikes"]},
+    {"kind": "weapon", "value": "xyston", "label": "Xyston (cavalry lance)", "words": ["xyston", "lance", "lances", "cavalry lance", "cavalry lances"], "scope": "cavalry"},
+    {"kind": "weapon", "value": "xiphos", "label": "Xiphos (sword)", "words": ["xiphos", "sword", "swords", "short sword", "short swords", "blade", "blades"]},
+
+    {"kind": "shield", "value": "hoplon", "label": "Round shield", "words": ["hoplon", "hopla", "aspis", "round shield", "round shields", "shield", "shields", "big shield", "large shield", "large shields"]},
+    {"kind": "shield", "value": "hoplon", "id": "small", "label": "Small shield", "params": {"radius": 2.6}, "words": ["small shield", "small shields", "pelte", "peltai", "light shield", "light shields", "buckler", "bucklers"]},
+
+    {"kind": "helmet", "value": "corinthian", "label": "Corinthian helmet", "words": ["corinthian", "corinthian helmet", "corinthian helmets", "full helmet", "full helmets", "closed helmet", "closed helmets", "face covering helmet"]},
+    {"kind": "helmet", "value": "attic", "label": "Attic helmet", "words": ["attic", "attic helmet", "attic helmets", "open helmet", "open helmets", "open faced helmet", "open face helmet", "helmet", "helmets", "helm", "helms"]},
+    {"kind": "helmet", "value": "pilos", "label": "Pilos (cone helmet)", "words": ["pilos", "pilos helmet", "cone helmet", "conical helmet", "conical helmets", "felt cap", "cap", "caps", "simple helmet", "simple helmets"]},
+
+    {"kind": "crest", "value": "fore_aft", "label": "Crest", "words": ["crest", "crests", "crested", "plume", "plumes", "plumed", "horsehair", "horsehair crest", "horsehair crests", "mohawk"]},
+    {"kind": "crest", "value": "transverse", "label": "Crest, side to side", "words": ["transverse crest", "transverse crests", "sideways crest", "sideways crests", "transverse"]},
+
+    {"kind": "material", "value": "bronze", "label": "Bronze", "words": ["bronze", "brass", "golden bronze"]},
+    {"kind": "material", "value": "iron", "label": "Iron", "words": ["iron", "steel", "mail", "chainmail", "chain mail", "scale"]},
+    {"kind": "material", "value": "linen", "label": "Linen", "words": ["linen", "cloth", "fabric", "linothorax", "quilted"]},
+    {"kind": "material", "value": "leather", "label": "Leather", "words": ["leather", "hide"]},
+    {"kind": "material", "value": "skin", "label": "Bare skin", "words": ["bare", "naked", "skin", "exposed", "uncovered"]},
+
+    {"kind": "garment", "value": "torso", "label": "Torso (cuirass, tunic)", "default": "linen", "words": ["cuirass", "cuirasses", "tunic", "tunics", "chiton", "torso", "corselet", "body"]},
+    {"kind": "garment", "value": "shins", "label": "Shins (greaves)", "default": "bronze", "words": ["greaves", "greave", "shins", "shin guards", "knemides"]},
+    {"kind": "garment", "value": "upper_torso", "label": "Chest (breastplate, armour)", "default": "bronze", "words": ["breastplate", "breastplates", "chest plate", "chest", "upper body", "muscle cuirass", "muscle cuirasses", "armour", "armor", "armoured", "armored", "body armour", "body armor"]},
+    {"kind": "garment", "value": "arms", "label": "Arms", "default": "skin", "words": ["arms", "arm"]},
+    {"kind": "garment", "value": "legs", "label": "Legs", "default": "skin", "words": ["legs", "leg", "thighs"]},
+    {"kind": "garment", "value": "belt", "label": "Belt", "default": "leather", "words": ["belt", "belts", "girdle", "sash"]},
+    {"kind": "garment", "value": "feet", "label": "Feet (sandals)", "default": "leather", "words": ["feet", "sandals", "boots", "shoes"]},
+    {"kind": "garment", "value": "lower_torso", "label": "Skirt", "default": "linen", "words": ["skirt", "skirts", "pteruges", "kilt", "lower body", "waist"]},
+    {"kind": "garment", "value": "collar", "label": "Collar", "default": "bronze", "words": ["collar", "collars", "neck", "neckline"]},
+    {"kind": "garment", "value": "shoulders", "label": "Shoulders", "default": "linen", "words": ["shoulders", "shoulder", "shoulder guards", "pauldrons"]},
+    {"kind": "garment", "value": "upper_sleeves", "label": "Short sleeves", "default": "linen", "words": ["sleeves", "short sleeves", "sleeve"]},
+    {"kind": "garment", "value": "forearms", "label": "Forearms (bracers)", "default": "leather", "words": ["forearms", "bracers", "vambraces", "wrists"]},
+
+    {"kind": "colour", "value": [170, 30, 30], "id": "red", "label": "Red", "words": ["red", "crimson", "scarlet", "vermilion", "blood red", "ruby"]},
+    {"kind": "colour", "value": [110, 20, 30], "id": "dark_red", "label": "Dark red", "words": ["dark red", "maroon", "burgundy", "wine", "wine red"]},
+    {"kind": "colour", "value": [150, 30, 110], "id": "purple", "label": "Purple", "words": ["purple", "violet", "royal purple", "tyrian purple", "magenta"]},
+    {"kind": "colour", "value": [40, 70, 160], "id": "blue", "label": "Blue", "words": ["blue", "azure", "cobalt", "sky blue", "light blue"]},
+    {"kind": "colour", "value": [25, 35, 80], "id": "navy", "label": "Dark blue", "words": ["navy", "dark blue", "indigo", "deep blue"]},
+    {"kind": "colour", "value": [40, 110, 50], "id": "green", "label": "Green", "words": ["green", "emerald", "olive green", "forest green"]},
+    {"kind": "colour", "value": [200, 170, 40], "id": "yellow", "label": "Yellow", "words": ["yellow", "saffron", "ochre", "mustard"]},
+    {"kind": "colour", "value": [195, 150, 60], "id": "gold", "label": "Gold", "words": ["gold", "golden", "gilded", "gilt"]},
+    {"kind": "colour", "value": [210, 110, 30], "id": "orange", "label": "Orange", "words": ["orange", "amber", "rust"]},
+    {"kind": "colour", "value": [235, 230, 215], "id": "white", "label": "White", "words": ["white", "ivory", "off white", "cream", "bleached"]},
+    {"kind": "colour", "value": [30, 28, 26], "id": "black", "label": "Black", "words": ["black", "ebony", "jet black", "dark"]},
+    {"kind": "colour", "value": [120, 120, 120], "id": "grey", "label": "Grey", "words": ["grey", "gray", "silver", "ash"]},
+    {"kind": "colour", "value": [110, 75, 45], "id": "brown", "label": "Brown", "words": ["brown", "tan", "umber", "chestnut"]},
+
+    {"kind": "negation", "value": "no", "label": "No", "words": ["no", "without", "none", "lacking", "not"]},
+
+    {"kind": "progression", "value": "heavier", "label": "Gets heavier with tech", "words": ["heavier with tech", "gets heavier", "heavier later", "upgrade over time", "progressive"]},
+    {"kind": "progression", "value": "same", "label": "Same look on all tiers", "words": ["same look", "same look on all tiers", "same on all tiers", "all tiers the same", "same every tier", "same at every tier"]}
+  ]
+}
