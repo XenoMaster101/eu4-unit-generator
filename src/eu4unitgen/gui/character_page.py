@@ -14,8 +14,8 @@ from PIL import Image
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QColorDialog, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox,
-    QTableWidget, QVBoxLayout, QWidget,
+    QColorDialog, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
+    QSpinBox, QSplitter, QTableWidget, QVBoxLayout, QWidget,
 )
 
 from eu4unitgen.core.finishes import FinishError, finishes, split
@@ -161,23 +161,30 @@ class CharacterPage(Page):
         slot_row.addStretch(1)
         self.layout_.addLayout(slot_row)
 
-        body = QHBoxLayout()
-        left = QVBoxLayout()
+        # resizable panes: the map | (areas table and tools / preview and render)
         self.canvas = MaskCanvas()
-        left.addWidget(self.canvas)
         self.legend = QLabel()
         self.legend.setWordWrap(True)
-        left.addWidget(self.legend)
-        body.addLayout(left)
+        left = QWidget()
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(0, 0, 0, 0)
+        canvas_scroll = QScrollArea()
+        canvas_scroll.setWidget(self.canvas)
+        canvas_scroll.setAlignment(Qt.AlignCenter)
+        ll.addWidget(canvas_scroll, 1)
+        ll.addWidget(self.legend)
 
-        right = QVBoxLayout()
+        tools = QWidget()
+        tl = QVBoxLayout(tools)
+        tl.setContentsMargins(0, 0, 0, 0)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Area", "Finish", "Colour"])
         self.table.verticalHeader().setVisible(False)
         self.table.setColumnWidth(0, 130)
         self.table.setColumnWidth(1, 190)
+        self.table.setMinimumHeight(120)
         self.table.itemSelectionChanged.connect(self._highlight)
-        right.addWidget(self.table, 1)
+        tl.addWidget(self.table, 1)
 
         paint = QGroupBox("Paint a mask (left button paints, right erases)")
         pl = QHBoxLayout(paint)
@@ -195,7 +202,7 @@ class CharacterPage(Page):
         keep.clicked.connect(self._save_mask)
         for w in (self.mask_name, QLabel("Brush"), self.brush, self.paint_btn, keep):
             pl.addWidget(w)
-        right.addWidget(paint)
+        tl.addWidget(paint)
 
         act = QHBoxLayout()
         apply = QPushButton("Apply to the texture recipe")
@@ -209,13 +216,45 @@ class CharacterPage(Page):
         render.clicked.connect(lambda: window.character_render())
         for w in (apply, preview, render):
             act.addWidget(w)
-        right.addLayout(act)
-        self.after = QLabel()
-        self.after.setMinimumHeight(260)
-        right.addWidget(self.after)
-        body.addLayout(right, 1)
-        self.layout_.addLayout(body, 1)
+        tl.addLayout(act)
+
+        self.after = QLabel("Preview and render show here.")
+        self.after.setAlignment(Qt.AlignCenter)
+        self.after_scroll = QScrollArea()
+        self.after_scroll.setWidgetResizable(True)
+        self.after_scroll.setWidget(self.after)
+        self.after_scroll.setMinimumHeight(80)
+
+        self.right_split = QSplitter(Qt.Vertical)
+        self.right_split.addWidget(tools)
+        self.right_split.addWidget(self.after_scroll)
+        self.right_split.setChildrenCollapsible(False)
+        self.right_split.setSizes([420, 300])
+        self.split = QSplitter(Qt.Horizontal)
+        self.split.addWidget(left)
+        self.split.addWidget(self.right_split)
+        self.split.setChildrenCollapsible(False)
+        self.split.setSizes([540, 560])
+        self.layout_.addWidget(self.split, 1)
         self.layout_.addWidget(self.message)
+        self.show_hint(loaded=False)
+
+    def show_hint(self, loaded: bool, loading: bool = False) -> None:
+        """What the empty map says: why it's empty and what to do next."""
+        if self.body is not None:
+            return
+        if loading:
+            text = "Loading the EU4 install...\n\nThis takes a few seconds."
+        elif not loaded:
+            text = ("The EU4 install isn't loaded yet.\n\nGo to 1. Settings, check the EU4 folder,\n"
+                    "and press \"Load EU4 install\".\nThen come back and press \"Show body areas\".")
+        else:
+            text = ("No body shown yet.\n\nPick a tier and role above\n"
+                    "and press \"Show body areas\" to see\nthe body's texture and its areas.")
+        self.canvas.clear()
+        self.canvas.setText(text)
+        self.canvas.setAlignment(Qt.AlignCenter)
+        self.canvas.setStyleSheet("background: #333; color: #ddd; font-size: 13px")
 
     # ------------------------------------------------------------------ slot
     def slot_key(self) -> tuple[int, str]:
@@ -397,7 +436,7 @@ class CharacterPage(Page):
         self.show_message("Before | after, tinted with the unit colours. " + "; ".join(preview.notes))
 
     def show_render(self, preview) -> None:
-        w = max(300, min(900, self.after.width() - 10))
+        w = max(300, min(900, self.after_scroll.viewport().width() - 10))
         self.after.setPixmap(QPixmap.fromImage(_qimage(preview.image)).scaledToWidth(w, Qt.SmoothTransformation))
         self.show_message(f"Saved to {preview.path}. " + "; ".join(preview.notes))
 

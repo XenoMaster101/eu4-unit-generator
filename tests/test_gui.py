@@ -336,3 +336,36 @@ def test_character_page_areas_finishes_masks_and_spec(window, fake_install, tmp_
     page.apply_finishes()  # re-applying replaces, never duplicates
     ops = window.textures_page.recipe.slots[(1, "infantry")].ops
     assert sum(1 for o in ops if o["op"] == "recolour" and o.get("region") == "area:arms") == 1
+
+
+def test_u1_wheel_guard_splitters_and_empty_hint(window, qapp):
+    """U1: the wheel never changes an unfocused dropdown; a big render keeps the areas table usable;
+    the empty map explains itself."""
+    from types import SimpleNamespace
+    from PIL import Image
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+
+    page = window.character_page
+    assert "isn't loaded" in page.canvas.text()
+    combo = page.role
+    window.resize(1100, 760)
+    window.steps.setCurrentRow(1)
+    window.show()
+    qapp.processEvents()
+
+    def wheel(widget):
+        ev = QWheelEvent(QPointF(5, 5), QPointF(widget.mapToGlobal(QPoint(5, 5))), QPoint(0, 0), QPoint(0, -120),
+                         Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+        qapp.sendEvent(widget, ev)
+
+    before = combo.currentIndex()
+    combo.clearFocus()
+    wheel(combo)
+    assert combo.currentIndex() == before  # unfocused: ignored
+    assert combo.focusPolicy() == Qt.StrongFocus
+
+    page.show_render(SimpleNamespace(image=Image.new("RGB", (720, 2400), (90, 90, 90)), path="x.png", notes=[]))
+    qapp.processEvents()
+    assert page.table.height() >= 120 and page.after_scroll.height() >= 80
+    window.hide()

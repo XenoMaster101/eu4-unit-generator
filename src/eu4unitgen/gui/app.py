@@ -65,6 +65,10 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self._busy = False
         self._tasks: list[_Task] = []
+        app = QApplication.instance()
+        if app is not None and getattr(app, "_wheel_guard", None) is None:
+            from eu4unitgen.gui.widgets import install_wheel_guard
+            app._wheel_guard = install_wheel_guard(app)
 
         self.settings_page = SettingsPage(self, self.session.settings)
         self.character_page = CharacterPage(self)
@@ -195,6 +199,7 @@ class MainWindow(QMainWindow):
             self.settings_page.info.setText(f"Loaded {version}: {len(cultures)} graphical cultures, "
                                             f"{len(bases)} you can copy from, {len(dlc)} DLC folders.")
             self.statusBar().showMessage("Install loaded. Tick your owned DLC, then fill in the unit set.", 8000)
+            self.character_page.show_hint(loaded=True)
         self.run(self.settings_page, "Loading EU4 install", work, done)
 
     def current_spec(self, page) -> SetSpec | None:
