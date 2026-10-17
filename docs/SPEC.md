@@ -1345,6 +1345,7 @@ Constraints carried over:
       - **U5, finer areas:**
         - collar, shoulders, upper/lower torso, belt, upper/lower sleeves from bone groups plus height splits in the library;
         - per-row grow/shrink (px) and smoothed (feathered) edges.
+        - Done: bands in `library/bodies.json` "bands" cut a parent area along `height` (y) or `reach` (|x|; arms hang in an A-pose, so sleeves split by reach), as fractions of the parent's own extent: collar, upper/lower torso, belt (0.36-0.46: the type1 texture's painted belt is at 0.38-0.45), shoulders, upper/lower sleeves (halves of the upper arm). Checked on the type1 texture (`textures/areas.py` area_masks). Any op with a region takes `grow` (-32..32 px) and `feather` (0..32 px), applied by `textures.areas.adjust`; the area table has a Grow and a Feather box per row.
       - **U6, paint finishes, not pixels:**
         - the brush paints the chosen finish (with a real colour picker) and the map shows the finished texture live (recipe applied, tinted with the unit colours);
         - 6b: a 3D view with live preview and painting on the model (UNPLANNED detail: Qt Quick 3D custom geometry from the parsed .mesh; spike first).

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from eu4unitgen.core.finishes import FinishError, finishes, split
 from eu4unitgen.core.naming import MESH_ROLES, TIERS
 from eu4unitgen.gui.pages import Page, _path_row
-from eu4unitgen.textures.areas import overlay
+from eu4unitgen.textures.areas import FEATHER_MAX, GROW_MAX, adjust, overlay
 
 KEEP = "keep (base texture)"
 MAP_SIZE = 512
@@ -128,6 +128,7 @@ class CharacterPage(Page):
         self.body = None  # Session.body_areas result for the shown slot
         self.masks: dict[str, Image.Image] = {}  # mask:<png> regions painted or loaded on this page
         self._colours: dict[str, tuple] = {}  # region -> custom colour
+        self._edges: dict[str, tuple[int, int]] = {}  # region -> (grow, feather) in texture pixels
         self._quiet = False  # rebuilding the rows: their signals aren't edits
 
         top = QHBoxLayout()
@@ -198,8 +199,8 @@ class CharacterPage(Page):
         tools = QWidget()
         tl = QVBoxLayout(tools)
         tl.setContentsMargins(0, 0, 0, 0)
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Area", "Finish", "Colour"])
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["Area", "Finish", "Colour", "Grow", "Feather"])
         self.table.verticalHeader().setVisible(False)
         self.table.setColumnWidth(0, 130)
         self.table.setColumnWidth(1, 190)
@@ -316,6 +317,7 @@ class CharacterPage(Page):
         rows = self.regions()
         self.table.setRowCount(len(rows))
         names = [KEEP] + [f"{k}: {v['label']}" for k, v in finishes().items()]
+        self._edges = {r: (c.get("grow", 0), c.get("feather", 0)) for r, c in chosen.items()}
         for i, region in enumerate(rows):
             label = QLabel(region.removeprefix("area:"))
             self.table.setCellWidget(i, 0, label)
@@ -331,6 +333,14 @@ class CharacterPage(Page):
             btn = QPushButton()
             btn.clicked.connect(lambda _=False, r=region: self._pick_colour(r))
             self.table.setCellWidget(i, 2, btn)
+            for col, (lo, hi), v in ((3, (-GROW_MAX, GROW_MAX), self._edges.get(region, (0, 0))[0]),
+                                     (4, (0, FEATHER_MAX), self._edges.get(region, (0, 0))[1])):
+                box = QSpinBox()
+                box.setRange(lo, hi)
+                box.setValue(v)
+                box.setSuffix(" px")
+                box.valueChanged.connect(lambda _=0, r=region: self._edge_changed(r))
+                self.table.setCellWidget(i, col, box)
             self._paint_button(region)
         self._draw_map()
         self.show_message(f"Body {body.base} ({body.mesh_file}); its own skin tone is rgb {' '.join(map(str, body.skin))}. "
@@ -349,8 +359,29 @@ class CharacterPage(Page):
         for region in self.regions():
             f = self._finish(region)
             if f:
-                out[region] = {"finish": f, "colour": self._colours.get(region)}
+                grow, feather = self._edges.get(region, (0, 0))
+                out[region] = {"finish": f, "colour": self._colours.get(region), "grow": grow, "feather": feather}
         return out
+
+    def set_edge(self, region: str, grow: int = 0, feather: int = 0) -> None:
+        """Grow (negative: shrink) and feather a row's area, in texture pixels (tests, scripted setups)."""
+        row = self._row(region)
+        self._quiet = True
+        try:
+            self.table.cellWidget(row, 3).setValue(grow)
+        finally:
+            self._quiet = False
+        self.table.cellWidget(row, 4).setValue(feather)
+        self._edge_changed(region)
+
+    def _edge_changed(self, region: str) -> None:
+        if self._quiet:
+            return
+        row = self._row(region)
+        self._edges[region] = (self.table.cellWidget(row, 3).value(), self.table.cellWidget(row, 4).value())
+        self._draw_map()
+        if self._finish(region):
+            self.apply_finishes()
 
     def set_finish(self, region: str, finish: str | None, colour: tuple | None = None) -> None:
         """Choose a finish for a row (tests, and scripted setups)."""
@@ -397,7 +428,7 @@ class CharacterPage(Page):
     def _all_masks(self) -> dict[str, Image.Image]:
         out = {f"area:{k}": v for k, v in (self.body.areas if self.body else {}).items()}
         out.update(self.masks)
-        return out
+        return {r: adjust(m, *self._edges[r]) if self._edges.get(r, (0, 0)) != (0, 0) else m for r, m in out.items()}
 
     def _draw_map(self, highlight: str | None = None) -> None:
         """Areas with a finish show in its colour; the selected row shows in a bright tint."""

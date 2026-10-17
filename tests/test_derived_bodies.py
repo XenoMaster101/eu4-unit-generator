@@ -447,3 +447,55 @@ def test_finishes_round_trip():
     rest, back = split(out)
     assert rest == base and back["mask:greek_border.png"]["colour"] == (10, 20, 30)
     assert back["area:shins"]["finish"] == "bronze"
+
+
+def test_u5_bands_split_areas_and_edges_grow_and_feather():
+    """U5: bands cut a parent area by height (or reach); grow/shrink and feather adjust any region."""
+    from PIL import Image
+    from eu4unitgen.core.finishes import finish_ops, split
+    from eu4unitgen.core.recipe import RecipeError, SlotRecipe, TextureRecipe, apply_slot, check_op
+    from eu4unitgen.textures.areas import adjust, area_masks, area_names
+
+    spine = BONES.index("mid_spine")
+    ident = [1.0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+    bones = [{"name": b, "props": {"ix": [i], **({"pa": [0]} if i else {}), "tx": ident}, "children": []}
+             for i, b in enumerate(BONES)]
+    # two torso triangles: a low one (y 0-1, UVs on the left) and a high one (y 9-10, UVs on the right)
+    p = [0.0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 9, 0, 1, 9, 0, 0, 10, 0]
+    u0 = [0.05, 0.1, 0.4, 0.1, 0.05, 0.9, 0.6, 0.1, 0.95, 0.1, 0.6, 0.9]
+    mesh = {"name": "mesh", "props": {"p": p, "n": [0.0, 0, -1] * 6, "ta": [1.0, 0, 0, 1] * 6, "u0": u0,
+                                      "tri": [0, 2, 1, 3, 5, 4]},
+            "children": [{"name": "skin", "props": {"bones": [4], "ix": [spine, -1, -1, -1] * 6, "w": [1.0, 0, 0, 0] * 6},
+                          "children": []}]}
+    body = write_pdx_mesh({"name": "root", "props": {"pdxasset": [1, 0]}, "children": [
+        {"name": "object", "props": {}, "children": [
+            {"name": "bodyShape", "props": {}, "children": [mesh, {"name": "skeleton", "props": {}, "children": bones}]}]}]})
+    masks = area_masks(body, (40, 40))
+    left, right = (6, 8), (30, 8)
+    assert masks["torso"].getpixel(left) == 255 and masks["torso"].getpixel(right) == 255
+    assert masks["collar"].getpixel(right) == 255 and masks["collar"].getpixel(left) == 0
+    assert masks["upper_torso"].getpixel(right) == 255 and masks["lower_torso"].getpixel(left) == 255
+    assert masks["lower_torso"].getpixel(right) == 0 and masks["shoulders"].getbbox() is None
+    assert {"collar", "belt", "upper_sleeves", "lower_sleeves", "shoulders"} <= set(area_names())
+    assert list(area_masks(body, (8, 8), names=["collar"])) == ["collar"]  # a band alone still finds its parent
+
+    dot = Image.new("L", (21, 21), 0)
+    dot.paste(255, (8, 8, 13, 13))
+    assert adjust(dot, 2).getbbox() == (6, 6, 15, 15) and adjust(dot, -2).getbbox() == (10, 10, 11, 11)
+    soft = adjust(dot, 0, 4)
+    assert 0 < soft.getpixel((7, 10)) < 255 and soft.getpixel((10, 10)) < 255
+
+    ops = finish_ops("area:collar", "bronze", (1, 2, 3), grow=3, feather=2)
+    assert all(o["grow"] == 3 and o["feather"] == 2 for o in ops)
+    assert split(ops)[1]["area:collar"]["grow"] == 3
+    assert "grow" not in finish_ops("area:collar", "bronze", (1, 2, 3))[0]
+    for bad in ({"grow": 99}, {"grow": 1.5}, {"feather": -1}, {"grow": True}):
+        with pytest.raises(RecipeError):
+            check_op({"op": "recolour", "region": "area:torso", "colour": [1, 2, 3], **bad})
+    slot = SlotRecipe(ops=[{"op": "recolour", "region": "area:collar", "colour": [200, 0, 0], "detail": 0.0,
+                            "protect": False, "grow": 2}])
+    res = apply_slot(TextureRecipe(), slot, Image.new("RGBA", (40, 40), (90, 90, 90, 255)), None, "PdxMeshStandard",
+                     areas=masks)
+    grown = adjust(masks["collar"], 2)
+    edge = next((x, 20) for x in range(40) if grown.getpixel((x, 20)) and not masks["collar"].getpixel((x, 20)))
+    assert res.diffuse.getpixel(edge)[:3] == (200, 0, 0)

@@ -392,6 +392,28 @@ def test_u3_undo_redo_reset_and_unsaved_mark(window, fake_install, tmp_path):
     assert window.windowTitle() == "eu4unitgen: saved.json" and not window.history.dirty
 
 
+def test_u5_band_rows_and_edges(window, fake_install, tmp_path):
+    """U5: bands are rows like any area; a row's grow and feather go into its finish ops and load back."""
+    page = window.character_page
+    window.load_character(_hoplite_spec(fake_install, tmp_path))
+    page.tier.setCurrentText("1")
+    window.character_areas()
+    assert {"area:collar", "area:belt", "area:upper_sleeves"} <= set(page.regions())
+    assert page.regions().index("area:torso") < page.regions().index("area:belt")  # broad before narrow
+    page.set_finish("area:belt", "leather")
+    page.set_edge("area:belt", 3, 2)
+    ops = [o for o in window.textures_page.recipe.slots[(1, "infantry")].ops if o.get("region") == "area:belt"]
+    assert ops and all(o["grow"] == 3 and o["feather"] == 2 for o in ops)
+    page.undo_btn.click()
+    assert page.chosen()["area:belt"]["grow"] == 0
+    page.redo_btn.click()
+    window.save_character(tmp_path / "char" / "edges.json")
+    window.load_character(tmp_path / "char" / "edges.json")
+    window.character_areas()
+    row = page.regions().index("area:belt")
+    assert page.table.cellWidget(row, 3).value() == 3 and page.table.cellWidget(row, 4).value() == 2
+
+
 def test_u1_wheel_guard_splitters_and_empty_hint(window, qapp):
     """U1: the wheel never changes an unfocused dropdown; a big render keeps the areas table usable;
     the empty map explains itself."""

@@ -3,7 +3,8 @@
 A finish (``library/materials.json`` "finishes") becomes ordinary texture-recipe operations on
 one region (``area:<name>`` or ``mask:<png>``): recolour (``protect`` off, ``detail`` from the
 finish), clear every unit-colour mask there, gloss, and flatten the normal map. Each operation
-carries ``"finish": <name>`` so the page can read its choices back from a saved recipe.
+carries ``"finish": <name>`` so the page can read its choices back from a saved recipe, and the
+row's ``grow`` and ``feather`` (pixels; left out when 0).
 """
 from __future__ import annotations
 
@@ -18,16 +19,18 @@ def finishes() -> dict[str, dict]:
     return library("materials")["finishes"]
 
 
-def finish_ops(region: str, finish: str, skin: tuple, colour: tuple | None = None) -> list[dict]:
+def finish_ops(region: str, finish: str, skin: tuple, colour: tuple | None = None, grow: int = 0,
+               feather: int = 0) -> list[dict]:
     """The recipe operations that give ``region`` the ``finish``. ``skin``: the body's own skin tone;
-    ``colour``: the user's colour (required by a finish whose colour is null, overrides others)."""
+    ``colour``: the user's colour (required by a finish whose colour is null, overrides others);
+    ``grow`` / ``feather``: the region's edge, in pixels."""
     f = finishes().get(finish)
     if f is None:
         raise FinishError(f"unknown finish {finish!r}; known: {', '.join(finishes())}")
     c = colour or (skin if f["colour"] == "skin" else f["colour"])
     if c is None:
         raise FinishError(f"{region}: finish {finish!r} needs a colour")
-    tag = {"finish": finish}
+    tag = {"finish": finish, **({"grow": int(grow)} if grow else {}), **({"feather": int(feather)} if feather else {})}
     ops = [{"op": "recolour", "region": region, "colour": [int(v) for v in c], "detail": f["detail"],
             "protect": False, **tag},
            {"op": "spec_paint", "channel": "all", "region": region, "mode": "clear", **tag},
@@ -44,12 +47,14 @@ def split(ops: list[dict]) -> tuple[list[dict], dict[str, dict]]:
         if "finish" not in op:
             rest.append(op)
         elif op.get("op") == "recolour":
-            chosen[op["region"]] = {"finish": op["finish"], "colour": tuple(op["colour"])}
+            chosen[op["region"]] = {"finish": op["finish"], "colour": tuple(op["colour"]),
+                                    "grow": op.get("grow", 0), "feather": op.get("feather", 0)}
     return rest, chosen
 
 
 def with_finishes(ops: list[dict], chosen: dict[str, dict], skin: tuple, order: list[str]) -> list[dict]:
-    """``ops`` with its finish operations replaced by ``chosen`` ({region: {"finish", "colour"}}),
+    """``ops`` with its finish operations replaced by ``chosen`` ({region: {"finish", "colour",
+    optional "grow", "feather"}}),
     appended after the rest in ``order`` (broad areas before narrow ones, then masks)."""
     rest, _ = split(ops)
     rank = {r: i for i, r in enumerate(order)}
@@ -57,5 +62,5 @@ def with_finishes(ops: list[dict], chosen: dict[str, dict], skin: tuple, order: 
     for region in sorted(chosen, key=lambda r: (rank.get(r, len(rank)), r)):
         c = chosen[region]
         custom = c.get("colour") if finishes()[c["finish"]]["colour"] is None else None
-        out += finish_ops(region, c["finish"], skin, custom)
+        out += finish_ops(region, c["finish"], skin, custom, c.get("grow", 0), c.get("feather", 0))
     return out

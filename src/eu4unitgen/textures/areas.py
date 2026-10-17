@@ -5,6 +5,11 @@ skeleton, overridable per body). Its mask is every triangle of the body whose ve
 skinned to the area's bones, drawn into texture space with a 2 px margin. Computed from the
 body's own mesh (bone weights and UVs), so every body on the skeleton gets them without painting.
 Texture recipes target them as ``area:<name>``.
+
+Bands (``library/bodies.json`` "bands") are finer areas cut from a parent area along an axis:
+``height`` (y) or ``reach`` (|x|, out from the body's middle; arms hang in an A-pose). A
+triangle of the parent belongs to the band holding its centroid. ``adjust`` grows, shrinks and
+feathers any mask (a recipe op's ``grow`` and ``feather``).
 """
 from __future__ import annotations
 
@@ -25,11 +30,37 @@ def groups(base_file: str | None = None) -> dict[str, list[str]]:
     return out
 
 
+def bands(base_file: str | None = None) -> dict[str, dict]:
+    """Band name -> {"of": parent area, "axis": "height" | "reach", "from", "to"}, the body's own on top."""
+    lib = library("bodies")
+    out = {k: dict(v) for k, v in lib.get("bands", {}).items()}
+    if base_file:
+        out.update({k: dict(v) for k, v in lib["bodies"].get(base_file.lower(), {}).get("bands", {}).items()})
+    return out
+
+
 def area_names() -> list[str]:
-    names = set(library("bodies").get("areas", {}))
+    names = set(library("bodies").get("areas", {})) | set(library("bodies").get("bands", {}))
     for body in library("bodies")["bodies"].values():
-        names |= set(body.get("areas", {}))
+        names |= set(body.get("areas", {})) | set(body.get("bands", {}))
     return sorted(names)
+
+
+GROW_MAX = 32  # px, either way
+FEATHER_MAX = 32
+
+
+def adjust(mask: Image.Image, grow: int = 0, feather: int = 0) -> Image.Image:
+    """``mask`` grown (``grow`` > 0) or shrunk (< 0) by that many pixels, then its edge softened
+    over ``feather`` pixels. Pixels are the mask's own."""
+    from PIL import ImageFilter
+
+    m = mask.convert("L")
+    for _ in range(abs(int(grow))):  # 3x3 steps: a big rank filter is quadratic in its size
+        m = m.filter(ImageFilter.MaxFilter(3) if grow > 0 else ImageFilter.MinFilter(3))
+    if feather > 0:
+        m = m.filter(ImageFilter.GaussianBlur(feather / 2))
+    return m
 
 
 def skin_colour(diffuse: Image.Image, skin: Image.Image, where: list[Image.Image] | None = None) -> tuple[int, int, int]:
@@ -66,10 +97,13 @@ def overlay(diffuse: Image.Image, masks: dict[str, Image.Image], colours: dict[s
 
 def area_masks(mesh: bytes, size: tuple[int, int], base_file: str | None = None,
                names: list[str] | None = None) -> dict[str, Image.Image]:
-    """``{area: 'L' mask}`` at ``size`` for the body ``mesh`` (.mesh bytes). A triangle belongs to
-    the area(s) holding most of its three vertices' dominant bones; triangles in no area are left out."""
+    """``{area: 'L' mask}`` at ``size`` for the body ``mesh`` (.mesh bytes): its bone areas, then its
+    bands. A triangle belongs to the area(s) holding most of its three vertices' dominant bones;
+    triangles in no area are left out."""
     tree = parse_pdx_mesh(mesh)
-    masks = {a: Image.new("L", size, 0) for a in (names or groups(base_file))}
+    band_defs = {b: d for b, d in bands(base_file).items() if names is None or b in names}
+    masks = {a: Image.new("L", size, 0) for a in (names or groups(base_file)) if a not in band_defs}
+    masks.update((b, Image.new("L", size, 0)) for b in band_defs)
     node = next((n for n in _walk(tree) if n["name"] == "mesh"), None)
     skeleton = next((n for n in _walk(tree) if n["name"] == "skeleton"), None)
     skin = next((c for c in node["children"] if c["name"] == "skin"), None) if node else None
@@ -80,8 +114,9 @@ def area_masks(mesh: bytes, size: tuple[int, int], base_file: str | None = None,
     skin = skin["props"]
     k = (skin.get("bones") or [4])[0]
     area_of_bone = {}
+    wanted = set(masks) | {d["of"] for d in band_defs.values()}
     for area, bones in groups(base_file).items():
-        if names is None or area in names:
+        if area in wanted:
             for b in bones:
                 area_of_bone.setdefault(b, []).append(area)
 
@@ -89,17 +124,37 @@ def area_masks(mesh: bytes, size: tuple[int, int], base_file: str | None = None,
         ws = skin["w"][v * k:(v + 1) * k]
         return bone_of.get(skin["ix"][v * k + max(range(k), key=lambda j: ws[j])], "")
 
+    pos = props["p"]
+
+    def along(v: int, axis: str) -> float:
+        return pos[v * 3 + 1] if axis == "height" else abs(pos[v * 3])
+
+    # each band's parent extent on its axis, over the parent's own vertices
+    nv = len(pos) // 3
+    doms = [dominant(v) for v in range(nv)]
+    extent = {}
+    for b, d in band_defs.items():
+        vals = [along(v, d["axis"]) for v in range(nv) if d["of"] in area_of_bone.get(doms[v], [])]
+        extent[b] = (min(vals), max(vals)) if vals else None
+
     w, h = size
     draws = {a: ImageDraw.Draw(m) for a, m in masks.items()}
     u0, tri = props["u0"], props["tri"]
     for t in range(0, len(tri), 3):
         vs = tri[t:t + 3]
-        votes = Counter(a for v in vs for a in area_of_bone.get(dominant(v), []))
+        votes = Counter(a for v in vs for a in area_of_bone.get(doms[v], []))
         if not votes:
             continue
         top = max(votes.values())
+        won = {a for a, n in votes.items() if n == top}
         pts = [(u0[v * 2] * w, u0[v * 2 + 1] * h) for v in vs]
-        for area, n in votes.items():
-            if n == top and area in draws:
+        for area in won:
+            if area in draws and area not in band_defs:
                 draws[area].polygon(pts, fill=255, outline=255, width=2)
+        for b, d in band_defs.items():
+            if d["of"] in won and extent[b] is not None:
+                lo, hi = extent[b]
+                f = (sum(along(v, d["axis"]) for v in vs) / 3 - lo) / ((hi - lo) or 1)
+                if d["from"] <= f < d["to"] or (d["to"] >= 1 and f >= 1):
+                    draws[b].polygon(pts, fill=255, outline=255, width=2)
     return masks

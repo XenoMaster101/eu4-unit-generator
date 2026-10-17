@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "note": "Base-game body facts (names, UV boxes and pixel regions only; no game data). Keys are .mesh paths, lowercase. removable: named parts a derived body can drop (any triangle with a vertex mostly on bone whose UV centroid lies in uv_px of a tex-px texture). hair_region: the diffuse's hair (x0 y0 x1 y1 [tex]) skinned additions use when no hair swatch fits. SPEC Track R. areas: named texture areas as bone groups for the generic 28-bone skeleton (a body may override them under its own \"areas\"); a triangle belongs to the area of most of its vertices' dominant bones (textures.areas); recipes target them as area:<name>. Areas are listed broad before narrow (arms before forearms, legs before shins): finishes apply in this order.",
+  "note": "Base-game body facts (names, UV boxes and pixel regions only; no game data). Keys are .mesh paths, lowercase. removable: named parts a derived body can drop (any triangle with a vertex mostly on bone whose UV centroid lies in uv_px of a tex-px texture). hair_region: the diffuse's hair (x0 y0 x1 y1 [tex]) skinned additions use when no hair swatch fits. SPEC Track R. areas: named texture areas as bone groups for the generic 28-bone skeleton (a body may override them under its own \"areas\"); a triangle belongs to the area of most of its vertices' dominant bones (textures.areas); recipes target them as area:<name>. Areas are listed broad before narrow (arms before forearms, legs before shins): finishes apply in this order. bands: finer areas cut from a parent area along an axis, as fractions of the parent's own extent on that axis (0 = its lowest or innermost vertex, 1 = its highest or outermost): height is y, reach is |x|, the distance out from the body's middle (arms hang in an A-pose, so sleeves split by reach). A triangle of the parent belongs to the band holding its centroid. A body may override them under its own \"bands\". Fractions measured on western_generic_01_type1 and african_generic_03_type1 (torso y 7.6-14.3, arms |x| 2.0-5.7); belt: the type1 texture's painted belt is at 0.38-0.45.",
   "bodies": {
     "gfx/models/units/western_generic_01_type1.mesh": {
       "removable": {
@@ -92,5 +92,49 @@
       "R_foot",
       "R_toe"
     ]
+  },
+  "bands": {
+    "collar": {
+      "of": "torso",
+      "axis": "height",
+      "from": 0.88,
+      "to": 1.0
+    },
+    "upper_torso": {
+      "of": "torso",
+      "axis": "height",
+      "from": 0.5,
+      "to": 1.0
+    },
+    "lower_torso": {
+      "of": "torso",
+      "axis": "height",
+      "from": 0.0,
+      "to": 0.5
+    },
+    "belt": {
+      "of": "torso",
+      "axis": "height",
+      "from": 0.36,
+      "to": 0.46
+    },
+    "shoulders": {
+      "of": "upper_arms",
+      "axis": "reach",
+      "from": 0.0,
+      "to": 0.4
+    },
+    "upper_sleeves": {
+      "of": "upper_arms",
+      "axis": "reach",
+      "from": 0.0,
+      "to": 0.5
+    },
+    "lower_sleeves": {
+      "of": "upper_arms",
+      "axis": "reach",
+      "from": 0.5,
+      "to": 1.0
+    }
   }
 }

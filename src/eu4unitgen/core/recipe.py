@@ -20,7 +20,9 @@ A recipe is a JSON file in the user's project (never in this repo):
 
 Slots are ``<tier>/<role>`` with role in MESH_ROLES (``infantry`` also dresses the cavalry
 rider and the artillery crew). Regions are those of ``textures.regions``, ``mask:<png>`` or
-``area:<name>`` (the body's named texture areas, textures.areas).
+``area:<name>`` (the body's named texture areas and bands, textures.areas). Any op with a
+``region`` may also carry ``"grow": px`` (negative shrinks) and ``"feather": px`` (soft edge),
+applied to that region's mask at its own size.
 Paths are relative to the recipe file. Diffuse operations skip the protect mask; spec
 operations (``spec_paint``, ``gloss``) don't.
 """
@@ -35,6 +37,7 @@ from PIL import Image
 
 from eu4unitgen.core.naming import MESH_ROLES, TIERS
 from eu4unitgen.textures import recolour as rc
+from eu4unitgen.textures.areas import adjust
 from eu4unitgen.textures.regions import COUNTRY_REGIONS, REGIONS, area, auto_regions, protect_mask
 
 SCHEMA = 1
@@ -130,6 +133,11 @@ def _check_region(op: dict, key: str = "region") -> None:
     if not ok:
         raise RecipeError(f"{op.get('op')}: {key} {region!r} must be one of {REGIONS}, mask:<png> or "
                           f"area:<name> ({', '.join(area_names())})")
+    from eu4unitgen.textures.areas import FEATHER_MAX, GROW_MAX
+
+    for k, lo, hi in (("grow", -GROW_MAX, GROW_MAX), ("feather", 0, FEATHER_MAX)):
+        if k in op and not (isinstance(op[k], int) and not isinstance(op[k], bool) and lo <= op[k] <= hi):
+            raise RecipeError(f"{op.get('op')}: {k} must be a whole number of pixels, {lo} to {hi}")
     if "protect" in op and not isinstance(op["protect"], bool):
         raise RecipeError(f"{op.get('op')}: protect must be true or false (false: the slot's protect mask doesn't apply)")
 
@@ -220,19 +228,23 @@ def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, sp
 
     area_cache: dict = {}
 
+    edge = (0, 0)  # the current op's grow and feather
+
     def region(name: str, spec_size: bool = False) -> Image.Image:
         target = s.size if (spec_size and s is not None) else size
         if name.startswith("mask:"):
-            return recipe.image(name[5:]).convert("L").resize(target, Image.Resampling.BILINEAR)
-        if name.startswith("area:"):
+            m, how = recipe.image(name[5:]).convert("L"), Image.Resampling.BILINEAR
+        elif name.startswith("area:"):
             if not area_cache:
                 area_cache.update((areas() if callable(areas) else areas) or {})
             if name[5:] not in area_cache:
                 raise RecipeError(f"area {name[5:]!r} isn't known for this body")
-            m = area_cache[name[5:]]
-            return m if m.size == target else m.resize(target, Image.Resampling.NEAREST)
-        m = regions[name]
-        return m if m.size == target else m.resize(target, Image.Resampling.BILINEAR)
+            m, how = area_cache[name[5:]], Image.Resampling.NEAREST
+        else:
+            m, how = regions[name], Image.Resampling.BILINEAR
+        if edge != (0, 0):
+            m, how = adjust(m, *edge), Image.Resampling.BILINEAR
+        return m if m.size == target else m.resize(target, how)
 
     def mask_or_region(op: dict) -> Image.Image:
         if "mask" in op:
@@ -245,6 +257,7 @@ def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, sp
     for op in slot.ops:
         check_op(op)
         kind = op["op"]
+        edge = (op.get("grow", 0), op.get("feather", 0))
         if kind in SPEC_OPS and s is None:
             raise RecipeError(f"{kind}: this base has no specular map")
         if kind == "spec_paint" and not colour_shader:
