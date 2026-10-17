@@ -111,6 +111,9 @@ def test_home_is_readable_whatever_windows_says(qapp, fake_install, tmp_path, mo
     assert _text_contrast(home.generate) >= MIN
     w.hide()
     w.session.close()
+    import shiboken6
+
+    shiboken6.delete(w)
 
 
 def test_contrast_maths():

@@ -28,6 +28,9 @@ def window(qapp, fake_install, tmp_path):
     w.settings_page.user_mods.setText(str(tmp_path / "eu4mods"))
     yield w
     w.session.close()
+    import shiboken6
+
+    shiboken6.delete(w)  # a live window would be re-styled by every later theme change (slow)
 
 
 def test_every_screen_loads(window):
