@@ -1351,11 +1351,11 @@ Constraints carried over:
         - the brush paints the chosen finish (with a real colour picker) and the map shows the finished texture live (recipe applied, tinted with the unit colours);
         - Done (2D): the brush paints a finish into an in-memory mask `paint_<finish>[_<rrggbb>].png` (one per finish and colour). That mask is a row with that finish, and it is written beside the spec on Save (or beside the recipe on the Textures page's Save). Painting takes the spot out of the other painted finishes; the right button erases paint. A colour picked for a row or for the brush tints any finish (`core/finishes.py` keeps a colour unless it is the finish's own). With the brush off, a click selects the narrowest area under the pointer. The map shows "Finished (live)": `export.pipeline.finished_texture` applies the slot to the body's base textures and tints them with the unit colours. It reads nothing from the game and takes about 0.16 s for six finishes on the 512 px type1 body, after each edit (not during a stroke). "Areas" shows the old tinted view. Bands are ordered widest first after the bone areas (a narrow band's finish wins over its parent's).
         - 6b: a 3D view with live preview and painting on the model (UNPLANNED detail: Qt Quick 3D custom geometry from the parsed .mesh; spike first).
-      - **U7, reference start:**
+      - **U7, reference start** (moved to Track F, step F5):
         - a Reference section: load an image (CLAUDE.md rule 8: original or licensed);
         - the app extracts its palette per horizontal band (head, torso, legs of a front view) and suggests a finish and colour per area for the user to accept.
         - No automatic part detection (not reliable); parts come from templates.
-      - **U8, starter templates:** Hoplite, Phalangite, Companion cavalry, Peltast, as character specs in the app's library. Original designs from generic historical descriptions, using only our own parts and base-game references.
+      - **U8, starter templates** (moved to Track F, step F3): Hoplite, Phalangite, Companion cavalry, Peltast, as character specs in the app's library. Original designs from generic historical descriptions, using only our own parts and base-game references.
     - **Next (user):** A, the GUI Character page with named texture areas per body (arms → skin, legs → skin, shins → bronze greaves), proven by rebuilding the hoplite in the GUI with bare arms and legs, a proper bronze helmet and a fuller crest; B, import part; C, an **import full body** mode, spiked first; D, TripoSG.
  The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
 
@@ -1377,6 +1377,56 @@ Constraints carried over:
 4. Does io_pdx_mesh anim playback match the game?
 5. Can attached entities be skinned to the parent skeleton? (UNVERIFIED; would avoid derived bodies.)
 6. Cavalry: the same character as a rider needs the `cavalry_rider_*` anims in R0's successor.
+
+### Track F: Prompt front end (PLANNED 2026-10-17; mockups approved with changes)
+
+The app opens on a prompt screen like the AI app builders (one box, example chips, one Generate button). Everything built so far stays, unchanged, behind an "Advanced editor" link; both edit the same character spec, so they stay in sync and share undo.
+
+**Screens**
+- **Home:**
+  - "Describe your soldiers…" box. While you type, suggestion chips complete known words, and an "Understood" strip shows what was matched. Each chip has × to remove it, and clicking a chip offers the other choices of its kind.
+  - "Not understood: …" lists the leftover words. Each has "add this word as…", which saves a custom synonym to the user's vocabulary file.
+  - "Upload reference image" (CLAUDE.md rule 8: original or licensed). It runs the F5 palette extraction and adds its suggestions as chips.
+  - "For:" nation picker by name: vanilla localisation plus the mod's own, including mod-only tags.
+  - "Tiers:" "Same look on all tiers" or "Gets heavier with tech" (the template's per-tier steps).
+  - Template chips: Hoplite, Phalangite, Companion cavalry, Peltast. One Generate button.
+- **Result:**
+  - Gallery of infantry, cavalry and artillery × tiers 1-4 as 3D previews, rendered one by one in the background and cached. Clicking a tile selects that tier.
+  - The Understood strip again, still editable.
+  - Unit names: in-game names per unit type (e.g. Pezhetairoi, Hetairoi), written to localisation.
+  - Right panel, two tabs:
+    - Parts: picture cards for helmet, weapon, shield and body look, each with "Change ▾" and "Apply to: all tiers / this tier only".
+    - Colours: the three unit colours, material swatches (tint the finishes), shield emblem (a built-in original shape, your own PNG, or none).
+  - Bottom: "Test in game" and "Export". Validation runs silently and only shows problems; Export is off while there are errors.
+  - Export keeps rule 5: one short confirmation ("will write N files to …", list expandable), never overwrites files the tool didn't write.
+  - Small "Advanced editor" link.
+- **First launch:** EU4 install, owned DLC (U2) and Blender detected and shown as a status line.
+
+**Interpretation (offline only).** `core/prompt.py` behind an `Interpreter` interface (text + optional reference palette → character spec, understood items, leftover words), so another interpreter could be added later. Only the keyword interpreter is built; no AI interpreter, no API keys, no local LLM (decided 2026-10-17).
+- The vocabulary is data: `library/vocabulary.json`. Each concept (unit type, helmet style, weapon, shield, crest, finish per body zone, colour) has a canonical value and its synonyms, for example:
+  - pike, sarissa, long spear → sarissa;
+  - crimson, red, scarlet → red.
+  - Multi-word phrases match before single words.
+- User vocabulary: `vocabulary.json` in the user's config folder (`%APPDATA%\eu4unitgen` on Windows, `$XDG_CONFIG_HOME/eu4unitgen` or `~/.config/eu4unitgen` on Linux), merged over the library. Never in the repo.
+- Output goes through `CharacterSpec.from_json`, the same checks as a loaded file.
+
+**Unit names.** The set section gains `unit_names: {infantry, cavalry, artillery}`. Tiers get " I"-" IV" after the name, as the generated default names already do ("Athenian Infantry I"), so the four tiers stay distinct in the unit list. The names go into the existing localisation file (`core/nation.py` builds the names, `loc.yml.j2` writes them). The validator rule `unit_names`: localisation text without a quote or line break (render.py already refuses those), and no two units sharing a name.
+
+**Tier progression.** A template holds one look per tier: the "Gets heavier with tech" steps, for example tier 1 linen and a simple helmet, tier 4 bronze cuirass and a full helmet. "Same look on all tiers" copies the chosen tier's look to all four. "Apply to: this tier only" changes one tier's loadout slot and recipe slot; "all tiers" changes all four.
+
+**Steps** (one commit each, with tests; a short report after each):
+- F1: this plan.
+- F2: Blender detection (`BLENDER_PATH`, Windows registry and Program Files, `blender` on PATH on Linux) and the first-launch status line.
+- F3: starter templates with per-tier steps (U8).
+- F4: vocabulary, synonyms, keyword interpreter, suggestions, leftovers, user vocabulary.
+- F5: reference image palette per horizontal band (U7).
+- F6: nation list (vanilla + mod localisation, mod-only tags).
+- F7: unit names in the spec, localisation and validator.
+- F8: Home screen; Advanced editor behind a link. **Stop: real screenshots.**
+- F9: gallery renderer (spike first: cavalry rider on horse, artillery crew; time the 12 renders).
+- F10: Result screen: gallery, interactive chips, unit names, Parts (apply to all / this tier; tile selects tier), Colours.
+- F11: bottom bar: silent validation, Test in game, Export.
+- F12: end-to-end check. **Stop: real screenshots.**
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
