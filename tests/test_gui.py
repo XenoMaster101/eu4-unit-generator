@@ -473,6 +473,33 @@ def test_u6_brush_paints_finishes(window, fake_install, tmp_path):
     assert iron.getpixel((int(200 * sx), int(300 * sx))) == 255 and iron.getpixel((int(200 * sx), int(100 * sx))) == 0
 
 
+def test_u6_live_map_follows_the_recipe(window, fake_install, tmp_path):
+    """U6: the map shows the finished texture (recipe applied, unit colours) and follows every edit."""
+    page = window.character_page
+    window.load_character(_hoplite_spec(fake_install, tmp_path))
+    page.tier.setCurrentText("1")
+    window.character_areas()
+    assert page.view.currentText() == "Finished (live)"
+    from PIL import Image
+
+    w, h = page.body.diffuse.size
+    x, y = 1, h // 2
+    before = page.canvas.pixmap().toImage().pixelColor(int(x * 512 / w), int(y * 512 / h))
+    base = page.finished_map().getpixel((x, y))
+    left = Image.new("L", (w, h), 0)
+    left.paste(255, (0, 0, w // 2, h))
+    page.set_brush("colour", (0, 230, 0))
+    page.paint(left)
+    px = page.finished_map().getpixel((x, y))
+    assert px[1] > 150 and px[0] < 80, px
+    after = page.canvas.pixmap().toImage().pixelColor(int(x * 512 / w), int(y * 512 / h))
+    assert after != before and after.green() > after.red()
+    page.undo_btn.click()
+    assert page.finished_map().getpixel((x, y)) == base
+    page.view.setCurrentText("Areas")
+    assert not page.canvas.pixmap().isNull()
+
+
 def test_u1_wheel_guard_splitters_and_empty_hint(window, qapp):
     """U1: the wheel never changes an unfocused dropdown; a big render keeps the areas table usable;
     the empty map explains itself."""

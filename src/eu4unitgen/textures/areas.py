@@ -101,7 +101,9 @@ def area_masks(mesh: bytes, size: tuple[int, int], base_file: str | None = None,
     bands. A triangle belongs to the area(s) holding most of its three vertices' dominant bones;
     triangles in no area are left out."""
     tree = parse_pdx_mesh(mesh)
-    band_defs = {b: d for b, d in bands(base_file).items() if names is None or b in names}
+    # bands after the bone areas, widest first: finishes apply in row order, so narrow ones win
+    band_defs = dict(sorted(((b, d) for b, d in bands(base_file).items() if names is None or b in names),
+                            key=lambda bd: -(bd[1]["to"] - bd[1]["from"])))
     masks = {a: Image.new("L", size, 0) for a in (names or groups(base_file)) if a not in band_defs}
     masks.update((b, Image.new("L", size, 0)) for b in band_defs)
     node = next((n for n in _walk(tree) if n["name"] == "mesh"), None)

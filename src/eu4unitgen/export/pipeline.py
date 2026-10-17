@@ -134,6 +134,24 @@ class BodyAreas:
     diffuse: Any  # PIL RGB: the base body texture (base game: shown, never saved)
     areas: dict  # area name -> 'L' mask at the diffuse's size
     skin: tuple  # the body's own skin tone (the skin region's mean), for "bare skin" areas
+    specular: Any = None  # PIL: the base spec map (the live map's country colours and recipe spec ops)
+    colours: list = field(default_factory=list)  # the unit colours previews tint with
+    role: str = "infantry"
+
+
+def finished_texture(body: BodyAreas, recipe, slot) -> Any:
+    """The body texture with ``slot`` applied, tinted as PdxMeshColor tints it with the body's
+    preview colours: the Character page's live map. Reads nothing from the game; the normal map
+    isn't shown, so ``flatten`` works on a flat stand-in."""
+    from PIL import Image
+
+    from eu4unitgen.core.recipe import apply_slot
+    from eu4unitgen.textures.recolour import shade
+
+    res = apply_slot(recipe, slot, body.diffuse, body.specular, body.shader, body.role, body.areas,
+                     lambda: Image.new("RGBA", body.diffuse.size, (128, 128, 255, 255)))
+    return shade(res.diffuse or body.diffuse, res.specular or body.specular, body.colours or DEFAULT_UNIT_COLOURS,
+                 body.shader)
 
 
 # Unit colours for tags without a common/country_colors entry: the file's example template.
@@ -526,8 +544,10 @@ class Session:
         b = self._slot_base(spec, tier, role, base)
         regions = auto_regions(b.diffuse, b.specular, b.shape["shader"] == "PdxMeshColor", hide=role == "horse")
         areas = self._areas(b)
+        colours, _ = self._preview_colours(spec)
         return BodyAreas(b.pdxmesh, b.mesh_file, b.shape["shader"], b.diffuse.convert("RGB"), areas,
-                         skin_colour(b.diffuse, regions["skin"], [areas[a] for a in ("head", "hands") if a in areas]))
+                         skin_colour(b.diffuse, regions["skin"], [areas[a] for a in ("head", "hands") if a in areas]),
+                         b.specular, colours, role)
 
     def _preview_colours(self, spec: SetSpec) -> tuple[list, list[str]]:
         """The colours previews tint country regions with: the set's unit colours, else the tag's

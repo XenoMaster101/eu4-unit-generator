@@ -487,6 +487,9 @@ def test_u5_bands_split_areas_and_edges_grow_and_feather():
     assert masks["lower_torso"].getpixel(right) == 0 and masks["shoulders"].getbbox() is None
     assert {"collar", "belt", "upper_sleeves", "lower_sleeves", "shoulders"} <= set(area_names())
     assert list(area_masks(body, (8, 8), names=["collar"])) == ["collar"]  # a band alone still finds its parent
+    order = list(masks)
+    assert order.index("upper_torso") < order.index("collar") and order.index("lower_torso") < order.index("belt")
+    assert order.index("upper_sleeves") < order.index("shoulders") and order.index("feet") < order.index("upper_torso")
 
     dot = Image.new("L", (21, 21), 0)
     dot.paste(255, (8, 8, 13, 13))

@@ -8,6 +8,7 @@ from export.pipeline.Session.body_areas. The page only draws the map and the bru
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 from PIL import Image, ImageChops
@@ -20,10 +21,13 @@ from PySide6.QtWidgets import (
 
 from eu4unitgen.core.finishes import FinishError, default_colour, finishes, paint_mask_name, split
 from eu4unitgen.core.naming import MESH_ROLES, TIERS
+from eu4unitgen.core.recipe import RecipeError, SlotRecipe
+from eu4unitgen.export.pipeline import finished_texture
 from eu4unitgen.gui.pages import Page, _path_row
 from eu4unitgen.textures.areas import FEATHER_MAX, GROW_MAX, adjust, overlay
 
 KEEP = "keep (base texture)"
+VIEWS = ("Finished (live)", "Areas")
 PAINT = "mask:paint_"  # rows the brush paints: mask:paint_<finish>[_<rrggbb>].png
 MAP_SIZE = 512
 # area tints on the map; masks you paint show in white
@@ -129,6 +133,8 @@ class CharacterPage(Page):
         self._colours: dict[str, tuple] = {}  # region -> the user's colour (tints any finish)
         self._edges: dict[str, tuple[int, int]] = {}  # region -> (grow, feather) in texture pixels
         self._quiet = False  # rebuilding the rows: their signals aren't edits
+        self._finished: tuple | None = None  # (key, image): the live map, until the slot changes
+        self._selected: str | None = None
 
         top = QHBoxLayout()
         self.spec_path = QLineEdit()
@@ -191,6 +197,14 @@ class CharacterPage(Page):
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
+        view_row = QHBoxLayout()
+        self.view = QComboBox()
+        self.view.addItems(VIEWS)
+        self.view.currentIndexChanged.connect(lambda _: self._draw_map(self._selected))
+        view_row.addWidget(QLabel("Show"))
+        view_row.addWidget(self.view)
+        view_row.addStretch(1)
+        ll.addLayout(view_row)
         canvas_scroll = QScrollArea()
         canvas_scroll.setWidget(self.canvas)
         canvas_scroll.setAlignment(Qt.AlignCenter)
@@ -455,16 +469,35 @@ class CharacterPage(Page):
             return out
         return {r: adjust(m, *self._edges[r]) if self._edges.get(r, (0, 0)) != (0, 0) else m for r, m in out.items()}
 
+    def finished_map(self) -> Image.Image:
+        """The body texture with this slot's recipe applied, tinted with the unit colours (cached
+        until the slot or its painted masks change)."""
+        recipe = self.window_.textures_page.recipe
+        slot = recipe.slots.get(self.slot_key()) or SlotRecipe()
+        key = (json.dumps(slot.to_json(), sort_keys=True), tuple((k, id(v)) for k, v in sorted(recipe.images.items())))
+        if self._finished is None or self._finished[0] != key:
+            try:
+                img = finished_texture(self.body, recipe, slot)
+            except RecipeError as exc:
+                self.show_message(f"Can't show the finished texture: {exc}", error=True)
+                img = self.body.diffuse
+            self._finished = (key, img)
+        return self._finished[1]
+
     def _draw_map(self, highlight: str | None = None) -> None:
-        """Areas with a finish show in its colour; the selected row shows in a bright tint."""
+        """Finished: the texture as the unit will wear it, the selected row lightly tinted. Areas:
+        the base texture, areas with a finish in its colour, the selected row in a bright tint."""
         if self.body is None:
             return
+        self._selected = highlight
         masks = self._all_masks()
         colours = {r: self._colour_of(r) for r in self.regions() if self._colour_of(r)}
         legend = [f"{r.removeprefix('area:')} → {self._finish(r)}" for r in colours]
-        if highlight:
-            colours[highlight] = TINTS[self.regions().index(highlight) % len(TINTS)]
-        self.canvas.show_map(overlay(self.body.diffuse, masks, colours, 0.6))
+        tint = {highlight: TINTS[self.regions().index(highlight) % len(TINTS)]} if highlight else {}
+        if self.view.currentText() == VIEWS[0]:
+            self.canvas.show_map(overlay(self.finished_map(), masks, tint, 0.45))
+        else:
+            self.canvas.show_map(overlay(self.body.diffuse, masks, {**colours, **tint}, 0.6))
         self.legend.setText("Finishes: " + (", ".join(legend) if legend else "none yet")
                             + (f"<br>Selected: <b>{highlight.removeprefix('area:')}</b>" if highlight else ""))
 
@@ -576,6 +609,7 @@ class CharacterPage(Page):
         except FinishError as exc:
             return self.show_message(str(exc), error=True)
         self.window_.character_edited()
+        self._draw_map(self._selected)  # the live map follows the recipe
         n = len(chosen)
         self.show_message(f"Applied {n} area finish(es) to the texture recipe's slot "
                           f"{self.slot_key()[0]}/{self.slot_key()[1]}." if n else "Cleared this slot's area finishes.")
