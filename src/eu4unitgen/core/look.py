@@ -244,4 +244,9 @@ def compile_look(look: Look, doc: dict, skins: dict[int, tuple] | None = None) -
     out["textures"] = textures
     if look.colours:
         out.setdefault("set", {})["unit_colours"] = [list(c) for c in look.colours]
+    names = {k: v for k, v in (look.names or {}).items() if v}
+    if names:
+        out.setdefault("set", {})["unit_names"] = names
+    else:
+        out.get("set", {}).pop("unit_names", None)
     return out

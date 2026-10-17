@@ -7,7 +7,8 @@ code (the numbers code needs are in the data libraries, eu4unitgen/library/*.jso
      "name": "Hellenistic hoplite",                        # free text for the GUI
      "set": {"tags": ["HDA"], "cultures": [], "gfx": "hellenicgfx", "set_name": "hoplite_test",
              "base_gfx": "westerngfx", "name": "", "adjective": "", "colour": null, "tech_group": "",
-             "unit_colours": [[r, g, b], [r, g, b], [r, g, b]]   # every tag; or {"TAG": [[...], [...], [...]]}
+             "unit_colours": [[r, g, b], [r, g, b], [r, g, b]],  # every tag; or {"TAG": [[...], [...], [...]]}
+             "unit_names": {"infantry": "Pezhetairoi", "cavalry": "Hetairoi"}   # in-game names; tiers add I-IV
              },
      "textures": {...},     # a core.recipe texture recipe, inline (or null)
      "loadout": {...},      # a core.loadout loadout, inline (or null): slots, bodies, derived, accept_clipping
@@ -32,7 +33,7 @@ from typing import Any
 SCHEMA = 1
 SECTIONS = ("schema", "name", "set", "textures", "loadout", "hair", "export", "test")
 SET_KEYS = ("tags", "cultures", "gfx", "set_name", "base_gfx", "name", "adjective", "colour", "tech_group",
-            "unit_colours", "gfx_set_base")
+            "unit_colours", "gfx_set_base", "unit_names")
 EXPORT_KEYS = ("prefix", "version", "pack_order")
 TEST_KEYS = ("sprite_techs", "base_mod", "base_name", "give_cores")
 HAIR_KEYS = ("colour", "inner", "gloss")
@@ -143,7 +144,7 @@ class CharacterSpec:
                        name=s.get("name") or "", adjective=s.get("adjective") or "",
                        colour=tuple(colour) if colour else None, tech_group=s.get("tech_group") or "",
                        gfx_set_base=s.get("gfx_set_base"), unit_colours=self.unit_colours(),
-                       texture_recipe=recipe, loadout=loadout)
+                       texture_recipe=recipe, loadout=loadout, unit_names=dict(s.get("unit_names") or {}))
 
     def test_options(self) -> dict:
         """Keyword arguments for Session.build_test_mod (the ``test`` section)."""

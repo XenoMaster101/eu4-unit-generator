@@ -969,6 +969,31 @@ def localisation(ctx: Context) -> list[Issue]:
     return out
 
 
+@rule("unit_names")
+def unit_names(ctx: Context) -> list[Issue]:
+    """F7: no two units share a name (the unit list would show them alike), and each unit's name
+    is in the localisation file exactly as the set gives it."""
+    out = []
+    seen: dict[str, str] = {}
+    for unit in ctx.nation.units:
+        if unit.name in seen:
+            out.append(Issue(ERROR, "unit_names", f"{unit.key} and {seen[unit.name]} are both named {unit.name!r}",
+                             subject=unit.key))
+        seen.setdefault(unit.name, unit.key)
+    for lang in ctx.project.languages:
+        path = ctx.naming.loc_file(ctx.nation.set_name, lang)
+        f = ctx.generated.files.get(path)
+        if f is None:
+            continue  # the localisation rule reports it
+        text = f.data.decode("utf-8-sig")
+        for unit in ctx.nation.units:
+            key = ctx.naming.loc_name_key(unit.key)
+            m = re.search(rf'^ {re.escape(key)}:\d* "(.*)"$', text, re.M)
+            if m and m.group(1) != unit.name:
+                out.append(Issue(ERROR, "unit_names", f"{key} is {m.group(1)!r} in the file, not {unit.name!r}", path))
+    return out
+
+
 @rule("tech_enables")
 def tech_enables(ctx: Context) -> list[Issue]:
     rel = ctx.naming.mil_tech_file()

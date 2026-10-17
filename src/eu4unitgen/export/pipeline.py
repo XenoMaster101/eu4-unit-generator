@@ -75,6 +75,7 @@ class SetSpec:
     texture_recipe: Any = None  # Phase 2: a core.recipe JSON file (Path) or a TextureRecipe
     loadout: Any = None  # Phase 3: a core.loadout JSON file (Path) or a Loadout
     cultures: list[str] = field(default_factory=list)  # primary cultures the set's pack also matches
+    unit_names: dict = field(default_factory=dict)  # unit type -> in-game name (F7)
 
     @staticmethod
     def parse_tags(text: str) -> list[str]:
@@ -338,7 +339,7 @@ class Session:
             return [Nation(list(spec.tags), spec.gfx, base_gfx=spec.base_gfx, name=spec.name,
                            adjective=spec.adjective, colour=spec.colour, tech_group=tech, set_name=spec.set_name,
                            gfx_set_base=spec.gfx_set_base or None, unit_colours=spec.unit_colours,
-                           cultures=list(spec.cultures))]
+                           cultures=list(spec.cultures), unit_names=dict(spec.unit_names or {}))]
         except (NamingError, ValueError) as exc:
             if isinstance(exc, SpecError):
                 raise

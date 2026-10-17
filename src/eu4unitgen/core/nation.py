@@ -82,6 +82,7 @@ class Nation:
     # one; a tag left out keeps its entry (or the engine default when it has none; SPEC §4).
     unit_colours: Any = None
     cultures: list[str] = field(default_factory=list)  # primary cultures the set's pack also matches
+    unit_names: dict = field(default_factory=dict)  # unit type -> in-game name (tiers add I-IV), e.g. Pezhetairoi
     tags: list[str] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -97,6 +98,12 @@ class Nation:
             raise ValueError(f"a tag is listed twice in {tags}")
         if len(set(self.cultures)) != len(self.cultures):
             raise ValueError(f"a culture is listed twice in {self.cultures}")
+        self.unit_names = {k: str(v).strip() for k, v in (self.unit_names or {}).items() if str(v or "").strip()}
+        for utype, name in self.unit_names.items():
+            if utype not in UNIT_TYPES:
+                raise ValueError(f"unit names: {utype!r} must be one of {UNIT_TYPES}")
+            if '"' in name or "\n" in name or "\r" in name or len(name) > 60:
+                raise ValueError(f"unit name {name!r}: no quotes or line breaks, at most 60 characters")
         if (len(tags) > 1 or not tags) and not self.set_name:
             raise ValueError("a set shared by several tags, or triggered by culture only, needs a set name")
         self.tags, self.tag = tags, (tags[0] if tags else None)
@@ -139,8 +146,10 @@ def default_units(nation: Nation, naming: Naming, sprite_mil_tech: dict[int, int
                 type=utype,
                 tier=tier,
                 mil_tech=mil,
-                name=f"{nation.adjective} {TYPE_LABEL[utype]} {ROMAN[tier]}",
-                description=f"{nation.adjective} {TYPE_LABEL[utype].lower()}, tier {tier}.",
+                name=f"{own} {ROMAN[tier]}" if (own := nation.unit_names.get(utype)) else
+                f"{nation.adjective} {TYPE_LABEL[utype]} {ROMAN[tier]}",
+                description=f"{own}, {nation.adjective} {TYPE_LABEL[utype].lower()}, tier {tier}." if own else
+                f"{nation.adjective} {TYPE_LABEL[utype].lower()}, tier {tier}.",
                 stats=dict(zip(STAT_KEYS, DEFAULT_PIPS[utype][tier])),
             ))
     return units

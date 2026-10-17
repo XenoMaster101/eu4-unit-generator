@@ -241,3 +241,32 @@ def test_real_packages_never_move_sprite_levels(generated, fake_install):
     vanilla = (fake_install / "common/technologies/mil.txt").read_bytes()
     removed = [ln for ln in vanilla.splitlines() if ln not in generated.files["common/technologies/mil.txt"].data.splitlines()]
     assert removed == []
+
+
+def test_f7_unit_names_reach_localisation_and_are_checked(fake_install, tmp_path):
+    """F7: a set's unit names (per type; tiers add I-IV) are what localisation says, and the
+    unit_names rule catches two units sharing a name."""
+    from eu4unitgen.core.nation import Nation
+    from eu4unitgen.export.pipeline import Session, Settings, SetSpec
+
+    s = Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out"))
+    try:
+        spec = SetSpec(tags=["MAC"], gfx="hellenicgfx", adjective="Macedonian",
+                       unit_names={"infantry": "Pezhetairoi", "cavalry": "Hetairoi"})
+        res = s.validate(spec)[0]
+        assert not res.report.errors, [str(i) for i in res.report.errors]
+        assert [u.name for u in res.nation.units if u.tier == 1] == ["Pezhetairoi I", "Hetairoi I",
+                                                                     "Macedonian Artillery I"]
+        s.generate(spec)
+        loc = next(p for p in (tmp_path / "out").rglob("*_l_english.yml"))
+        body = loc.read_text(encoding="utf-8-sig")
+        assert '"Pezhetairoi I"' in body and '"Hetairoi IV"' in body and '"Macedonian Artillery II"' in body
+        same = s.validate(SetSpec(tags=["MAC"], gfx="hellenicgfx", unit_names={"infantry": "Hetairoi",
+                                                                             "cavalry": "Hetairoi"}))[0]
+        assert any(i.rule == "unit_names" for i in same.report.errors)
+    finally:
+        s.close()
+    with pytest.raises(ValueError):
+        Nation("MAC", "hellenicgfx", unit_names={"infantry": 'Say "hi"'})
+    with pytest.raises(ValueError):
+        Nation("MAC", "hellenicgfx", unit_names={"ships": "Triremes"})

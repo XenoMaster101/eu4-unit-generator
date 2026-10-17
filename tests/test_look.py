@@ -75,3 +75,6 @@ def test_compiling_keeps_what_the_advanced_editor_added():
     look.colours = [[10, 20, 30], [40, 50, 60], [70, 80, 90]]
     assert compile_look(look, SET)["set"]["unit_colours"] == [[10, 20, 30], [40, 50, 60], [70, 80, 90]]
     assert Look.from_json(look.to_json()) == look
+    assert compile_look(Look.from_template("phalangite"), SET)["set"]["unit_names"]["infantry"] == "Pezhetairoi"
+    spec = CharacterSpec.from_json(compile_look(Look.from_template("companion_cavalry"), SET))
+    assert spec.set_spec().unit_names["cavalry"] == "Hetairoi"
