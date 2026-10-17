@@ -1,6 +1,21 @@
 {
   "schema": 1,
   "note": "Words the prompt front end understands (SPEC Track F, F4; core.prompt). Each entry: kind, value, label and its words (synonyms; multi-word phrases match before single words). kinds: template (a starting look), scope (which unit type the following words describe, until the next comma or full stop), weapon / shield / helmet / crest (core.look parts), material (a finish), garment (a body area; default: the material it means alone), colour (rgb; on a crest: the crest, on a shield: the main unit colour, on a garment: tints it, alone: the main unit colour), negation (no / without: the next part is removed), progression. The user's own synonyms (vocabulary.json in the config folder) are merged over this file. Colour values are plain named colours, not from any game.",
+  "reference": {
+    "note": "F5: a reference image (a front view) read per horizontal band, as fractions of the figure's height (the background, the colour along the image border or transparent pixels, is left out first). Each band's main colour becomes a finish by hue (degrees), saturation and value (0-1), first rule that fits (only the middle fraction of the figure's width counts, so outstretched arms don't drown the body); anything else is a colour finish tinted with it. The head band only suggests a crest colour, and only for a saturated colour that isn't skin or metal.",
+    "background_distance": 40,
+    "bands": {"head": [0.0, 0.2], "torso": [0.2, 0.55], "legs": [0.55, 1.0]},
+    "middle": 0.4,
+    "areas": {"torso": "torso", "legs": "legs"},
+    "rules": [
+      {"finish": "linen", "sat": [0.0, 0.22], "val": [0.72, 1.0]},
+      {"finish": "iron", "sat": [0.0, 0.14], "val": [0.35, 0.72]},
+      {"finish": "skin", "hue": [0, 35], "sat": [0.2, 0.55], "val": [0.45, 0.95]},
+      {"finish": "bronze", "hue": [25, 50], "sat": [0.45, 1.0], "val": [0.35, 0.85]},
+      {"finish": "leather", "hue": [10, 40], "sat": [0.3, 0.75], "val": [0.15, 0.45]}
+    ],
+    "crest_saturation": 0.45
+  },
   "stopwords": ["a", "an", "the", "and", "or", "with", "of", "in", "on", "to", "for", "their", "they", "them", "who", "that", "which", "is", "are", "be", "wear", "wears", "wearing", "worn", "carry", "carries", "carrying", "armed", "wield", "wielding", "holding", "hold", "bearing", "some", "very", "like", "style", "styled", "type", "kind", "look", "looking", "dressed", "clad", "equipped", "soldier", "soldiers", "troops", "men", "warrior", "warriors", "unit", "units", "army", "my", "our", "greek", "hellenistic", "macedonian", "ancient", "classical", "heavy", "light", "elite", "made", "has", "have", "plus", "also", "but", "by", "from", "as", "all", "every", "each", "s", "tier", "tiers", "level", "levels"],
   "entries": [
     {"kind": "template", "value": "hoplite", "label": "Hoplite", "words": ["hoplite", "hoplites", "hoplitai"]},
