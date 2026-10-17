@@ -1448,6 +1448,19 @@ The app opens on a prompt screen like the AI app builders (one box, example chip
     - **Contrast:** the Result screen is in the contrast test with Home (light, dark, follow Windows).
 - F11: bottom bar: silent validation, Test in game, Export. Done: Export runs `Session.generate(write=False)` (the dry run), shows "Write N file(s) to <output>/<set>?" with the full list under Details, writes only on Yes (`apply_export`: manifest, never over files the tool didn't write, never into a mod folder), and says where the files went. A blocked plan says why. Test in game builds and stages the test mod and says where to copy it (Controlled Folder Access blocks the app from the EU4 mod folder). A country without land at the start gets the builder's own explanation.
 - F12: end-to-end check. **Stop: real screenshots.**
+  - Done (2026-10-17), on the user's install, real Blender, the native window: "Phalangites with long pikes and small shields, crimson tunics, bronze greaves. Cavalry with lances and white plumes." for ATH.
+    - **The run:**
+      - Generate to a full gallery in 87 s, "no problems";
+      - a tier-3-only helmet edit (Corinthian, crest side to side) in 69 s; tier 4 kept its own;
+      - Export asked to write 116 files, then wrote them, INTEGRATION.md included;
+      - Test in game staged 121 files and passed on the builder's warning that a DLC sprite pack also matches ATH.
+    - **Templates:** hoplite, companion cavalry and peltast validate with 0 errors.
+    - **Tile framing fix:** io_pdx_mesh skins with an Armature modifier (not always a parent), which the framing now checks.
+    - **Open (next):**
+      1. Riders and gun crews wear the untextured base body (§7.2: the retextured body lacks `horse_*` ids); crews keep the base weapon.
+      2. Any edit re-checks and re-renders all 12 tiles (about 70 s); only the changed tiers need it.
+      3. No javelin or crescent pelte yet.
+      4. ATH (and other DLC-covered tags) need a pack-order check before an in-game test.
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.

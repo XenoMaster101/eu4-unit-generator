@@ -92,6 +92,11 @@ def place(node, world, loaded, inherit):
         place(child, at, loaded, inherit)
 
 
+def skinned(o) -> bool:
+    """A mesh deformed by a rig (io_pdx_mesh skins with an Armature modifier, not always a parent)."""
+    return (o.parent is not None and o.parent.type == "ARMATURE") or any(m.type == "ARMATURE" for m in o.modifiers)
+
+
 def frame(loaded, pad=0.12):
     """What the camera frames: the animated bodies (soldier, horse, crew) with a margin, so a
     6 m sarissa or a lance doesn't shrink the soldier to a speck (it runs off the edge instead).
@@ -99,7 +104,7 @@ def frame(loaded, pad=0.12):
     co = []
     for node, objs, _ in loaded:
         for o in objs:
-            if o.type == "MESH" and not node.get("hidden") and o.parent is not None and o.parent.type == "ARMATURE":
+            if o.type == "MESH" and not node.get("hidden") and skinned(o):
                 co += cd.evaluated(o)
     if not co:
         return points(loaded)
@@ -116,7 +121,7 @@ def points(loaded):
         for o in objs:
             if o.type != "MESH" or node.get("hidden"):
                 continue
-            if o.parent is not None and o.parent.type == "ARMATURE":
+            if skinned(o):
                 co += cd.evaluated(o)
             else:
                 co += [o.matrix_world @ Vector(c) for c in o.bound_box]

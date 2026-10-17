@@ -33,4 +33,4 @@ Desktop GUI app that generates complete Europa Universalis IV **land unit** sets
 - When you run or suggest terminal commands, explain in plain language what each one does, and mention the GUI equivalent when one exists.
 
 ## Current phase
-Phase 3 (asset generation: Blender mesh jobs). Phases 0, 1 and 2 are done; see docs/SPEC.md §10. Update this line as phases complete.
+Phase 3 (asset generation: Blender mesh jobs). Phases 0, 1 and 2 are done; Track F (the prompt front end: Home and Result screens) is done through F12; see docs/SPEC.md §10. Update this line as phases complete.
