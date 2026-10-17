@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from eu4unitgen.core.generator import GenerationError
 from eu4unitgen.core.loadout import LoadoutError
-from eu4unitgen.core.naming import NamingError
+from eu4unitgen.core.naming import TEST_MOD_NAME, NamingError
 from eu4unitgen.core.parts import PartError
 from eu4unitgen.core.recipe import RecipeError
 from eu4unitgen.export.pipeline import Session, SetSpec, Settings, SpecError
@@ -528,11 +528,79 @@ class MainWindow(QMainWindow):
         path = write(name, self.session.settings.output_dir / "emblems", tuple(colours[1]))
         self.result_edit(Edit("emblem", (), str(path)))
 
+    def confirm(self, title: str, text: str, details: str = "") -> bool:
+        """Ask before writing files (tests replace this)."""
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(text)
+        if details:
+            box.setDetailedText(details)
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Yes)
+        return box.exec() == QMessageBox.Yes
+
+    def _result_setspec(self):
+        spec = getattr(self, "_result_spec", None)
+        if spec is None:
+            self.result_page.show_message("Generate the army first.", error=True)
+        return spec
+
     def result_test(self) -> None:
-        self.result_page.show_message("Test in game comes with F11.")
+        """Build the test mod for this army and stage it (copying it into EU4's mod folder is yours:
+        Windows' Controlled Folder Access may block the app from writing there)."""
+        got = self._result_setspec()
+        if got is None:
+            return
+        setspec, _ = got
+        page = self.result_page
+        mod_dir = self.session.settings.user_mod_dir()
+
+        def done(res) -> None:
+            if not res.written:
+                problems = [str(i) for _, r in res.reports for i in r.errors][:5]
+                return page.show_message("The test mod wasn't staged: " + ("; ".join(problems) or "see the Advanced "
+                                         "editor's 8. Test mod page"), error=True)
+            page.show_message(
+                f"Test mod ready: {len(res.written)} files in <b>{res.stage_dir}</b>.<br>"
+                f"Copy everything inside that folder into <b>{mod_dir}</b> (with Explorer), tick "
+                f"\"{TEST_MOD_NAME}\" in the EU4 launcher and start a game as {', '.join(setspec.tags)}."
+                + ("<br>" + "<br>".join(f"Note: {w}" for w in res.warnings) if res.warnings else ""))
+
+        self.run(page, "Building the test mod", lambda: self.session.build_test_mod(setspec), done)
 
     def result_export(self) -> None:
-        self.result_page.show_message("Export comes with F11.")
+        """A dry run first; the file list to confirm; then the package written to the output
+        folder (never into a mod folder, never over files the tool didn't write)."""
+        from eu4unitgen.export.writer import ExportError, apply_export
+
+        got = self._result_setspec()
+        if got is None:
+            return
+        setspec, _ = got
+        page = self.result_page
+
+        def done(results) -> None:
+            blocked = [r for r in results if not r.plan.can_apply]
+            if blocked:
+                reasons = [f"{f.path}: {f.reason}" for r in blocked for f in r.plan.files if f.action == "blocked"]
+                reasons += [e for r in blocked for e in r.plan.validation_errors]
+                return page.show_message("Export blocked: " + "; ".join(reasons[:5]), error=True)
+            files = [f"{f.action:9} {f.path}" for r in results for f in r.plan.files]
+            new = sum(1 for r in results for f in r.plan.files if f.action != "unchanged")
+            where = ", ".join(str(r.package_dir) for r in results)
+            if not self.confirm("Export", f"Write {new} file(s) to {where}?\n\nNothing outside that folder is "
+                                          "touched, and no file the app didn't write is replaced.", "\n".join(files)):
+                return page.show_message("Export cancelled; nothing written.")
+            try:
+                written = [p for r in results for p in apply_export(r.plan)]
+            except (ExportError, OSError) as exc:
+                return page.show_message(f"Export failed: {exc}", error=True)
+            page.show_message(f"Exported {len(written)} file(s) to <b>{where}</b>. Next: add them to your mod as "
+                              "INTEGRATION.md in that folder says.")
+
+        self.run(page, "Preparing the export", lambda: self.session.generate(setspec, write=False), done)
 
     def save_character(self, path: Path) -> None:
         """The pages -> a character spec at ``path`` (recipe and loadout paths rebased onto its folder)."""

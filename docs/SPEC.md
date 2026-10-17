@@ -1446,7 +1446,7 @@ The app opens on a prompt screen like the AI app builders (one box, example chip
     - **Crest colour is per unit type:** "red crests … cavalry with white plumes" gives each its own (`roles.<type>.crest_colour`); the Colours tab's crest colour sets every type.
     - **Tile framing:** tiles frame the animated bodies with a 12% margin; long weapons may run off the edge.
     - **Contrast:** the Result screen is in the contrast test with Home (light, dark, follow Windows).
-- F11: bottom bar: silent validation, Test in game, Export.
+- F11: bottom bar: silent validation, Test in game, Export. Done: Export runs `Session.generate(write=False)` (the dry run), shows "Write N file(s) to <output>/<set>?" with the full list under Details, writes only on Yes (`apply_export`: manifest, never over files the tool didn't write, never into a mod folder), and says where the files went. A blocked plan says why. Test in game builds and stages the test mod and says where to copy it (Controlled Folder Access blocks the app from the EU4 mod folder). A country without land at the start gets the builder's own explanation.
 - F12: end-to-end check. **Stop: real screenshots.**
 
 ### Phase 4: Test loop

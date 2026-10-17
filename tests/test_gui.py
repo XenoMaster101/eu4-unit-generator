@@ -660,3 +660,39 @@ def test_f10_result_screen_gallery_parts_colours_and_names(window, fake_install,
     window.result_chip_remove(crest, False)
     assert "crest" not in window.army.text.lower() and home.text() == window.army.text
     assert window.army.edits and window.character_page.spec.set["unit_names"]["cavalry"] == "Hetairoi"  # edits kept
+
+
+def test_f11_export_confirms_then_writes_and_test_mod_stages(window, fake_install, tmp_path, monkeypatch):
+    """F11: Export shows the dry run's file list to confirm (cancel writes nothing), then writes the
+    package; Test in game stages the test mod and says where to copy it."""
+    from fakes import make_textures_decodable
+    from test_gallery import GalleryRunner
+    from eu4unitgen.core.look import templates
+
+    make_textures_decodable(fake_install)
+    monkeypatch.setitem(templates()["hoplite"], "body_base", "generic_01")
+    monkeypatch.setitem(templates()["hoplite"], "steps", {})
+    monkeypatch.setitem(templates()["hoplite"]["roles"]["infantry"], "helmet", None)
+    runner = GalleryRunner()
+    monkeypatch.setattr(window.session, "runner", lambda: runner)
+    window.settings_page.load.click()
+    home, page = window.home, window.result_page
+    home.set_text("Hoplites with round shields and long spears")
+    home.set_nation("AAA")  # owns land at the start (the test mod needs that)
+    window.home_generate()
+    assert page.export.isEnabled(), page.status.text()
+
+    asked = []
+    monkeypatch.setattr(window, "confirm", lambda title, text, details="": asked.append((text, details)) or False)
+    window.result_export()
+    out = tmp_path / "out" / "aaa"
+    assert asked and "Write" in asked[0][0] and "create" in asked[0][1] and not out.exists()
+    assert "cancelled" in page.message.text()
+    monkeypatch.setattr(window, "confirm", lambda *a, **k: True)
+    window.result_export()
+    assert "Exported" in page.message.text() and (out / "INTEGRATION.md").is_file(), page.message.text()
+    assert any(p.suffix == ".yml" for p in out.rglob("*"))
+
+    window.result_test()
+    assert "Test mod ready" in page.message.text(), page.message.text()
+    assert any((tmp_path / "stage").rglob("*.mod"))
