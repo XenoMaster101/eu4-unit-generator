@@ -89,3 +89,25 @@ def test_chips_remove_and_swap(read, vocab):
     assert r.look().crest_colour == [40, 70, 160] and r.items[c].text() == "Blue crest"
     r.remove(c)
     assert r.look().crest_colour is None
+
+
+def test_f8_chips_rewrite_the_text(read, vocab):
+    """F8: the text is the one source: a chip's x takes its words out, a swap puts other words in."""
+    from eu4unitgen.core.prompt import text_with_template
+
+    t = "Hoplites with red crests, no shield, bronze greaves and long spears; red tunic"
+    r = read(t)
+    kinds = [i.kind for i in r.items]
+    crest, colour = kinds.index("crest"), kinds.index("crest_colour")
+    assert r.text_without(crest) == "Hoplites, no shield, bronze greaves and long spears; red tunic"
+    assert r.text_without(colour) == "Hoplites with crests, no shield, bronze greaves and long spears; red tunic"
+    assert r.text_without(kinds.index("shield")) == "Hoplites with red crests, bronze greaves and long spears; red tunic"
+    assert r.text_without(kinds.index("weapon")) == "Hoplites with red crests, no shield, bronze greaves; red tunic"
+    iron = next(e for e in vocab.entries if e["kind"] == "material" and e["value"] == "iron")
+    shins = next(n for n, i in enumerate(r.items) if i.area == "shins")
+    assert "iron greaves" in r.text_swapped(shins, iron)
+    tunic = next(n for n, i in enumerate(r.items) if i.area == "torso")
+    assert r.text_swapped(tunic, iron).endswith("red iron tunic")  # a material added before the garment
+    assert text_with_template(t, "peltast", KeywordInterpreter(vocab)).startswith("Peltast with red crests")
+    assert text_with_template("", "hoplite", KeywordInterpreter(vocab)) == "Hoplite"
+    assert read(text_with_template("red crests", "phalangite", KeywordInterpreter(vocab))).look().template == "phalangite"

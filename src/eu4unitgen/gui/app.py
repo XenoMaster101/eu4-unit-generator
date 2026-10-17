@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtCore import QObject, QRunnable, QSettings, QThreadPool, Signal
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QListWidget, QMainWindow, QStackedWidget, QWidget
+from PySide6.QtWidgets import (
+    QApplication, QHBoxLayout, QListWidget, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+)
 
 from eu4unitgen.core.generator import GenerationError
 from eu4unitgen.core.loadout import LoadoutError
@@ -25,6 +27,7 @@ from eu4unitgen.core.character import CharacterError
 from eu4unitgen.core.finishes import FinishError
 from eu4unitgen.core.history import History, Snapshot
 from eu4unitgen.gui.character_page import CharacterPage
+from eu4unitgen.gui.home_page import HomePage
 from eu4unitgen.gui.pages import GeneratePage, SettingsPage, TestModPage, UnitSetPage, ValidatePage
 from eu4unitgen.gui.parts_page import PartsPage
 from eu4unitgen.gui.textures_page import TexturesPage
@@ -116,10 +119,53 @@ class MainWindow(QMainWindow):
         lay = QHBoxLayout(central)
         lay.addWidget(self.steps)
         lay.addWidget(self.stack, 1)
-        self.setCentralWidget(central)
+        # Track F: the Home screen first; every page above behind "Advanced editor"
+        self.home = HomePage(self)
+        advanced = QWidget()
+        al = QVBoxLayout(advanced)
+        al.setContentsMargins(0, 0, 0, 0)
+        back = QPushButton("← Simple view")
+        back.setFlat(True)
+        back.setToolTip("Back to the describe-and-generate screen")
+        back.clicked.connect(self.show_home)
+        bar = QHBoxLayout()
+        bar.setContentsMargins(8, 4, 8, 0)
+        bar.addWidget(back)
+        bar.addStretch(1)
+        al.addLayout(bar)
+        al.addWidget(central, 1)
+        self.views = QStackedWidget()
+        self.views.addWidget(self.home)
+        self.views.addWidget(advanced)
+        self.setCentralWidget(self.views)
         self.statusBar().showMessage("Set the EU4 install and press Load.")
         self.history = History(self.character_state())
         self._update_title()
+
+    # ------------------------------------------------------------------ views (Track F)
+    def show_home(self) -> None:
+        self.views.setCurrentIndex(0)
+
+    def show_advanced(self, page=None) -> None:
+        self.views.setCurrentIndex(1)
+        if page is not None:
+            self.steps.setCurrentRow(self.pages.index(page))
+
+    def _home_status(self, version: str | None = None) -> None:
+        """The Home screen's line: EU4 (and its version once loaded), owned DLC, Blender."""
+        if version:
+            self._eu4_version = version
+        version = getattr(self, "_eu4_version", None)
+        page = self.settings_page
+        eu4 = page.eu4.text().strip()
+        ok_eu4 = bool(eu4) and (Path(eu4) / "common").is_dir()
+        blender = page.blender.text().strip()
+        n = len(page.owned())
+        self.home.set_status([
+            (ok_eu4, f"EU4 {version}" if (ok_eu4 and version) else ("EU4 found" if ok_eu4 else "EU4 not found")),
+            (True, f"{n} DLC ticked"),
+            (bool(blender) and Path(blender).is_file(), "Blender found" if blender and Path(blender).is_file()
+             else "Blender not found (3D parts and previews need it)")])
 
     # ------------------------------------------------------------------ plumbing
     def _stored_settings(self) -> Settings:
@@ -215,6 +261,7 @@ class MainWindow(QMainWindow):
             self.load_install()
         if did:
             page.info.setText("Auto-setup: " + "; ".join(did) + ".")
+        self._home_status()
         return did
 
     def load_install(self) -> None:
@@ -224,10 +271,11 @@ class MainWindow(QMainWindow):
         def work():
             game, idx = s.game()
             return (s.available_dlc(), s.graphical_cultures(), s.base_cultures(), idx.game_version.get("eu4_branch", "?"),
-                    s.body_candidates())
+                    s.body_candidates(), s.country_list())
 
         def done(result) -> None:
-            dlc, cultures, bases, version, bodies = result
+            dlc, cultures, bases, version, bodies, countries = result
+            self.home.fill_nations(countries)
             self.parts_page.fill_bodies(bodies)
             self.settings_page.fill_dlc(dlc)
             self.unit_page.fill(cultures, bases)
@@ -236,6 +284,7 @@ class MainWindow(QMainWindow):
                                             f"{len(bases)} you can copy from, {len(dlc)} DLC folders.")
             self.statusBar().showMessage("Install loaded. Tick your owned DLC, then fill in the unit set.", 8000)
             self.character_page.show_hint(loaded=True)
+            self._home_status(version.replace("release_", ""))
         self.run(self.settings_page, "Loading EU4 install", work, done)
 
     def current_spec(self, page) -> SetSpec | None:
@@ -256,32 +305,88 @@ class MainWindow(QMainWindow):
         from eu4unitgen.core.loadout import Loadout
         from eu4unitgen.core.recipe import TextureRecipe
 
-        page = self.character_page
         try:
             spec = CharacterSpec.load(path)
+        except CharacterError as exc:
+            return self.character_page.show_message(str(exc), error=True)
+        if self.adopt_character(spec, path):
+            self.history.reset(self.character_state())
+            self._update_title()
+            self.character_page.show_message(
+                f"Loaded {path}: {spec.name or 'unnamed'}; the Unit set, Textures and Parts pages now show it. "
+                "Press Show body to paint its areas.")
+
+    def adopt_character(self, spec, path: Path | None = None) -> bool:
+        """Show ``spec`` in the Unit set, Textures, Parts and Character pages (``path``: its file;
+        None: made on the Home screen, not saved yet). False (with a message) if it doesn't load."""
+        from eu4unitgen.core.loadout import Loadout
+        from eu4unitgen.core.recipe import TextureRecipe
+
+        page = self.character_page
+        try:
             recipe = TextureRecipe.from_json(spec.textures, spec.root) if spec.textures is not None else None
             loadout = Loadout.from_json(spec.loadout, spec.root) if spec.loadout is not None else None
-        except (CharacterError, RecipeError, LoadoutError) as exc:
-            return page.show_message(str(exc), error=True)
+        except (RecipeError, LoadoutError) as exc:
+            page.show_message(str(exc), error=True)
+            return False
+        label = f"(in {path.name})" if path else "(made on the Home screen)"
         page.spec = spec
-        page.spec_path.setText(str(path))
+        page.spec_path.setText(str(path) if path else "")
         page.name.setText(spec.name)
         page.masks.clear()
         self.unit_page.load_set(spec.set, spec.unit_colours())
-        self.textures_page.set_recipe(recipe, f"(in {path.name})" if recipe else "")
+        self.textures_page.set_recipe(recipe, label if recipe else "")
         if recipe is None:
             self.textures_page.recipe.root = spec.root
         if loadout is not None:
             loadout.hair = dict(spec.hair)
-        self.parts_page.set_loadout(loadout, f"(in {path.name})" if loadout else "")
+        self.parts_page.set_loadout(loadout, label if loadout else "")
         if loadout is None:
             self.parts_page.loadout.root = spec.root
         if page.body is not None:
             page.show_areas(page.body, self.textures_page.recipe)
-        self.history.reset(self.character_state())
-        self._update_title()
-        page.show_message(f"Loaded {path}: {spec.name or 'unnamed'}; the Unit set, Textures and Parts pages now show it. "
-                          "Press Show body to paint its areas.")
+        return True
+
+    # ------------------------------------------------------------------ the Home screen (Track F)
+    def home_generate(self) -> None:
+        """The Home screen's look -> a character spec for the chosen country, shown in the pages.
+        Reads the body's skin tone first (for "bare skin"), in the background."""
+        from eu4unitgen.core.character import CharacterSpec
+        from eu4unitgen.core.look import LookError, compile_look
+
+        home = self.home
+        tag = home.tag()
+        if not tag:
+            return home.show_message("Pick the country first (\"For:\").", error=True)
+        self._sync_settings()
+        try:
+            look = home.look()
+            look.check()
+        except (LookError, ValueError) as exc:
+            return home.show_message(str(exc), error=True)
+        old = self.character_page.spec
+        gfx = self.unit_page.gfx.currentText().strip() or "hellenicgfx"
+        base = {"schema": 1, "name": home.text().strip()[:80],
+                "set": {"tags": [tag], "gfx": gfx, "set_name": tag.lower(),
+                        "base_gfx": self.unit_page.base.currentText() or "westerngfx"}}
+        if old is not None and old.set.get("tags") == [tag]:  # the same country again: keep what the editor added
+            base = {**old.to_json(), "name": base["name"]}
+        session = self.session
+
+        def work():
+            first = CharacterSpec.from_json(compile_look(look, base), Path.cwd())
+            body = session.body_areas(first.set_spec(), 1, "infantry")
+            doc = compile_look(look, base, {t: body.skin for t in (1, 2, 3, 4)})
+            return CharacterSpec.from_json(doc, Path.cwd())
+
+        def done(spec) -> None:
+            if self.adopt_character(spec):
+                self.character_edited()
+                home.show_message(f"Made {len(spec.loadout['slots'])} loadout slots for {tag}. The Result screen "
+                                  "comes next (F10); for now the Advanced editor shows it.")
+                self.show_advanced(self.character_page)
+
+        self.run(home, "Generating", work, done)
 
     def save_character(self, path: Path) -> None:
         """The pages -> a character spec at ``path`` (recipe and loadout paths rebased onto its folder)."""

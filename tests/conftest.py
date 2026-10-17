@@ -37,3 +37,10 @@ def project(fake_install: Path, mod_root: Path) -> Project:
 def nation() -> Nation:
     return Nation("MAC", "hellenicgfx", name="Macedon", adjective="Macedonian", colour=(120, 30, 140),
                   unit_colours=((150, 20, 30), (210, 170, 40), (25, 35, 90)))
+
+
+@pytest.fixture(autouse=True)
+def _private_config(tmp_path, monkeypatch):
+    """Tests never read or write the user's real config folder (their own vocabulary.json)."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))

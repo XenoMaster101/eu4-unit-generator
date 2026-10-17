@@ -547,3 +547,46 @@ def test_u1_wheel_guard_splitters_and_empty_hint(window, qapp):
     qapp.processEvents()
     assert page.table.height() >= 120 and page.after_scroll.height() >= 80
     window.hide()
+
+
+def test_f8_home_screen_reads_rewrites_and_generates(window, fake_install, tmp_path, monkeypatch):
+    """F8: the window opens on Home; typing makes chips; x and swaps rewrite the text; a leftover
+    can be taught; template chips; the nation picker; Generate makes the spec the pages show."""
+    from fakes import make_textures_decodable
+
+    from eu4unitgen.core.look import templates
+
+    make_textures_decodable(fake_install)
+    monkeypatch.setitem(templates()["phalangite"], "body_base", "generic_01")  # the fake install's body
+    home = window.home
+    assert window.views.currentWidget() is home
+    home.set_text("Hoplites with red crests, no shield, long spears, doru, bronze greaves")
+    labels = [i.text() for i in home.result.items]
+    assert labels[:3] == ["Hoplite", "Crest", "Red crest"] and home.result.leftovers == ["doru"]
+    assert home.understood_flow.count() == len(labels) and home.left_row.isVisibleTo(window)
+
+    home._remove(labels.index("Crest"), False)  # the chip's x
+    assert home.text() == "Hoplites, no shield, long spears, doru, bronze greaves"
+    home.teach("doru", "weapon:dory")
+    assert home.result.leftovers == [] and (tmp_path / "appdata" / "eu4unitgen" / "vocabulary.json").is_file()
+    home.use_template("peltast")
+    assert home.text().startswith("Peltast") and home.result.look().template == "peltast"
+    home.set_text("bronze gr")
+    assert home.suggest_row.isVisibleTo(window)
+    home.complete("greaves")
+    assert home.text() == "bronze greaves "
+
+    window.settings_page.load.click()  # fills the nation picker
+    assert home.nation.count() > 0
+    home.set_nation("MAC")
+    assert home.tag() == "MAC"
+    home.set_text("Phalangites with pikes and small shields, crimson tunics; same look on all tiers")
+    assert home.tiers.currentData() == "same"
+    home.generate.click()
+    spec = window.character_page.spec
+    assert spec is not None, home.message.text()
+    assert spec.set["tags"] == ["MAC"] and spec.set["unit_names"]["infantry"] == "Pezhetairoi"
+    parts = {p["kind"] for p in spec.loadout["slots"]["4/infantry"]["parts"]}
+    assert {"sarissa", "hoplon", "greek_helmet"} <= parts
+    assert window.views.currentIndex() == 1 and window.windowTitle().endswith(" *")
+    assert window.textures_page.use.isChecked() and window.parts_page.use.isChecked()

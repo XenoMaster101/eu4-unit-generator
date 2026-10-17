@@ -47,7 +47,11 @@ def entry_id(e: dict) -> str:
 
 
 def words_of(text: str) -> list[str]:
-    return _TOKEN.findall(text.lower().replace("-", " ").replace("'", " "))
+    return _TOKEN.findall(_flat(text))
+
+
+def _flat(text: str) -> str:  # same length as text, so token spans index the original
+    return text.lower().replace("-", " ").replace("'", " ")
 
 
 class Vocabulary:
@@ -141,6 +145,7 @@ class Item:
     colour: tuple | None = None
     params: dict | None = None
     words: str = ""
+    spans: dict = field(default_factory=dict)  # "noun"/"material"/"colour"/"negation" -> (start, end) in the text
 
     def text(self) -> str:
         who = f" ({self.utype})" if self.kind in ("weapon", "shield", "helmet", "crest") and self.utype != "infantry" else ""
@@ -200,6 +205,54 @@ class Interpretation:
         else:
             self.items[index] = replace(i, value=entry["value"], label=entry["label"], params=entry.get("params"))
 
+    # the text is what the screens keep: a chip's x or swap rewrites it, then it is read again
+    def text_without(self, index: int) -> str:
+        """The text with item ``index``'s words taken out (its x)."""
+        return _tidy(_edit(self.text, {span: "" for span in self.items[index].spans.values()}))
+
+    def text_swapped(self, index: int, entry: dict) -> str:
+        """The text with item ``index`` saying ``entry`` instead (a chip click): its colour, its
+        material (added before the garment if it had none) or its noun."""
+        i, new = self.items[index], entry["words"][0]
+        part = {"colour": "colour", "material": "material"}.get(entry["kind"], "noun")
+        if part in i.spans:
+            start, end = i.spans[part]
+            if self.text[start:start + 1].isupper():
+                new = new[:1].upper() + new[1:]
+            return _edit(self.text, {(start, end): new})
+        if "noun" in i.spans:  # "greaves" -> "iron greaves"
+            start, end = i.spans["noun"]
+            return _edit(self.text, {(start, end): f"{new} {self.text[start:end]}"})
+        return self.text
+
+
+def _edit(text: str, changes: dict) -> str:
+    for (start, end), new in sorted(changes.items(), reverse=True):
+        text = text[:start] + new + text[end:]
+    return text
+
+
+def _tidy(text: str) -> str:
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    for _ in range(2):  # a joining word left with nothing to join: "with," "and;"
+        text = re.sub(r"(?i)\b(?:with|and|or|of|in|a|an|the|plus)[ \t]*(?=[,.;:!?]|$)", "", text)
+        text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"[ \t]+([,.;:!?])", r"\1", text)
+    text = re.sub(r"([,;])[ \t]*(?=[,;.]|$)", "", text)
+    text = re.sub(r"^[ \t]*[,;][ \t]*", "", text)
+    return text.strip(" ,;")
+
+
+def text_with_template(text: str, template: str, interpreter: "KeywordInterpreter") -> str:
+    """``text`` starting from ``template`` (a template chip): its template word swapped, or the
+    template's name put in front."""
+    entry = next(e for e in interpreter.vocab.entries if e["kind"] == "template" and e["value"] == template)
+    res = interpreter.interpret(text)
+    at = next((n for n, i in enumerate(res.items) if i.kind == "template"), None)
+    if at is not None:
+        return res.text_swapped(at, entry)
+    return f"{entry['label']}: {text.strip()}" if text.strip() else entry["label"]
+
 
 def _area_label(area: str | None) -> str:
     return (area or "").replace("_", " ")
@@ -230,24 +283,27 @@ class KeywordInterpreter(Interpreter):
     def __init__(self, vocab: Vocabulary | None = None):
         self.vocab = vocab or Vocabulary()
 
-    def _matches(self, text: str) -> list[tuple[str, dict | None, str]]:
-        """(kind, entry, source words): phrases longest first; "break" at punctuation; unknown words."""
-        toks = words_of(text)
+    def _matches(self, text: str) -> list[tuple[str, dict | None, str, tuple[int, int]]]:
+        """(kind, entry, source words, (start, end) in the text): phrases longest first; "break" at
+        punctuation; stopwords; unknown words."""
+        found = list(_TOKEN.finditer(_flat(text)))
+        toks = [m.group(0) for m in found]
         out, i = [], 0
         while i < len(toks):
+            span = (found[i].start(), found[i].end())
             if not toks[i].isalpha():
-                out.append(("break", None, toks[i]))
+                out.append(("break", None, toks[i], span))
                 i += 1
                 continue
             for n in range(min(self.vocab.longest, len(toks) - i), 0, -1):
                 key = tuple(toks[i:i + n])
                 if all(t.isalpha() for t in key) and key in self.vocab.phrases:
                     e = self.vocab.phrases[key]
-                    out.append((e["kind"], e, " ".join(key)))
+                    out.append((e["kind"], e, " ".join(key), (found[i].start(), found[i + n - 1].end())))
                     i += n
                     break
             else:
-                out.append(("stop" if toks[i] in self.vocab.stopwords else "unknown", None, toks[i]))
+                out.append(("stop" if toks[i] in self.vocab.stopwords else "unknown", None, toks[i], span))
                 i += 1
         return out
 
@@ -258,18 +314,20 @@ class KeywordInterpreter(Interpreter):
         def flush() -> None:  # a material or colour with nothing after it in its clause
             nonlocal material, colour
             if material:  # "in bronze": the torso
-                e, words = material
+                e, words, span = material
                 tint = tuple(colour[0]["value"]) if colour else None
+                spans = {"material": span, **({"colour": colour[2]} if colour else {})}
                 res.items.append(Item("finish", e["value"], (f"{colour[0]['label']} " if colour else "")
-                                      + f"{e['label']} torso", area="torso", colour=tint, words=words))
+                                      + f"{e['label']} torso", area="torso", colour=tint, words=words, spans=spans))
                 colour = None  # it tinted the material
             if colour:
-                e, words = colour
+                e, words, span = colour
                 res.items.append(Item("unit_colour", None, f"{e['label']} (main colour)", colour=tuple(e["value"]),
-                                      words=words))
+                                      words=words, spans={"colour": span}))
             material = colour = None
 
-        for kind, e, words in self._matches(text):
+        for kind, e, words, span in self._matches(text):
+            noun = {"noun": span, **({"negation": negate} if negate else {})}
             if kind == "break":
                 flush()
                 scope, negate = "infantry", False
@@ -279,29 +337,32 @@ class KeywordInterpreter(Interpreter):
             elif kind == "stop":
                 continue
             elif kind == "template":
-                res.items.append(Item("template", e["value"], e["label"], words=words))
+                res.items.append(Item("template", e["value"], e["label"], words=words, spans={"noun": span}))
             elif kind == "scope":
                 scope = e["value"]
             elif kind == "negation":
-                negate = True
+                negate = span  # truthy: the next part is a "no ..."
             elif kind == "progression":
-                res.items.append(Item("progression", e["value"], e["label"], words=words))
+                res.items.append(Item("progression", e["value"], e["label"], words=words, spans={"noun": span}))
             elif kind == "material":
-                material = (e, words)
+                material = (e, words, span)
             elif kind == "colour":
-                colour = (e, words)
+                colour = (e, words, span)
             elif kind == "garment":
                 if negate:
-                    res.items.append(Item("finish", None, f"no {e['label'].lower()}", area=e["value"], words=words))
+                    res.items.append(Item("finish", None, f"no {e['label'].lower()}", area=e["value"], words=words,
+                                          spans=noun))
                 else:
                     m = material[0] if material else None
                     finish = m["value"] if m else ("colour" if colour else e["default"])
                     tint = tuple(colour[0]["value"]) if colour else None
                     name = (colour[0]["label"] + " " if colour else "") + (m["label"].lower() + " " if m else "")
                     label = (name + words).capitalize() if (m or colour) else f"{words.capitalize()}: {finish}"
+                    spans = {**noun, **({"material": material[2]} if material else {}),
+                             **({"colour": colour[2]} if colour else {})}
                     res.items.append(Item("finish", finish, label, area=e["value"], colour=tint,
                                           words=" ".join(x for x in ((material or (None, ""))[1], (colour or (None, ""))[1],
-                                                                     words) if x)))
+                                                                     words) if x), spans=spans))
                 material = colour = None
                 negate = False
             elif kind in ("weapon", "shield", "helmet", "crest"):
@@ -314,14 +375,18 @@ class KeywordInterpreter(Interpreter):
                                      "helmet (a crest works)")
                 else:
                     label = f"no {e['label'].lower()}" if negate else e["label"]
-                    res.items.append(Item(kind, value, label, utype=utype, params=e.get("params"), words=words))
+                    owned = {"colour": colour[2]} if (colour and kind in ("crest", "shield") and not negate) else {}
+                    res.items.append(Item(kind, value, label, utype=utype, params=e.get("params"), words=words,
+                                          spans={**noun, **owned}))
                     if kind == "crest" and colour and not negate:
                         res.items.append(Item("crest_colour", None, f"{colour[0]['label']} crest",
-                                              colour=tuple(colour[0]["value"]), words=colour[1]))
+                                              colour=tuple(colour[0]["value"]), words=colour[1],
+                                              spans={"colour": colour[2]}))
                         colour = None
                     if kind == "shield" and colour and not negate:  # the hoplon's face is the main unit colour
                         res.items.append(Item("unit_colour", None, f"{colour[0]['label']} (main colour)",
-                                              colour=tuple(colour[0]["value"]), words=colour[1]))
+                                              colour=tuple(colour[0]["value"]), words=colour[1],
+                                              spans={"colour": colour[2]}))
                         colour = None
                     if kind == "helmet" and material:
                         res.notes.append(f"\"{material[1]} {words}\": helmets are bronze for now")
