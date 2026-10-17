@@ -50,17 +50,21 @@ def hue_shift(img: Image.Image, degrees: float, mask: Image.Image | None = None)
     return _apply(rgba, shifted, mask)
 
 
-def recolour(img: Image.Image, mask: Image.Image, colour: Colour, strength: float = 1.0) -> Image.Image:
+def recolour(img: Image.Image, mask: Image.Image, colour: Colour, strength: float = 1.0,
+             detail: float = 1.0) -> Image.Image:
     """Paint ``colour`` into the masked area, keeping each pixel's lightness relative to the
-    area's mean lightness (folds, seams and shading survive)."""
+    area's mean lightness (folds, seams and shading survive). ``detail`` (0-1) scales how much of
+    that lightness detail is kept: 1 all of it, 0 a flat colour (e.g. skin over mail rings)."""
     if not 0 <= strength <= 1:
         raise RecolourError(f"strength {strength} must be 0-1")
+    if not 0 <= detail <= 1:
+        raise RecolourError(f"detail {detail} must be 0-1")
     lum = img.convert("L")
     binary = mask.point(lambda v: 255 if v >= 128 else 0)
     if binary.getbbox() is None:
         return img.convert("RGBA")
     mean = max(1.0, ImageStat.Stat(lum, binary).mean[0])
-    bands = [lum.point(lambda v, c=c: min(255, round(c * v / mean))) for c in colour]
+    bands = [lum.point(lambda v, c=c: min(255, round(c * (1 + detail * (v / mean - 1))))) for c in colour]
     return _apply(img, Image.merge("RGB", bands), _scaled(mask, strength))
 
 

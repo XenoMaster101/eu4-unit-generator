@@ -179,7 +179,11 @@ def retexture_set(naming: Naming, set_name: str, owner: str, entities: list[dict
         holder: dict = {}
 
         def edit(b: BaseTextures, slot=slot, role=role, holder=holder) -> Edited:
-            result = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role)
+            from eu4unitgen.textures.areas import area_masks
+
+            def areas(b=b):  # the base body's named texture areas, computed only when an op asks
+                return area_masks(game.read(b.mesh_file), b.diffuse.size, b.mesh_file)
+            result = apply_slot(recipe, slot, b.diffuse, b.specular, b.shape["shader"], role, areas)
             holder["notes"] = result.notes
             return Edited(result.diffuse, result.specular)
         try:

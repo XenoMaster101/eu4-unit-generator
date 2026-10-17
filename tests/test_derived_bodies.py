@@ -381,3 +381,29 @@ def test_derived_body_on_a_texture_recipe(project, nation, body_game, fake_insta
         assert diff == N.texture("mac", "infantry", 1, "diffuse")  # the recipe's own texture
     report = validate(project, nation, gen, files, idx)
     assert not report.errors, [str(i) for i in report.errors]
+
+
+def test_area_masks_and_area_regions():
+    """A1: named texture areas from bone groups; recipes target them as area:<name>."""
+    from PIL import Image
+    from eu4unitgen.core.recipe import RecipeError, SlotRecipe, TextureRecipe, apply_slot, check_op
+    from eu4unitgen.textures.areas import area_masks, area_names
+
+    body = skinned_body(uv=(0.1, 0.1, 0.9, 0.1, 0.1, 0.9))  # one triangle, all on "hip"
+    masks = area_masks(body, (32, 32))
+    assert masks["hips"].getpixel((8, 8)) == 255 and masks["arms"].getbbox() is None
+    assert {"arms", "legs", "shins", "head", "torso"} <= set(area_names())
+    check_op({"op": "recolour", "region": "area:shins", "colour": [180, 120, 50], "detail": 0.3, "protect": False})
+    for bad in ({"op": "recolour", "region": "area:wings", "colour": [1, 2, 3]},
+                {"op": "recolour", "region": "area:arms", "colour": [1, 2, 3], "detail": 2},
+                {"op": "spec_paint", "channel": "all", "region": "area:arms", "mode": "set"}):
+        with pytest.raises(RecipeError):
+            check_op(bad)
+    diffuse = Image.new("RGBA", (32, 32), (100, 100, 100, 255))
+    spec = Image.new("RGBA", (32, 32), (255, 255, 0, 20))
+    slot = SlotRecipe(ops=[{"op": "recolour", "region": "area:hips", "colour": [200, 150, 120], "detail": 0.0,
+                            "protect": False},
+                           {"op": "spec_paint", "channel": "all", "region": "area:hips", "mode": "clear"}])
+    res = apply_slot(TextureRecipe(), slot, diffuse, spec, "PdxMeshColor", areas=lambda: masks)
+    assert res.diffuse.getpixel((8, 8))[:3] == (200, 150, 120) and res.diffuse.getpixel((30, 30))[:3] == (100, 100, 100)
+    assert res.specular.getpixel((8, 8))[:3] == (0, 0, 0) and res.specular.getpixel((30, 30))[:3] == (255, 255, 0)

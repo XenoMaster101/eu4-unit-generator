@@ -120,9 +120,16 @@ def parse_slot(key: str) -> tuple[int, str]:
 
 
 def _check_region(op: dict, key: str = "region") -> None:
+    from eu4unitgen.textures.areas import area_names
+
     region = op.get(key)
-    if not isinstance(region, str) or not (region in REGIONS or (region.startswith("mask:") and len(region) > 5)):
-        raise RecipeError(f"{op.get('op')}: {key} {region!r} must be one of {REGIONS} or mask:<png>")
+    ok = isinstance(region, str) and (region in REGIONS or (region.startswith("mask:") and len(region) > 5)
+                                      or (region.startswith("area:") and region[5:] in area_names()))
+    if not ok:
+        raise RecipeError(f"{op.get('op')}: {key} {region!r} must be one of {REGIONS}, mask:<png> or "
+                          f"area:<name> ({', '.join(area_names())})")
+    if "protect" in op and not isinstance(op["protect"], bool):
+        raise RecipeError(f"{op.get('op')}: protect must be true or false (false: the slot's protect mask doesn't apply)")
 
 
 def _check_colour(c: Any, what: str) -> None:
@@ -145,6 +152,8 @@ def check_op(op: dict) -> None:
     elif kind == "recolour":
         _check_region(op)
         _check_colour(op.get("colour"), "recolour: colour")
+        if not isinstance(op.get("detail", 1.0), (int, float)) or not 0 <= op.get("detail", 1.0) <= 1:
+            raise RecipeError("recolour: detail must be 0-1")
     elif kind == "hue_shift":
         _check_region(op)
         if not isinstance(op.get("degrees"), (int, float)):
@@ -156,8 +165,10 @@ def check_op(op: dict) -> None:
         if op.get("blend", "multiply") not in rc.BLENDS:
             raise RecipeError(f"pattern: blend must be one of {rc.BLENDS}")
     elif kind == "spec_paint":
-        if op.get("channel") not in COUNTRY_REGIONS:
-            raise RecipeError(f"spec_paint: channel must be one of {COUNTRY_REGIONS}")
+        if op.get("channel") not in (*COUNTRY_REGIONS, "all"):
+            raise RecipeError(f"spec_paint: channel must be one of {COUNTRY_REGIONS} or all")
+        if op.get("channel") == "all" and op.get("mode", "set") != "clear":
+            raise RecipeError("spec_paint: channel all only clears (mode clear)")
         if "mask" not in op and "region" not in op:
             raise RecipeError("spec_paint: needs a mask (PNG) or a region")
         if "region" in op:
@@ -185,9 +196,10 @@ class SlotResult:
 
 
 def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, specular: Image.Image | None,
-               shader: str, role: str = "infantry") -> SlotResult:
+               shader: str, role: str = "infantry", areas=None) -> SlotResult:
     """Run a slot's operations on decoded base textures. Returns new images (None = unchanged).
-    On a horse, the ``skin`` region is the whole hide (protected by default)."""
+    On a horse, the ``skin`` region is the whole hide (protected by default). ``areas``: the base
+    body's named texture areas (textures.areas), a dict or a callable returning one."""
     colour_shader = shader == "PdxMeshColor"
     regions = auto_regions(diffuse, specular, colour_shader, hide=role == "horse")
     override = recipe.image(slot.protect_mask) if slot.protect_mask else None
@@ -197,10 +209,19 @@ def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, sp
     d_changed = s_changed = False
     notes: list[str] = []
 
+    area_cache: dict = {}
+
     def region(name: str, spec_size: bool = False) -> Image.Image:
         target = s.size if (spec_size and s is not None) else size
         if name.startswith("mask:"):
             return recipe.image(name[5:]).convert("L").resize(target, Image.Resampling.BILINEAR)
+        if name.startswith("area:"):
+            if not area_cache:
+                area_cache.update((areas() if callable(areas) else areas) or {})
+            if name[5:] not in area_cache:
+                raise RecipeError(f"area {name[5:]!r} isn't known for this body")
+            m = area_cache[name[5:]]
+            return m if m.size == target else m.resize(target, Image.Resampling.NEAREST)
         m = regions[name]
         return m if m.size == target else m.resize(target, Image.Resampling.BILINEAR)
 
@@ -208,6 +229,9 @@ def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, sp
         if "mask" in op:
             return recipe.image(op["mask"]).convert("L").resize(s.size, Image.Resampling.BILINEAR)
         return region(op["region"], spec_size=True)
+
+    def guard(op: dict):  # "protect": false on an op: the slot's protect mask doesn't apply to it
+        return protect if op.get("protect", True) else None
 
     for op in slot.ops:
         check_op(op)
@@ -234,19 +258,21 @@ def apply_slot(recipe: TextureRecipe, slot: SlotRecipe, diffuse: Image.Image, sp
                     s_changed = True
             notes.append("palette: " + ", ".join(f"{t}={c}" for t, c in zip(order, colours)))
         elif kind == "recolour":
-            d = rc.recolour(d, rc.effective(region(op["region"]), protect), tuple(op["colour"]),
-                            float(op.get("strength", 1.0)))
+            d = rc.recolour(d, rc.effective(region(op["region"]), guard(op)), tuple(op["colour"]),
+                            float(op.get("strength", 1.0)), float(op.get("detail", 1.0)))
             d_changed = True
         elif kind == "hue_shift":
-            d = rc.hue_shift(d, float(op["degrees"]), rc.effective(region(op["region"]), protect))
+            d = rc.hue_shift(d, float(op["degrees"]), rc.effective(region(op["region"]), guard(op)))
             d_changed = True
         elif kind == "pattern":
-            d = rc.pattern_overlay(d, rc.effective(region(op["region"]), protect), recipe.image(op["image"]),
+            d = rc.pattern_overlay(d, rc.effective(region(op["region"]), guard(op)), recipe.image(op["image"]),
                                    op.get("blend", "multiply"), float(op.get("opacity", 1.0)),
                                    float(op.get("scale", 1.0)))
             d_changed = True
         elif kind == "spec_paint":
-            s = rc.spec_paint(s, mask_or_region(op), op["channel"], op.get("mode", "set"))
+            channels = list(COUNTRY_REGIONS) if op["channel"] == "all" else [op["channel"]]
+            for ch in channels:
+                s = rc.spec_paint(s, mask_or_region(op), ch, op.get("mode", "set"))
             s_changed = True
         elif kind == "gloss":
             pct = rc.GLOSS_PRESETS[op["preset"]] if "preset" in op else float(op["percent"])

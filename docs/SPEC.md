@@ -1298,6 +1298,15 @@ Constraints carried over:
       2. the figure reads "knight in white armour": vanilla's grey mail sleeves and striped hose are medieval. A hoplite needs bare arms and legs (skin) or bronze greaves;
       3. legs striped (finding c);
       4. crest too thin, barely visible: taller, fuller horsehair.
+    - **A1 (2026-10-16): named texture areas.**
+      - `library/bodies.json` "areas": bone groups for the generic 28-bone skeleton (head, torso, hips, upper_arms, forearms, arms, hands, thighs, shins, legs, feet), overridable per body.
+      - `textures/areas.area_masks` computes them from the body's own mesh: a triangle belongs to the area of most of its vertices' dominant bones, drawn into texture space with a 2 px margin. No painting per body. Type1 overlay: `build/plan11/type1_areas.png` (the sleeves, mail included, are arms; the hose island is thighs then shins).
+      - **Recipes:**
+        - region `area:<name>`;
+        - per-op `"protect": false` (the slot's protect mask doesn't apply, e.g. bare arms over the mail);
+        - recolour `detail` 0-1 (0 = flat colour: skin over mail rings);
+        - `spec_paint` channel `all` (clear only: every unit-colour mask in a region).
+        - `retexture_set` passes the base mesh's areas, computed only when an op asks.
     - **Next (user):** A, the GUI Character page with named texture areas per body (arms → skin, legs → skin, shins → bronze greaves), proven by rebuilding the hoplite in the GUI with bare arms and legs, a proper bronze helmet and a fuller crest; B, import part; C, an **import full body** mode, spiked first; D, TripoSG.
  The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
 
