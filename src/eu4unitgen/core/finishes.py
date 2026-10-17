@@ -40,6 +40,19 @@ def finish_ops(region: str, finish: str, skin: tuple, colour: tuple | None = Non
     return ops
 
 
+def default_colour(finish: str, skin: tuple) -> tuple | None:
+    """The colour a finish paints when the user picks none (None: the finish needs one)."""
+    c = finishes()[finish]["colour"]
+    return None if c is None else tuple(skin if c == "skin" else c)
+
+
+def paint_mask_name(finish: str, colour: tuple | None, skin: tuple) -> str:
+    """The file a brush painting ``finish`` (in ``colour``, if it isn't the finish's own) paints into."""
+    if colour is None or tuple(colour) == default_colour(finish, skin):
+        return f"paint_{finish}.png"
+    return f"paint_{finish}_{''.join(f'{int(v):02x}' for v in colour)}.png"
+
+
 def split(ops: list[dict]) -> tuple[list[dict], dict[str, dict]]:
     """A slot's operations -> (the ones no finish made, {region: {"finish", "colour"}})."""
     rest, chosen = [], {}
@@ -54,13 +67,14 @@ def split(ops: list[dict]) -> tuple[list[dict], dict[str, dict]]:
 
 def with_finishes(ops: list[dict], chosen: dict[str, dict], skin: tuple, order: list[str]) -> list[dict]:
     """``ops`` with its finish operations replaced by ``chosen`` ({region: {"finish", "colour",
-    optional "grow", "feather"}}),
+    optional "grow", "feather"}}; a colour other than the finish's own tints it),
     appended after the rest in ``order`` (broad areas before narrow ones, then masks)."""
     rest, _ = split(ops)
     rank = {r: i for i, r in enumerate(order)}
     out = list(rest)
     for region in sorted(chosen, key=lambda r: (rank.get(r, len(rank)), r)):
         c = chosen[region]
-        custom = c.get("colour") if finishes()[c["finish"]]["colour"] is None else None
+        own = default_colour(c["finish"], skin)
+        custom = c.get("colour") if c.get("colour") and tuple(c["colour"]) != own else None
         out += finish_ops(region, c["finish"], skin, custom, c.get("grow", 0), c.get("feather", 0))
     return out

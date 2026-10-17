@@ -10,20 +10,21 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from PIL import Image
-from PySide6.QtCore import QPoint, Qt
+from PIL import Image, ImageChops
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QColorDialog, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
     QSpinBox, QSplitter, QTableWidget, QVBoxLayout, QWidget,
 )
 
-from eu4unitgen.core.finishes import FinishError, finishes, split
+from eu4unitgen.core.finishes import FinishError, default_colour, finishes, paint_mask_name, split
 from eu4unitgen.core.naming import MESH_ROLES, TIERS
 from eu4unitgen.gui.pages import Page, _path_row
 from eu4unitgen.textures.areas import FEATHER_MAX, GROW_MAX, adjust, overlay
 
 KEEP = "keep (base texture)"
+PAINT = "mask:paint_"  # rows the brush paints: mask:paint_<finish>[_<rrggbb>].png
 MAP_SIZE = 512
 # area tints on the map; masks you paint show in white
 TINTS = [(255, 210, 0), (0, 160, 255), (150, 0, 255), (0, 210, 90), (255, 120, 0), (255, 60, 160), (255, 0, 0),
@@ -42,9 +43,13 @@ def _pil_mask(q: QImage) -> Image.Image:
     return Image.frombytes("L", (q.width(), q.height()), bytes(q.constBits()), "raw", "L", q.bytesPerLine())
 
 
-class MaskCanvas(QLabel):
-    """The body texture with areas tinted; while painting, the left button adds to the mask and the
-    right button erases. The mask lives at the texture's own size."""
+class PaintCanvas(QLabel):
+    """The body map. With the brush on, the left button paints and the right button erases; the
+    stroke shows in the brush colour and goes to the page when the button is let go, at the
+    texture's own size. With the brush off, a click picks the area under it."""
+
+    stroke_done = Signal(object, bool)  # PIL 'L' stroke mask at texture size, erase
+    picked = Signal(int, int)  # texture pixel clicked with the brush off
 
     def __init__(self):
         super().__init__()
@@ -52,71 +57,65 @@ class MaskCanvas(QLabel):
         self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.setStyleSheet("background: #333")
         self.base: QImage | None = None
-        self.mask: QImage | None = None
+        self.stroke: QImage | None = None
         self.painting = False
-        self.brush = 12
+        self.brush = 12  # px on screen
+        self.colour = QColor(255, 255, 255)
+        self._erase = False
         self._last: QPoint | None = None
 
     def show_map(self, img: Image.Image) -> None:
         self.base = _qimage(img)
-        if self.mask is None or self.mask.size() != self.base.size():
-            self.mask = QImage(self.base.size(), QImage.Format_Grayscale8)
-            self.mask.fill(0)
         self._redraw()
-
-    def new_mask(self, existing: Image.Image | None = None) -> None:
-        if self.base is None:
-            return
-        self.mask = QImage(self.base.size(), QImage.Format_Grayscale8)
-        self.mask.fill(0)
-        if existing is not None:
-            m = existing.convert("L").resize((self.base.width(), self.base.height()))
-            self.mask = QImage(m.tobytes(), m.width, m.height, m.width, QImage.Format_Grayscale8).copy()
-        self._redraw()
-
-    def mask_image(self) -> Image.Image | None:
-        return _pil_mask(self.mask) if self.mask is not None else None
 
     def _redraw(self) -> None:
         if self.base is None:
             return
         out = self.base.copy()
-        if self.painting and self.mask is not None:
+        if self.stroke is not None:
             p = QPainter(out)
-            tint = QImage(self.mask.size(), QImage.Format_ARGB32)
-            tint.fill(QColor(255, 255, 255))
-            tint.setAlphaChannel(self.mask)
-            p.setOpacity(0.7)
+            tint = QImage(self.stroke.size(), QImage.Format_ARGB32)
+            tint.fill(QColor(40, 40, 40) if self._erase else self.colour)
+            tint.setAlphaChannel(self.stroke)
+            p.setOpacity(0.8)
             p.drawImage(0, 0, tint)
             p.end()
         self.setPixmap(QPixmap.fromImage(out).scaled(MAP_SIZE, MAP_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def _to_texture(self, pos) -> QPoint:
-        sx = self.base.width() / MAP_SIZE
-        sy = self.base.height() / MAP_SIZE
-        return QPoint(int(pos.x() * sx), int(pos.y() * sy))
+        return QPoint(int(pos.x() * self.base.width() / MAP_SIZE), int(pos.y() * self.base.height() / MAP_SIZE))
 
-    def _stroke(self, pos, erase: bool) -> None:
-        if not self.painting or self.mask is None or self.base is None:
-            return
+    def _stroke(self, pos) -> None:
         pt = self._to_texture(pos)
-        p = QPainter(self.mask)
-        colour = QColor(0, 0, 0) if erase else QColor(255, 255, 255)
-        p.setPen(QPen(colour, self.brush * self.base.width() / MAP_SIZE, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p = QPainter(self.stroke)
+        p.setPen(QPen(QColor(255, 255, 255), self.brush * self.base.width() / MAP_SIZE, Qt.SolidLine, Qt.RoundCap,
+                      Qt.RoundJoin))
         p.drawLine(self._last or pt, pt)
         p.end()
         self._last = pt
         self._redraw()
 
     def mousePressEvent(self, e) -> None:  # noqa: N802 - Qt name
+        if self.base is None:
+            return
+        if not self.painting:
+            pt = self._to_texture(e.position())
+            return self.picked.emit(pt.x(), pt.y())
+        self._erase = e.button() == Qt.RightButton
+        self.stroke = QImage(self.base.size(), QImage.Format_Grayscale8)
+        self.stroke.fill(0)
         self._last = None
-        self._stroke(e.position(), e.button() == Qt.RightButton)
+        self._stroke(e.position())
 
     def mouseMoveEvent(self, e) -> None:  # noqa: N802
-        self._stroke(e.position(), bool(e.buttons() & Qt.RightButton))
+        if self.stroke is not None:
+            self._stroke(e.position())
 
     def mouseReleaseEvent(self, e) -> None:  # noqa: N802
-        self._last = None
+        if self.stroke is None:
+            return
+        stroke, self.stroke, self._last = _pil_mask(self.stroke), None, None
+        self.stroke_done.emit(stroke, self._erase)
 
 
 class CharacterPage(Page):
@@ -126,8 +125,8 @@ class CharacterPage(Page):
         super().__init__(window)
         self.spec = None  # the loaded core.character.CharacterSpec (keeps hair, export and test)
         self.body = None  # Session.body_areas result for the shown slot
-        self.masks: dict[str, Image.Image] = {}  # mask:<png> regions painted or loaded on this page
-        self._colours: dict[str, tuple] = {}  # region -> custom colour
+        self.masks: dict[str, Image.Image] = {}  # mask:<png> rows (painted or from files), from the recipe
+        self._colours: dict[str, tuple] = {}  # region -> the user's colour (tints any finish)
         self._edges: dict[str, tuple[int, int]] = {}  # region -> (grow, feather) in texture pixels
         self._quiet = False  # rebuilding the rows: their signals aren't edits
 
@@ -184,7 +183,9 @@ class CharacterPage(Page):
         self.layout_.addLayout(slot_row)
 
         # resizable panes: the map | (areas table and tools / preview and render)
-        self.canvas = MaskCanvas()
+        self.canvas = PaintCanvas()
+        self.canvas.stroke_done.connect(self.paint)
+        self.canvas.picked.connect(self._pick_area)
         self.legend = QLabel()
         self.legend.setWordWrap(True)
         left = QWidget()
@@ -208,23 +209,32 @@ class CharacterPage(Page):
         self.table.itemSelectionChanged.connect(self._highlight)
         tl.addWidget(self.table, 1)
 
-        paint = QGroupBox("Paint a mask (left button paints, right erases)")
-        pl = QHBoxLayout(paint)
-        self.mask_name = QLineEdit()
-        self.mask_name.setPlaceholderText("mask name, e.g. greaves_band")
+        paint = QGroupBox("Paint finishes on the map")
+        pv = QVBoxLayout(paint)
+        pl = QHBoxLayout()
+        self.paint_btn = QPushButton("Brush on")
+        self.paint_btn.setCheckable(True)
+        self.paint_btn.toggled.connect(self._toggle_paint)
+        self.brush_finish = QComboBox()
+        self.brush_finish.addItems([f"{k}: {v['label']}" for k, v in finishes().items()])
+        self.brush_finish.currentIndexChanged.connect(lambda _: self._brush_changed(own=True))
+        self.brush_colour = QPushButton()
+        self.brush_colour.clicked.connect(self._pick_brush_colour)
         self.brush = QSpinBox()
         self.brush.setRange(2, 80)
         self.brush.setValue(12)
+        self.brush.setSuffix(" px")
         self.brush.valueChanged.connect(lambda v: setattr(self.canvas, "brush", v))
-        self.paint_btn = QPushButton("Start painting")
-        self.paint_btn.setCheckable(True)
-        self.paint_btn.toggled.connect(self._toggle_paint)
-        keep = QPushButton("Save mask")
-        keep.setToolTip("writes <name>.png next to the character spec and adds it as an area (mask:<name>.png)")
-        keep.clicked.connect(self._save_mask)
-        for w in (self.mask_name, QLabel("Brush"), self.brush, self.paint_btn, keep):
+        for w in (self.paint_btn, QLabel("Paint"), self.brush_finish, self.brush_colour, QLabel("Size"), self.brush):
             pl.addWidget(w)
+        pl.addStretch(1)
+        pv.addLayout(pl)
+        self.paint_hint = QLabel()
+        self.paint_hint.setWordWrap(True)
+        pv.addWidget(self.paint_hint)
         tl.addWidget(paint)
+        self._brush: tuple | None = None  # the brush's own colour (None: the finish's)
+        self._toggle_paint(False)
 
         act = QHBoxLayout()
         apply = QPushButton("Apply to the texture recipe")
@@ -286,6 +296,7 @@ class CharacterPage(Page):
             self.window_._update_title()
             for region in self.regions() if self.body else []:
                 self._paint_button(region)
+            self._brush_changed()
 
     def show_dirty(self, dirty: bool, can_undo: bool, can_redo: bool) -> None:
         self.dirty.setText("<b>● Unsaved changes</b>" if dirty else "All changes saved")
@@ -308,12 +319,17 @@ class CharacterPage(Page):
         self.body = body
         slot = recipe.slots.get(self.slot_key()) if recipe is not None else None
         _, chosen = split(slot.ops if slot else [])
+        self.masks = {}
         for region in chosen:
-            if region.startswith("mask:") and region not in self.masks:
+            if region.startswith("mask:"):
                 try:
-                    self.masks[region] = recipe.image(region[5:]).convert("L")
+                    m = recipe.image(region[5:]).convert("L")
                 except Exception:  # noqa: BLE001 - a missing mask file shows as an empty mask row
-                    self.masks[region] = Image.new("L", body.diffuse.size, 0)
+                    m = Image.new("L", body.diffuse.size, 0)
+                self.masks[region] = m if m.size == body.diffuse.size else m.resize(body.diffuse.size)
+        self._colours = {r: tuple(c["colour"]) for r, c in chosen.items()
+                         if c.get("colour") and tuple(c["colour"]) != default_colour(c["finish"], body.skin)}
+        self._sizes = {r: sum(m.histogram()[128:]) for r, m in self._all_masks(raw=True).items()}  # px, for picking
         rows = self.regions()
         self.table.setRowCount(len(rows))
         names = [KEEP] + [f"{k}: {v['label']}" for k, v in finishes().items()]
@@ -326,8 +342,6 @@ class CharacterPage(Page):
             c = chosen.get(region)
             if c:
                 combo.setCurrentIndex(1 + list(finishes()).index(c["finish"]))
-                if finishes()[c["finish"]]["colour"] is None:
-                    self._colours[region] = c["colour"]
             combo.currentIndexChanged.connect(lambda _=0, r=region: self._finish_changed(r))
             self.table.setCellWidget(i, 1, combo)
             btn = QPushButton()
@@ -343,8 +357,9 @@ class CharacterPage(Page):
                 self.table.setCellWidget(i, col, box)
             self._paint_button(region)
         self._draw_map()
+        self._brush_changed()
         self.show_message(f"Body {body.base} ({body.mesh_file}); its own skin tone is rgb {' '.join(map(str, body.skin))}. "
-                          "Pick a finish per area, then Apply.")
+                          "Pick a finish per area, or paint finishes on the map.")
 
     def _row(self, region: str) -> int:
         return self.regions().index(region)
@@ -384,39 +399,47 @@ class CharacterPage(Page):
             self.apply_finishes()
 
     def set_finish(self, region: str, finish: str | None, colour: tuple | None = None) -> None:
-        """Choose a finish for a row (tests, and scripted setups)."""
+        """Choose a finish (and a colour of your own) for a row (tests, and scripted setups)."""
+        combo = self.table.cellWidget(self._row(region), 1)
+        self._quiet = True
+        try:
+            combo.setCurrentIndex(0 if finish is None else 1 + list(finishes()).index(finish))
+        finally:
+            self._quiet = False
+        self._colours.pop(region, None)
         if colour is not None:
             self._colours[region] = tuple(colour)
-        combo = self.table.cellWidget(self._row(region), 1)
-        combo.setCurrentIndex(0 if finish is None else 1 + list(finishes()).index(finish))
+        self._paint_button(region)
+        self._draw_map()
+        self.apply_finishes()
 
     def _colour_of(self, region: str) -> tuple | None:
         f = self._finish(region)
         if f is None:
             return None
-        c = finishes()[f]["colour"]
-        return self._colours.get(region) if c is None else (self.body.skin if c == "skin" else tuple(c))
+        return self._colours.get(region) or default_colour(f, self.body.skin)
 
     def _paint_button(self, region: str) -> None:
         btn = self.table.cellWidget(self._row(region), 2)
         c = self._colour_of(region)
-        custom = self._finish(region) is not None and finishes()[self._finish(region)]["colour"] is None
-        btn.setEnabled(custom)
-        btn.setText("" if c else ("pick…" if custom else "–"))
+        btn.setEnabled(self._finish(region) is not None)
+        btn.setText("" if c else ("pick…" if self._finish(region) else "–"))
         btn.setStyleSheet(f"background: rgb{tuple(c)}" if c else "")
+        btn.setToolTip("Pick a colour for this finish" if self._finish(region) else "Choose a finish first")
 
     def _finish_changed(self, region: str) -> None:
         if self._quiet:
             return
-        if self._finish(region) and finishes()[self._finish(region)]["colour"] is None and region not in self._colours:
+        self._colours.pop(region, None)  # a new finish starts from its own colour
+        if self._finish(region) and default_colour(self._finish(region), self.body.skin) is None:
             self._pick_colour(region, apply=False)
         self._paint_button(region)
         self._draw_map()
         self.apply_finishes()
 
     def _pick_colour(self, region: str, apply: bool = True) -> None:
-        start = QColor(*(self._colours.get(region) or (128, 128, 128)))
-        c = QColorDialog.getColor(start, self, f"Colour for {region}")
+        start = QColor(*(self._colour_of(region) or (128, 128, 128)))
+        c = QColorDialog.getColor(start, self, f"Colour for {region.removeprefix('area:')}")
         if c.isValid():
             self._colours[region] = (c.red(), c.green(), c.blue())
             self._paint_button(region)
@@ -425,9 +448,11 @@ class CharacterPage(Page):
                 self.apply_finishes()
 
     # ------------------------------------------------------------------ map
-    def _all_masks(self) -> dict[str, Image.Image]:
+    def _all_masks(self, raw: bool = False) -> dict[str, Image.Image]:
         out = {f"area:{k}": v for k, v in (self.body.areas if self.body else {}).items()}
         out.update(self.masks)
+        if raw:
+            return out
         return {r: adjust(m, *self._edges[r]) if self._edges.get(r, (0, 0)) != (0, 0) else m for r, m in out.items()}
 
     def _draw_map(self, highlight: str | None = None) -> None:
@@ -448,62 +473,110 @@ class CharacterPage(Page):
         regions = self.regions()
         self._draw_map(regions[min(rows)] if rows and min(rows) < len(regions) else None)
 
-    # ------------------------------------------------------------------ masks
+    # ------------------------------------------------------------------ painting
     def _toggle_paint(self, on: bool) -> None:
         if on and self.body is None:
             self.paint_btn.setChecked(False)
             return self.show_message("Show the body areas first.", error=True)
         self.canvas.painting = on
-        self.paint_btn.setText("Stop painting" if on else "Start painting")
-        if on:
-            name = self.mask_name.text().strip()
-            existing = self.masks.get(f"mask:{name}.png") if name else None
-            self.canvas.new_mask(existing)
-        self.canvas._redraw()
+        self.paint_btn.setText("Brush on" if on else "Brush off")
+        self.canvas.setCursor(Qt.CrossCursor if on else Qt.PointingHandCursor)
+        self.paint_hint.setText(
+            "Left button paints the finish, right button erases paint. Painting over another painted finish "
+            "replaces it." if on else "Brush off: click the map to find the area under the pointer.")
 
-    def _save_mask(self) -> None:
-        name = self.mask_name.text().strip()
-        if not name or not name.replace("_", "").replace("-", "").isalnum():
-            return self.show_message("Name the mask first (letters, digits, _ and -).", error=True)
-        if self.canvas.mask is None:
-            return self.show_message("Paint the mask first.", error=True)
-        try:
-            path = self.save_mask(name, self.canvas.mask_image())
-        except OSError as exc:
-            return self.show_message(str(exc), error=True)
-        self.paint_btn.setChecked(False)
-        self.show_message(f"Saved {path}; it's now the row mask:{name}.png.")
+    def brush_finish_key(self) -> str:
+        return list(finishes())[self.brush_finish.currentIndex()]
 
-    def save_mask(self, name: str, img: Image.Image) -> Path:
-        """Write a painted mask beside the character spec (the recipe's folder) and add its row."""
-        root = self.window_.textures_page.recipe.root
-        path = Path(root) / f"{name}.png"
-        img.convert("L").save(path)
-        region = f"mask:{name}.png"
-        self.masks[region] = img.convert("L")
-        if self.body is not None:
-            keep = self.chosen()
-            self._quiet = True
-            try:
-                self.show_areas(self.body, None)
-                for r, c in keep.items():
-                    self.set_finish(r, c["finish"], c.get("colour"))
-            finally:
-                self._quiet = False
-        return path
+    def brush_colour_value(self) -> tuple | None:
+        skin = self.body.skin if self.body else (196, 150, 120)
+        return self._brush or default_colour(self.brush_finish_key(), skin)
+
+    def set_brush(self, finish: str, colour: tuple | None = None) -> None:
+        """Pick what the brush paints (tests, scripted setups)."""
+        self.brush_finish.setCurrentIndex(list(finishes()).index(finish))
+        self._brush = tuple(colour) if colour else None
+        self._brush_changed()
+
+    def _brush_changed(self, own: bool = False) -> None:
+        if own:
+            self._brush = None  # a new finish starts from its own colour
+        c = self.brush_colour_value()
+        self.brush_colour.setText("" if c else "pick…")
+        self.brush_colour.setStyleSheet(f"background: rgb{tuple(c)}" if c else "")
+        self.brush_colour.setToolTip("The colour the brush paints; click to pick another (it tints the finish)")
+        if c:
+            self.canvas.colour = QColor(*c)
+
+    def _pick_brush_colour(self) -> None:
+        start = QColor(*(self.brush_colour_value() or (128, 128, 128)))
+        c = QColorDialog.getColor(start, self, "Brush colour")
+        if c.isValid():
+            self._brush = (c.red(), c.green(), c.blue())
+            self._brush_changed()
+
+    def paint(self, stroke: Image.Image, erase: bool = False) -> None:
+        """A brush stroke (an 'L' mask at the texture's size): paint the brush's finish there, taking
+        it out of every other painted finish; or, erasing, take it out of all of them."""
+        if self.body is None:
+            return
+        recipe = self.window_.textures_page.recipe
+        stroke = stroke.convert("L")
+        if stroke.size != self.body.diffuse.size:
+            stroke = stroke.resize(self.body.diffuse.size)
+        chosen = self.chosen()
+        target = None
+        if not erase:
+            colour = self.brush_colour_value()
+            if colour is None:
+                return self.show_message("Pick a colour for the brush first.", error=True)
+            finish = self.brush_finish_key()
+            target = "mask:" + paint_mask_name(finish, colour, self.body.skin)
+            own = tuple(colour) != default_colour(finish, self.body.skin)
+            old = chosen.get(target, {})
+            chosen[target] = {"finish": finish, "colour": tuple(colour) if own else None,
+                              "grow": old.get("grow", 0), "feather": old.get("feather", 0)}
+            self.masks.setdefault(target, Image.new("L", stroke.size, 0))
+        for region in [r for r in self.masks if r.startswith(PAINT)]:
+            if region == target:
+                m = ImageChops.lighter(self.masks[region], stroke)
+            else:
+                m = ImageChops.subtract(self.masks[region], stroke)
+                if m.getbbox() is None:  # all of it painted over or erased: the row goes
+                    chosen.pop(region, None)
+                    recipe.images.pop(region[5:], None)
+                    continue
+            recipe.images[region[5:]] = m
+        self.apply_finishes(chosen)
+        self.show_areas(self.body, recipe)
+
+    def _pick_area(self, x: int, y: int) -> None:
+        """Select the narrowest row whose area holds texture pixel (x, y)."""
+        if self.body is None:
+            return
+        rows = self.regions()
+        hits = [r for r, m in self._all_masks().items() if r in rows and m.getpixel((x, y)) >= 128]
+        if not hits:
+            return self.show_message("No named area there (no area covers that part of the texture).")
+        best = min(hits, key=lambda r: self._sizes.get(r, 0))
+        self.table.selectRow(rows.index(best))
+        others = [h.removeprefix("area:") for h in hits if h != best]
+        self.show_message(f"<b>{best.removeprefix('area:')}</b>" + (f" (also in: {', '.join(others)})" if others else ""))
 
     # ------------------------------------------------------------------ recipe
-    def apply_finishes(self) -> None:
-        """The rows' finishes -> the Textures page's slot for this tier/role (replacing the old ones).
-        Runs on every change, so the recipe (and the undo history) always matches the rows."""
+    def apply_finishes(self, chosen: dict | None = None) -> None:
+        """The rows' finishes (or ``chosen``) -> the Textures page's slot for this tier/role, replacing
+        the old ones. Runs on every change, so the recipe (and the undo history) always matches."""
         if self.body is None:
             return self.show_message("Show the body areas first.", error=True)
+        chosen = self.chosen() if chosen is None else chosen
+        order = self.regions() + sorted(r for r in chosen if r not in self.regions())
         try:
-            self.window_.apply_character_finishes(self.slot_key(), self.chosen(), self.body.skin, self.regions())
+            self.window_.apply_character_finishes(self.slot_key(), chosen, self.body.skin, order)
         except FinishError as exc:
             return self.show_message(str(exc), error=True)
         self.window_.character_edited()
-        n = len(self.chosen())
+        n = len(chosen)
         self.show_message(f"Applied {n} area finish(es) to the texture recipe's slot "
                           f"{self.slot_key()[0]}/{self.slot_key()[1]}." if n else "Cleared this slot's area finishes.")
 

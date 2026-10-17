@@ -447,6 +447,15 @@ def test_finishes_round_trip():
     rest, back = split(out)
     assert rest == base and back["mask:greek_border.png"]["colour"] == (10, 20, 30)
     assert back["area:shins"]["finish"] == "bronze"
+    from eu4unitgen.core.finishes import paint_mask_name
+
+    tinted = with_finishes([], {"area:shins": {"finish": "bronze", "colour": (90, 60, 30)},
+                                "area:arms": {"finish": "skin", "colour": (190, 140, 110)}}, (190, 140, 110), [])
+    assert split(tinted)[1]["area:shins"]["colour"] == (90, 60, 30)  # a colour of your own tints any finish
+    assert split(tinted)[1]["area:arms"]["colour"] == (190, 140, 110)
+    assert paint_mask_name("bronze", None, (1, 2, 3)) == "paint_bronze.png"
+    assert paint_mask_name("skin", (1, 2, 3), (1, 2, 3)) == "paint_skin.png"
+    assert paint_mask_name("colour", (255, 16, 0), (1, 2, 3)) == "paint_colour_ff1000.png"
 
 
 def test_u5_bands_split_areas_and_edges_grow_and_feather():

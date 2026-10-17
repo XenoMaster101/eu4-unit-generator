@@ -313,14 +313,14 @@ def test_character_page_areas_finishes_masks_and_spec(window, fake_install, tmp_
     assert page.table.rowCount() >= 10 and page.regions()[0] == "area:head"
     page.set_finish("area:arms", "skin")
     page.set_finish("area:shins", "bronze")
-    page.save_mask("border", Image.new("L", page.body.diffuse.size, 255))
-    assert (tmp_path / "char" / "border.png").is_file() and "mask:border.png" in page.regions()
+    page.set_brush("colour", (10, 20, 30))
+    page.paint(Image.new("L", page.body.diffuse.size, 255))
+    border = "mask:paint_colour_0a141e.png"
+    assert border in page.regions() and not (tmp_path / "char" / border[5:]).exists()  # in memory until saved
     assert page.chosen()["area:shins"]["finish"] == "bronze"  # kept across the new row
-    page.set_finish("mask:border.png", "colour", (10, 20, 30))
-    page.apply_finishes()
     ops = window.textures_page.recipe.slots[(1, "infantry")].ops
     assert ops[0]["region"] == "cloth"
-    assert [o["region"] for o in ops if o["op"] == "recolour"][1:] == ["area:arms", "area:shins", "mask:border.png"]
+    assert [o["region"] for o in ops if o["op"] == "recolour"][1:] == ["area:arms", "area:shins", border]
     window.character_preview()
     assert page.after.pixmap() is not None and not page.after.pixmap().isNull(), page.message.text()
 
@@ -329,10 +329,11 @@ def test_character_page_areas_finishes_masks_and_spec(window, fake_install, tmp_
     doc = json.loads(out.read_text(encoding="utf-8"))
     assert doc["hair"] == {"colour": [40, 30, 20]} and doc["test"]["sprite_techs"] == [2, 3, 4]
     assert any(o.get("finish") == "skin" for o in doc["textures"]["slots"]["1/infantry"]["ops"])
+    assert (tmp_path / "char" / border[5:]).is_file()  # written beside the spec on save
     window.load_character(out)
     window.character_areas()
     assert page.chosen()["area:arms"]["finish"] == "skin"
-    assert page.chosen()["mask:border.png"]["colour"] == (10, 20, 30)
+    assert page.chosen()[border]["colour"] == (10, 20, 30)
     page.apply_finishes()  # re-applying replaces, never duplicates
     ops = window.textures_page.recipe.slots[(1, "infantry")].ops
     assert sum(1 for o in ops if o["op"] == "recolour" and o.get("region") == "area:arms") == 1
@@ -412,6 +413,64 @@ def test_u5_band_rows_and_edges(window, fake_install, tmp_path):
     window.character_areas()
     row = page.regions().index("area:belt")
     assert page.table.cellWidget(row, 3).value() == 3 and page.table.cellWidget(row, 4).value() == 2
+
+
+def test_u6_brush_paints_finishes(window, fake_install, tmp_path):
+    """U6: the brush paints a finish into an in-memory mask row; painting another finish over it
+    takes that spot out of the first; erasing takes paint out; undo brings a stroke back; a click
+    with the brush off picks the narrowest area under it."""
+    from PIL import Image
+
+    page = window.character_page
+    window.load_character(_hoplite_spec(fake_install, tmp_path))
+    page.tier.setCurrentText("1")
+    window.character_areas()
+    size = page.body.diffuse.size
+    left = Image.new("L", size, 0)
+    left.paste(255, (0, 0, size[0] // 2, size[1]))
+    top = Image.new("L", size, 0)
+    top.paste(255, (0, 0, size[0], size[1] // 4))
+
+    page.set_brush("bronze")
+    from eu4unitgen.core.finishes import default_colour
+    assert page.brush_colour_value() == default_colour("bronze", page.body.skin)  # the finish's own colour
+    page.paint(left)
+    page.set_brush("linen", (90, 30, 30))  # a colour of your own tints the finish
+    page.paint(top)
+    images = window.textures_page.recipe.images
+    bronze, linen = "mask:paint_bronze.png", "mask:paint_linen_5a1e1e.png"
+    assert {bronze, linen} <= set(page.regions()) and {bronze[5:], linen[5:]} <= set(images)
+    assert images[bronze[5:]].getpixel((0, 0)) == 0 and images[bronze[5:]].getpixel((0, size[1] - 1)) == 255
+    assert images[linen[5:]].getpixel((size[0] - 1, 0)) == 255
+    assert page.chosen()[linen] == {"finish": "linen", "colour": (90, 30, 30), "grow": 0, "feather": 0}
+    assert page.chosen()[bronze]["colour"] is None
+    ops = window.textures_page.recipe.slots[(1, "infantry")].ops
+    assert [o["region"] for o in ops if o["op"] == "recolour"][-2:] == [bronze, linen]  # paint after areas
+
+    page.paint(Image.new("L", size, 255), erase=True)
+    assert bronze not in page.regions() and linen not in page.regions() and not images
+    page.undo_btn.click()
+    assert {bronze, linen} <= set(page.regions())
+    assert window.textures_page.recipe.images[linen[5:]].getpixel((size[0] - 1, 0)) == 255
+
+    small = min((r for r in page.regions() if page._sizes.get(r)), key=lambda r: page._sizes[r])
+    m = page._all_masks()[small]
+    x, y = next((x, y) for y in range(size[1]) for x in range(size[0]) if m.getpixel((x, y)) == 255)
+    page.canvas.picked.emit(x, y)
+    picked = page.regions()[page.table.currentRow()]
+    assert page._sizes[picked] == page._sizes[small], page.message.text()  # the narrowest area there
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    page.set_brush("iron")
+    page.paint_btn.setChecked(True)
+    QTest.mousePress(page.canvas, Qt.LeftButton, Qt.NoModifier, QPoint(100, 300))
+    QTest.mouseMove(page.canvas, QPoint(300, 300))
+    QTest.mouseRelease(page.canvas, Qt.LeftButton, Qt.NoModifier, QPoint(300, 300))
+    iron = window.textures_page.recipe.images["paint_iron.png"]
+    sx = size[0] / 512
+    assert iron.getpixel((int(200 * sx), int(300 * sx))) == 255 and iron.getpixel((int(200 * sx), int(100 * sx))) == 0
 
 
 def test_u1_wheel_guard_splitters_and_empty_hint(window, qapp):
