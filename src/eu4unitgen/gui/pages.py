@@ -126,6 +126,13 @@ class SettingsPage(Page):
             item.setCheckState(Qt.Checked if n in self._owned else Qt.Unchecked)
             self.dlc.addItem(item)
 
+    def set_owned(self, names: list[str]) -> None:
+        """Tick these DLC (auto-setup), in the list and for the next fill."""
+        self._owned = set(names)
+        for i in range(self.dlc.count()):
+            item = self.dlc.item(i)
+            item.setCheckState(Qt.Checked if item.text() in self._owned else Qt.Unchecked)
+
     def owned(self) -> list[str]:
         if self.dlc.count() == 0:
             return sorted(self._owned)

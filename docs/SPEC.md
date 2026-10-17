@@ -1337,7 +1337,7 @@ Constraints carried over:
         3. the page explains what's missing instead of showing a blank box (no install loaded, no body shown yet).
       - **U2, auto-setup:**
         - find the EU4 install: `EU4_PATH`, then Steam (Windows registry `HKCU\Software\Valve\Steam` SteamPath, Linux `~/.steam/steam`, `~/.local/share/Steam`) and `steamapps/libraryfolders.vdf`, app 236850;
-        - owned DLC: Steam's `appmanifest_236850.acf` InstalledDepots `dlcappid` matched to each `dlc/*/*.dlc` `steam_id`. Measured on the user's install: 78 of 122 dlc folders owned, so the folder alone isn't ownership. Other stores: nothing ticked, with a note;
+        - owned DLC: Steam's `appmanifest_236850.acf` InstalledDepots `dlcappid` matched to each `dlc/*/*.dlc` `steam_id`. Measured on the user's install: all 122 dlc folders map to installed DLC depots (63 distinct steam ids, 79 DLC depots), so the files can't tell owning everything from Steam installing every depot. The detected list only fills an empty DLC list and never replaces the user's ticks. Other stores: nothing ticked, with a note;
         - load on startup in the background.
       - **U3, edit history:** undo/redo, "reset to saved file", and an unsaved-changes mark in the page and the window title.
       - **U4, layout:** labelled sections (1 Character file, 2 Body, 3 Areas and finishes, 4 Paint, 5 Preview), spacing, a plain-words tooltip on every control.

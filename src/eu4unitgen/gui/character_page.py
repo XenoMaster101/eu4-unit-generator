@@ -243,6 +243,8 @@ class CharacterPage(Page):
         """What the empty map says: why it's empty and what to do next."""
         if self.body is not None:
             return
+        if not loaded and not loading and self.window_.session._game is not None:
+            loaded = True
         if loading:
             text = "Loading the EU4 install...\n\nThis takes a few seconds."
         elif not loaded:

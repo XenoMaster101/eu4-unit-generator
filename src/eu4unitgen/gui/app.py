@@ -181,6 +181,32 @@ class MainWindow(QMainWindow):
         self.pool.start(task)
 
     # ------------------------------------------------------------------ actions
+    def auto_setup(self, load: bool = True) -> list[str]:
+        """Find the EU4 install and the owned DLC when the settings don't name them, then load the
+        install in the background. Never replaces what the user set. Returns what it did."""
+        from eu4unitgen.core.install import find_eu4, owned_dlc
+
+        page, did = self.settings_page, []
+        if not page.eu4.text().strip():
+            found = find_eu4()
+            if found is not None:
+                page.eu4.setText(str(found))
+                did.append(f"found EU4 at {found}")
+        eu4 = Path(page.eu4.text().strip()) if page.eu4.text().strip() else None
+        if eu4 is not None and not page.owned():
+            names, note = owned_dlc(eu4)
+            if names:
+                page.set_owned(names)
+            did.append(note + ("; untick any you don't own" if names else ""))
+        if eu4 is None:
+            did.append("EU4 install not found: set its folder in 1. Settings")
+        elif load:
+            self.character_page.show_hint(loaded=False, loading=True)
+            self.load_install()
+        if did:
+            page.info.setText("Auto-setup: " + "; ".join(did) + ".")
+        return did
+
     def load_install(self) -> None:
         self._sync_settings()
         s = self.session
@@ -441,4 +467,5 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
     window = MainWindow(store=QSettings("eu4unitgen", "eu4unitgen"))
     window.show()
+    window.auto_setup()
     return app.exec()
