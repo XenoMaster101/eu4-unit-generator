@@ -597,6 +597,21 @@ def _recipe_lines(recipe) -> list[str]:
     return out
 
 
+def _non_square_parts(generated) -> list[str]:
+    """Part entities whose diffuse texture isn't square, with its size."""
+    from eu4unitgen.library.scanner import read_dds_header
+
+    out = []
+    for r in generated.loadout.parts:
+        folder = r.mesh_file.rsplit("/", 1)[0]
+        for path, f in generated.files.items():
+            if path.startswith(folder + "/") and path.endswith("_diffuse.dds") and path.rsplit("/", 1)[-1].startswith(r.entity + "_"):
+                h = read_dds_header(f.data[:200])
+                if h["width"] != h["height"]:
+                    out.append(f"{r.entity} ({h['width']}x{h['height']})")
+    return sorted(set(out))
+
+
 def _side_view(res) -> list[str]:
     kinds = sorted({k for rec in res.derived.values() for k, _, _ in rec.additions})
     look = ", ".join(kinds) if kinds else "the body, the helmet and the shield"
@@ -650,6 +665,10 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
             head_parts = [_part_label(r) for r in res.parts if r.tier == tier and r.role == "infantry" and r.bone == "head"]
             lines += _derived_lines(tier, res.derived[tier], head_parts)
         lines += [ln for ln in _recipe_lines(recipe) if ln.startswith(f"[ ] {tier}T")]
+    wide = _non_square_parts(generated)
+    if wide:
+        lines += ["", f"[ ] P  non-square part textures (first use for our parts; the base game's weapons have them): "
+                      f"{', '.join(wide)}. That part black, pink or missing = non-square textures fail."]
     if res.derived:
         lines += ["", *_side_view(res)]
         if len(res.derived) > 1:

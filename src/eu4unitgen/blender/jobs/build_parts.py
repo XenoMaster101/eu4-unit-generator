@@ -355,18 +355,39 @@ def smooth_normals(mesh):
             sharp.data[e.index].value = True
 
 
+MAX_ASPECT = 4  # height : width of a part atlas; the base game's weapon textures go to 4:1 (robot_saber 512x128)
+# and to 1024 px (robot_rifle_spec 1024x512): a part at the 4:1 cap may be 1024 tall
+
+
 def unwrap_atlas(obj, density):
     """Q1: a real UV unwrap (Smart UV Project, islands packed with a margin) and the texture size
-    (a power of two, 64-512) that gives about ``density`` texels per mesh unit. Returns
-    {"size", "density", "tris": [[zone, u0, v0, u1, v1, u2, v2], ...]} in image coordinates (v down)."""
+    that gives about ``density`` texels per mesh unit. Long parts (shafts) get a non-square atlas:
+    the packed islands are turned so their long side runs down, cropped, and scaled the same in u
+    and v (density stays uniform) into a texture up to MAX_ASPECT times taller than wide. Sizes are
+    powers of two, at most 512 (1024 tall for parts at the MAX_ASPECT cap: very long shafts). Returns {"size": [w, h], "density", "tris": [[zone, u0, v0, ...]]}
+    in image coordinates (v down)."""
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.03)
+    bpy.ops.uv.pack_islands(rotate=True, margin=0.02)
     bpy.ops.object.mode_set(mode="OBJECT")
     me = obj.data
     uv = me.uv_layers["map1"].data
+    us = [d.uv.x for d in uv]
+    vs = [d.uv.y for d in uv]
+    if max(us) - min(us) > max(vs) - min(vs):  # long side down
+        for d in uv:
+            d.uv = (d.uv.y, 1.0 - d.uv.x)
+        us, vs = [d.uv.x for d in uv], [d.uv.y for d in uv]
+    u0, v0 = min(us), min(vs)
+    bw, bh = max(us) - u0, max(vs) - v0
+    aspect = 1
+    while aspect * 2 <= MAX_ASPECT and aspect * 2 * bw <= bh * 1.0001:
+        aspect *= 2
+    for d in uv:  # crop and scale u and v alike: u spans bw / bh * aspect <= 1, v spans 1
+        d.uv = ((d.uv.x - u0) / bh * aspect, (d.uv.y - v0) / bh)
     zone = me.attributes.get("zone")
     area3, area_uv, tris = 0.0, 0.0, []
     for poly in me.polygons:
@@ -375,11 +396,16 @@ def unwrap_atlas(obj, density):
         area_uv += abs((pts[1].x - pts[0].x) * (pts[2].y - pts[0].y) - (pts[2].x - pts[0].x) * (pts[1].y - pts[0].y)) / 2
         z = zone.data[poly.index].value if zone is not None else 0
         tris.append([z] + [c for p in pts for c in (p.x, 1.0 - p.y)])
-    ideal = density * math.sqrt(area3 / area_uv) if area_uv > 0 else 64
-    size = 64
-    while size < 512 and size * 1.41 < ideal:
-        size *= 2
-    return {"size": size, "density": size * math.sqrt(area_uv / area3) if area3 else 0.0, "tris": tris}
+    # density for a texture h tall and h / aspect wide: h * sqrt(area_uv / (aspect * area3))
+    per_h = math.sqrt(area_uv / (aspect * area3)) if area3 > 0 and area_uv > 0 else 0.0
+    ideal = density / per_h if per_h else 64
+    h, cap = 64, (1024 if aspect == MAX_ASPECT else 512)  # very long parts (at the 4:1 cap) may go 1024 tall
+    while h < cap and h * 1.41 < ideal:
+        h *= 2
+    if h > 64 and h * per_h > density * 1.25:  # nearest power of two overshot: keep within the base game's range
+        h //= 2
+    w = max(16, h // aspect)
+    return {"size": [w, h], "density": h * per_h, "tris": tris}
 
 
 # Q2: maps baked on the part's own UVs for textures.paint. Patterns are computed in 3D (object
@@ -426,7 +452,7 @@ def _pattern(nodes, links, material):
 
 
 def bake_maps(obj, size, materials, prefix):
-    """Bake ao, curv, up and pattern maps (PNG, ``size``) for ``obj`` (one material per zone, from
+    """Bake ao, curv, up, pattern and normal maps (PNG, ``size`` = [w, h]) for ``obj`` (one material per zone, from
     the ``zone`` face attribute; called after export). Returns {map: path}."""
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
@@ -480,7 +506,7 @@ def bake_maps(obj, size, materials, prefix):
     bpy.context.view_layer.objects.active = obj
     paths = {}
     for name in ("ao", "curv", "up", "pattern", "normal"):
-        img = bpy.data.images.new(f"{prefix}_{name}", size, size, alpha=False)
+        img = bpy.data.images.new(f"{prefix}_{name}", size[0], size[1], alpha=False)
         img.colorspace_settings.name = "Non-Color"
         for mat, emit, sockets, target, bsdf, out in mats:
             target.image = img
@@ -524,7 +550,7 @@ def main() -> None:
         ie.export_meshfile(part["out_mesh"], exp_mesh=True, exp_skel=False, exp_locs=False)
         maps = None
         if part.get("bake"):  # after export: the baking materials never reach the .mesh
-            size = atlas["size"] if atlas else part.get("bake_size", 64)
+            size = atlas["size"] if atlas else [part.get("bake_size", 64)] * 2
             maps = bake_maps(obj, size, part.get("materials"), part["out_mesh"][:-len(".mesh")])
         out.append({"kind": part["kind"], "out_mesh": part["out_mesh"], "verts": len(mesh.vertices),
                     "faces": len(mesh.polygons), **({"atlas": atlas} if atlas else {}), **({"maps": maps} if maps else {})})

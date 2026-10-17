@@ -41,22 +41,22 @@ def _pixels(img: Image.Image) -> list:
     return list(img.get_flattened_data() if hasattr(img, "get_flattened_data") else img.getdata())
 
 
-def _map(data: bytes | Image.Image, size: int) -> list[float]:
+def _map(data: bytes | Image.Image, size: tuple[int, int]) -> list[float]:
     img = data if isinstance(data, Image.Image) else Image.open(BytesIO(data))
     img = img.convert("L")
-    if img.size != (size, size):
-        img = img.resize((size, size), Image.Resampling.BILINEAR)
+    if img.size != size:
+        img = img.resize(size, Image.Resampling.BILINEAR)
     return [v / 255 for v in _pixels(img)]
 
 
 def paint(diffuse: Image.Image, zones_map: Image.Image, zones: list, maps: dict) -> Image.Image:
     """``diffuse`` (RGBA, flat zone colours, any blazon already on it) shaded by the baked maps."""
-    size = diffuse.size[0]
+    size = diffuse.size
     ao = _map(maps["ao"], size) if "ao" in maps else None
     curv = _map(maps["curv"], size) if "curv" in maps else None
     up = _map(maps["up"], size) if "up" in maps else None
     pat = _map(maps["pattern"], size) if "pattern" in maps else None
-    zid = _pixels(zones_map.convert("L").resize((size, size), Image.Resampling.NEAREST))
+    zid = _pixels(zones_map.convert("L").resize(size, Image.Resampling.NEAREST))
     out = []
     for i, (r, g, b, a) in enumerate(_pixels(diffuse.convert("RGBA"))):
         z = zones[zid[i]] if zid[i] < len(zones) else zones[0]

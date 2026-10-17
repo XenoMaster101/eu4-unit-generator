@@ -1286,6 +1286,11 @@ Constraints carried over:
     - named texture islands per body in the body library (data: `head`, `torso`, `legs`, … as UV boxes or island masks) so recipes can target `island:torso`;
     - the GUI shows the body texture with its regions and islands overlaid, with mask painting.
   - **In-game test 12 — STAGED (2026-10-16):** the hoplite from `build/specs/hoplite/hoplite.json` on HDA tier 1 (`test-mod --spec`), `build/test12/stage`, validator 0 errors, 0 warnings. It verifies a texture recipe on a derived body in game. Checklist `build/test12/checklist.txt`, now **data-driven**: lines only for what each tier has (removals, additions with their `look` from `additions.json`, accepted clipping, parts on the head), one line per texture-recipe slot listing its operations, and a side-view and map-scale section naming what to look at. The horse wording is gone from code.
+  - **Non-square part textures (2026-10-16):**
+    - `unwrap_atlas` turns the packed islands so their long side runs down, crops them, and scales u and v alike (density stays uniform) into a texture up to 4:1 tall, the base game's precedent (`robot_saber` 512×128, `western_generic_weapons` 512×256). Parts at the 4:1 cap may be 1024 tall (precedent `robot_rifle_spec` 1024×512). The nearest power of two steps down when it would overshoot 1.25 × the target density.
+    - Bakes, the atlas painter, the zone map and paint take [w, h].
+    - **Measured** (test 8): sarissa 22.8 texels/unit at 256×1024 (was 11.4); dory 20.1 at 128×512; xiphos 24.9 at 64×128. Test 8's only quality warning left is crest_2 (detail 5.3, shading 3.5: a transverse crest, separate).
+    - **UNVERIFIED in game for our parts:** test 12 now includes the hoplite's 128×512 dory, and its checklist has a line for non-square part textures.
   - **Not yet checked in game:** the hoplite (no test requested). The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
 
 

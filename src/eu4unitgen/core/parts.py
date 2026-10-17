@@ -326,12 +326,12 @@ class BuiltParts:
                                int(p.get("blazon_rotate", 0)), p.get("blazon_mirror") == "yes")
         maps = self.maps.get(b.name)
         if maps:  # Q2: painted in vanilla's style from the baked maps
-            size = imgs["diffuse"].size[0]
-            zmap = zone_map(b.part.zones, layout, size, atlas["tris"] if atlas else None)
+            size = imgs["diffuse"].size
+            zmap = zone_map(b.part.zones, layout, list(size), atlas["tris"] if atlas else None)
             imgs["diffuse"] = paint(imgs["diffuse"], zmap, b.part.zones, maps)
             if "normal" in maps:  # Q3: the baked tangent-space normal map (bevelled edges, material relief)
                 normal = Image.open(BytesIO(maps["normal"])).convert("RGBA")
-                imgs["normal"] = normal.resize((size, size), Image.Resampling.BILINEAR) if normal.size != (size, size)                     else normal
+                imgs["normal"] = normal.resize(size, Image.Resampling.BILINEAR) if normal.size != size else normal
         return imgs
 
 

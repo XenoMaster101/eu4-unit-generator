@@ -131,30 +131,39 @@ def part_images(zones: list[Zone], layout: str = "strip", blazon: Image.Image | 
     return {"diffuse": diffuse, "normal": Image.new("RGBA", (size, size), (*FLAT_NORMAL, 255)), "specular": spec}
 
 
-def atlas_images(zones: list[Zone], size: int, tris: list[list[float]]) -> dict[str, Image.Image]:
+def _wh(size) -> tuple[int, int]:
+    """An atlas size: an int (square, old caches) or [w, h]."""
+    return (size, size) if isinstance(size, int) else (int(size[0]), int(size[1]))
+
+
+def atlas_images(zones: list[Zone], size, tris: list[list[float]]) -> dict[str, Image.Image]:
     """{diffuse, normal, specular} for an unwrapped part: each triangle ([zone, u0, v0, u1, v1, u2,
     v2], image coordinates) painted in its zone's diffuse and spec, edges bled 2 px so mip levels
     don't pull in the background; the background is zone 0's."""
-    diffuse = Image.new("RGBA", (size, size), (*_diffuse_of(zones[0]), 255))
-    spec = Image.new("RGBA", (size, size), _spec_of(zones[0]))
+    w, h = _wh(size)
+    diffuse = Image.new("RGBA", (w, h), (*_diffuse_of(zones[0]), 255))
+    spec = Image.new("RGBA", (w, h), _spec_of(zones[0]))
     dd, sd = ImageDraw.Draw(diffuse), ImageDraw.Draw(spec)
     for t in tris:
         z = zones[int(t[0]) if 0 <= int(t[0]) < len(zones) else 0]
-        pts = [(t[1 + 2 * k] * size, t[2 + 2 * k] * size) for k in range(3)]
+        pts = [(t[1 + 2 * k] * w, t[2 + 2 * k] * h) for k in range(3)]
         for draw, fill in ((dd, (*_diffuse_of(z), 255)), (sd, _spec_of(z))):
             draw.polygon(pts, fill=fill, outline=fill, width=2)
-    return {"diffuse": diffuse, "normal": Image.new("RGBA", (size, size), (*FLAT_NORMAL, 255)), "specular": spec}
+    return {"diffuse": diffuse, "normal": Image.new("RGBA", (w, h), (*FLAT_NORMAL, 255)), "specular": spec}
 
 
-def zone_map(zones: list[Zone], layout: str, size: int, tris: list[list[float]] | None = None) -> Image.Image:
-    """An 'L' image holding each texel's zone index, laid out like the part's textures."""
+def zone_map(zones: list[Zone], layout: str, size, tris: list[list[float]] | None = None) -> Image.Image:
+    """An 'L' image holding each texel's zone index, laid out like the part's textures (``size``: an
+    int or [w, h])."""
+    w, h = _wh(size)
     if tris is not None:
-        img = Image.new("L", (size, size), 0)
+        img = Image.new("L", (w, h), 0)
         draw = ImageDraw.Draw(img)
         for t in tris:
             z = int(t[0]) if 0 <= int(t[0]) < len(zones) else 0
-            draw.polygon([(t[1 + 2 * k] * size, t[2 + 2 * k] * size) for k in range(3)], fill=z, outline=z, width=2)
+            draw.polygon([(t[1 + 2 * k] * w, t[2 + 2 * k] * h) for k in range(3)], fill=z, outline=z, width=2)
         return img
+    size = w
     ids = [Zone((i, i, i), 0) for i in range(len(zones))]
     return _paint(ids, layout, lambda z: (z.colour[0], z.colour[0], z.colour[0], 255)).convert("L").resize(
         (size, size), Image.Resampling.NEAREST)
