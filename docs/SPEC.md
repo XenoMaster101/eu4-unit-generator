@@ -1330,6 +1330,28 @@ Constraints carried over:
         - areas follow triangles, so edges are sawtoothed and the shoulder triangles of the torso islands count as arms;
         - the mail sleeve's shape stays (only its texture changes);
         - the flat skin reads slightly mauve in Blender's light; judge it in game.
+    - **GUI usability pass (planned 2026-10-16, after the user's first real use; target user knows nothing about textures, modelling or modding).** Before B. Small commits, screenshots of the reworked page before B.
+      - **U1, bugs:**
+        1. dropdowns and number boxes ignore the mouse wheel unless clicked (app-wide);
+        2. resizable splitter panes on the Character page, so the area table and the preview/render both stay usable;
+        3. the page explains what's missing instead of showing a blank box (no install loaded, no body shown yet).
+      - **U2, auto-setup:**
+        - find the EU4 install: `EU4_PATH`, then Steam (Windows registry `HKCU\Software\Valve\Steam` SteamPath, Linux `~/.steam/steam`, `~/.local/share/Steam`) and `steamapps/libraryfolders.vdf`, app 236850;
+        - owned DLC: Steam's `appmanifest_236850.acf` InstalledDepots `dlcappid` matched to each `dlc/*/*.dlc` `steam_id`. Measured on the user's install: 78 of 122 dlc folders owned, so the folder alone isn't ownership. Other stores: nothing ticked, with a note;
+        - load on startup in the background.
+      - **U3, edit history:** undo/redo, "reset to saved file", and an unsaved-changes mark in the page and the window title.
+      - **U4, layout:** labelled sections (1 Character file, 2 Body, 3 Areas and finishes, 4 Paint, 5 Preview), spacing, a plain-words tooltip on every control.
+      - **U5, finer areas:**
+        - collar, shoulders, upper/lower torso, belt, upper/lower sleeves from bone groups plus height splits in the library;
+        - per-row grow/shrink (px) and smoothed (feathered) edges.
+      - **U6, paint finishes, not pixels:**
+        - the brush paints the chosen finish (with a real colour picker) and the map shows the finished texture live (recipe applied, tinted with the unit colours);
+        - 6b: a 3D view with live preview and painting on the model (UNPLANNED detail: Qt Quick 3D custom geometry from the parsed .mesh; spike first).
+      - **U7, reference start:**
+        - a Reference section: load an image (CLAUDE.md rule 8: original or licensed);
+        - the app extracts its palette per horizontal band (head, torso, legs of a front view) and suggests a finish and colour per area for the user to accept.
+        - No automatic part detection (not reliable); parts come from templates.
+      - **U8, starter templates:** Hoplite, Phalangite, Companion cavalry, Peltast, as character specs in the app's library. Original designs from generic historical descriptions, using only our own parts and base-game references.
     - **Next (user):** A, the GUI Character page with named texture areas per body (arms → skin, legs → skin, shins → bronze greaves), proven by rebuilding the hoplite in the GUI with bare arms and legs, a proper bronze helmet and a fuller crest; B, import part; C, an **import full body** mode, spiked first; D, TripoSG.
  The texture-quality check warns on test 8 (sarissa density 11.4: a non-square atlas for long shafts).
 
