@@ -1470,7 +1470,8 @@ Goal: from a reference image, a unit that is recognisably close to it, not only 
 - Riders are the weakest path: they wear the untextured base body (F12 open 1). Derived bodies are infantry-only, so riders get crests, never a `greek_helmet`. `hoplon` is limited to infantry and crew. A cataphract is all rider and horse, so none of the armour, helmet or shield work reaches it today.
 - The vocabulary has no cataphract words or template, so it fell back to a hoplite/companion look.
 
-**Items, by value vs effort** (S/M/L). Only C11 needs TripoSG.
+**Items, by value vs effort** (S/M/L). Only C11 needs TripoSG, and C11 is skipped (user, 2026-10-18).
+- **C-1. Faster edits** (first, before C0; F12 open 2). An edit re-checks the set but re-renders only the tiles whose unit changed (unit types and tiers); the old picture stays, dimmed, until its new one arrives.
 - **C0. Riders get the full treatment** (blocks the rest; S-M). The retextured rider pdxmesh carries the `horse_*` ids (§7.2), so recipes and finishes reach the rider; helmets and shields on rider slots. In-game test.
 - **C1. Scale, lamellar and mail finishes** (high; S-M). A tiled procedural diffuse plus normal-map relief, written into an area as a new recipe op; finishes in `materials.json`. Infantry and (after C0) riders.
 - **C2. Oval shield and cross emblem** (high: the shield reads best at 48 px; S). An aspect param and a flatter dome on the hoplon builder; a cross in `core/emblems.py`. **UNVERIFIED:** a `Left_hand_node` shield with the `cavalry_rider_*` animations. Check vanilla entities for a rider with a left-hand attach, then test in game.
@@ -1480,19 +1481,19 @@ Goal: from a reference image, a unit that is recognisably close to it, not only 
 - **C6. Chanfron** (medium; S-M). A rigid part on `HorseHead`, fitted from the horse mesh (fitting generalised from the soldier's head to any bone). **UNVERIFIED:** a horse attach other than `Saddle_Node`; in-game test.
 - **C7. Cataphract template and vocabulary** (medium: makes typed prompts work; S). Cataphract/kataphraktos, lamellar, scale, mail veil, kontarion, barding, chanfron, cloak, plume. The kontarion is the xyston under another name.
 - **C8. Curved sword** (low-medium: at 48 px curved vs straight barely shows; S). A blade-curve param on the xiphos builder. With a lance in the right hand the sword goes in a scabbard on `hip` (**UNVERIFIED**; `head` worked) or is left out.
-- **C9. Cape.** No cloth bones and no physics (Track R), so no flowing cloak without extra bones and re-made animations (R6, rejected).
-  - **Painted** (medium; S; first): a red cloak with gold trim painted on the rider's shoulder and back areas. At map scale it reads about as well as geometry.
-  - **Short rigid mantle** (low; M; spike only): shoulder to mid-back on `attach_back` or `top_spine`. A stiff plate; anything longer clips into the horse and saddle when seated.
-  - **Skinned into a derived rider body:** stiff all the same, and derived rider bodies are untested. Not for a cape alone.
+- **C9. Cape: painted only** (user, 2026-10-18). No cloth bones and no physics (Track R), so no flowing cloak without extra bones and re-made animations (R6, rejected). A red cloak with gold trim painted on the rider's shoulder and back areas (medium; S); at map scale it reads about as well as geometry. **Not planned:** a short rigid mantle (a stiff plate that clips into the horse and saddle when seated) and a cape skinned into a derived rider body.
 - **C10. Tagger, second half** (low; M). A pattern hint (scale vs mail vs plain) from a box's pixels. Unreliable, so only a hint; the user picks from the crop.
-- **C11. TripoSG crops** (low for this reference; L). Needs R-I and R-T, neither built. The crops are low-resolution, partly hidden and from one angle; the output must come down to 300-400 triangles and be repainted, so at 48 px it is no better than a procedural part. Crops are reference images too (rule 8). Use TripoSG for organic or ornate parts the builders can't make, not for this look.
+- **C11. TripoSG crops: skipped for this look** (user, 2026-10-18; low value for this reference; L). Needs R-I and R-T, neither built. The crops are low-resolution, partly hidden and from one angle; the output must come down to 300-400 triangles and be repainted, so at 48 px it is no better than a procedural part. Crops are reference images too (rule 8). Use TripoSG for organic or ornate parts the builders can't make, not for this look.
 
-**Order:**
-1. C0 → in-game test.
-2. C2, C7, C1 → in-game test: a cataphract rider with a scale torso, an oval shield and a xyston.
-3. C3.
-4. C5 → C4 → C6 → in-game test (the `HorseHead` attach, the helmet shell on a rider).
-5. C9 painted cape, C8. The rigid mantle only as a spike on request.
+- **C12. Auto-tag** (after C3; optional, **off by default**). A local vision model (Ollama with a vision-capable model that fits the RTX 3060's 12 GB; offline, no API key, run as a separate local process, never inside the app) looks at the reference and proposes C3's boxes and labels: helmet type, plume, shield shape and emblem, armour pattern, weapon, horse armour, plus the closest parts and colours, all mapped to `vocabulary.json`. The user confirms or corrects each proposal before anything is built; whatever has no matching part goes on the "missing parts" list. **Before building:** research which current local vision models fit 12 GB (and box/grounding ability, licence) and recommend one. Exception to Track F's "no local LLM" (2026-10-17), decided by the user for the tagger only.
+
+**Order** (small steps, one commit each; stop for the user at each in-game test):
+1. C-1 faster edits.
+2. C0 → in-game test.
+3. C2, C7, C1 → in-game test: a cataphract rider with a scale torso, an oval shield and a xyston.
+4. C3, then C12 (model research and recommendation first).
+5. C5 → C4 → C6 → in-game test (the `HorseHead` attach, the helmet shell on a rider).
+6. C9 painted cape, C8.
 
 **Acceptance:** the reference beside the gallery's cavalry tile, close up and at 48 px, with one line per tagger box: matched, approximated or missing. "Recognisably close" = the shield's shape and colour, the helmet outline with the plume, the armoured horse and the red-and-silver colours all read at 48 px.
 
