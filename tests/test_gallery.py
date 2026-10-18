@@ -101,6 +101,40 @@ def test_gallery_renders_every_unit_in_one_job(session, tmp_path, monkeypatch):
     assert some.thumbs["hr_mac_dory_1"].size == (24, 24) and "hr_mac_crest_rider_1" in some.thumbs
 
 
+def test_retextured_meshes_are_staged_with_their_meshsettings_textures(session, tmp_path, monkeypatch):
+    """C0a: a retextured pdxmesh draws the textures its meshsettings name (the rider shares the
+    infantry's), so the gallery stages those, under the name the mesh's material loads."""
+    from eu4unitgen.core.recipe import TextureRecipe
+    from eu4unitgen.export.gallery import shape_textures
+    from eu4unitgen.textures.dds import read_dds
+
+    runner = GalleryRunner()
+    monkeypatch.setattr(session, "runner", lambda: runner)
+    recipe = TextureRecipe.from_json({"schema": 1, "slots": {"1/infantry": {"ops": [
+        {"op": "recolour", "region": "skin", "colour": [20, 200, 40], "protect": False}]}}})
+    spec = SetSpec(tags=["MAC"], gfx="hellenicgfx", texture_recipe=recipe)
+    res = session.validate(spec)[0]
+    game, idx = session.game()
+    world = World(game, idx, None, res.generated)
+    rider = entity_tree(world, "MAC_CAVALRY_1").attach[0][1]
+    assert rider.settings and rider.settings[0]["texture_diffuse"] == "hr_mac_infantry_1_diffuse.dds"
+    from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
+
+    shape = summarize_mesh(parse_pdx_mesh(world.read(rider.mesh_file)))["shapes"][0]
+    paths, _ = shape_textures(rider, shape, 0)
+    assert paths["diffuse"].endswith("/hr_mac_infantry_1_diffuse.dds") and world.read(paths["diffuse"])
+
+    colours = [(255, 255, 255)] * 3
+    staged = stage(rider, world, colours, tmp_path / "stage")
+    tex = Path(staged["mesh"]).parent / shape["diffuse"]  # the material's own name
+    ours = read_dds(tex.read_bytes()).convert("RGB")
+    import dataclasses
+
+    plain = stage(dataclasses.replace(rider, settings=[], attach=[]), world, colours, tmp_path / "stage2")
+    theirs = read_dds((Path(plain["mesh"]).parent / shape["diffuse"]).read_bytes()).convert("RGB")
+    assert ours.tobytes() != theirs.tobytes()  # the recoloured diffuse, not the vanilla one
+
+
 def test_fingerprints_change_only_for_units_an_edit_changed(session, tmp_path, monkeypatch):
     """Track C, C-1: a unit's fingerprint covers what its tile shows, so an edit re-renders only
     the units it changed."""

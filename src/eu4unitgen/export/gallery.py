@@ -24,6 +24,24 @@ class Node:
     scale: float = 1.0
     anim_file: str | None = None  # game path of the .anim the state plays (None: rigid)
     attach: list[tuple[str, "Node"]] = field(default_factory=list)  # (bone on this mesh, child)
+    settings: list[dict] = field(default_factory=list)  # the pdxmesh's meshsettings (texture overrides)
+
+
+def shape_textures(node: Node, shape: dict, index: int) -> tuple[dict[str, str | None], str]:
+    """({diffuse, specular, normal}: game path or None, shader) of one shape of ``node``'s mesh as
+    the game draws it: a pdxmesh meshsettings block for the shape (matched by name, else index)
+    overrides the mesh's own texture names and shader. Both resolve in the mesh's folder (SPEC §4;
+    validate.graph.meshsettings_texture_path)."""
+    from eu4unitgen.validate.graph import meshsettings_texture_path
+
+    over = next((m for m in node.settings if m.get("name") == shape.get("shape")), None)
+    if over is None:
+        over = next((m for m in node.settings if "name" not in m and str(m.get("index")) == str(index)), None)
+    out = {}
+    for k in ("diffuse", "specular", "normal"):
+        name = (over or {}).get(f"texture_{k}") or shape.get(k)
+        out[k] = meshsettings_texture_path(node.mesh_file, name) if name else None
+    return out, (over or {}).get("shader") or shape.get("shader") or ""
 
 
 class GalleryError(ValueError):
@@ -47,7 +65,8 @@ def entity_tree(world, entity: str, state: str = "idle", depth: int = 0) -> Node
         if s.get("name") == state and s.get("animation"):
             atype = world.idx.animation_type((pm.get("animations") or {}).get(s["animation"]) or "")
             anim = atype["file"] if atype else None
-    node = Node(entity, pm["file"], float(pm.get("scale") or 1.0), anim)
+    node = Node(entity, pm["file"], float(pm.get("scale") or 1.0), anim,
+                settings=list(pm.get("meshsettings") or []))
     for a in resolved(world.idx, entity, "attach") or []:
         for bone, child in a.items():
             if bone != "name" and isinstance(child, str):
@@ -81,12 +100,12 @@ def fingerprint(node: Node, world, colours) -> str:
         data = world.read(n.mesh_file)
         h.update(data or b"<missing>")
         if data is not None:
-            base = str(PurePosixPath(n.mesh_file).parent)
-            for shape in summarize_mesh(parse_pdx_mesh(data))["shapes"]:
-                for k in ("diffuse", "specular", "normal"):
-                    name = shape.get(k)
-                    h.update(f"|{k}={name}|".encode("utf-8"))
-                    h.update((world.read(f"{base}/{name}") if name else None) or b"<none>")
+            for i, shape in enumerate(summarize_mesh(parse_pdx_mesh(data))["shapes"]):
+                paths, shader = shape_textures(n, shape, i)
+                h.update(f"|{shader}|".encode("utf-8"))
+                for k, path in paths.items():
+                    h.update(f"|{k}={path}|".encode("utf-8"))
+                    h.update((world.read(path) if path else None) or b"<none>")
         if n.anim_file:
             h.update(world.read(n.anim_file) or b"<missing>")
         for bone, child in n.attach:
@@ -114,24 +133,24 @@ def stage(node: Node, world, colours, folder: Path, n: list | None = None) -> di
     mesh_path = here / PurePosixPath(node.mesh_file).name
     mesh_path.write_bytes(data)
     summary = summarize_mesh(parse_pdx_mesh(data))
-    base = str(PurePosixPath(node.mesh_file).parent)
     textured = False
-    for shape in summary["shapes"]:
-        names = {k: shape.get(k) for k in ("diffuse", "specular", "normal")}
+    for i, shape in enumerate(summary["shapes"]):
+        paths, shader = shape_textures(node, shape, i)
         imgs = {}
-        for k, name in names.items():
-            raw = world.read(f"{base}/{name}") if name else None
+        for k, path in paths.items():
+            raw = world.read(path) if path else None
             if raw is not None:
                 try:
                     imgs[k] = read_dds(raw)
                 except (OSError, ValueError):
                     pass
-        if names["diffuse"] and "diffuse" in imgs:
+        if shape.get("diffuse") and "diffuse" in imgs:
             alpha = imgs["diffuse"].convert("RGBA").getchannel("A").getextrema()
             textured = textured or alpha[1] > 0
-            d = shade(imgs["diffuse"], imgs.get("specular"), colours, shape.get("shader") or "")
+            d = shade(imgs["diffuse"], imgs.get("specular"), colours, shader)
             w, h = d.size
-            (here / names["diffuse"]).write_bytes(write_dds(d.convert("RGBA"), DDSFormat("DXT1", w, h,
+            # under the name the mesh's material gives, which is what the renderer loads
+            (here / shape["diffuse"]).write_bytes(write_dds(d.convert("RGBA"), DDSFormat("DXT1", w, h,
                                                                                      full_mip_count(w, h))))
     # a mesh whose diffuse is missing or fully transparent is a helper the game doesn't show
     # (artillery_base is one triangle under the gun, textured with nospec.dds: 4x4, alpha 0): hidden
