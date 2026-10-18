@@ -139,7 +139,7 @@ def test_retexture_refuses_non_base_meshes_and_no_op_edits(project, tex_game):
     with pytest.raises(GenerationError, match="changed no texture"):
         retextured_mesh(project.naming, "mac", Retexture("infantry", 1, "generic_01", lambda b: Edited()), files, idx)
     with pytest.raises(GenerationError):
-        Retexture("rider", 1, "generic_01", _shift)
+        Retexture("crew", 1, "generic_01", _shift)  # the crew wears the infantry's (a rider has its own, C0b)
 
 
 @pytest.fixture
@@ -256,3 +256,37 @@ def test_texture_paths_rule(project, tex_game, texture_test):
     assert any(p == "gfx/models/Units/h_d.dds" and "same path as a base-game texture" in m for p, m in msgs)
     assert any(p == "gfx/models/Units/hr_macedonian_test_infantry_1_diffuse.dds" and "isn't in the folder" in m
                for p, m in msgs)
+
+
+def test_a_rider_slot_gives_the_rider_its_own_textures(fake_install, tmp_path):
+    """Track C, C0b: a <tier>/rider slot retextures the rider apart from the infantry, on the same
+    body and with every animation id (horse_* included); a tier without one shares the infantry's."""
+    from fakes import make_textures_decodable
+    from eu4unitgen.core.recipe import TextureRecipe
+    from eu4unitgen.export.pipeline import Session, Settings, SetSpec
+
+    make_textures_decodable(fake_install)
+    recipe = TextureRecipe.from_json({"schema": 1, "slots": {
+        "1/infantry": {"ops": [{"op": "hue_shift", "region": "cloth", "degrees": 90}]},
+        "1/rider": {"ops": [{"op": "recolour", "region": "skin", "colour": [200, 200, 210], "protect": False}]},
+        "2/infantry": {"ops": [{"op": "hue_shift", "region": "cloth", "degrees": 40}]}}})
+    s = Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out"))
+    try:
+        res = s.validate(SetSpec(tags=["MAC"], gfx="hellenicgfx", texture_recipe=recipe))[0]
+    finally:
+        s.close()
+    assert not res.report.errors, [str(i) for i in res.report.errors]
+    text = "".join(f.text for p, f in res.generated.files.items() if p.endswith(".asset"))
+    gfx = "".join(f.text for p, f in res.generated.files.items() if p.endswith(".gfx"))
+
+    def pdxmesh_of(entity):
+        block = text.split(f'name = "{entity}"', 1)[1]
+        return block.split('pdxmesh = "', 1)[1].split('"', 1)[0]
+    assert pdxmesh_of("MAC_CAVALRY_1_rider") == "hr_mac_rider_1_mesh"
+    assert pdxmesh_of("MAC_INFANTRY_1") == "hr_mac_infantry_1_mesh"
+    assert pdxmesh_of("MAC_CAVALRY_2_rider") == "hr_mac_infantry_2_mesh"  # no rider slot: shares
+    rider = gfx.split('name = "hr_mac_rider_1_mesh"', 1)[1].split("pdxmesh = {", 1)[0]
+    infantry = gfx.split('name = "hr_mac_infantry_1_mesh"', 1)[1].split("pdxmesh = {", 1)[0]
+    assert 'texture_diffuse = "hr_mac_rider_1_diffuse.dds"' in rider and 'id = "horse_idle"' in rider
+    assert rider.split("file = ", 1)[1].split("\n", 1)[0] == infantry.split("file = ", 1)[1].split("\n", 1)[0]
+    assert any(p.endswith("/hr_mac_rider_1_diffuse.dds") for p in res.generated.files)

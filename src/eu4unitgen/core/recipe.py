@@ -19,7 +19,7 @@ A recipe is a JSON file in the user's project (never in this repo):
          ]}}}
 
 Slots are ``<tier>/<role>`` with role in MESH_ROLES (``infantry`` also dresses the cavalry
-rider and the artillery crew). Regions are those of ``textures.regions``, ``mask:<png>`` or
+rider, unless the tier has a ``rider`` slot, and the artillery crew). Regions are those of ``textures.regions``, ``mask:<png>`` or
 ``area:<name>`` (the body's named texture areas and bands, textures.areas). Any op with a
 ``region`` may also carry ``"grow": px`` (negative shrinks) and ``"feather": px`` (soft edge),
 applied to that region's mask at its own size.

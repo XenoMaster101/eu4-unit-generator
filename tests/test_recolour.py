@@ -121,7 +121,7 @@ def test_recipe_round_trip_and_errors(tmp_path):
     assert r.root == tmp_path and list(r.active()) == [(1, "infantry")]
     assert r.slots[(2, "horse")].protect_metal and not r.slots[(2, "horse")].protect_skin
     assert TextureRecipe.from_json(r.to_json()).to_json() == r.to_json()
-    for bad in ({"schema": 2}, {"schema": 1, "slots": {"5/infantry": {}}}, {"schema": 1, "slots": {"1/rider": {}}},
+    for bad in ({"schema": 2}, {"schema": 1, "slots": {"5/infantry": {}}}, {"schema": 1, "slots": {"1/crew": {}}},
                 {"schema": 1, "slots": {"1/horse": {"ops": [{"op": "melt"}]}}},
                 {"schema": 1, "slots": {"1/horse": {"ops": [{"op": "recolour", "region": "hat", "colour": [1, 2, 3]}]}}},
                 {"schema": 1, "slots": {"1/horse": {"ops": [{"op": "recolour", "region": "cloth", "colour": [1, 2]}]}}},

@@ -12,7 +12,8 @@ from dataclasses import dataclass
 
 UNIT_TYPES = ("infantry", "cavalry", "artillery")
 TIERS = (1, 2, 3, 4)
-MESH_ROLES = ("infantry", "horse", "cannon")  # retexturable meshes per tier; the rider uses the infantry's
+MESH_ROLES = ("infantry", "rider", "horse", "cannon")  # retexturable meshes per tier; without a rider slot
+# the rider wears the infantry's (Track C, C0b)
 TEXTURE_KINDS = ("diffuse", "normal", "specular")
 PART_KINDS = ("dory", "sarissa", "xyston", "xiphos", "hoplon", "crest", "horse_ears", "greek_helmet")  # procedural rigid parts (Phase 3)
 LOADOUT_ROLES = ("infantry", "rider", "crew")  # bodies a loadout dresses (Phase 3)

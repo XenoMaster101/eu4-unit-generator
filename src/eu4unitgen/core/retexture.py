@@ -136,12 +136,14 @@ def retextured_mesh(naming: Naming, set_name: str, r: Retexture, game: GameFiles
 def apply_retextures(entities: list[dict], owner: str, tier: int, meshes: dict[str, str], chain: BaseChain,
                      naming: Naming, version: int) -> list[dict]:
     """Point one tier of ``owner``'s entities (from ``unit_entities``) at retextured pdxmeshes
-    (role -> pdxmesh name). The rider uses the infantry's. A retextured cannon gets the owner's
+    (role -> pdxmesh name). The rider uses the infantry's unless it has its own. A retextured cannon gets the owner's
     own cannon entity (a full copy of the vanilla one), attached on the gunman's cannon_node."""
     by_name = {e["name"]: e for e in entities}
     if "infantry" in meshes:
         for name in (naming.unit_entity(owner, "infantry", tier), naming.rider_entity(owner, tier)):
             by_name[name]["pdxmesh"] = meshes["infantry"]
+    if "rider" in meshes:
+        by_name[naming.rider_entity(owner, tier)]["pdxmesh"] = meshes["rider"]
     if "horse" in meshes:
         by_name[naming.unit_entity(owner, "cavalry", tier)]["pdxmesh"] = meshes["horse"]
     if "cannon" in meshes:
@@ -158,7 +160,7 @@ def apply_retextures(entities: list[dict], owner: str, tier: int, meshes: dict[s
 
 def default_base(chain: BaseChain, role: str, tier: int) -> str:
     """The base culture's own pdxmesh for a slot (base game only; SPEC §4 recolour bases)."""
-    if role == "infantry":
+    if role in ("infantry", "rider"):  # the rider wears the tier's infantry body (SPEC §7.2)
         return chain.slot("infantry", tier)["pdxmesh"]
     if role == "horse":
         return chain.slot("cavalry", tier)["horse_pdxmesh"]
@@ -176,7 +178,8 @@ def retexture_set(naming: Naming, set_name: str, owner: str, entities: list[dict
     meshes, files, notes = [], [], []
     by_tier: dict[int, dict[str, str]] = {}
     for (tier, role), slot in recipe.active().items():
-        base = slot.base or ((bodies or {}).get(tier) if role == "infantry" else None) or default_base(chain, role, tier)
+        base = (slot.base or ((bodies or {}).get(tier) if role in ("infantry", "rider") else None)
+                or default_base(chain, role, tier))
         holder: dict = {}
 
         def edit(b: BaseTextures, slot=slot, role=role, holder=holder) -> Edited:

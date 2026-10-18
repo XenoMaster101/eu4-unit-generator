@@ -616,7 +616,7 @@ class Session:
 
         game, idx = self.game()
         loadout = load_loadout(spec)
-        if base is None and role == "infantry" and loadout is not None:
+        if base is None and role in ("infantry", "rider") and loadout is not None:
             base = loadout.bodies.get(tier)
         try:
             name = base or default_base(BaseChain(idx, spec.base_gfx), role, tier)
