@@ -414,6 +414,32 @@ class Session:
             if mod is not None:
                 mod.close()
 
+    def gallery_prints(self, spec: SetSpec, result: SetResult) -> dict[tuple[str, int], str]:
+        """(unit type, tier) -> export.gallery.fingerprint of the unit as ``gallery`` would render it
+        (a unit that can't be assembled gets its error, so it's rendered to show the note)."""
+        from eu4unitgen.export.gallery import GalleryError, entity_tree, fingerprint
+        from eu4unitgen.validate.graph import World
+
+        game, idx = self.game()
+        project = self.project()
+        mod = project.mod_files()
+        colours, _ = self._preview_colours(spec)
+        owner = project.naming.entity_owner(result.nation.tags, result.nation.set_name)
+        out = {}
+        try:
+            world = World(game, idx, mod, result.generated, project.owned_dlc)
+            for tier in TIERS:
+                for utype in UNIT_TYPES:
+                    try:
+                        tree = entity_tree(world, project.naming.unit_entity(owner, utype, tier))
+                        out[(utype, tier)] = fingerprint(tree, world, colours)
+                    except GalleryError as exc:
+                        out[(utype, tier)] = f"error: {exc}"
+        finally:
+            if mod is not None:
+                mod.close()
+        return out
+
     def gallery(self, spec: SetSpec, units: list[tuple[str, int]] | None = None, size: int = 256,
                 result: SetResult | None = None, thumbs: int = 0) -> "Gallery":
         """Whole units, posed at their idle frame, as the game assembles them (Track F, F9): the

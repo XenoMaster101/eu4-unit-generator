@@ -1458,7 +1458,7 @@ The app opens on a prompt screen like the AI app builders (one box, example chip
     - **Tile framing fix:** io_pdx_mesh skins with an Armature modifier (not always a parent), which the framing now checks.
     - **Open (next):**
       1. Riders and gun crews wear the untextured base body (§7.2: the retextured body lacks `horse_*` ids); crews keep the base weapon.
-      2. Any edit re-checks and re-renders all 12 tiles (about 70 s); only the changed tiers need it.
+      2. ~~Any edit re-checks and re-renders all 12 tiles (about 70 s); only the changed tiers need it.~~ Done in Track C, C-1.
       3. No javelin or crescent pelte yet.
       4. ATH (and other DLC-covered tags) need a pack-order check before an in-game test.
 
@@ -1472,6 +1472,9 @@ Goal: from a reference image, a unit that is recognisably close to it, not only 
 
 **Items, by value vs effort** (S/M/L). Only C11 needs TripoSG, and C11 is skipped (user, 2026-10-18).
 - **C-1. Faster edits** (first, before C0; F12 open 2). An edit re-checks the set but re-renders only the tiles whose unit changed (unit types and tiers); the old picture stays, dimmed, until its new one arrives.
+  - **Done (2026-10-18).** `export.gallery.fingerprint` hashes what a tile shows: each mesh of the unit's entity tree, the textures its shapes name, the idle animation, scales, attach bones and the preview unit colours. `Session.gallery_prints` runs after each check (0.2-0.3 s for 12 units); the Result screen re-renders only units whose print changed or that have no picture, one Blender run per unit type that has any. Tiles being redone keep their picture at 35% opacity; unchanged ones are undimmed when the check ends. A name edit renders nothing; a unit colour re-renders all 12.
+  - **The set is still checked whole:** the validator's rules span the set (pack orders, the graph), so rule 4 stays intact. Parts are cached, so only changed parts go to Blender.
+  - **Measured on the user's install** (F12's ATH phalangite army, real Blender): first generate 144 s (validate 50 s); a tier-3-only helmet edit 23.6 s (validate 19 s including the helmet build, 1 tile rendered), was ~69 s for 12 tiles.
 - **C0. Riders get the full treatment** (blocks the rest; S-M). The retextured rider pdxmesh carries the `horse_*` ids (§7.2), so recipes and finishes reach the rider; helmets and shields on rider slots. In-game test.
 - **C1. Scale, lamellar and mail finishes** (high; S-M). A tiled procedural diffuse plus normal-map relief, written into an area as a new recipe op; finishes in `materials.json`. Infantry and (after C0) riders.
 - **C2. Oval shield and cross emblem** (high: the shield reads best at 48 px; S). An aspect param and a flatter dome on the hoplon builder; a cross in `core/emblems.py`. **UNVERIFIED:** a `Left_hand_node` shield with the `cavalry_rider_*` animations. Check vanilla entities for a rider with a left-hand attach, then test in game.

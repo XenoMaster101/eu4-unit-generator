@@ -634,8 +634,20 @@ def test_f10_result_screen_gallery_parts_colours_and_names(window, fake_install,
     assert page.selected == ("cavalry", 2) and "Cavalry, tier 2" in page.showing.text()
     assert not page.cards["shield"].isVisible()  # riders carry no shield
     page.scope_one.setChecked(True)
+    runner.calls.clear()
     page._part("cavalry", "weapon", "xiphos")
     assert "xiphos" in slot("2/rider") and "xyston" in slot("3/rider")  # tier 2 only
+    renders = [a for j, a in runner.calls if j == "render_unit"]
+    assert [[u["name"] for u in a["units"]] for a in renders] == [["cavalry_2"]]  # C-1: only that tile
+    assert sum(1 for t in page.tiles.values() if t.pixmap() and not t.pixmap().isNull()) == 12
+    assert not any(t.is_stale() for t in page.tiles.values())  # nothing left dimmed
+    runner.calls.clear()
+    page.names["artillery"].setText("Lithoboloi")
+    page._name_changed("artillery")
+    assert not [j for j, _ in runner.calls if j == "render_unit"]  # a name changes no picture
+    page.mark_stale(page.tiles)
+    assert all(t.is_stale() for t in page.tiles.values())
+    page.mark_stale(page.tiles, False)
     page.tiles[("infantry", 1)].clicked.emit()
     page.scope_all.setChecked(True)
     page._shield("infantry", "hoplon", {"radius": 2.6})

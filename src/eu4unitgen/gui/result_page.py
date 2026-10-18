@@ -15,7 +15,8 @@ from PIL import Image
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup, QColorDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QButtonGroup, QColorDialog, QFileDialog, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QMenu,
     QPushButton, QRadioButton, QScrollArea, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -55,8 +56,10 @@ def _swatch(colour, size: int = 16) -> QIcon:
 
 
 class Tile(QLabel):
-    """One unit's preview; a click picks it (its unit type and tier)."""
+    """One unit's preview; a click picks it (its unit type and tier). A stale tile (its unit is being
+    checked or rendered again) keeps its old picture, dimmed."""
     clicked = Signal()
+    STALE_OPACITY = 0.35
 
     def __init__(self):
         super().__init__()
@@ -65,6 +68,17 @@ class Tile(QLabel):
         self.setObjectName("tile")
         self.setCursor(Qt.PointingHandCursor)
         self.setWordWrap(True)
+
+    def set_stale(self, stale: bool) -> None:
+        if stale:
+            effect = QGraphicsOpacityEffect(self)
+            effect.setOpacity(self.STALE_OPACITY)
+            self.setGraphicsEffect(effect)
+        else:
+            self.setGraphicsEffect(None)
+
+    def is_stale(self) -> bool:
+        return self.graphicsEffect() is not None
 
     def mousePressEvent(self, e) -> None:  # noqa: N802 - Qt name
         self.clicked.emit()
@@ -358,10 +372,22 @@ QLabel#good {{ color: {t['ok']}; }}
             if key not in self.images:
                 tile.setText(text)
 
-    def show_gallery(self, gallery) -> None:
+    def mark_stale(self, keys, stale: bool = True) -> None:
+        """Dim the tiles of ``keys`` while their units are redone (or undim them: unchanged)."""
+        for key in keys:
+            self.tiles[key].set_stale(stale and key in self.images)
+
+    def show_gallery(self, gallery, units=None) -> None:
+        """The rendered tiles; a unit of ``units`` that rendered no picture loses its old one."""
+        for key in units or ():
+            if key not in gallery.images:
+                self.images.pop(key, None)
+                self.tiles[key].clear()
+                self.tiles[key].set_stale(False)
         for key, img in gallery.images.items():
             self.images[key] = img
             self.tiles[key].setPixmap(_pixmap(img, TILE - 6))
+            self.tiles[key].set_stale(False)
         self.gallery_parts.update(gallery.parts)
         self.thumbs.update(gallery.thumbs)
         self._fill_cards()
@@ -370,6 +396,7 @@ QLabel#good {{ color: {t['ok']}; }}
         self.images.clear()
         for tile in self.tiles.values():
             tile.clear()
+            tile.set_stale(False)
 
     def select(self, utype: str, tier: int) -> None:
         self.selected = (utype, tier)

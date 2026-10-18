@@ -101,6 +101,31 @@ def test_gallery_renders_every_unit_in_one_job(session, tmp_path, monkeypatch):
     assert some.thumbs["hr_mac_dory_1"].size == (24, 24) and "hr_mac_crest_rider_1" in some.thumbs
 
 
+def test_fingerprints_change_only_for_units_an_edit_changed(session, tmp_path, monkeypatch):
+    """Track C, C-1: a unit's fingerprint covers what its tile shows, so an edit re-renders only
+    the units it changed."""
+    from eu4unitgen.core.loadout import Loadout
+
+    runner = GalleryRunner()
+    monkeypatch.setattr(session, "runner", lambda: runner)
+    spec = SetSpec(tags=["MAC"], gfx="hellenicgfx", loadout=_loadout(tmp_path))
+    before = session.gallery_prints(spec, session.validate(spec)[0])
+    assert len(before) == 12 and not [v for v in before.values() if v.startswith("error")]
+    assert session.gallery_prints(spec, session.validate(spec)[0]) == before  # stable
+
+    edited = Loadout.from_json({"schema": 1, "slots": {
+        "1/infantry": {"parts": [{"kind": "dory"}, {"kind": "hoplon"}]},
+        "1/rider": {"parts": [{"kind": "xiphos"}, {"kind": "crest"}]}}}, tmp_path)  # the rider's weapon only
+    after = session.gallery_prints(SetSpec(tags=["MAC"], gfx="hellenicgfx", loadout=edited),
+                                   session.validate(SetSpec(tags=["MAC"], gfx="hellenicgfx", loadout=edited))[0])
+    assert [k for k in before if before[k] != after[k]] == [("cavalry", 1)]
+
+    recoloured = SetSpec(tags=["MAC"], gfx="hellenicgfx", loadout=_loadout(tmp_path),
+                         unit_colours=[(10, 20, 30), (200, 200, 0), (0, 0, 0)])
+    again = session.gallery_prints(recoloured, session.validate(recoloured)[0])
+    assert all(again[k] != before[k] for k in before)  # unit colours tint every tile
+
+
 @pytest.mark.skipif(not os.environ.get("EU4_PATH"), reason="needs the real install (EU4_PATH) and Blender")
 def test_real_blender_gallery(tmp_path):
     from eu4unitgen.core.character import CharacterSpec

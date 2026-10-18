@@ -66,6 +66,36 @@ def parts_of(node: Node) -> dict[str, str]:
     return out
 
 
+def fingerprint(node: Node, world, colours) -> str:
+    """A hash of everything ``stage`` would hand the renderer for ``node``'s tree: each mesh, the
+    textures its shapes name, the animation, scales, attach bones, and the unit colours. Two equal
+    fingerprints render the same tile, so an edit re-renders only the units whose print changed."""
+    import hashlib
+
+    from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
+
+    h = hashlib.sha256(repr([list(c) for c in colours]).encode("utf-8"))
+
+    def walk(n: Node) -> None:
+        h.update(f"|{n.entity}|{n.mesh_file}|{n.scale}|{n.anim_file}|".encode("utf-8"))
+        data = world.read(n.mesh_file)
+        h.update(data or b"<missing>")
+        if data is not None:
+            base = str(PurePosixPath(n.mesh_file).parent)
+            for shape in summarize_mesh(parse_pdx_mesh(data))["shapes"]:
+                for k in ("diffuse", "specular", "normal"):
+                    name = shape.get(k)
+                    h.update(f"|{k}={name}|".encode("utf-8"))
+                    h.update((world.read(f"{base}/{name}") if name else None) or b"<none>")
+        if n.anim_file:
+            h.update(world.read(n.anim_file) or b"<missing>")
+        for bone, child in n.attach:
+            h.update(f"|attach {bone}|".encode("utf-8"))
+            walk(child)
+    walk(node)
+    return h.hexdigest()
+
+
 def stage(node: Node, world, colours, folder: Path, n: list | None = None) -> dict:
     """Write ``node``'s tree into ``folder`` (one subfolder per mesh, its textures beside it as its
     materials name them) -> the Blender job's node: {"mesh", "anim", "scale", "attach": [{"bone",

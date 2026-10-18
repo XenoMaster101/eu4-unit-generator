@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from eu4unitgen.core.generator import GenerationError
 from eu4unitgen.core.loadout import LoadoutError
-from eu4unitgen.core.naming import TEST_MOD_NAME, NamingError
+from eu4unitgen.core.naming import TEST_MOD_NAME, UNIT_TYPES, NamingError
 from eu4unitgen.core.parts import PartError
 from eu4unitgen.core.recipe import RecipeError
 from eu4unitgen.export.pipeline import Session, SetSpec, Settings, SpecError
@@ -149,6 +149,7 @@ class MainWindow(QMainWindow):
         self.army = Army()
         self._result_token = 0
         self._result_dirty = False
+        self._tile_prints: dict = {}  # (unit type, tier) -> fingerprint of the picture on its tile
         self._skins: dict[str, tuple] = {}  # body pdxmesh -> its skin tone (read once)
         self.setCentralWidget(self.views)
         self.statusBar().showMessage("Set the EU4 install and press Load.")
@@ -401,6 +402,7 @@ class MainWindow(QMainWindow):
         self.army = Army(home.text(), list(home.image_items), tag, home.tiers.currentData(), [],
                          [list(c) for c in own] if own else None)
         self.result_page.clear_gallery()
+        self._tile_prints = {}
         self.views.setCurrentWidget(self.result_page)
         self.result_regenerate()
 
@@ -418,7 +420,9 @@ class MainWindow(QMainWindow):
 
     def result_regenerate(self) -> None:
         """The army -> spec (shown in the pages too) -> validation -> the gallery, row by row, in the
-        background. An edit made meanwhile restarts it once the current step ends."""
+        background. Only units whose assembled model changed are rendered again; the others keep
+        their picture, and a picture being redone is dimmed until it arrives. An edit made
+        meanwhile restarts it once the current step ends."""
         from eu4unitgen.core.character import CharacterSpec
         from eu4unitgen.core.look import DEFAULT_SKIN, LookError, compile_look
 
@@ -436,7 +440,7 @@ class MainWindow(QMainWindow):
         self._result_dirty = False
         self._result_token += 1
         token = self._result_token
-        page.clear_gallery()
+        page.mark_stale(page.tiles)
         page.show_waiting("checking the army and building its parts…")
         page.show_status("Checking…")
         base = self._result_base(army.tag)
@@ -449,18 +453,23 @@ class MainWindow(QMainWindow):
                 skin = session.body_areas(first.set_spec(), 1, "infantry").skin
             spec = CharacterSpec.from_json(compile_look(look, base, {t: skin for t in (1, 2, 3, 4)}), Path.cwd())
             setspec = spec.set_spec()
-            return spec, setspec, session.validate(setspec)[0], skin
+            result = session.validate(setspec)[0]
+            return spec, setspec, result, skin, session.gallery_prints(setspec, result)
 
         def done(res) -> None:
-            spec, setspec, result, skin = res
+            spec, setspec, result, skin, prints = res
             self._skins[look.body_base] = skin
             if self.adopt_character(spec):
                 self.character_edited()
             page.show_army(army, look, interp, skin)
             page.show_report(result.report)
             self._result_spec = (setspec, result)
-            if not self._restart_if_dirty():
-                self._render_rows(token, setspec, result, ["infantry", "cavalry", "artillery"])
+            if self._restart_if_dirty():
+                return
+            changed = [k for k, v in prints.items() if self._tile_prints.get(k) != v or k not in page.images]
+            page.mark_stale([k for k in page.tiles if k not in changed], False)
+            self._render_rows(token, setspec, result, [u for u in UNIT_TYPES if any(k[0] == u for k in changed)],
+                              changed, prints)
 
         self.run(page, "Checking the army", work, done)
 
@@ -471,22 +480,24 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def _render_rows(self, token: int, setspec, result, rows: list[str]) -> None:
-        """One Blender run per unit type, so tiles appear as they're ready."""
+    def _render_rows(self, token: int, setspec, result, rows: list[str], changed: list, prints: dict) -> None:
+        """One Blender run per unit type with changed units (only those), so tiles appear as they're
+        ready."""
         if token != self._result_token or not rows:
             return
         page, utype = self.result_page, rows[0]
-        units = [(utype, t) for t in (1, 2, 3, 4)]
+        units = [k for k in changed if k[0] == utype]
         page.show_waiting("rendering…", units)
 
         def done(gallery) -> None:
             if token != self._result_token:
                 return
-            page.show_gallery(gallery)
+            page.show_gallery(gallery, units)
+            self._tile_prints.update({k: prints[k] for k in units})
             if gallery.notes:
                 page.show_message("; ".join(gallery.notes))
             if not self._restart_if_dirty():
-                self._render_rows(token, setspec, result, rows[1:])
+                self._render_rows(token, setspec, result, rows[1:], changed, prints)
 
         self.run(page, f"Rendering the {utype}", lambda: self.session.gallery(setspec, units, 200, result, thumbs=120),
                  done)
