@@ -1462,6 +1462,40 @@ The app opens on a prompt screen like the AI app builders (one box, example chip
       3. No javelin or crescent pelte yet.
       4. ATH (and other DLC-covered tags) need a pack-order check before an in-game test.
 
+### Track C: Close to a reference (PLANNED 2026-10-18, nothing built)
+Goal: from a reference image, a unit that is recognisably close to it, not only in its colours. Test reference (user's, rule 8 declared by the user): a cataphract: a helmet with a mail veil and a tall red plume, silver scale or lamellar armour, a red cloak with gold trim, an oval red shield with a gold cross, a kontarion, a curved sword, a fully armoured horse with barding and a chanfron.
+
+**Why the first try gave a crested "Spartan" rider:**
+- `core/reference.py` (F5) reads colour only, in head/torso/legs bands of a standing front view. On a rider on a horse the "legs" band is mostly horse, so colours land on the wrong areas. It never detects parts.
+- Riders are the weakest path: they wear the untextured base body (F12 open 1). Derived bodies are infantry-only, so riders get crests, never a `greek_helmet`. `hoplon` is limited to infantry and crew. A cataphract is all rider and horse, so none of the armour, helmet or shield work reaches it today.
+- The vocabulary has no cataphract words or template, so it fell back to a hoplite/companion look.
+
+**Items, by value vs effort** (S/M/L). Only C11 needs TripoSG.
+- **C0. Riders get the full treatment** (blocks the rest; S-M). The retextured rider pdxmesh carries the `horse_*` ids (§7.2), so recipes and finishes reach the rider; helmets and shields on rider slots. In-game test.
+- **C1. Scale, lamellar and mail finishes** (high; S-M). A tiled procedural diffuse plus normal-map relief, written into an area as a new recipe op; finishes in `materials.json`. Infantry and (after C0) riders.
+- **C2. Oval shield and cross emblem** (high: the shield reads best at 48 px; S). An aspect param and a flatter dome on the hoplon builder; a cross in `core/emblems.py`. **UNVERIFIED:** a `Left_hand_node` shield with the `cavalry_rider_*` animations. Check vanilla entities for a rider with a left-hand attach, then test in game.
+- **C3. Reference tagger, first half** (high; M). The user draws boxes on the image (helmet, body armour, shield, weapon, horse, cloak, plume), picks the closest part per box or "none exists", and colours are sampled per box (background drop and palette as in F5). Unmatched boxes become a "missing parts" list. This alone fixes the band problem above.
+- **C4. Horse barding as texture** (high: the horse is half the unit; M). Horse areas from bone groups of the 30-bone horse skeleton (neck: `HorseNeck*`; body: `HorseSpine*`, `Root`; legs: `HorseFront*`, `HorseBack*`; head: `HorseHead`) in `bodies.json`, then the scale finish and a colour on the `horse` recipe slot. Caveat: the horse diffuse is 256², so scales will be coarse; the normal map is 512².
+- **C5. Helmet with a mail aventail or face veil and a tall plume** (high; M). A new helmet style: a dome, a mail curtain below the rim with an eye slit (mail finish), the plume as a crest variant **in the same mesh** (one attached part per bone). On riders: a shell that slightly encloses type1's own helmet instead of a removal, which avoids untested derived rider bodies (Track R open question 6).
+- **C6. Chanfron** (medium; S-M). A rigid part on `HorseHead`, fitted from the horse mesh (fitting generalised from the soldier's head to any bone). **UNVERIFIED:** a horse attach other than `Saddle_Node`; in-game test.
+- **C7. Cataphract template and vocabulary** (medium: makes typed prompts work; S). Cataphract/kataphraktos, lamellar, scale, mail veil, kontarion, barding, chanfron, cloak, plume. The kontarion is the xyston under another name.
+- **C8. Curved sword** (low-medium: at 48 px curved vs straight barely shows; S). A blade-curve param on the xiphos builder. With a lance in the right hand the sword goes in a scabbard on `hip` (**UNVERIFIED**; `head` worked) or is left out.
+- **C9. Cape.** No cloth bones and no physics (Track R), so no flowing cloak without extra bones and re-made animations (R6, rejected).
+  - **Painted** (medium; S; first): a red cloak with gold trim painted on the rider's shoulder and back areas. At map scale it reads about as well as geometry.
+  - **Short rigid mantle** (low; M; spike only): shoulder to mid-back on `attach_back` or `top_spine`. A stiff plate; anything longer clips into the horse and saddle when seated.
+  - **Skinned into a derived rider body:** stiff all the same, and derived rider bodies are untested. Not for a cape alone.
+- **C10. Tagger, second half** (low; M). A pattern hint (scale vs mail vs plain) from a box's pixels. Unreliable, so only a hint; the user picks from the crop.
+- **C11. TripoSG crops** (low for this reference; L). Needs R-I and R-T, neither built. The crops are low-resolution, partly hidden and from one angle; the output must come down to 300-400 triangles and be repainted, so at 48 px it is no better than a procedural part. Crops are reference images too (rule 8). Use TripoSG for organic or ornate parts the builders can't make, not for this look.
+
+**Order:**
+1. C0 → in-game test.
+2. C2, C7, C1 → in-game test: a cataphract rider with a scale torso, an oval shield and a xyston.
+3. C3.
+4. C5 → C4 → C6 → in-game test (the `HorseHead` attach, the helmet shell on a rider).
+5. C9 painted cape, C8. The rigid mantle only as a spike on request.
+
+**Acceptance:** the reference beside the gallery's cavalry tile, close up and at 48 px, with one line per tagger box: matched, approximated or missing. "Recognisably close" = the shield's shape and colour, the helmet outline with the plume, the armoured horse and the red-and-silver colours all read at 48 px.
+
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
 
