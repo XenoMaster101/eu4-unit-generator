@@ -48,7 +48,8 @@ def test_a_full_description(read):
 def test_negation_scope_notes_and_leftovers(read):
     r = read("peltasts with javelins, no shield, a red tunic; cavalry with shields and helmets, same look on all tiers")
     assert r.leftovers == ["javelins"]
-    assert len(r.notes) == 2 and "riders can't carry a shield" in r.notes[0]
+    assert len(r.notes) == 1 and "Greek helmet" in r.notes[0]  # riders may carry shields (C0c)
+    assert any(i.kind == "shield" and i.utype == "cavalry" for i in r.items)
     look = r.look()
     assert look.template == "peltast" and look.progression == "same"
     assert "shield" not in look.tier(2)["roles"]["infantry"] and look.tier(2)["body"]["torso"] == ["colour", [170, 30, 30]]

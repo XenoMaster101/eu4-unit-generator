@@ -123,8 +123,6 @@ class Look:
                 raise LookError(f"{utype}: weapon {r['weapon']!r} must be one of {WEAPONS}")
             if r.get("shield") not in (None, *SHIELDS):
                 raise LookError(f"{utype}: shield {r['shield']!r} must be one of {SHIELDS}")
-            if r.get("shield") and utype == "cavalry":
-                raise LookError("cavalry: riders can't carry a hoplon (core.parts)")
             if r.get("helmet") and utype != "infantry":
                 raise LookError(f"{utype}: only infantry can wear a Greek helmet (riders and crews keep the base "
                                 "body's own helmet; give them a crest)")

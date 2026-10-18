@@ -417,7 +417,10 @@ def loadout(ctx: Context) -> list[Issue]:
     shields = {r.entity for r in res.parts if r.kind == "hoplon"}
     for name in sorted(ents):
         carried = {t for a in w.resolve(name, "attach") or [] for b, t in a.items() if b != "name"} & shields
-        if carried:
+        if carried and name.endswith("_rider"):  # riders play the cavalry_rider set; no stance to check
+            out.append(Issue(INFO, "loadout", f"{name} carries {sorted(carried)} in its rein hand: UNVERIFIED in "
+                                              "game (no base-game rider holds anything in its left hand)", subject=name))
+        elif carried:
             anims = (w.pdxmesh(w.resolve(name, "pdxmesh") or "") or {}).get("animations") or {}
             if any(anims.get(i) != t for i, t in STANCE_TYPES["spear_shield"].items()):
                 out.append(Issue(WARNING, "loadout", f"{name} carries {sorted(carried)} but doesn't use the "

@@ -215,7 +215,7 @@ def test_parts_form_round_trip_and_crew_toggle(window, tmp_path):
     head.kind.setCurrentIndex(head.kind.findData("crest"))
     head.params["orientation"].setCurrentText("transverse")
     page.role.setCurrentText("rider")  # stores 1/infantry
-    assert left.kind.findData("hoplon") == -1 and right.kind.findData("xiphos") >= 0  # no shields on riders
+    assert left.kind.findData("hoplon") >= 0 and right.kind.findData("xiphos") >= 0  # riders may carry shields (C0c)
     assert not page.stance.isEnabled()
     page.role.setCurrentText("crew")
     assert not right.isEnabled() and "gun crew is the infantry entity" in page.message.text()
@@ -632,7 +632,7 @@ def test_f10_result_screen_gallery_parts_colours_and_names(window, fake_install,
 
     page.tiles[("cavalry", 2)].clicked.emit()
     assert page.selected == ("cavalry", 2) and "Cavalry, tier 2" in page.showing.text()
-    assert not page.cards["shield"].isVisible()  # riders carry no shield
+    assert not page.cards["shield"].isHidden()  # riders may carry a shield (C0c)
     page.scope_one.setChecked(True)
     runner.calls.clear()
     page._part("cavalry", "weapon", "xiphos")

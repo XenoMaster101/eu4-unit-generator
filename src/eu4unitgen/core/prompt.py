@@ -373,9 +373,7 @@ class KeywordInterpreter(Interpreter):
             elif kind in ("weapon", "shield", "helmet", "crest"):
                 utype = e.get("scope") if (kind == "weapon" and e.get("scope") and scope == "infantry") else scope
                 value = None if negate else e["value"]
-                if kind == "shield" and utype == "cavalry":
-                    res.notes.append(f"\"{words}\": riders can't carry a shield yet, left out")
-                elif kind == "helmet" and utype != "infantry":
+                if kind == "helmet" and utype != "infantry":
                     res.notes.append(f"\"{words}\": only infantry can wear a Greek helmet; {utype} keep the base "
                                      "helmet (a crest works)")
                 else:

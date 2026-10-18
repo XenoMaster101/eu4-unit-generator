@@ -53,8 +53,12 @@ def test_edits_all_tiers_or_one_tier():
     assert all(_finishes(doc, t)["area:shins"] == "iron" for t in (1, 2, 3, 4))
     look.edit(("body", "arms"), None)  # back to the base texture everywhere
     assert all("area:arms" not in _finishes(compile_look(look, SET), t) for t in (1, 2, 3, 4))
+    look.edit(("roles", "cavalry", "shield"), "hoplon")  # riders may carry one (C0c)
+    look.check()
+    doc = compile_look(look, SET)
+    assert all("hoplon" in _parts(doc, f"{t}/rider") for t in (1, 2, 3, 4))
     with pytest.raises(LookError):
-        look.edit(("roles", "cavalry", "shield"), "hoplon")
+        look.edit(("roles", "cavalry", "shield"), "pelte")
         look.check()
 
 

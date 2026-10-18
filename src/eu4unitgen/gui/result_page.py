@@ -451,18 +451,16 @@ QLabel#good {{ color: {t['ok']}; }}
                                                 + [(None, "Keep the base weapon")]))
 
         shield = self.cards["shield"]
-        shield.setVisible(utype != "cavalry")
-        if utype != "cavalry":
-            small = (role.get("shield_params") or {}).get("radius")
-            shield.caption.setText(("Small round shield" if small else "Round shield") if role.get("shield") else "no shield")
-            picture(shield, "Left_hand_node", "no shield")
-            menu = QMenu(self)
-            for label, value, params in (("Round shield", "hoplon", None), ("Small round shield", "hoplon", {"radius": 2.6}),
-                                         ("No shield", None, None)):
-                act = QAction(label, menu)
-                act.triggered.connect(lambda _=False, v=value, p=params, u=utype: self._shield(u, v, p))
-                menu.addAction(act)
-            shield.change.setMenu(menu)
+        small = (role.get("shield_params") or {}).get("radius")
+        shield.caption.setText(("Small round shield" if small else "Round shield") if role.get("shield") else "no shield")
+        picture(shield, "Left_hand_node", "no shield")
+        menu = QMenu(self)
+        for label, value, params in (("Round shield", "hoplon", None), ("Small round shield", "hoplon", {"radius": 2.6}),
+                                     ("No shield", None, None)):
+            act = QAction(label, menu)
+            act.triggered.connect(lambda _=False, v=value, p=params, u=utype: self._shield(u, v, p))
+            menu.addAction(act)
+        shield.change.setMenu(menu)
 
         body = self.cards["body"]
         picked = ", ".join(f"{a.replace('_', ' ')} {f[0] if isinstance(f, list) else f}" for a, f in tl["body"].items())

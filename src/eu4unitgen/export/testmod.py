@@ -620,9 +620,10 @@ def _non_square_parts(generated) -> list[str]:
     return sorted(set(out))
 
 
-def _side_view(res) -> list[str]:
+def _side_view(res, rider_shields: bool = False) -> list[str]:
     kinds = sorted({k for rec in res.derived.values() for k, _, _ in rec.additions})
-    look = ", ".join(kinds) if kinds else "the body, the helmet and the shield"
+    look = (", ".join(kinds) if kinds else "the body, the helmet and the shield") + (
+        " (cavalry: the rider's shield against the horse's neck and the rider's thigh)" if rider_shields else "")
     return [
         "SIDE-VIEW CHECK (the camera can't rotate; units face the way they move):",
         f"[ ] V1 march the army east or west across 2+ provinces, zoom all the way in, pause mid-march: the units walk "
@@ -666,6 +667,11 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
             parts = [by_entity[e] for e in res.carried.get((tier, role), [])]
             lines.append(f"[ ] {tier}{role[0].upper()}  {ROLE_WHERE[role]}: "
                          + ("; ".join(_describe_part(r) for r in parts) or "no parts of its own: the plain base infantry"))
+            if role == "rider" and any(r.kind == "hoplon" for r in parts):
+                lines.append(f"[ ] {tier}RS rider shield (UNVERIFIED: no base-game rider holds anything in its left "
+                             "hand, which holds the reins): the shield follows that hand through idle, walk, attack "
+                             "and retreat. Note where it sits (rein side, in front of the chest?) and whether it sinks "
+                             "into the horse's neck or the rider's thigh, or swings about.")
         for entity, (stance, _) in sorted(res.stances.items()):
             if entity.endswith((f"_INFANTRY_{tier}", f"_{tier}_crew")):
                 lines.append(f"[ ] {tier}S  {entity}: {stance} animations; " + STANCE_LOOK.get(stance, ""))
@@ -673,12 +679,20 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
             head_parts = [_part_label(r) for r in res.parts if r.tier == tier and r.role == "infantry" and r.bone == "head"]
             lines += _derived_lines(tier, res.derived[tier], head_parts)
         lines += [ln for ln in _recipe_lines(recipe) if ln.startswith(f"[ ] {tier}T")]
+        slots = recipe.active() if recipe else {}
+        if (tier, "infantry") in slots and (tier, "rider") not in slots:
+            lines.append(f"[ ] {tier}TR the cavalry rider wears the infantry's textures (this tier has no rider slot).")
+        elif (tier, "rider") in slots:
+            lines.append(f"[ ] {tier}TR the cavalry rider's textures differ from the infantry's (its own slot), "
+                         "and it still animates on the horse (sits, walks, attacks: not T-posed or standing).")
     wide = _non_square_parts(generated)
     if wide:
         lines += ["", f"[ ] P  non-square part textures (first use for our parts; the base game's weapons have them): "
                       f"{', '.join(wide)}. That part black, pink or missing = non-square textures fail."]
-    if res.derived:
-        lines += ["", *_side_view(res)]
+    rider_shields = any(by_entity[e].kind == "hoplon" for (_, role), carried in res.carried.items() if role == "rider"
+                        for e in carried)  # what riders carry (a part may be shared with the infantry)
+    if res.derived or rider_shields:
+        lines += ["", *_side_view(res, rider_shields)]
         if len(res.derived) > 1:
             bodies = ", ".join(f"tier {t}: {r.base_file.rsplit('/', 1)[-1][:-5]}" + "".join(f" - {x}" for x in r.removed)
                                for t, r in sorted(res.derived.items()))

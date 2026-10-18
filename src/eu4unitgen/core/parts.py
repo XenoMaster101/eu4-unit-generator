@@ -137,7 +137,8 @@ KINDS: dict[str, PartKind] = {k.name: k for k in (
              (ZoneDef("blade", "Blade and guard", IRON, 8, material="iron"),
               ZoneDef("hilt", "Grip and pommel", WOOD, 3, material="leather")),
              scaled=("blade_length", "grip_length")),
-    PartKind("hoplon", "Hoplon (round shield)", "Left_hand_node", ("infantry", "crew"), "shield", "disc",
+    # riders: UNVERIFIED in game (Track C, C0c; no base-game rider holds anything in its left hand)
+    PartKind("hoplon", "Hoplon (round shield)", "Left_hand_node", LOADOUT_ROLES, "shield", "disc",
              {"radius": Param(3.8, 1.5, 6.0, "Radius", 0.1),
               "depth": Param(0.9, 0.0, 2.5, "Dome depth", tip="how far the face bulges outwards (+X)"),
               "rim": Param(0.35, 0.0, 1.0, "Rim width"),

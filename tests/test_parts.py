@@ -180,7 +180,8 @@ def test_resolve_defaults_fitting_overrides_and_point():
     fixed = resolve(PartSpec("hoplon", colours={"face": [200, 30, 30]}), "crew", None)
     assert fixed.shader == "PdxMeshStandard" and fixed.zones[0].colour == (200, 30, 30)
     with pytest.raises(PartError, match="can't go on the rider"):
-        resolve(PartSpec("hoplon"), "rider", None)
+        resolve(PartSpec("sarissa"), "rider", None)
+    assert resolve(PartSpec("hoplon"), "rider", None).bone == "Left_hand_node"  # riders may carry one (C0c)
 
 
 # --------------------------------------------------------------------------- fitting
@@ -263,7 +264,7 @@ def test_loadout_round_trip_and_errors(tmp_path):
                      ({"schema": 1, "slots": {"1/horse": {}}}, "must be <tier>/<role>"),
                      ({"schema": 1, "slots": {"1/infantry": {"parts": [{"kind": "dory"}, {"kind": "xiphos"}]}}},
                       "both go on Right_hand_node"),
-                     ({"schema": 1, "slots": {"1/rider": {"parts": [{"kind": "hoplon"}]}}}, "can't go on the rider"),
+                     ({"schema": 1, "slots": {"1/rider": {"parts": [{"kind": "sarissa"}]}}}, "can't go on the rider"),
                      ({"schema": 1, "slots": {"1/rider": {"stance": "spear_shield"}}}, "take a stance"),
                      ({"schema": 1, "slots": {"1/infantry": {"stance": "dance"}}}, "stance"),
                      ({"schema": 1, "slots": {"1/infantry": {"parts": [{"kind": "dory", "params": {"x": 1}}]}}},
@@ -333,6 +334,13 @@ def test_loadout_rule_catches_mistakes(project, nation, game):
         rep = validate(project, nation, g, files, idx)
         return [str(i) for i in rep.issues if i.rule == "loadout"]
     assert any("doesn't use the spear_shield animations" in m for m in issues(gen))  # shield, no stance: warned
+    rider = generate(project, nation, files, idx, runner=FakeRunner(), loadout=Loadout.from_json({"schema": 1, "slots": {
+        "1/rider": {"parts": [{"kind": "xyston"}, {"kind": "hoplon"}]}}}))
+    rep = validate(project, nation, rider, files, idx)
+    mine = [i for i in rep.issues if i.rule == "loadout"]
+    assert [i.severity for i in mine] == ["info"] and "UNVERIFIED in game" in mine[0].message  # C0c: a note only
+    text = loadout_checklist(rider, "eu4unitgen_test", None)
+    assert "1RS rider shield (UNVERIFIED" in text and "the rider's shield against the horse's neck" in text
     bad = copy.deepcopy(gen)
     rel = N.set_entities_file("mac")
     bad.files[rel] = GeneratedFile(rel, bad.files[rel].data.replace(b'Left_hand_node = "hr_mac_hoplon_1"',
