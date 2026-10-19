@@ -16,7 +16,12 @@ those tracks), and measure every frame over all triangle edges and faces:
 Optional renders of each animation's worst frame (side and 3/4, vertices coloured by stretch:
 grey = rest length, red = stretched or squashed by 50% or more).
 
-args: {"mesh", "anims": [{"id", "path"}], "renders": {"out_dir", "name", "size"} | null, "result_path"}
+With ``groups`` ({name: [bone, ...]}, e.g. the tail's bones): the same numbers for that group alone
+(edges with both ends' dominant bone in it, triangles whose dominant bone is in it), and its
+travel: the furthest any of its vertices gets from where the first frame has it.
+
+args: {"mesh", "anims": [{"id", "path"}], "renders": {"out_dir", "name", "size"} | null,
+       "groups": {name: [bone]} | null, "result_path"}
 """
 import math
 import os
@@ -142,6 +147,16 @@ def main():
         f0, f1 = frame_range(rig)
         res = {"frames": [f0, f1], "str_min": 9.0, "str_max": 0.0, "str_p05": 9.0, "str_p95": 0.0, "flips": 0,
                "worst_frame": f0, "worst_log": 0.0, "worst_bones": None}
+        valid_e = [e for e, l0 in zip(edges, rest_len) if l0 > 1e-6]
+        gsel = {}
+        for gname, bones in (a.get("groups") or {}).items():
+            bs = set(bones)
+            gsel[gname] = {"edges": [i for i, (p, q) in enumerate(valid_e) if dominant_v[p] in bs and dominant_v[q] in bs],
+                           "tris": [i for i, b in enumerate(tri_bone) if b in bs],
+                           "verts": [i for i, b in enumerate(dominant_v) if b in bs]}
+        gres = {g: {"edges": len(sel["edges"]), "tris": len(sel["tris"]), "str_min": 9.0, "str_max": 0.0, "flips": 0,
+                    "travel": 0.0} for g, sel in gsel.items()}
+        first = None
         for f in range(f0, f1 + 1):
             scene.frame_set(f)
             co = coords(mesh)
@@ -156,14 +171,23 @@ def main():
             if logs[k] > res["worst_log"]:
                 p, q = [e for e, l0 in zip(edges, rest_len) if l0 > 1e-6][k]
                 res.update(worst_log=logs[k], worst_frame=f, worst_bones=sorted({dominant_v[p], dominant_v[q]} - {None}))
-            flips = 0
-            for t, n0, b in zip(tris, rest_n, tri_bone):
+            flipped = [False] * len(tris)
+            for i, (t, n0, b) in enumerate(zip(tris, rest_n, tri_bone)):
                 if b is None or b not in rig.pose.bones:
                     continue
                 m = (rig.matrix_world @ rig.pose.bones[b].matrix) @ rest_bone[b].inverted()
-                if (m.to_3x3() @ n0).dot(tri_normal(co, t)) < 0:
-                    flips += 1
+                flipped[i] = (m.to_3x3() @ n0).dot(tri_normal(co, t)) < 0
+            flips = sum(flipped)
             res["flips"] = max(res["flips"], flips)
+            if first is None:
+                first = co
+            for g, sel in gsel.items():
+                gr = gres[g]
+                rs = [ratios[i] for i in sel["edges"]]
+                if rs:
+                    gr["str_min"], gr["str_max"] = min(gr["str_min"], min(rs)), max(gr["str_max"], max(rs))
+                gr["flips"] = max(gr["flips"], sum(1 for i in sel["tris"] if flipped[i]))
+                gr["travel"] = max([gr["travel"]] + [(co[v] - first[v]).length for v in sel["verts"]])
             bad = {}
             valid = [e for e, l0 in zip(edges, rest_len) if l0 > 1e-6]
             for (p, q), r in zip(valid, ratios):
@@ -184,6 +208,8 @@ def main():
             r = a["renders"]
             res["renders"] = render(scene, mesh, per_v, rig, os.path.join(r["out_dir"], f"{r['name']}_{anim['id']}_worst"),
                                     int(r.get("size", 512)))
+        if gres:
+            res["groups"] = {g: {k: round(v, 3) if isinstance(v, float) else v for k, v in gr.items()} for g, gr in gres.items()}
         out["anims"][anim["id"]] = res
     out["vertices"], out["triangles"] = len(rest), len(tris)
     _pdx.write_result(a, out)
