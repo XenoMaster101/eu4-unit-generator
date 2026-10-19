@@ -10,8 +10,13 @@ args: {"vanilla": {"p", "tri", "bones"} (core.fresh_mesh.base_arrays),
        our stirrups and straps, parts 4-5 in the geometry's "part", don't count; vanilla's do),
        "overlays": [{"name", "draw": [[label | "vanilla", [r, g, b, a]], ...], "view": "side" | "front" | "top"}],
        "out_dir", "size": px, "result_path"}
-Result: {"vanilla": proportions, "meshes": {label: {"proportions", "compare", "flags": [metric]}},
-         "overlays": {name: path}}.
+Result: {"vanilla": proportions, "meshes": {label: {"proportions", "compare", "flags": [metric],
+         "vanilla_distance"}}, "overlays": {name: path}}.
+vanilla_distance (the user's rule: a body traced from vanilla's doesn't count as our own): the body
+surface (part 0) against vanilla's (without its reins and tail by their bones: given as
+``vanilla.keep``, a triangle mask, when the caller has the weights), both sampled by area, each
+sample's distance to the nearest sample of the other (mean, median, p95, max; ours -> vanilla), and
+the share within TRACE_NEAR. Over TRACE_SHARE within it is flagged "trace": too close to vanilla's.
 """
 import json
 import os
@@ -28,6 +33,26 @@ import _pdx  # noqa: E402
 
 # camera direction (camera -> scene) and up, PDX space: side = from the horse's left (+X)
 VIEWS = {"side": ((-1, 0, 0), (0, 1, 0)), "front": ((0, 0, 1), (0, 1, 0)), "top": ((0, -1, 0), (0, 0, -1))}
+
+
+TRACE_NEAR, TRACE_SHARE = 0.15, 0.5  # assumed (round 5): B traced from vanilla was 65% within 0.15, TripoSG 30%
+
+
+def vanilla_distance(co, tris, vco, vtri):
+    """The vanilla_distance numbers (module doc)."""
+    from mathutils import Vector
+    from mathutils.kdtree import KDTree
+    vs = hm.surface_samples(vco, vtri, n=150000)
+    ours = hm.surface_samples(co, tris, n=40000, seed=1)
+    tree = KDTree(len(vs))
+    for i, p in enumerate(vs):
+        tree.insert(Vector(p), i)
+    tree.balance()
+    d = np.sort([tree.find(Vector(p))[2] for p in ours])
+    near = float((d < TRACE_NEAR).mean())
+    return {"mean": round(float(d.mean()), 3), "median": round(float(np.median(d)), 3),
+            "p95": round(float(np.percentile(d, 95)), 3), "max": round(float(d[-1]), 3),
+            "share_near": round(near, 3), "trace": near > TRACE_SHARE}
 
 
 RIDER_GEAR = (4, 5)  # stirrup iron and strap (_horse_barding): round the rider's foot, not covering it
@@ -99,7 +124,11 @@ def main():
             cover = tris if part is None else tris[~np.isin(part, RIDER_GEAR)]
             p["rider_leg"] = hm.visible_from_side(co, cover, legs)
         cmp_ = hm.compare(p, vp, a.get("limits"))
-        res["meshes"][label] = {"proportions": p, "compare": cmp_, "flags": [k for k, c in cmp_.items() if c["flag"]]}
+        body = tris if part is None else tris[part == 0]
+        vkeep = vtri if van.get("keep") is None else vtri[np.array(van["keep"], dtype=bool)]
+        vd = vanilla_distance(co, body, vco, vkeep)
+        flags = [k for k, c in cmp_.items() if c["flag"]] + (["trace"] if vd["trace"] else [])
+        res["meshes"][label] = {"proportions": p, "compare": cmp_, "flags": flags, "vanilla_distance": vd}
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_WORKBENCH"
     sh = scene.display.shading
