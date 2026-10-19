@@ -189,3 +189,80 @@ def geometry_from_job(path) -> FreshGeometry:
 
     d = json.loads(Path(path).read_text(encoding="utf-8"))
     return FreshGeometry(d["p"], d["n"], d["u0"], d["tri"], d["weights"])
+
+
+@dataclass
+class FreshHorse:
+    """What the validator and the checklist need to know about one fresh horse."""
+    tier: int
+    entity: str  # the cavalry (horse) entity that wears it
+    pdxmesh: str
+    file: str
+    base_pdxmesh: str
+    base_file: str
+    textures: dict  # kind -> generated texture path
+    triangles: int
+    rights: str
+    source: str = ""
+
+
+HORSE_TRIANGLES = 3000  # Track C, test 15: the budget for a fresh horse (the base-game horse has 1,874)
+
+
+def apply_horses(naming, set_name: str, owner: str, entities: dict, records: list, by_name: dict, loadout,
+                 game, idx) -> tuple[list, dict, list[str]]:
+    """Put each tier's fresh horse (``loadout.horses``) on its cavalry entity: the .mesh (the base
+    horse's skeleton, locators and skin count with the new geometry), its textures (from the PNGs,
+    procedural DDS in the base textures' formats, full mips) beside it in the set's model folder,
+    and a pdxmesh with the base horse's animations, scale and keys. -> (files, records, notes)."""
+    from eu4unitgen.core.generator import OWNED, GeneratedFile, GenerationError
+    from eu4unitgen.core.loadout import LoadoutError
+    from eu4unitgen.library.scanner import summarize_mesh
+    from eu4unitgen.textures.dds import DDSFormat, full_mip_count, read_header, write_dds
+
+    files, out, notes = [], {}, []
+    for tier, h in sorted(loadout.horses.items()):
+        entity = entities[naming.unit_entity(owner, "cavalry", tier)]
+        if entity["pdxmesh"] == naming.pdxmesh(set_name, "horse", tier):
+            raise GenerationError(f"tier {tier}: a texture recipe's horse slot and a fresh horse; pick one")
+        rec = idx.pdxmesh(h["base"], base_only=True)
+        if rec is None or not game.in_base_game(rec.get("file") or ""):
+            raise GenerationError(f"tier {tier}: fresh horse base {h['base']!r} isn't a base-game pdxmesh")
+        base = game.read(rec["file"])
+        try:
+            geo = geometry_from_job(loadout.path(h["geometry"]))
+        except (OSError, ValueError, KeyError) as exc:
+            raise GenerationError(f"tier {tier}: can't read the fresh horse geometry {h['geometry']}: {exc}") from exc
+        shape = summarize_mesh(parse_pdx_mesh(base))["shapes"][0]
+        folder = rec["file"].rsplit("/", 1)[0]
+        names, paths = {}, {}
+        for kind in ("diffuse", "specular", "normal"):
+            try:
+                img = loadout.image(h["textures"][kind]).convert("RGBA")
+            except LoadoutError as exc:
+                raise GenerationError(f"tier {tier}: {exc}") from exc
+            w, hh = img.size
+            if w & (w - 1) or hh & (hh - 1):
+                raise GenerationError(f"tier {tier}: the fresh horse's {kind} is {w}x{hh}; sizes must be powers of two")
+            fmt = read_header(game.read(f"{folder}/{shape[kind]}"))["format"]
+            names[kind] = naming.fresh_horse_texture(set_name, tier, kind)
+            paths[kind] = f"{naming.part_dir(set_name)}/{names[kind]}"
+            files.append(GeneratedFile(paths[kind], write_dds(img, DDSFormat(fmt, w, hh, full_mip_count(w, hh))), OWNED,
+                                       procedural=True))
+        try:
+            data = write_fresh(base, geo, names)
+        except FreshMeshError as exc:
+            raise GenerationError(f"tier {tier}: fresh horse: {exc}") from exc
+        file, name = naming.fresh_horse_file(set_name, tier), naming.fresh_horse_pdxmesh(set_name, tier)
+        files.append(GeneratedFile(file, data, OWNED, derived_from=rec["file"]))
+        pdx = {"name": name, "file": file, "base": h["base"], "animations": dict(rec.get("animations") or {}),
+               "scale": rec.get("scale"), "extra": dict(rec.get("extra") or {}), "settings": []}
+        records.append(pdx)
+        by_name[name] = pdx
+        entity["pdxmesh"] = name
+        out[tier] = FreshHorse(tier, entity["name"], name, file, h["base"], rec["file"], paths, len(geo.tri) // 3,
+                               h["rights"], h.get("source", ""))
+        notes.append(f"tier {tier}: {entity['name']} is a fresh horse ({file}: {len(geo.tri) // 3} triangles on "
+                     f"{h['base']}'s skeleton and animations); reference {h.get('source') or '(none given)'}, "
+                     f"rights: {h['rights']}")
+    return files, out, notes

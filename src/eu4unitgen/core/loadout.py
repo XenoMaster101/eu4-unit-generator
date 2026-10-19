@@ -127,6 +127,24 @@ def check_slot(tier: int, role: str, slot: RoleLoadout) -> None:
         bones[k.bone] = p.kind
 
 
+HORSE_KEYS = {"geometry", "textures", "base", "rights", "source"}
+
+
+def check_horse(key, raw) -> dict:
+    """A loadout's fresh horse (Track C, test 15): ``geometry`` (the fresh_horse job's JSON),
+    ``textures`` {diffuse, specular, normal} (PNG paths), ``base`` (the base-game horse pdxmesh
+    whose skeleton the geometry was built on; default cavalry_horse), and the reference's
+    ``rights`` and ``source`` (CLAUDE.md rule 8: required, written to the notes)."""
+    if not isinstance(raw, dict) or set(raw) - HORSE_KEYS:
+        raise LoadoutError(f"horses: tier {key} must be an object with keys from {sorted(HORSE_KEYS)}")
+    if not raw.get("geometry") or not isinstance(raw.get("textures"), dict) or             set(raw["textures"]) != {"diffuse", "specular", "normal"}:
+        raise LoadoutError(f"horses: tier {key} needs geometry and textures {{diffuse, specular, normal}}")
+    if not str(raw.get("rights") or "").strip():
+        raise LoadoutError(f"horses: tier {key} needs the reference's rights (original, licensed or authorised; "
+                           "CLAUDE.md rule 8)")
+    return {"base": "cavalry_horse", **raw}
+
+
 def slot_warnings(slot: RoleLoadout) -> list[str]:
     """Hints for a slot as the form shows it (the validator checks the generated result)."""
     kinds = {KINDS[p.kind].bone: p.kind for p in slot.parts}
@@ -146,6 +164,7 @@ class Loadout:
     derived: dict[int, dict] = field(default_factory=dict)  # tier -> {"add": [...], "remove": [...]} on its infantry body
     accept_clipping: list[str] = field(default_factory=list)  # addition kinds whose clipping (C2) is a known limit
     hair: dict = field(default_factory=dict)  # a character spec's "hair" (swatch colours); empty: the library's
+    horses: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh horse (core.fresh_mesh: geometry, textures, rights)
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -200,6 +219,10 @@ class Loadout:
         if not isinstance(accept, list) or any(k not in ADDITION_KINDS for k in accept):
             raise LoadoutError(f"accept_clipping must list addition kinds from {sorted(ADDITION_KINDS)}, not {accept!r}")
         out.accept_clipping = list(accept)
+        for key, raw in (doc.get("horses") or {}).items():
+            if not str(key).isdigit() or int(key) not in TIERS:
+                raise LoadoutError(f"horses: {key!r} must be a tier {TIERS}")
+            out.horses[int(key)] = check_horse(key, raw)
         for role, point in (doc.get("weapon_point") or {}).items():
             if role not in LOADOUT_ROLES or point not in POINTS:
                 raise LoadoutError(f"weapon_point: {role!r} must be one of {LOADOUT_ROLES} and {point!r} one of {POINTS}")
@@ -216,6 +239,8 @@ class Loadout:
                               for t, d in sorted(self.derived.items())}
         if self.accept_clipping:
             out["accept_clipping"] = list(self.accept_clipping)
+        if self.horses:
+            out["horses"] = {str(t): dict(h) for t, h in sorted(self.horses.items())}
         points = {r: p for r, p in sorted(self.points.items()) if p != DEFAULT_POINTS[r]}
         if points:
             out["weapon_point"] = points
@@ -232,7 +257,7 @@ class Loadout:
                 if s.parts or s.resolved_stance() != "base" or k[1] == "crew"}
 
     def changes_anything(self) -> bool:
-        return bool(self.active() or self.bodies or self.derived)
+        return bool(self.active() or self.bodies or self.derived or self.horses)
 
     def needs_blender(self) -> bool:
         return any(d["add"] for d in self.derived.values()) or any(s.parts for s in self.active().values())
@@ -281,6 +306,7 @@ class LoadoutResult:
     chosen_bodies: dict[int, str] = field(default_factory=dict)  # tier -> body pdxmesh the loadout picked
     carried: dict[tuple[int, str], list[str]] = field(default_factory=dict)  # slot -> part entities it carries
     derived: dict[int, "DerivedRecord"] = field(default_factory=dict)  # tier -> its infantry's derived body
+    horses: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse (rule fresh_mesh)
     texture_files: list[GeneratedFile] = field(default_factory=list)  # derived bodies' derived textures (Q5)
 
 
@@ -641,6 +667,13 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
         if prebuilt is not None:
             derived_files.append(_derive(naming, set_name, tier, inf, loadout.derived[tier], prebuilt, pdx, res,
                                          game, idx, runner, loadout.accept_clipping))
+    if loadout.horses:
+        from eu4unitgen.core.fresh_mesh import apply_horses
+
+        files, res.horses, notes = apply_horses(naming, set_name, owner, by_name, pdx.records, pdx.by_name, loadout,
+                                                game, idx)
+        derived_files += files
+        res.notes += notes
     built = build_parts(runner, naming, set_name, builds, version, cache)
     for target, bone, name in assigned:
         attach(by_name[target], bone, name)

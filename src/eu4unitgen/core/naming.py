@@ -174,6 +174,24 @@ class Naming:
             raise NamingError(f"texture kind {tex!r} must be one of {TEXTURE_KINDS}")
         return f"{self.part(set_name, kind, tier, role)}_{tex}.dds"
 
+    # ------------------------------------------------------------------ fresh meshes (Track C, test 15)
+    def fresh_horse(self, set_name: str, tier: int) -> str:
+        """hr_mac_fresh_horse_1: a new horse mesh on the base horse's skeleton (core.fresh_mesh). Not
+        hr_mac_horse_1: that stem is a retextured horse's (``pdxmesh(set, "horse", tier)``)."""
+        return f"{self.prefix}{check_set_name(set_name)}_fresh_horse_{_check_tier(tier)}"
+
+    def fresh_horse_pdxmesh(self, set_name: str, tier: int) -> str:
+        return f"{self.fresh_horse(set_name, tier)}_mesh"
+
+    def fresh_horse_file(self, set_name: str, tier: int) -> str:
+        """In the set's own model folder, its textures beside it (bare names resolve there)."""
+        return f"{self.part_dir(set_name)}/{self.fresh_horse(set_name, tier)}.mesh"
+
+    def fresh_horse_texture(self, set_name: str, tier: int, kind: str) -> str:
+        if kind not in TEXTURE_KINDS:
+            raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
+        return f"{self.fresh_horse(set_name, tier)}_{kind}.dds"
+
     # ------------------------------------------------------------------ derived bodies (Track R)
     def derived_body(self, set_name: str, tier: int) -> str:
         """hr_mac_body_1: a base-game body with skinned additions (tail, tuft) appended."""

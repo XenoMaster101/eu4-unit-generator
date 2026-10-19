@@ -68,3 +68,49 @@ def test_fresh_mesh_refuses_bad_geometry_and_check_catches_tampering():
     skel = tree["children"][0]["children"][0]["children"][1]
     skel["children"][2]["props"]["tx"] = [2.0] * 12
     assert any("skeleton differs" in p for p in check_fresh(base, write_pdx_mesh(tree)))
+
+
+def test_a_fresh_horse_through_the_generator_and_validator(fake_install, tmp_path):
+    """Test 15 step 10: a loadout's fresh horse becomes the tier's cavalry pdxmesh (the base horse's
+    animations and scale), with its .mesh and procedural DDS textures in the set's model folder;
+    rule fresh_mesh passes; the checklist has its lines. Tampering is caught."""
+    import json
+
+    from PIL import Image
+
+    from eu4unitgen.core.loadout import Loadout, LoadoutError
+    from eu4unitgen.export.pipeline import Session, Settings, SetSpec
+    from eu4unitgen.export.testmod import loadout_checklist
+    from fakes import make_textures_decodable
+
+    make_textures_decodable(fake_install)
+    (fake_install / "gfx/models/Units/horse.mesh").write_bytes(horse_like())  # textures h_d/h_n/h_s, as the fake
+    geo = quad()
+    (tmp_path / "geo.json").write_text(json.dumps(geo.__dict__), encoding="utf-8")
+    for kind in ("diffuse", "specular", "normal"):
+        Image.new("RGBA", (64, 64), (120, 30, 30, 255)).save(tmp_path / f"{kind}.png")
+    doc = {"schema": 1, "horses": {"1": {"base": "horse", "geometry": "geo.json", "rights": "original (test)",
+                                         "textures": {k: f"{k}.png" for k in ("diffuse", "specular", "normal")}}}}
+    lo = Loadout.from_json(doc, tmp_path)
+    s = Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out"))
+    try:
+        res = s.validate(SetSpec(tags=["MAC"], gfx="hellenicgfx", loadout=lo))[0]
+    finally:
+        s.close()
+    assert not res.report.errors, [str(i) for i in res.report.errors]
+    files = res.generated.files
+    assert "gfx/models/units/hr_mac/hr_mac_fresh_horse_1.mesh" in files
+    assert all(f"gfx/models/units/hr_mac/hr_mac_fresh_horse_1_{k}.dds" in files for k in ("diffuse", "specular", "normal"))
+    text = "".join(f.text for p, f in files.items() if p.endswith(".asset"))
+    cav = text.split('name = "MAC_CAVALRY_1"', 1)[1]
+    assert cav.split('pdxmesh = "', 1)[1].split('"', 1)[0] == "hr_mac_fresh_horse_1_mesh"
+    gfx = "".join(f.text for p, f in files.items() if p.endswith(".gfx"))
+    block = gfx.split('name = "hr_mac_fresh_horse_1_mesh"', 1)[1].split("pdxmesh = {", 1)[0]
+    assert 'id = "horse_walk"' in block and "scale = 0.48" in block
+    assert any(i.rule == "fresh_mesh" and "rights: original (test)" in i.message for i in res.report.issues)
+    text = loadout_checklist(res.generated, "eu4unitgen_test", None)
+    assert "1H0 cavalry horse: a FRESH mesh" in text and "1H2 rider seating" in text and "skeleton, bone" in text
+
+    with pytest.raises(LoadoutError, match="rights"):
+        Loadout.from_json({"schema": 1, "horses": {"1": {**doc["horses"]["1"], "rights": ""}}}, tmp_path)
+

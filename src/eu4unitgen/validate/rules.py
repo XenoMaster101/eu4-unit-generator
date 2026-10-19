@@ -565,6 +565,55 @@ def derived_body(ctx: Context) -> list[Issue]:
 
 # --------------------------------------------------------------------------- naming
 
+@rule("fresh_mesh")
+def fresh_mesh(ctx: Context) -> list[Issue]:
+    """Fresh horses (Track C, test 15, core.fresh_mesh): on a base-game horse (never DLC), the
+    re-import checks pass (the base's skeleton byte for byte, locators, skin within its influence
+    count, aabb, no boundingsphere); the pdxmesh plays every animation id of the base's; the
+    textures its material names are generated beside it; the cavalry entity wears it; the file
+    takes no game file's name; within the triangle budget."""
+    from eu4unitgen.core.fresh_mesh import HORSE_TRIANGLES, check_fresh
+    from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
+
+    res = ctx.generated.loadout
+    if res is None or not res.horses:
+        return []
+    w, game, out = ctx.world, ctx.world.game, []
+    for tier, rec in sorted(res.horses.items()):
+        f = ctx.generated.files.get(rec.file)
+        if f is None:
+            out.append(Issue(ERROR, "fresh_mesh", f"tier {tier}: {rec.file} wasn't generated", subject=rec.entity))
+            continue
+        if not game.in_base_game(rec.base_file):
+            out.append(Issue(ERROR, "fresh_mesh", f"base horse {rec.base_file} isn't a base-game file", f.path))
+            continue
+        if game.exists(rec.file):
+            out.append(Issue(ERROR, "fresh_mesh", "has a game file's name: it would replace it for everyone", f.path))
+        for problem in check_fresh(game.read(rec.base_file), f.data):
+            out.append(Issue(ERROR, "fresh_mesh", problem, f.path))
+        pdx = w.pdxmesh(rec.pdxmesh) or {}
+        base = w.pdxmesh(rec.base_pdxmesh) or {}
+        missing = sorted(set(base.get("animations") or {}) - set(pdx.get("animations") or {}))
+        if missing:
+            out.append(Issue(ERROR, "fresh_mesh", f"{rec.pdxmesh} lacks the base horse's animation ids {missing}",
+                             subject=rec.pdxmesh))
+        if (pdx.get("file") or "").lower() != rec.file.lower():
+            out.append(Issue(ERROR, "fresh_mesh", f"{rec.pdxmesh} doesn't point at {rec.file}", subject=rec.pdxmesh))
+        if (w.resolve(rec.entity, "pdxmesh") or "") != rec.pdxmesh:
+            out.append(Issue(ERROR, "fresh_mesh", f"{rec.entity} doesn't wear {rec.pdxmesh}", subject=rec.entity))
+        folder = rec.file.rsplit("/", 1)[0]
+        for shape in summarize_mesh(parse_pdx_mesh(f.data))["shapes"]:
+            for kind in ("diffuse", "normal", "specular"):
+                path = f"{folder}/{shape.get(kind)}"
+                if shape.get(kind) and path not in ctx.generated.files:
+                    out.append(Issue(ERROR, "fresh_mesh", f"its {kind} texture {path} isn't generated", f.path))
+        if rec.triangles > HORSE_TRIANGLES:
+            out.append(Issue(WARNING, "fresh_mesh", f"{rec.triangles} triangles (budget {HORSE_TRIANGLES})", f.path))
+        out.append(Issue(INFO, "fresh_mesh", f"tier {tier}: {rec.entity} on a fresh horse ({rec.triangles} triangles, "
+                                             f"{rec.base_pdxmesh}'s skeleton); rights: {rec.rights}", f.path))
+    return out
+
+
 @rule("naming")
 def naming(ctx: Context) -> list[Issue]:
     """Generated entity and pack names are exactly the ones naming.py produces."""

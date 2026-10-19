@@ -605,6 +605,27 @@ def _recipe_lines(recipe) -> list[str]:
     return out
 
 
+def _horse_lines(tier: int, h) -> list[str]:
+    """In-game checks for a fresh horse (Track C, test 15)."""
+    t = f"{tier}H"
+    return [
+        f"[ ] {t}0 cavalry horse: a FRESH mesh ({h.file.rsplit('/', 1)[-1]}, {h.triangles} triangles) on "
+        f"{h.base_pdxmesh}'s skeleton and animations. Invisible, black, pink or the vanilla horse instead = the mesh, "
+        "its textures or the pdxmesh failed -> stop, send error.log.",
+        f"[ ] {t}1 textured as designed (not untextured grey or the vanilla coat); no holes or inside-out patches.",
+        f"[ ] {t}2 rider seating: the (vanilla) rider sits on the horse's back at the saddle: not floating above it, not "
+        "sunk into it, not in front of or behind it. Note which if not.",
+        f"[ ] {t}3 idle, walk (march), attack, retreat: the horse animates in each (not frozen, not T-posed, no "
+        "vertices flying off); the rider follows it.",
+        f"[ ] {t}4 side view (march east or west, zoom all the way in, pause mid-march): legs swing cleanly; note any "
+        "stretching at the shoulders, hips, neck or between the hind legs, and whether anything rigid (the chanfron, if "
+        "any) stays on its bone.",
+        f"[ ] {t}5 close zoom in the attack: no spikes, tears or flipped (dark, inside-out) faces; compare how it "
+        "bends with the vanilla horse at the next vanilla tier.",
+        f"[ ] {t}6 map scale: does it read as a different horse from vanilla's (silhouette, colours)?",
+    ]
+
+
 def _non_square_parts(generated) -> list[str]:
     """Part entities whose diffuse texture isn't square, with its size."""
     from eu4unitgen.library.scanner import read_dds_header
@@ -656,7 +677,10 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
         lines.append("Unit colours: " + ", ".join(f"{n} {' '.join(map(str, c))}"
                                                  for n, c in zip(("primary", "secondary", "tertiary"), colours)))
     by_entity = {r.entity: r for r in res.parts}
-    for tier in sorted({tier for tier, _ in res.slots}):
+    if res.horses:
+        lines.append("Fresh horses: each tier's cavalry shows its own horse. Reaching the next tier changes every cavalry "
+                     "army at once and can't be undone in that game: check the lower tier first (or reload a save).")
+    for tier in sorted({tier for tier, _ in res.slots} | set(res.horses)):
         lines += ["", f"TIER {tier}"]
         for role in ("infantry", "crew", "rider"):
             if (tier, role) not in res.slots:
@@ -678,6 +702,8 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
         if tier in res.derived:
             head_parts = [_part_label(r) for r in res.parts if r.tier == tier and r.role == "infantry" and r.bone == "head"]
             lines += _derived_lines(tier, res.derived[tier], head_parts)
+        if tier in res.horses:
+            lines += _horse_lines(tier, res.horses[tier])
         lines += [ln for ln in _recipe_lines(recipe) if ln.startswith(f"[ ] {tier}T")]
         slots = recipe.active() if recipe else {}
         if (tier, "infantry") in slots and (tier, "rider") not in slots:
@@ -706,6 +732,8 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
         "[ ] G2 hoplon face: the country colour (or the fixed colour) as listed; rim bronze; the inside is not see-through.",
         "[ ] G3 blazon (if any): upright and not mirrored, seen from the front of the unit. If not: note how it is turned.",
         "[ ] G4 sizes: a part far too big or small, or sunk into / floating off the body: note which.",
-        "[ ] E  error.log: note any line with hr_, .mesh, entity, attach, texture or animation.",
+        "[ ] E  error.log: note any line with hr_, .mesh, entity, attach, texture or animation"
+        + (", and any with skeleton, bone or a fresh_horse name (a fresh mesh the engine can't bind to its "
+           "skeleton)." if res.horses else "."),
     ]
     return "\n".join(lines)
