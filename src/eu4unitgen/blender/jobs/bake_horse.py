@@ -18,6 +18,7 @@ the UVs cover, and how much of the low surface found the high one.
 
 args: {"low": geometry .json, "high": [.obj (preview axes, as fresh_horse's debug_dump writes)],
        "diffuse": painted .png, "size": px, "cage", "distance", "samples", "ao_strength",
+       "preview": bool (lit EEVEE renders with and without the normal map),
        "high_smooth": iterations (the high surface smoothed before baking), "strength": the tangent
        normals' x and y scaled by it (towards flat) and renormalised, "outlier": degrees (steeper
        texels are rays that hit the wrong surface: flat),
@@ -132,6 +133,69 @@ def coverage_mask(obj, size, faces=None):
     return pixels(img)[..., 0] > 0.5
 
 
+VIEWS = {"side": ((-1, 0, 0), (0, 1, 0)), "three_quarter": ((-0.6, -0.45, 0.65), (0, 1, 0))}  # camera -> scene, PDX
+
+
+def preview(low, diffuse, normal, out_dir, name, size=600):
+    """Lit EEVEE renders of the low mesh with the baked colour, with and without the normal map
+    (Workbench shows no normal maps). -> {view_variant: path}."""
+    from mathutils import Matrix, Vector
+    scene = bpy.context.scene
+    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    scene.render.resolution_x = scene.render.resolution_y = size
+    scene.view_settings.view_transform = "Standard"
+    scene.world = scene.world or bpy.data.worlds.new("w")
+    scene.world.use_nodes = True
+    scene.world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.35, 0.35, 0.37, 1)
+    sun = bpy.data.objects.new("sun", bpy.data.lights.new("sun", "SUN"))
+    sun.data.energy = 3.0
+    sun.rotation_euler = Vector((-0.5, 0.8, 0.4)).to_track_quat("-Z", "Y").to_euler()  # light -> scene, PDX
+    scene.collection.objects.link(sun)
+    cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam"))
+    scene.collection.objects.link(cam)
+    cam.data.type, cam.data.ortho_scale, cam.data.clip_end = "ORTHO", 24.0, 200
+    scene.camera = cam
+    mat = bpy.data.materials.new("preview")
+    mat.use_nodes = True
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    bsdf = next(n for n in nodes if n.type == "BSDF_PRINCIPLED")
+    bsdf.inputs["Roughness"].default_value = 0.6
+    dif = nodes.new("ShaderNodeTexImage")
+    dif.image = bpy.data.images.load(diffuse)
+    links.new(dif.outputs["Color"], bsdf.inputs["Base Color"])
+    nimg = bpy.data.images.load(normal)
+    nimg.colorspace_settings.name = "Non-Color"
+    ntex = nodes.new("ShaderNodeTexImage")
+    ntex.image = nimg
+    nmap = nodes.new("ShaderNodeNormalMap")
+    links.new(ntex.outputs["Color"], nmap.inputs["Color"])
+    low.data.materials.clear()
+    low.data.materials.append(mat)
+    for o in bpy.data.objects:
+        if o.type == "MESH" and o is not low:
+            o.hide_render = True
+    low.hide_render = False
+    centre = Vector((0, 7.0, -1.0))
+    paths = {}
+    for view, (d, up) in VIEWS.items():
+        d, up = Vector(d).normalized(), Vector(up)
+        x = up.cross(-d).normalized()
+        up = (-d).cross(x).normalized()
+        cam.location = centre - d * 60
+        cam.rotation_euler = Matrix((x, up, -d)).transposed().to_euler()
+        for variant, on in (("flat", False), ("normal", True)):
+            if on:
+                links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+            else:
+                for lk in [lk for lk in links if lk.to_socket == bsdf.inputs["Normal"]]:
+                    links.remove(lk)
+            path = os.path.join(out_dir, f"{name}_preview_{view}_{variant}.png")
+            scene.render.filepath = path
+            bpy.ops.render.render(write_still=True)
+            paths[f"{view}_{variant}"] = path
+    return paths
+
+
 def main():
     a = _pdx.args()
     _pdx.clear_scene()
@@ -229,6 +293,8 @@ def main():
     diff[..., 3] = 1.0
     paths["diffuse"] = save(diff, f"{name}_diffuse", od)
     out["paths"] = paths
+    if a.get("preview"):
+        out["preview"] = preview(low, paths["diffuse"], paths["normal"], od, name)
     _pdx.write_result(a, out)
 
 
