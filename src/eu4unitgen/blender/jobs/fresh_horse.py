@@ -19,7 +19,9 @@ times, limited to ``influences`` bones per vertex, normalised.
 
 args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]}},
        "source": {"kind": "model", "path"} | {"kind": "control"} | {"kind": "procedural", "fit_from": OBJ | null,
-       "voxel", "relax"} (bake-off horse B: _horse_proc's own body fitted to the reference),
+       "voxel", "relax"} (round 4's horse B: sections traced from vanilla's; superseded) |
+       {"kind": "anatomy", "fit_from": OBJ | null, "params": {name: value}, "voxel", "relax"} (round 5's
+       horse B: _horse_anatomy's own parametric horse driven by the reference),
        "cut": {"y", "z0", "z1"} | null, "voxel": size | null (model: voxel remesh after the cut),
        "reshape": bool (model: height to the croup, then _horse_shape.reshape onto the vanilla rest pose),
        "leg_top": y up to which legs are tracked, "cut".y may be "saddle" (vanilla's back height there),
@@ -434,6 +436,36 @@ def procedural_horse(van, src):
         bpy.ops.object.modifier_apply(modifier=mod.name)
     obj.name = "procedural_horse"
     return obj, {"scale": 1.0, "offset": [0, 0, 0], "note": "built on the skeleton", **fit, "build": built["log"]}
+
+
+def anatomy_horse(van, vanilla, src):
+    """Bake-off horse B, round 5: _horse_anatomy's own parametric horse on the vanilla skeleton
+    (from vanilla only the bones and the seat height: its back's surface at Saddle_Node), its
+    parameters driven by the reference model (``fit_from``: a preview-axes OBJ of it on the vanilla
+    rest pose) and ``params`` overrides, joined by a voxel remesh (``voxel``) and relaxed
+    (``relax``). -> (object, fit log)."""
+    import _horse_anatomy as ha
+    bones = van["bones"]
+    seat = surface_top(vanilla, bones["Saddle_Node"][2])
+    params, fit = src.get("params") or {}, {"seat": seat}
+    if src.get("fit_from"):
+        rco, rtri = read_obj(src["fit_from"])
+        fit.update(ha.fit(bones, seat, rco, rtri, params))
+        params = fit["params"]
+    built = ha.build(bones, seat, params)
+    fit["achieved"] = ha.measure(built["tubes"], bones)
+    objs = [mesh_object(f"anat_{i}", v.tolist(), t.tolist()) for i, (v, t) in enumerate(built["tubes"])]
+    obj = join(objs)
+    solidify(obj, float(src.get("voxel", 0.15)))
+    if src.get("relax", 4):
+        activate(obj)
+        mod = obj.modifiers.new("relax", "SMOOTH")
+        mod.factor, mod.iterations = 0.5, int(src.get("relax", 4))
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+    obj.name = "anatomy_horse"
+    fit["params"] = {k: round(v, 4) for k, v in built["params"].items()}
+    return obj, {"scale": 1.0, "offset": [0, 0, 0], "note": "the app's own anatomy on the skeleton", **fit,
+                 "build": built["log"]}
 
 
 def control_horse(bones):
@@ -936,9 +968,9 @@ def main():
         else:
             res["stages"]["holes_filled"] = {"boundary_edges": fill_holes(obj), "tris": tri_count(obj)}
         debug_dump(a, obj, "5_solid")
-    elif src["kind"] == "procedural":
+    elif src["kind"] in ("procedural", "anatomy"):
         high, build_tail = None, False
-        obj, res["fit"] = procedural_horse(van, src)
+        obj, res["fit"] = (anatomy_horse(van, vanilla, src) if src["kind"] == "anatomy" else procedural_horse(van, src))
         res["stages"]["built"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
         high = obj.copy()  # the bake source: the smooth surface before the reduction
         high.data = obj.data.copy()
