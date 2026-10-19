@@ -5,6 +5,8 @@ args: {"vanilla": {"p", "tri", "bones"} (core.fresh_mesh.base_arrays),
        "meshes": {label: path} (a fresh_horse geometry .json, PDX space; or an .obj in preview axes
        (PDX (x, y, z) = Blender (x, z, y)) as Blender's OBJ exporter writes them: file (x, y, -z)),
        "limits": {metric: ratio} | null (overrides _horse_measure.LIMITS),
+       "rider": {"path": render_unit dump, "node": name part (default "rider"), "seat_y"} | null (the
+       posed rider in horse space, through Saddle_Node: how much of its lower legs each horse hides),
        "overlays": [{"name", "draw": [[label | "vanilla", [r, g, b, a]], ...], "view": "side" | "front" | "top"}],
        "out_dir", "size": px, "result_path"}
 Result: {"vanilla": proportions, "meshes": {label: {"proportions", "compare", "flags": [metric]}},
@@ -74,13 +76,22 @@ def main():
     bones = van["bones"]
     vco = np.array(van["p"], dtype=np.float64).reshape(-1, 3)
     vtri = np.array(van["tri"], dtype=np.int64).reshape(-1, 3)
+    legs = None
+    if a.get("rider"):
+        rd = json.loads(open(a["rider"]["path"], encoding="utf-8").read())
+        node = next(k for k in rd if a["rider"].get("node", "rider") in k)
+        legs = hm.rider_legs(np.array(rd[node]["p"]).reshape(-1, 3), float(a["rider"].get("seat_y", 12.36)))
     vp = hm.proportions(vco, vtri, bones)
+    if legs is not None:
+        vp["rider_leg"] = hm.visible_from_side(vco, vtri, legs)
     res = {"vanilla": vp, "meshes": {}, "overlays": {}}
     loaded = {"vanilla": (vco, vtri)}
     for label, path in a["meshes"].items():
         co, tris = load(path)
         loaded[label] = (co, tris)
         p = hm.proportions(co, tris, bones)
+        if legs is not None:
+            p["rider_leg"] = hm.visible_from_side(co, tris, legs)
         cmp_ = hm.compare(p, vp, a.get("limits"))
         res["meshes"][label] = {"proportions": p, "compare": cmp_, "flags": [k for k, c in cmp_.items() if c["flag"]]}
     scene = bpy.context.scene

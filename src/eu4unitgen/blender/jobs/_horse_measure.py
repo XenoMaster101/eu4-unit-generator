@@ -12,7 +12,8 @@ a ray's entry and exit hits closer than 0.5) are skipped, so the numbers describ
     (Knee-Heel) midpoints, by a ray through the bone; thin legs under a deep body read as "sticks";
   * neck: the thickness at HorseNeckMiddle perpendicular to the neck (NeckBase -> Head), by a ray;
   * volume of the closed surface (open meshes: approximate);
-  * hem (reported, not judged): the lowest surface that isn't a leg, i.e. a skirt's hem.
+  * hem (reported, not judged): the lowest surface that isn't a leg, i.e. a skirt's hem;
+  * rider_leg (with a posed rider): the share of its lower legs and feet visible from the side.
 ``compare`` divides ours by vanilla's and flags what is past its limit.
 """
 import numpy as np
@@ -23,7 +24,10 @@ LEGS = ("FrontLeft", "FrontRight", "BackLeft", "BackRight")
 # (test 15 round 3): a barded horse may be somewhat bulkier than vanilla's bare one, not 1.5x.
 # Tightened after the in-game test 15 (depth 1.22x and the hem at 0.79x read as a sack on sticks).
 LIMITS = {"depth": 1.15, "width": 1.25, "belly": 0.85, "leg": 0.75, "neck": 1.3, "volume": 1.3}
-LOW_IS_BAD = ("belly", "leg")
+# the seated rider's lower legs seen from the side, ours / vanilla's: the reference shows the boot
+# and stirrup outside the caparison (measured only when a posed rider is given)
+LIMITS_RIDER = {"rider_leg": 0.9}
+LOW_IS_BAD = ("belly", "leg", "rider_leg")
 
 
 def ray_hits(co, tris, origin, direction):
@@ -140,6 +144,26 @@ def proportions(co, tris, bones, leg_radius=0.8, slab=0.3):
     return out
 
 
+def rider_legs(rider, seat_y, below=1.0, inner=1.0):
+    """The seated rider's lower legs and feet: vertices more than ``below`` under the seat and
+    more than ``inner`` off the centre line."""
+    r = np.asarray(rider, dtype=np.float64)
+    return r[(r[:, 1] < seat_y - below) & (np.abs(r[:, 0]) > inner)]
+
+
+def visible_from_side(co, tris, points, eps=0.02):
+    """Share of ``points`` not covered by the mesh seen from their own side (a ray from x = +-30
+    in towards the centre line; any surface counts, thin panels too)."""
+    if not len(points):
+        return None
+    seen = 0
+    for p in points:
+        s = 1.0 if p[0] > 0 else -1.0
+        hits = ray_hits(co, tris, np.array([30.0 * s, p[1], p[2]]), np.array([-s, 0.0, 0.0]))
+        seen += int(not len(hits) or 30.0 - hits[0] <= abs(p[0]) + eps)
+    return seen / len(points)
+
+
 def summary(p):
     """The numbers ``compare`` judges: mean depth, max width, mean belly height, mean leg
     thickness (both points, all legs), neck thickness, volume; and the lowest hem (reported)."""
@@ -153,14 +177,15 @@ def summary(p):
     return {"depth": mean(s["depth"] for s in sl), "width": max(widths) if widths else None,
             "belly": mean(s["belly"] for s in sl),
             "leg": mean(v for leg in p["legs"].values() for v in leg.values()),
-            "neck": p["neck"]["thickness"], "volume": p["volume"], "hem": min(hems) if hems else None}
+            "neck": p["neck"]["thickness"], "volume": p["volume"], "hem": min(hems) if hems else None,
+            "rider_leg": p.get("rider_leg")}
 
 
 def compare(ours, vanilla, limits=None):
     """{metric: {ours, vanilla, ratio, limit, flag}}: flag when the ratio is past its limit
     (above it; below it for belly and leg), or the metric couldn't be measured on ours."""
-    limits = {**LIMITS, **(limits or {})}
     o, v = summary(ours), summary(vanilla)
+    limits = {**LIMITS, **(LIMITS_RIDER if v.get("rider_leg") else {}), **(limits or {})}
     out = {}
     for k, lim in limits.items():
         if o[k] is None or not v[k]:
