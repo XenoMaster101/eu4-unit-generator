@@ -1,0 +1,70 @@
+"""Test 15, step 9: a fresh mesh written onto a base mesh's skeleton (made-up 3-influence base,
+like the base-game horse's skin)."""
+import pytest
+
+from eu4unitgen.core.fresh_mesh import FreshGeometry, FreshMeshError, check_fresh, influences, write_fresh
+from eu4unitgen.library.scanner import parse_pdx_mesh, write_pdx_mesh
+
+BONES = ["Root", "HorseSpineTop", "HorseHead", "Saddle_Node"]
+
+
+def horse_like() -> bytes:
+    ident = [1.0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+    bones = [{"name": b, "props": {"ix": [i], **({"pa": [0]} if i else {}), "tx": ident}, "children": []}
+             for i, b in enumerate(BONES)]
+    mesh = {"name": "mesh", "props": {"p": [0.0, 8, 0, 1, 8, 0, 0, 9, 0], "n": [0.0, 0, -1] * 3,
+                                      "ta": [1.0, 0, 0, 1] * 3, "u0": [0.0, 0, 1, 0, 0, 1], "tri": [0, 2, 1]},
+            "children": [{"name": "aabb", "props": {"min": [0.0, 8, 0], "max": [1.0, 9, 0]}, "children": []},
+                         {"name": "material", "props": {"shader": ["PdxMeshColor"], "diff": ["h_d.dds"],
+                                                        "n": ["h_n.dds"], "spec": ["h_s.dds"]}, "children": []},
+                         {"name": "skin", "props": {"bones": [3], "ix": [1, -1, -1, -1] * 3, "w": [1.0, 0, 0, 0] * 3},
+                          "children": []}]}
+    return write_pdx_mesh({"name": "root", "props": {"pdxasset": [1, 0]}, "children": [
+        {"name": "object", "props": {}, "children": [
+            {"name": "horseShape", "props": {}, "children": [mesh, {"name": "skeleton", "props": {}, "children": bones}]}]},
+        {"name": "locator", "props": {}, "children": []}]})
+
+
+def quad(weights=None) -> FreshGeometry:
+    """Two triangles, normals -Z (like the base's), wound the other way round to test reorienting."""
+    return FreshGeometry(p=[0.0, 0, 0, 2, 0, 0, 2, 3, 0, 0, 3, 0], n=[0.0, 0, -1] * 4,
+                         u0=[0.0, 1, 1, 1, 1, 0, 0, 0], tri=[0, 1, 2, 0, 2, 3],
+                         weights=weights or [{"HorseSpineTop": 1.0}, {"HorseSpineTop": 0.5, "HorseHead": 0.5},
+                                             {"HorseHead": 1.0}, {"Root": 0.2, "HorseHead": 0.3, "HorseSpineTop": 0.5}])
+
+
+def test_fresh_geometry_on_the_base_skeleton():
+    base = horse_like()
+    out = write_fresh(base, quad(), {"diffuse": "hr_x_horse_1_diffuse.dds"})
+    assert check_fresh(base, out) == []
+    tree = parse_pdx_mesh(out)
+    mesh = tree["children"][0]["children"][0]["children"][0]
+    props = mesh["props"]
+    assert len(props["p"]) == 12 and len(props["ta"]) == 16 and len(props["tri"]) == 6
+    skin = next(c for c in mesh["children"] if c["name"] == "skin")["props"]
+    assert skin["bones"] == [3] and skin["ix"][:8] == [1, -1, -1, -1, 1, 2, -1, -1]
+    assert skin["ix"][12:16] == [1, 2, 0, -1] and skin["w"][12:16] == pytest.approx([0.5, 0.3, 0.2, 0.0])
+    box = next(c for c in mesh["children"] if c["name"] == "aabb")["props"]
+    assert box["min"] == [0.0, 0.0, 0.0] and box["max"] == [2.0, 3.0, 0.0]
+    material = next(c for c in mesh["children"] if c["name"] == "material")["props"]
+    assert material["diff"] == ["hr_x_horse_1_diffuse.dds"] and material["n"] == ["h_n.dds"]
+    # the base's winding: its triangle (0,2,1) faces along its -Z normals, so ours are turned to match
+    assert props["tri"] == [0, 2, 1, 0, 3, 2]
+    assert influences(base) == 3
+
+
+def test_fresh_mesh_refuses_bad_geometry_and_check_catches_tampering():
+    base = horse_like()
+    with pytest.raises(FreshMeshError, match="isn't in the skeleton"):
+        write_fresh(base, quad([{"tail": 1.0}] * 4))
+    with pytest.raises(FreshMeshError, match="base mesh allows 3"):
+        write_fresh(base, quad([{"Root": 0.25, "HorseSpineTop": 0.25, "HorseHead": 0.25, "Saddle_Node": 0.25}] * 4))
+    with pytest.raises(FreshMeshError, match="sum"):
+        write_fresh(base, quad([{"Root": 0.5}] * 4))
+    with pytest.raises(FreshMeshError, match="outside"):
+        write_fresh(base, FreshGeometry(**{**quad().__dict__, "tri": [0, 1, 9]}))
+
+    tree = parse_pdx_mesh(write_fresh(base, quad()))
+    skel = tree["children"][0]["children"][0]["children"][1]
+    skel["children"][2]["props"]["tx"] = [2.0] * 12
+    assert any("skeleton differs" in p for p in check_fresh(base, write_pdx_mesh(tree)))
