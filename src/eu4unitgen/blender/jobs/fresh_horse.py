@@ -35,7 +35,8 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        is taken),
        "barding": {"style": "drape" (_horse_barding.drape: draped cloth) | "slab" (panels(), test 16's), + its keywords} (round 3: hanging panels, weighted from the body
        without legs), "stirrups": {"tread", "strap_top"} (round 3: 100% HorseSpineTop),
-       "paint": {"palette": {silver, red, gold, coat}, "out_dir", "name", "size"} (step 8: textures),
+       "paint": {"palette": {silver, red, gold, coat}, "out_dir", "name", "size", "hem_y" (the coat below it;
+       default the skirt hem_y)} (step 8: textures),
        "chain_weights": bool (head, leg and tail regions weighted by distance to their bone chains),
        "target_tris", "quads" (QuadriFlow's target; default target_tris / 2), "relax", "smooth", "influences",
        "geometry_out": .json path, "preview_out": .obj path (Blender axes, for renders),
@@ -723,7 +724,14 @@ def paint_textures(obj, bones, palette, hem_y, out_dir, name, size):
         vals = [0.0] * len(me.polygons)
         hem_attr.data.foreach_get("value", vals)
         face_hem = np.array([vals[lt.polygon_index] for lt in me.loop_triangles])
-    region = hp.regions(centres, normals, part, bones, hem_y, face_hem)
+    g = obj.vertex_groups.get("HorseHead")
+    head_w = np.zeros(len(me.vertices))
+    if g is not None:
+        for v in me.vertices:
+            for e in v.groups:
+                if e.group == g.index:
+                    head_w[v.index] = e.weight
+    region = hp.regions(centres, normals, part, bones, hem_y, face_hem, head_w[tris].mean(axis=1))
     diff, spec, normal, coverage = hp.paint(uvs, tris, co, normals, region, palette, bones, size)
     paths = {}
     for kind, arr in (("diffuse", diff), ("specular", spec), ("normal", normal)):
@@ -991,7 +999,7 @@ def main():
         res.setdefault("barding", {})["pinned_vertices"] = pin_barding(obj, van["bones"])
     if a.get("paint"):
         pt = a["paint"]
-        res["textures"] = paint_textures(obj, van["bones"], pt["palette"], float(a.get("hem_y") or 0.0),
+        res["textures"] = paint_textures(obj, van["bones"], pt["palette"], float(pt.get("hem_y", a.get("hem_y") or 0.0)),
                                          pt["out_dir"], pt["name"], int(pt.get("size", 512)))
     verts, tris, unweighted = export(obj, a["geometry_out"], a.get("preview_out"))
     if high is not None and a.get("bake_source_out"):

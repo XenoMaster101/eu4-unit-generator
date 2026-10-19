@@ -26,8 +26,10 @@ DEFAULTS = {"iron": (70, 70, 74), "leather": (60, 38, 24)}
 
 
 def regions(centres: np.ndarray, normals: np.ndarray, part: np.ndarray, bones: dict, hem_y: float,
-            face_hem: np.ndarray | None = None) -> np.ndarray:
-    """Per face: its region (module doc). ``face_hem``: each panel face's hem height."""
+            face_hem: np.ndarray | None = None, face_head: np.ndarray | None = None) -> np.ndarray:
+    """Per face: its region (module doc). ``face_hem``: each panel face's hem height;
+    ``face_head``: each face's HorseHead weight (the head is where it is over 0.5; without it,
+    near the poll-to-muzzle segment)."""
     B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
     y, z = centres[:, 1], centres[:, 2]
     seam = B["HorseSpineTop"][2] + 0.5
@@ -35,7 +37,20 @@ def regions(centres: np.ndarray, normals: np.ndarray, part: np.ndarray, bones: d
     out[z < seam] = SCALE
     out[(z >= seam) & (z < seam + 0.4) & (y > hem_y)] = TRIM
     out[(y > hem_y) & (y < hem_y + 0.5)] = TRIM
-    out[z < B["HorseHead"][2] + 0.4] = COAT
+    # the head: in front of the poll along the head's own direction (a z plane cut the front
+    # of the neck into coat blotches, test 16b)
+    # near the poll-to-muzzle segment of this mesh (its muzzle: the face furthest along vanilla's
+    # poll-to-muzzle direction, as add_chanfron finds it)
+    rel = centres - B["HorseHead"]
+    tip = rel[np.argmax(rel @ np.array([0.0, -1.5, -3.3]))]
+    length = float(np.linalg.norm(tip))
+    head_dir = tip / max(length, 1e-6)
+    t = rel @ head_dir
+    off = np.linalg.norm(rel - t[:, None] * head_dir, axis=1)
+    if face_head is not None:  # by the weights: wherever a generated head ended up
+        out[face_head > 0.5] = COAT
+    else:
+        out[(t > -0.3) & (t < length + 0.5) & (off < 1.7)] = COAT
     out[y < hem_y] = COAT
     out[part == 1] = CHANFRON
     out[part == 2] = CLOTH
@@ -48,7 +63,7 @@ def regions(centres: np.ndarray, normals: np.ndarray, part: np.ndarray, bones: d
     return out
 
 
-SCALE_SIZE = 0.2  # scene units; test 16: 0.32 read as big tiles and, soft-shaded, as wool
+SCALE_SIZE = 0.25  # scene units; test 16: 0.32 read as big tiles and, soft-shaded, as wool; 0.2 with a hard rim aliased into speckle
 
 
 def _scale_shade(a: np.ndarray, b: np.ndarray, size: float = SCALE_SIZE) -> np.ndarray:
@@ -59,9 +74,10 @@ def _scale_shade(a: np.ndarray, b: np.ndarray, size: float = SCALE_SIZE) -> np.n
     fa = (a / size + 0.5 * (row % 2)) % 1.0 - 0.5
     fb = (b / size) % 1.0
     r = np.sqrt(fa ** 2 + (1.0 - fb) ** 2 * 0.7)  # distance from the scale's top centre
-    face = 0.9 + 0.1 * fb  # brighter towards the top
-    rim = (r > 0.5) & (r < 0.62)
-    return np.where(rim, 0.62, face)
+    face = 0.8 + 0.08 * fb  # brighter towards the top
+    # the rim as a smooth dip (a hard one thinner than a texel aliases into white speckle)
+    rim = np.exp(-((r - 0.55) / 0.08) ** 2)
+    return face * (1.0 - 0.28 * rim)
 
 
 def colour(points: np.ndarray, normals: np.ndarray, region: int, palette: dict, bones: dict) -> np.ndarray:
@@ -70,14 +86,13 @@ def colour(points: np.ndarray, normals: np.ndarray, region: int, palette: dict, 
     rng = np.random.default_rng(int(abs(points[0].sum()) * 1000) % 2 ** 32 if n else 0)
     noise = 1.0 + (rng.random(n) - 0.5) * 0.08
     if region == SCALE:
-        ax = np.abs(normals[0]) if len(normals) else np.array([1, 0, 0])
-        if ax[0] >= ax[1] and ax[0] >= ax[2]:
-            a, b = points[:, 2], points[:, 1]
-        elif ax[2] >= ax[1]:
-            a, b = points[:, 0], points[:, 1]
-        else:
-            a, b = points[:, 0], points[:, 2]
-        return np.array(palette["silver"])[None, :] * (_scale_shade(a, b) * noise)[:, None]
+        # one projection for the whole front: rows along the height, wrapped round a vertical
+        # axis in front of the chest (a plane per face, as before, broke the rows at every face
+        # edge into a patchwork, test 16b)
+        B = {k: np.array(v) for k, v in bones.items()}
+        zc = B["HorseNeckBase"][2] + 1.5
+        a = 2.5 * np.arctan2(points[:, 0], zc - points[:, 2])
+        return np.array(palette["silver"])[None, :] * (_scale_shade(a, points[:, 1]) * noise)[:, None]
     if region == CLOTH:
         rgb = np.tile(np.array(palette["red"], dtype=np.float64), (n, 1)) * noise[:, None]
         B = {k: np.array(v) for k, v in bones.items()}
@@ -97,7 +112,7 @@ def colour(points: np.ndarray, normals: np.ndarray, region: int, palette: dict, 
         streak = 0.8 + 0.12 * np.sin(points[:, 0] * 23.0 + np.sin(points[:, 1] * 3.0))
         return np.array(palette["coat"])[None, :] * (streak * noise)[:, None]
     if region == CHANFRON:
-        rgb = np.array(palette["silver"])[None, :] * 1.08 * noise[:, None]
+        rgb = np.array(palette["silver"])[None, :] * 0.92 * noise[:, None]
         rgb[np.abs(points[:, 0]) < 0.12] = palette["gold"]
         return rgb
     # the coat (head, lower legs): quiet, the muzzle a little darker (HorseHead to the nose tip
