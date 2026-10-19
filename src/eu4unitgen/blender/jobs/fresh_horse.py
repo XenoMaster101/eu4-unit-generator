@@ -671,8 +671,9 @@ def tail_anchor(obj, bones, inside=0.4, out=0.05):
 
 
 def pin_barding(obj, bones):
-    """Panel vertices take the weights of the body vertex nearest their anchor, without leg, tail
-    or rein bones (a panel hangs from the body and doesn't swing with the legs: round 2's lesson);
+    """Panel vertices take the trunk-bone weights of the body vertex nearest their anchor, blended
+    over neighbouring anchors (a panel hangs from the body and doesn't swing with the legs: round 2's
+    lesson; nor twist between columns: round 5's);
     stirrups and straps 100% HorseSpineTop (as vanilla's, ~97%); the tail along its chain
     (_horse_barding.tail_weights). -> how many vertices."""
     from mathutils.kdtree import KDTree
@@ -692,8 +693,30 @@ def pin_barding(obj, bones):
     chain = [0.0] * len(me.vertices)
     if me.attributes.get("chain") is not None:
         me.attributes["chain"].data.foreach_get("value", chain)
-    skip = set(hs.TAIL) | {"Rem"} | {f"Horse{leg}{p}" for leg in hs.LEGS for p in ("Up", "Down", "Knee", "Heel")}
     group = {g.index: g.name for g in obj.vertex_groups}
+    # panels: only the trunk's bones (round 5: with the head's and legs' too, and a different mix in
+    # each column, the cloth between columns twisted when the spine bent: 21 of idle's 30 flips),
+    # blended over the neighbouring columns' anchors
+    trunk = {"HorseSpineTop", "HorseSpineMiddle", "HorseSpineEnd", "HorseNeckBase", "Root"}
+    anchors = {}
+    for vi, k in kind.items():
+        if k in (hb.CLOTH_PANEL, hb.SCALE_PANEL):
+            key = tuple(round(x, 3) for x in anchor[3 * vi:3 * vi + 3])
+            if key not in anchors:
+                _, src, _ = tree.find(Vector(key))
+                row = {group[g.group]: g.weight for g in me.vertices[src].groups if group[g.group] in trunk and g.weight > 0}
+                anchors[key] = row or {"HorseSpineTop": 1.0}
+    keys = list(anchors)
+    pos = np.array(keys) if keys else np.zeros((0, 3))
+    blended = {}
+    for i, key in enumerate(keys):
+        w = np.exp(-(np.linalg.norm(pos - pos[i], axis=1) / 1.5) ** 2)
+        acc = {}
+        for j in np.flatnonzero(w > 0.05):
+            tot = sum(anchors[keys[j]].values())
+            for b, x in anchors[keys[j]].items():
+                acc[b] = acc.get(b, 0.0) + w[j] * x / tot
+        blended[key] = acc
     n = 0
     for vi, k in kind.items():
         if k < hb.CLOTH_PANEL:
@@ -703,10 +726,7 @@ def pin_barding(obj, bones):
         elif k == hb.TAIL:
             row = hb.tail_weights(chain[vi])
         else:
-            _, src, _ = tree.find(Vector(anchor[3 * vi:3 * vi + 3]))
-            row = {group[g.group]: g.weight for g in me.vertices[src].groups if group[g.group] not in skip and g.weight > 0}
-            if not row:
-                row = {"HorseSpineTop": 1.0}
+            row = dict(sorted(blended[tuple(round(x, 3) for x in anchor[3 * vi:3 * vi + 3])].items(), key=lambda kv: -kv[1])[:3])
         total = sum(row.values())
         for g in list(me.vertices[vi].groups):
             obj.vertex_groups[g.group].remove([vi])

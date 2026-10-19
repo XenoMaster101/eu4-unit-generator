@@ -275,7 +275,7 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
           tuck: float = 0.5, hems=None, slits=None, hem_length: float = 0.25, leg_clear: float = 0.4,
           readable: float = 0.55, back: float = 0.02, seam_z: float | None = None, band_h: float = 0.3,
           fold: float = 0.14, fold_len: float = 2.1, sag: float = 0.25, corner: float = 0.4,
-          tail_open: float = 1.5, top: float | None = None) -> dict:
+          tail_open: float = 1.5, top: float | None = None, leg_lift: float = 0.9, leg_cut: float = 1.1) -> dict:
     """Barding panels as draped cloth (test 16: the straight hanging slabs read as a box). They
     start tucked into the barrel at its widest level (``top``; when None, the level between y 7.5
     and 10.5 whose body slice is widest) round the outline there, then fall with ``flare`` and
@@ -286,7 +286,10 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
     ``hem_length``: 0 = game-readable (``readable`` of the way from knee or hock up to the belly,
     so the legs show), 1 = reference-accurate (knee or hock + ``leg_clear`` only).
     Slits as panels(), at the front centre, and an opening ``tail_open`` wide at the rear centre
-    for the tail. Two-sided below the top. -> {"v", "f", "part", "hem", "anchor", "log"}."""
+    for the tail. Without ``slits`` (round 5: one continuous caparison, not a row of aprons) the hem is
+    one curve cut up by ``leg_lift`` over each leg (a Gaussian ``leg_cut`` wide along z), so the
+    legs swing free under it; with slits each panel's hem sags (as round 4). Two-sided below the top.
+    -> {"v", "f", "part", "hem", "anchor", "log"}."""
     B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
     z0, z1 = B["HorseNeckBase"][2] - 2.0, B["HorseSpineEnd"][2] + 3.0
     if top is None:
@@ -319,9 +322,17 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
     open_ |= (loop[:, 1] > mid_z) & (crosses | (np.abs(loop[:, 0]) < tail_open / 2) |
                                      (np.abs(loop[nxt, 0]) < tail_open / 2))  # round the tail
     runs = _panel_runs(open_)
-    for run in runs:  # each panel's hem: sagging in the middle, the corners rounded up
-        q = np.linspace(0.0, 1.0, len(run))
-        hem[run] = hem[run] - sag * (1 - (2 * q - 1) ** 2) + corner * np.clip(1 - np.minimum(q, 1 - q) / 0.2, 0, 1) ** 2
+    if slits:
+        for run in runs:  # each panel's hem: sagging in the middle, the corners rounded up
+            q = np.linspace(0.0, 1.0, len(run))
+            hem[run] = hem[run] - sag * (1 - (2 * q - 1) ** 2) + corner * np.clip(1 - np.minimum(q, 1 - q) / 0.2, 0, 1) ** 2
+    else:  # one caparison: the hem rises over each leg, sags between them
+        leg_z = [B["HorseFrontLeftUp"][2], B["HorseBackLeftUp"][2]]
+        lift = sum(np.exp(-((loop[:, 1] - z) / leg_cut) ** 2) for z in leg_z)
+        hem = hem - sag + leg_lift * np.clip(lift, 0, 1)
+        for run in runs:  # the edges at the chest and tail openings round up
+            q = np.linspace(0.0, 1.0, len(run))
+            hem[run] = hem[run] + corner * np.clip(1 - np.minimum(q, 1 - q) / 0.06, 0, 1) ** 2
     seg = np.linalg.norm(loop[nxt] - loop, axis=1)
     arc = np.concatenate([[0], np.cumsum(seg)[:-1]])
     wave = np.sin(2 * np.pi * arc / fold_len)
