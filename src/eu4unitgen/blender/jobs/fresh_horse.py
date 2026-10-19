@@ -28,6 +28,8 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        narrowed to vanilla's half-width x this), "leg_allow" (thin legs thickened to vanilla's radius x this), "tail_gap" (the caparison
        pushed off the tail),
        "chanfron": {"lift", "thickness", "facing"} (step 8: a plate merged in, 100% HorseHead),
+       "barding": _horse_barding.panels' keywords (round 3: hanging panels, weighted from the body
+       without legs), "stirrups": {"tread", "strap_top"} (round 3: 100% HorseSpineTop),
        "paint": {"palette": {silver, red, gold, coat}, "out_dir", "name", "size"} (step 8: textures),
        "chain_weights": bool (head, leg and tail regions weighted by distance to their bone chains),
        "target_tris", "quads" (QuadriFlow's target; default target_tris / 2), "relax", "smooth", "influences",
@@ -47,6 +49,7 @@ from mathutils import Matrix, Vector  # noqa: E402 - Blender module
 
 import numpy as np  # noqa: E402 - Blender's numpy
 
+import _horse_barding as hb  # noqa: E402
 import _horse_shape as hs  # noqa: E402
 import _pdx  # noqa: E402
 
@@ -475,6 +478,74 @@ def add_chanfron(obj, bones, lift=0.06, thickness=0.04, facing=0.35):
     return tris
 
 
+def add_barding(obj, bones, barding, stirrups=None):
+    """Round 3: the hanging panels and the stirrups (_horse_barding) joined in as their own
+    pieces, with face attributes ``part`` and ``hem`` and a point attribute ``anchor`` (where each
+    vertex takes its body weights from). -> the builders' logs."""
+    body = hs.verts(obj)
+    built = [hb.panels(body, bones, **barding)]
+    if stirrups:
+        built.append(hb.stirrups(**stirrups))
+    if obj.data.attributes.get("part") is None:
+        attr = obj.data.attributes.new("part", "INT", "FACE")
+        attr.data.foreach_set("value", [0] * len(obj.data.polygons))
+    log = {}
+    for name, b in zip(("panels", "stirrups"), built):
+        me = bpy.data.meshes.new(name)
+        me.from_pydata(b["v"].tolist(), [], b["f"].tolist())
+        me.update()
+        me.attributes.new("part", "INT", "FACE").data.foreach_set("value", list(b["part"]))
+        me.attributes.new("hem", "FLOAT", "FACE").data.foreach_set("value", list(b["hem"]))
+        me.attributes.new("anchor", "FLOAT_VECTOR", "POINT").data.foreach_set("vector", b["anchor"].ravel().tolist())
+        o = bpy.data.objects.new(name, me)
+        bpy.context.scene.collection.objects.link(o)
+        activate(obj)
+        o.select_set(True)
+        bpy.ops.object.join()
+        log[name] = b["log"]
+    return log
+
+
+def pin_barding(obj, bones):
+    """Panel vertices take the weights of the body vertex nearest their anchor, without leg, tail
+    or rein bones (a panel hangs from the body and doesn't swing with the legs: round 2's lesson);
+    stirrups and straps 100% HorseSpineTop (as vanilla's, ~97%). -> how many vertices."""
+    from mathutils.kdtree import KDTree
+    me = obj.data
+    parts = face_parts(obj)
+    kind = {}
+    for poly, part in zip(me.polygons, parts):
+        for vi in poly.vertices:
+            kind[vi] = max(kind.get(vi, 0), part)
+    body = [vi for vi in range(len(me.vertices)) if kind.get(vi, 0) == 0]
+    tree = KDTree(len(body))
+    for vi in body:
+        tree.insert(me.vertices[vi].co, vi)
+    tree.balance()
+    anchor = [0.0] * (3 * len(me.vertices))
+    me.attributes["anchor"].data.foreach_get("vector", anchor)
+    skip = set(hs.TAIL) | {"Rem"} | {f"Horse{leg}{p}" for leg in hs.LEGS for p in ("Up", "Down", "Knee", "Heel")}
+    group = {g.index: g.name for g in obj.vertex_groups}
+    n = 0
+    for vi, k in kind.items():
+        if k < hb.CLOTH_PANEL:
+            continue
+        if k in (hb.IRON, hb.LEATHER):
+            row = {"HorseSpineTop": 1.0}
+        else:
+            _, src, _ = tree.find(Vector(anchor[3 * vi:3 * vi + 3]))
+            row = {group[g.group]: g.weight for g in me.vertices[src].groups if group[g.group] not in skip and g.weight > 0}
+            if not row:
+                row = {"HorseSpineTop": 1.0}
+        total = sum(row.values())
+        for g in list(me.vertices[vi].groups):
+            obj.vertex_groups[g.group].remove([vi])
+        for b, w in row.items():
+            (obj.vertex_groups.get(b) or obj.vertex_groups.new(name=b)).add([vi], w / total, "REPLACE")
+        n += 1
+    return n
+
+
 def face_parts(obj):
     attr = obj.data.attributes.get("part")
     if attr is None:
@@ -509,7 +580,13 @@ def paint_textures(obj, bones, palette, hem_y, out_dir, name, size):
     normals = np.array([lt.normal[:] for lt in me.loop_triangles])
     centres = co[tris].mean(axis=1)
     part = np.array([parts[lt.polygon_index] for lt in me.loop_triangles])
-    region = hp.regions(centres, normals, part, bones, hem_y)
+    hem_attr = me.attributes.get("hem")
+    face_hem = None
+    if hem_attr is not None:
+        vals = [0.0] * len(me.polygons)
+        hem_attr.data.foreach_get("value", vals)
+        face_hem = np.array([vals[lt.polygon_index] for lt in me.loop_triangles])
+    region = hp.regions(centres, normals, part, bones, hem_y, face_hem)
     diff, spec, normal, coverage = hp.paint(uvs, tris, co, normals, region, palette, bones, size)
     paths = {}
     for kind, arr in (("diffuse", diff), ("specular", spec), ("normal", normal)):
@@ -588,6 +665,8 @@ def export(obj, geometry_out, preview_out):
     # split vertices by UV seam: one PDX vertex per (vertex, uv) pair
     key_to_index, p, n, u0, weights, tri = {}, [], [], [], [], []
     normals = [v.normal.copy() for v in me.vertices]
+    parts = face_parts(obj)
+    tri_part = [parts[lt.polygon_index] for lt in me.loop_triangles]
     for lt in me.loop_triangles:
         face = []
         for li in lt.loops:
@@ -608,7 +687,7 @@ def export(obj, geometry_out, preview_out):
         tri += face
     unweighted = sum(1 for w in weights if not w)
     with open(geometry_out, "w", encoding="utf-8") as f:
-        json.dump({"p": p, "n": n, "u0": u0, "tri": tri, "weights": weights}, f)
+        json.dump({"p": p, "n": n, "u0": u0, "tri": tri, "weights": weights, "part": tri_part}, f)
     if preview_out:  # PDX -> Blender axes as io_pdx_mesh shows meshes: (x, y, z) -> (x, z, y)
         prev = obj.copy()
         prev.data = obj.data.copy()
@@ -721,6 +800,8 @@ def main():
                          "saddle_node_y": van["bones"]["Saddle_Node"][1]}
     if a.get("chanfron"):
         res["chanfron"] = {"tris": add_chanfron(obj, van["bones"], **a["chanfron"])}
+    if a.get("barding"):
+        res["barding"] = add_barding(obj, van["bones"], a["barding"], a.get("stirrups"))
     smart_uv(obj)
     wstats = {}
     transfer_weights(obj, vanilla, a.get("smooth", 2), a.get("influences", 3),
@@ -728,6 +809,8 @@ def main():
     res["weights"] = wstats
     if a.get("chanfron"):
         res["chanfron"]["pinned_vertices"] = pin_chanfron(obj)
+    if a.get("barding"):
+        res["barding"]["pinned_vertices"] = pin_barding(obj, van["bones"])
     if a.get("paint"):
         pt = a["paint"]
         res["textures"] = paint_textures(obj, van["bones"], pt["palette"], float(a.get("hem_y") or 0.0),

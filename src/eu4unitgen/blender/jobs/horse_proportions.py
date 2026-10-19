@@ -6,7 +6,8 @@ args: {"vanilla": {"p", "tri", "bones"} (core.fresh_mesh.base_arrays),
        (PDX (x, y, z) = Blender (x, z, y)) as Blender's OBJ exporter writes them: file (x, y, -z)),
        "limits": {metric: ratio} | null (overrides _horse_measure.LIMITS),
        "rider": {"path": render_unit dump, "node": name part (default "rider"), "seat_y"} | null (the
-       posed rider in horse space, through Saddle_Node: how much of its lower legs each horse hides),
+       posed rider in horse space, through Saddle_Node: how much of its lower legs each horse hides;
+       our stirrups and straps, parts 4-5 in the geometry's "part", don't count; vanilla's do),
        "overlays": [{"name", "draw": [[label | "vanilla", [r, g, b, a]], ...], "view": "side" | "front" | "top"}],
        "out_dir", "size": px, "result_path"}
 Result: {"vanilla": proportions, "meshes": {label: {"proportions", "compare", "flags": [metric]}},
@@ -29,11 +30,15 @@ import _pdx  # noqa: E402
 VIEWS = {"side": ((-1, 0, 0), (0, 1, 0)), "front": ((0, 0, 1), (0, 1, 0)), "top": ((0, -1, 0), (0, 0, -1))}
 
 
+RIDER_GEAR = (4, 5)  # stirrup iron and strap (_horse_barding): round the rider's foot, not covering it
+
+
 def load(path):
-    """(positions n x 3, triangles m x 3) in PDX space."""
+    """(positions n x 3, triangles m x 3, per-triangle part or None) in PDX space."""
     if path.lower().endswith(".json"):
         d = json.loads(open(path, encoding="utf-8").read())
-        return np.array(d["p"], dtype=np.float64).reshape(-1, 3), np.array(d["tri"], dtype=np.int64).reshape(-1, 3)
+        return (np.array(d["p"], dtype=np.float64).reshape(-1, 3), np.array(d["tri"], dtype=np.int64).reshape(-1, 3),
+                np.array(d["part"]) if "part" in d else None)
     co, tris = [], []
     for line in open(path, encoding="utf-8"):
         if line.startswith("v "):
@@ -42,7 +47,7 @@ def load(path):
         elif line.startswith("f "):
             idx = [int(t.split("/")[0]) - 1 for t in line.split()[1:]]
             tris += [(idx[0], idx[i], idx[i + 1]) for i in range(1, len(idx) - 1)]
-    return np.array(co, dtype=np.float64), np.array(tris, dtype=np.int64)
+    return np.array(co, dtype=np.float64), np.array(tris, dtype=np.int64), None
 
 
 def mesh_object(name, co, tris, rgba):
@@ -87,11 +92,12 @@ def main():
     res = {"vanilla": vp, "meshes": {}, "overlays": {}}
     loaded = {"vanilla": (vco, vtri)}
     for label, path in a["meshes"].items():
-        co, tris = load(path)
+        co, tris, part = load(path)
         loaded[label] = (co, tris)
         p = hm.proportions(co, tris, bones)
-        if legs is not None:
-            p["rider_leg"] = hm.visible_from_side(co, tris, legs)
+        if legs is not None:  # the horse and its barding covering the leg; our stirrups don't count
+            cover = tris if part is None else tris[~np.isin(part, RIDER_GEAR)]
+            p["rider_leg"] = hm.visible_from_side(co, cover, legs)
         cmp_ = hm.compare(p, vp, a.get("limits"))
         res["meshes"][label] = {"proportions": p, "compare": cmp_, "flags": [k for k, c in cmp_.items() if c["flag"]]}
     scene = bpy.context.scene

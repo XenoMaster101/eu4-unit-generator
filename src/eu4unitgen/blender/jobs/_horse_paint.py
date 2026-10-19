@@ -9,19 +9,24 @@ bind positions) and a per-face ``part`` attribute (1 = the chanfron):
   trim      gold bands: just above the hem, and at the seam between scale and cloth;
   scale     the neck and the front of the body: silver scales in rows (projected on the plane
             the face looks along least), each darker at its lower edge;
-  cloth     red: the rear caparison and the saddle, with a gold cross on each rear flank.
+  cloth     red: the rear caparison and the saddle, with a gold cross on each rear flank;
+  panels    (parts 2 and 3, round 3) cloth or scale, with a gold band along each panel's hem;
+  iron, leather  stirrups and straps (parts 4 and 5).
 
 Maps: diffuse RGB, specular RGBA (RGB 0: no unit colours; alpha = gloss, small values as the base
 game's), normal flat. Islands are bled outwards so mips and seams don't pick up the background.
 """
 import numpy as np
 
-COAT, SCALE, CLOTH, TRIM, CHANFRON = range(5)
-GLOSS = {COAT: 5, SCALE: 14, CLOTH: 4, TRIM: 12, CHANFRON: 16}
+COAT, SCALE, CLOTH, TRIM, CHANFRON, IRON, LEATHER = range(7)
+GLOSS = {COAT: 5, SCALE: 14, CLOTH: 4, TRIM: 12, CHANFRON: 16, IRON: 14, LEATHER: 6}
+# parts (_horse_barding): 2 cloth panel, 3 scale panel, 4 stirrup iron, 5 strap
+DEFAULTS = {"iron": (70, 70, 74), "leather": (60, 38, 24)}
 
 
-def regions(centres: np.ndarray, normals: np.ndarray, part: np.ndarray, bones: dict, hem_y: float) -> np.ndarray:
-    """Per face: its region (module doc)."""
+def regions(centres: np.ndarray, normals: np.ndarray, part: np.ndarray, bones: dict, hem_y: float,
+            face_hem: np.ndarray | None = None) -> np.ndarray:
+    """Per face: its region (module doc). ``face_hem``: each panel face's hem height."""
     B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
     y, z = centres[:, 1], centres[:, 2]
     seam = B["HorseSpineTop"][2] + 0.5
@@ -32,6 +37,12 @@ def regions(centres: np.ndarray, normals: np.ndarray, part: np.ndarray, bones: d
     out[z < B["HorseHead"][2] + 0.4] = COAT
     out[y < hem_y] = COAT
     out[part == 1] = CHANFRON
+    out[part == 2] = CLOTH
+    out[part == 3] = SCALE
+    if face_hem is not None:
+        out[(part >= 2) & (part <= 3) & (y < face_hem + 0.35)] = TRIM
+    out[part == 4] = IRON
+    out[part == 5] = LEATHER
     return out
 
 
@@ -71,6 +82,9 @@ def colour(points: np.ndarray, normals: np.ndarray, region: int, palette: dict, 
         return rgb
     if region == TRIM:
         return np.array(palette["gold"])[None, :] * noise[:, None]
+    if region in (IRON, LEATHER):
+        key = "iron" if region == IRON else "leather"
+        return np.array(palette.get(key, DEFAULTS[key]), dtype=np.float64)[None, :] * noise[:, None]
     if region == CHANFRON:
         rgb = np.array(palette["silver"])[None, :] * 1.08 * noise[:, None]
         rgb[np.abs(points[:, 0]) < 0.12] = palette["gold"]
