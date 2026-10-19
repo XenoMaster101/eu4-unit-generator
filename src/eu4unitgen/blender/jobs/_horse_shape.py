@@ -40,6 +40,28 @@ def set_verts(obj, co: np.ndarray) -> None:
     obj.data.update()
 
 
+def smooth(t):
+    """Smoothstep of ``t`` clipped to 0..1 (arrays)."""
+    t = np.clip(t, 0.0, 1.0)
+    return t * t * (3 - 2 * t)
+
+
+def steepness(before: np.ndarray, after: np.ndarray, obj) -> dict:
+    """How abruptly a warp moved neighbouring vertices: per edge of ``obj``, |difference of the two
+    ends' displacements| / edge length. Over 1 the edge's ends can cross (a fold or a crack on the
+    fine surface, which the reduction hides and the normal bake shows). -> {"p999", "max", "over_1"}."""
+    e = np.empty(len(obj.data.edges) * 2, dtype=np.int64)
+    obj.data.edges.foreach_get("vertices", e)
+    e = e.reshape(-1, 2)
+    d = after - before
+    length = np.linalg.norm(before[e[:, 0]] - before[e[:, 1]], axis=1)
+    e = e[length > 0.05 * np.median(length)]  # sliver edges of the voxel solid: any move looks steep
+    k = np.linalg.norm(d[e[:, 0]] - d[e[:, 1]], axis=1) / np.linalg.norm(before[e[:, 0]] - before[e[:, 1]], axis=1)
+    w = int(np.argmax(k))
+    return {"p999": round(float(np.percentile(k, 99.9)), 3), "max": round(float(k[w]), 3),
+            "over_1": int((k > 1.0).sum()), "worst_at": [round(float(x), 2) for x in before[e[w, 0]]]}
+
+
 def chain(bones: dict, names: list[str]) -> np.ndarray:
     return np.array([bones[n] for n in names], dtype=np.float64)
 
@@ -214,8 +236,9 @@ def neck_warp(obj, vanilla, bones: dict, allow: float = 1.15, samples=(0.1, 0.25
     """The neck thinned towards vanilla's: at fractions of NeckBase -> HorseHead, the thickness
     perpendicular to the neck (in the vertical plane) is measured by a ray on both meshes; where
     ours is thicker than vanilla's x ``allow``, that cross-section is scaled about its own centre
-    (never thickened). The ratio fades to 1 a quarter of the neck behind the base and at the head.
-    -> {fraction: [ours, vanilla, ratio]}."""
+    (never thickened). The ratio fades to 1 a quarter of the neck behind the base and at the head,
+    and the shift fades out from 3 to 4.5 off the neck's axis. -> {fraction: [ours, vanilla,
+    ratio]}, "steepness"."""
     B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
     base, head = B["HorseNeckBase"], B["HorseHead"]
     axis = head - base
@@ -243,11 +266,13 @@ def neck_warp(obj, vanilla, bones: dict, allow: float = 1.15, samples=(0.1, 0.25
     tv = (rel @ axis) / length
     radial = rel - np.outer(rel @ axis, axis)
     u = radial @ up
-    near = (tv > -0.25) & (tv < 1.05) & (np.linalg.norm(radial, axis=1) < 4.0)
+    near = (tv > -0.25) & (tv < 1.05)
+    fade = 1.0 - smooth((np.linalg.norm(radial, axis=1) - 3.0) / 1.5)  # no hard edge round the neck
     r = np.interp(tv, ts, ratios)
     c = np.interp(tv, ts, centres)
-    shift = np.where(near, (c + (u - c) * r) - u, 0.0)
+    shift = np.where(near, (c + (u - c) * r) - u, 0.0) * fade
     set_verts(obj, co + shift[:, None] * up)
+    log["steepness"] = steepness(co, verts(obj), obj)
     return log
 
 
@@ -272,22 +297,25 @@ def _leg_profile(points, chain_pts, ys, reach, slab):
 
 
 def leg_inflate(obj, vanilla, bones: dict, top: float, allow: float = 0.9, step: float = 0.25,
-                reach: float = 0.85, most: float = 2.5) -> dict:
+                reach: float = 0.85, most: float = 2.5, band: float = 2.0) -> dict:
     """Thin legs thickened towards vanilla's: per leg and height (ground to ``top``, where the
     legs meet the body), the mean radius of our slice and of vanilla's (surface samples, so
     vanilla's sparse vertices don't matter); where ours is under vanilla's x ``allow``, the slice's
-    vertices move out from its centre (x, z) by that ratio (at most ``most``; never thinned).
-    The ratio fades to 1 over the top 0.8 so the legs still meet the body. -> per leg: the
-    thinnest ratio before and how many vertices moved."""
+    slice moves out from its centre (x, z): a vertex at distance d inside our radius r0 by
+    (ratio - 1) x d, outside it by (ratio - 1) x r0 fading to nothing over ``band`` x that push
+    (wider than the push, so neighbours never cross: no fold where the leg meets the panels or
+    the body). Ratio at most ``most``, never thinning; it fades to 1 over the top 0.8 so the legs
+    still meet the body. -> per leg: the thinnest ratio before; how many vertices moved; steepness."""
     import _horse_measure as hm
     co, vco = verts(obj), verts(vanilla)
     vs = hm.surface_samples(vco, faces(vanilla))
     os_ = hm.surface_samples(co, faces(obj), n=200000)
     ys = np.arange(0.2, top, step)
     B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    before = co.copy()
     best = np.full(len(co), np.inf)
-    scale = np.ones(len(co))
-    centre_of = np.zeros((len(co), 2))
+    push = np.zeros(len(co))
+    dirs = np.zeros((len(co), 2))
     log = {}
     for leg in LEGS:
         chain_pts = leg_chain(B, leg)[::-1][::-1]
@@ -302,18 +330,24 @@ def leg_inflate(obj, vanilla, bones: dict, top: float, allow: float = 0.9, step:
         fade = np.clip((top - ys[ok]) / 0.8, 0, 1)
         ratio = 1 + (ratio - 1) * fade
         cx, cz = np.interp(co[:, 1], ys[ok], ours[ok, 0]), np.interp(co[:, 1], ys[ok], ours[ok, 1])
+        r0 = np.interp(co[:, 1], ys[ok], ours[ok, 2])
+        k = np.interp(co[:, 1], ys[ok], ratio) - 1.0
         d = np.hypot(co[:, 0] - cx, co[:, 2] - cz)
-        mine = (d < reach) & (co[:, 1] < top) & (d < best)
+        out = k * r0  # the slice surface's push
+        far = r0 + band * out
+        amount = np.where(d < r0, k * d, out * (1.0 - smooth((d - r0) / np.maximum(far - r0, 1e-6))))
+        mine = (d < far) & (co[:, 1] < top) & (d < best) & (amount > 0)
         best[mine] = d[mine]
-        scale[mine] = np.interp(co[mine, 1], ys[ok], ratio)
-        centre_of[mine] = np.stack([cx[mine], cz[mine]], axis=1)
+        push[mine] = amount[mine]
+        dirs[mine] = np.stack([co[mine, 0] - cx[mine], co[mine, 2] - cz[mine]], axis=1) / np.maximum(d[mine], 1e-6)[:, None]
         log[leg] = {"found": int(ok.sum()), "thinnest_ratio": round(float((ours[ok, 2] / van[ok, 2]).min()), 3),
                     "most_scale": round(float(ratio.max()), 3)}
-    move = scale > 1.0
-    co[move, 0] = centre_of[move, 0] + (co[move, 0] - centre_of[move, 0]) * scale[move]
-    co[move, 2] = centre_of[move, 1] + (co[move, 2] - centre_of[move, 1]) * scale[move]
+    move = push > 0
+    co[move, 0] += dirs[move, 0] * push[move]
+    co[move, 2] += dirs[move, 1] * push[move]
     set_verts(obj, co)
     log["moved"] = int(move.sum())
+    log["steepness"] = steepness(before, co, obj)
     return log
 
 
@@ -332,6 +366,43 @@ def _half_widths(points, ys, zs, cell):
     return out
 
 
+def _fill(grid, default):
+    """NaN cells of a (2, ny, nz) grid take their filled neighbours' mean, growing inwards;
+    ``default`` where nothing reaches."""
+    ny, nz = grid.shape[1:]
+    for _ in range(max(ny, nz)):
+        empty = np.isnan(grid)
+        if not empty.any():
+            break
+        pad = np.pad(grid, ((0, 0), (1, 1), (1, 1)), constant_values=np.nan)
+        nb = np.stack([pad[:, 1 + dy:1 + dy + ny, 1 + dz:1 + dz + nz] for dy, dz in ((0, 1), (0, -1), (1, 0), (-1, 0))])
+        with np.errstate(all="ignore"):
+            grid = np.where(empty, np.nanmean(nb, axis=0), grid)
+    return np.nan_to_num(grid, nan=default)
+
+
+def _blur(grid, passes):
+    """``passes`` 3 x 3 box blurs of a (2, ny, nz) grid (edges repeated)."""
+    ny, nz = grid.shape[1:]
+    for _ in range(passes):
+        pad = np.pad(grid, ((0, 0), (1, 1), (1, 1)), mode="edge")
+        grid = sum(pad[:, i:i + ny, j:j + nz] for i in range(3) for j in range(3)) / 9.0
+    return grid
+
+
+def _sample(grid, co, ys, zs, cell, side=None):
+    """Bilinear lookup of a (2, ny, nz) grid at each vertex's (y, z), on its side (0: +x, 1: -x;
+    ``side`` overrides), clamped to the grid."""
+    fy = np.clip((co[:, 1] - ys[0]) / cell, 0, len(ys) - 1)
+    fz = np.clip((co[:, 2] - zs[0]) / cell, 0, len(zs) - 1)
+    y0i, z0i = np.floor(fy).astype(int), np.floor(fz).astype(int)
+    y1i, z1i = np.minimum(y0i + 1, len(ys) - 1), np.minimum(z0i + 1, len(zs) - 1)
+    ty, tz = fy - y0i, fz - z0i
+    s = (co[:, 0] < 0).astype(int) if side is None else side
+    return (grid[s, y0i, z0i] * (1 - ty) * (1 - tz) + grid[s, y1i, z0i] * ty * (1 - tz) +
+            grid[s, y0i, z1i] * (1 - ty) * tz + grid[s, y1i, z1i] * ty * tz)
+
+
 def flank_warp(obj, vanilla, bones: dict, allow: float = 1.05, y0: float = 6.0, y1: float = 13.0,
                cell: float = 0.5, least: float = 0.6) -> dict:
     """Each flank narrowed towards vanilla's half-width, side by side: the generated torso can be
@@ -339,8 +410,9 @@ def flank_warp(obj, vanilla, bones: dict, allow: float = 1.05, y0: float = 6.0, 
     vanilla's where the rider's legs hang. Per (y, z) cell of the torso (neck base to behind the
     rump, ``y0``-``y1``) and side, our max |x| against vanilla's (both sides' mean; its thin
     stirrups left out); where ours is over vanilla's x ``allow`` that side's x is scaled down (to
-    ``least`` at most; never widened). The ratio grid is smoothed; vertices near the leg chains
-    below y 9.5 keep their x (the legs are on their chains). -> the narrowest ratio per side."""
+    ``least`` at most; never widened). Cells without both surfaces take their neighbours' ratio and
+    the grid is smoothed; vertices near the leg chains below y 9 keep their x (the legs are on
+    their chains), fading out over 0.8 and over y 9-10. -> the narrowest ratio per side, steepness."""
     import _horse_measure as hm
     B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
     co = verts(obj)
@@ -352,47 +424,50 @@ def flank_warp(obj, vanilla, bones: dict, allow: float = 1.05, y0: float = 6.0, 
     zs = np.arange(B["HorseNeckBase"][2], B["HorseSpineEnd"][2] + 2.5 + cell / 2, cell)
     o = _half_widths(ours, ys, zs, cell)
     v = np.nanmean(_half_widths(van, ys, zs, cell), axis=0)
-    ratio = np.where(np.isnan(o) | np.isnan(v[None]), 1.0, np.clip(allow * v[None] / o, least, 1.0))
-    pad = np.pad(ratio, ((0, 0), (1, 1), (1, 1)), mode="edge")
-    ratio = sum(pad[:, i:i + len(ys), j:j + len(zs)] for i in range(3) for j in range(3)) / 9.0
-    fy = np.clip((co[:, 1] - ys[0]) / cell, 0, len(ys) - 1)
-    fz = np.clip((co[:, 2] - zs[0]) / cell, 0, len(zs) - 1)
-    y0i, z0i = np.floor(fy).astype(int), np.floor(fz).astype(int)
-    y1i, z1i = np.minimum(y0i + 1, len(ys) - 1), np.minimum(z0i + 1, len(zs) - 1)
-    ty, tz = fy - y0i, fz - z0i
-    side = (co[:, 0] < 0).astype(int)
-    r = (ratio[side, y0i, z0i] * (1 - ty) * (1 - tz) + ratio[side, y1i, z0i] * ty * (1 - tz) +
-         ratio[side, y0i, z1i] * (1 - ty) * tz + ratio[side, y1i, z1i] * ty * tz)
-    inside = (co[:, 1] >= y0 - 1.0) & (co[:, 2] >= zs[0]) & (co[:, 2] <= zs[-1])
-    r = np.where(inside, r, 1.0)
-    r = 1 + (r - 1) * np.clip((co[:, 1] - (y0 - 1.0)) / 1.0, 0, 1)
-    legs = (hm.leg_distance(co, bones) < 1.0) & (co[:, 1] < 9.5)
-    r[legs] = 1.0
+    with np.errstate(all="ignore"):
+        ratio = np.clip(allow * v[None] / o, least, 1.0)
+    # cells without both surfaces take their neighbours' ratio (a 1.0 there would make a step
+    # next to a narrowed cell)
+    ratio = _blur(_fill(ratio, 1.0), 3)
+    r = _sample(ratio, co, ys, zs, cell)
+    # faded in below y0 and beyond both ends of the grid along z (a hard edge there is a step)
+    inside = smooth((co[:, 1] - (y0 - 1.0)) / 1.0) * smooth((co[:, 2] - (zs[0] - 1.5)) / 1.5) * \
+        smooth(((zs[-1] + 1.5) - co[:, 2]) / 1.5)
+    r = 1 + (r - 1) * inside
+    keep = (1.0 - smooth((hm.leg_distance(co, bones) - 0.8) / 0.8)) * (1.0 - smooth((co[:, 1] - 9.0) / 1.0))
+    r = 1 + (r - 1) * (1.0 - keep)  # the legs keep their x, fading out (no step at the leg's edge)
+    before = co.copy()
     co[:, 0] *= r
     set_verts(obj, co)
     return {"narrowest": {"left": round(float(ratio[0].min()), 3), "right": round(float(ratio[1].min()), 3)},
-            "moved": int((r < 0.999).sum())}
+            "moved": int((r < 0.999).sum()), "steepness": steepness(before, co, obj)}
 
 
-def flatten_lump(obj, z0: float, z1: float, y0: float, y1: float, margin: float = 0.3) -> int:
-    """Vertices in the box on either flank sticking out more than ``margin`` past the other
-    flank's width at the same (y, z) (a rider's leg on one side) are pushed in to that width.
-    No vertex is deleted, so no hole opens. -> how many moved."""
+def flatten_lump(obj, z0: float, z1: float, y0: float, y1: float, margin: float = 0.3,
+                 cell: float = 0.5, fade: float = 1.5) -> dict:
+    """Vertices in the box on either flank sticking out past the other flank's width at the same
+    (y, z) (a rider's leg on one side) are pushed in to within ``margin`` of it (soft: the excess
+    is compressed, not cut, so there is no crease). The widths are a grid (max |x| per ``cell`` and side, gaps filled, blurred) read bilinearly,
+    and the limit rises away over ``fade`` at the box's edges: a smooth wall, not cell-sized
+    terraces (which the normal bake shows). No vertex is deleted, so no hole opens.
+    -> how many moved, steepness."""
     co = verts(obj)
-    box = np.nonzero((co[:, 2] >= z0) & (co[:, 2] <= z1) & (co[:, 1] >= y0) & (co[:, 1] <= y1))[0]
-    keys = np.stack([np.floor(co[:, 1] / 0.5), np.floor(co[:, 2] / 0.5)], axis=1).astype(int)
-    width = {}
-    for i in box:
-        k = (keys[i, 0], keys[i, 1], bool(co[i, 0] > 0))
-        width[k] = max(width.get(k, 0.0), abs(co[i, 0]))
-    moved = 0
-    for i in box:
-        other = width.get((keys[i, 0], keys[i, 1], not bool(co[i, 0] > 0)))
-        if other is not None and abs(co[i, 0]) > other + margin:
-            co[i, 0] = math.copysign(other, co[i, 0])
-            moved += 1
+    ys = np.arange(y0 - fade, y1 + fade + cell / 2, cell)
+    zs = np.arange(z0 - fade, z1 + fade + cell / 2, cell)
+    width = _blur(_fill(_half_widths(co, ys, zs, cell), 0.0), 2)
+    other = _sample(width, co, ys, zs, cell, side=(co[:, 0] >= 0).astype(int))  # the opposite side's
+    inside = smooth((co[:, 1] - y0) / fade) * smooth((y1 - co[:, 1]) / fade) * \
+        smooth((co[:, 2] - z0) / fade) * smooth((z1 - co[:, 2]) / fade)
+    before = co.copy()
+    over = (np.abs(co[:, 0]) > other) & (inside > 0)
+    # a soft clamp: the excess e past the other side's width becomes margin x (1 - exp(-e / margin)),
+    # tangent to no change at the limit (a hard clamp leaves a crease where the wall begins); the
+    # move itself fades out at the box's edges
+    excess = np.abs(co[over, 0]) - other[over]
+    to = np.sign(co[over, 0]) * (other[over] + margin * (1.0 - np.exp(-excess / margin)))
+    co[over, 0] += (to - co[over, 0]) * inside[over]
     set_verts(obj, co)
-    return moved
+    return {"vertices": int(over.sum()), "steepness": steepness(before, co, obj)}
 
 
 def nearest_on_chains(co: np.ndarray, chains: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:

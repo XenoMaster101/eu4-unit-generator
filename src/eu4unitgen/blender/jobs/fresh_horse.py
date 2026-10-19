@@ -36,7 +36,8 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        "geometry_out": .json path, "preview_out": .obj path (Blender axes, for renders),
        "bake_source_out": .obj path (preview axes; model only): the fine surface for bake_horse, with
        every reshape the low mesh gets (the edits, the tail cleared, the saddle matched), "result_path"}
-Result: counts per stage, the fit (scale, offset) and back heights (ours vs vanilla).
+Result: counts per stage, the fit (scale, offset) and back heights (ours vs vanilla); "steep_reshapes":
+the reshapes whose steepness max is over STEEP (steps the bake would show).
 """
 import json
 import math
@@ -54,6 +55,8 @@ import numpy as np  # noqa: E402 - Blender's numpy
 import _horse_barding as hb  # noqa: E402
 import _horse_shape as hs  # noqa: E402
 import _pdx  # noqa: E402
+
+STEEP = 2.0  # _horse_shape.steepness max over which a reshape is reported (smooth warps here: about 1.5)
 
 
 def mesh_object(name, verts, tris):
@@ -758,8 +761,8 @@ def main():
         debug_dump(a, obj, "3_rider_cut")
         lump = a.get("lump")
         if lump:
-            res["stages"]["lump_flattened"] = {"vertices": hs.flatten_lump(
-                obj, lump["z0"], lump["z1"], lump["y0"], lump["y1"], lump.get("margin", 0.3))}
+            res["stages"]["lump_flattened"] = hs.flatten_lump(
+                obj, lump["z0"], lump["z1"], lump["y0"], lump["y1"], lump.get("margin", 0.3))
         if a.get("hem_y"):
             res["stages"]["skirts_trimmed"] = {"hem_y": a["hem_y"], "tris_removed": trim_skirts(
                 obj, van["bones"], float(a["hem_y"]), float(a.get("leg_radius", 0.9)))}
@@ -836,6 +839,10 @@ def main():
         write_obj(high, a["bake_source_out"])
         res["bake_source"] = {"path": a["bake_source_out"], "tris": tri_count(high)}
     res["final"] = {"vertices": verts, "tris": tris, "unweighted_vertices": unweighted, "pieces": count_pieces(obj)}
+    # a reshape that moves neighbours apart steeply leaves steps on the fine surface: invisible
+    # after the reduction, but the normal bake picks them up
+    res["steep_reshapes"] = {k: v["steepness"] for k, v in res["stages"].items()
+                             if isinstance(v, dict) and v.get("steepness", {}).get("max", 0) > STEEP}
     _pdx.write_result(a, res)
 
 
