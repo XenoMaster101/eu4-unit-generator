@@ -250,3 +250,126 @@ def tail_weights(t: float) -> dict:
     frac = u - i
     out = {TAIL_NODES[i]: 1.0 - frac, TAIL_NODES[i + 1]: frac}
     return {k: w for k, w in out.items() if w > 1e-3}
+
+
+def _panel_runs(open_: np.ndarray) -> list[list[int]]:
+    """The panels: runs of column indices between slits round the closed loop (column i is in a
+    run with i + 1 when the face between them is kept)."""
+    n = len(open_)
+    if not open_.any():
+        return [list(range(n))]
+    start = int(np.argmax(open_))  # an open gap: the next column starts a panel
+    runs, cur = [], []
+    for k in range(1, n + 1):
+        i = (start + k) % n
+        cur.append(i)
+        if open_[i]:  # no face from i onwards: the panel ends at i
+            runs.append(cur)
+            cur = []
+    if cur:
+        runs.append(cur)
+    return [r for r in runs if len(r) >= 2]
+
+
+def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0.7, flare: float = 0.1,
+          tuck: float = 0.5, hems=None, slits=None, hem_length: float = 0.25, leg_clear: float = 0.4,
+          readable: float = 0.55, back: float = 0.02, seam_z: float | None = None, band_h: float = 0.3,
+          fold: float = 0.14, fold_len: float = 2.1, sag: float = 0.25, corner: float = 0.4,
+          tail_open: float = 1.5, top: float | None = None) -> dict:
+    """Barding panels as draped cloth (test 16: the straight hanging slabs read as a box). They
+    start tucked into the barrel at its widest level (``top``; when None, the level between y 7.5
+    and 10.5 whose body slice is widest) round the outline there, then fall with ``flare`` and
+    folds: out and in by up to ``fold``, a wave every ``fold_len`` along the outline, growing from
+    nothing at the top to full at the hem. Each panel's hem sags ``sag`` in its middle and its
+    corners round up by ``corner``.
+    Hems: the reference's (``hems``), never above the body's belly - 0.3, nor below a floor set by
+    ``hem_length``: 0 = game-readable (``readable`` of the way from knee or hock up to the belly,
+    so the legs show), 1 = reference-accurate (knee or hock + ``leg_clear`` only).
+    Slits as panels(), at the front centre, and an opening ``tail_open`` wide at the rear centre
+    for the tail. Two-sided below the top. -> {"v", "f", "part", "hem", "anchor", "log"}."""
+    B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    z0, z1 = B["HorseNeckBase"][2] - 2.0, B["HorseSpineEnd"][2] + 3.0
+    if top is None:
+        best, top = -1.0, 8.0
+        for y in np.arange(7.5, 10.51, 0.25):
+            sl = body[(np.abs(body[:, 1] - y) < 0.2) & (body[:, 2] > z0) & (body[:, 2] < z1)]
+            if len(sl) > 8 and np.abs(sl[:, 0]).max() > best:
+                best, top = float(np.abs(sl[:, 0]).max()), float(y)
+    loop, centre = outline(body, top, z0, z1, offset, column)
+    n = len(loop)
+    nxt = np.roll(np.arange(n), -1)
+    mid_z = (B["HorseFrontLeftUp"][2] + B["HorseBackLeftUp"][2]) / 2
+    knee = min(B[f"HorseFront{s}Knee"][1] for s in ("Left", "Right"))
+    hock = min(B[f"HorseBack{s}Knee"][1] for s in ("Left", "Right"))
+    under = body[(np.abs(body[:, 0]) < 0.5) & (body[:, 2] > B["HorseFrontLeftUp"][2] + 1.0) &
+                 (body[:, 2] < B["HorseBackLeftUp"][2] - 1.0) & (body[:, 1] > max(knee, hock) + 1.0)]  # the centre line, not the legs
+    belly = float(np.percentile(under[:, 1], 2)) if len(under) else top - 2.0
+    joint = np.where(loop[:, 1] < mid_z, knee, hock)
+    floor_read = joint + (belly - joint) * readable
+    floor_ref = joint + leg_clear
+    floor = floor_read + (floor_ref - floor_read) * float(np.clip(hem_length, 0.0, 1.0))
+    hems = np.array(hems or [[z0, 4.7], [z1, 4.7]], dtype=np.float64)
+    hem_ref = np.interp(loop[:, 1], hems[:, 0], hems[:, 1])
+    hem = np.minimum(np.maximum(hem_ref, floor), belly - 0.3)
+    open_ = np.zeros(n, dtype=bool)
+    for zs in (slits or []):
+        open_ |= (loop[:, 1] - zs) * (loop[nxt, 1] - zs) < 0
+    crosses = loop[:, 0] * loop[nxt, 0] < 0
+    open_ |= crosses & (loop[:, 1] < mid_z)  # the front centre
+    open_ |= (loop[:, 1] > mid_z) & (crosses | (np.abs(loop[:, 0]) < tail_open / 2) |
+                                     (np.abs(loop[nxt, 0]) < tail_open / 2))  # round the tail
+    runs = _panel_runs(open_)
+    for run in runs:  # each panel's hem: sagging in the middle, the corners rounded up
+        q = np.linspace(0.0, 1.0, len(run))
+        hem[run] = hem[run] - sag * (1 - (2 * q - 1) ** 2) + corner * np.clip(1 - np.minimum(q, 1 - q) / 0.2, 0, 1) ** 2
+    seg = np.linalg.norm(loop[nxt] - loop, axis=1)
+    arc = np.concatenate([[0], np.cumsum(seg)[:-1]])
+    wave = np.sin(2 * np.pi * arc / fold_len)
+    seam_z = B["HorseSpineTop"][2] + 0.5 if seam_z is None else seam_z
+    fracs = (0.0, 0.4, 0.75)  # of the drop: the top and two fold rows; then the band and the hem
+    v, anchor, cols = [], [], []
+    for i, (x, z) in enumerate(loop):
+        d = np.array([x, z]) - centre
+        d /= np.linalg.norm(d)
+        drop = top - hem[i]
+        cols.append(len(v))
+        inner = centre + (np.array([x, z]) - centre) * 0.88
+        v.append([inner[0], top + tuck, inner[1]])
+        rows = [(top - f * drop, f) for f in fracs] + [(hem[i] + band_h, (drop - band_h) / drop), (hem[i], 1.0)]
+        for y, t in rows:
+            p = np.array([x, z]) + d * (flare * (top - y) + fold * t * wave[i])
+            v.append([p[0], y, p[1]])
+        anchor += [[x, top, z]] * (len(rows) + 1)
+    per = len(fracs) + 3  # points per column: tuck, top, two fold rows, band, hem
+    f, part, fhem, hang = [], [], [], []
+    for i in range(n):
+        if open_[i]:
+            continue
+        a, b = cols[i], cols[nxt[i]]
+        kind = SCALE_PANEL if (loop[i, 1] + loop[nxt[i], 1]) / 2 < seam_z else CLOTH_PANEL
+        h = (hem[i] + hem[nxt[i]]) / 2
+        for r in range(per - 1):  # outward-facing (the loop runs counter-clockwise seen from above)
+            for t in ((a + r, b + r, b + r + 1), (a + r, b + r + 1, a + r + 1)):
+                f.append(t)
+                part.append(kind)
+                fhem.append(h)
+                hang.append(r >= 1)  # below the top: seen from inside too
+    v, f, hang = np.array(v), np.array(f), np.array(hang)
+    vb = v.copy()
+    dd = vb[:, [0, 2]] - centre
+    vb[:, [0, 2]] -= dd / np.maximum(np.linalg.norm(dd, axis=1, keepdims=True), 1e-9) * back
+    fb = f[hang][:, ::-1] + len(v)
+    out_f = np.vstack([f, fb])
+    allv, alla = np.vstack([v, vb]), np.vstack([anchor, anchor])
+    used = np.unique(out_f)  # the back copies of the tuck row (and open columns) have no faces
+    remap = np.full(len(allv), -1)
+    remap[used] = np.arange(len(used))
+    out_f = remap[out_f]
+    return {"v": allv[used], "f": out_f,
+            "part": part + [p for p, k in zip(part, hang) if k], "hem": fhem + [h for h, k in zip(fhem, hang) if k],
+            "anchor": alla[used],
+            "log": {"style": "drape", "top": round(top, 2), "belly": round(belly, 2), "columns": n,
+                    "panels": len(runs), "open": int(open_.sum()), "tris": int(len(out_f)),
+                    "hem_reference": [round(float(hem_ref.min()), 2), round(float(hem_ref.max()), 2)],
+                    "hem_used": [round(float(hem.min()), 2), round(float(hem.max()), 2)],
+                    "hem_length": hem_length}}

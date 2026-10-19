@@ -32,7 +32,7 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        radii, flat} (round 3: with "auto", built when _horse_measure.tail_state says the generated
        one is missing, fused or a stub; a fused tail or stub is cut off first, before the bake source
        is taken),
-       "barding": _horse_barding.panels' keywords (round 3: hanging panels, weighted from the body
+       "barding": {"style": "drape" (_horse_barding.drape: draped cloth) | "slab" (panels(), test 16's), + its keywords} (round 3: hanging panels, weighted from the body
        without legs), "stirrups": {"tread", "strap_top"} (round 3: 100% HorseSpineTop),
        "paint": {"palette": {silver, red, gold, coat}, "out_dir", "name", "size"} (step 8: textures),
        "chain_weights": bool (head, leg and tail regions weighted by distance to their bone chains),
@@ -523,7 +523,9 @@ def add_barding(obj, bones, barding, stirrups=None):
     pieces, with face attributes ``part`` and ``hem`` and a point attribute ``anchor`` (where each
     vertex takes its body weights from). -> the builders' logs."""
     body = hs.verts(obj)
-    built = [hb.panels(body, bones, **barding)]
+    style = barding.get("style", "slab")
+    kw = {k: v for k, v in barding.items() if k != "style"}
+    built = [hb.drape(body, bones, **kw) if style == "drape" else hb.panels(body, bones, **kw)]
     if stirrups:
         built.append(hb.stirrups(**stirrups))
     if obj.data.attributes.get("part") is None:
