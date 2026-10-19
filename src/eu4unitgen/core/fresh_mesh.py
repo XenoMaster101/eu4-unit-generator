@@ -155,3 +155,37 @@ def check_fresh(base: bytes, fresh: bytes) -> list[str]:
                for j in range(3)):
             problems.append("the aabb doesn't bound the vertices")
     return problems
+
+
+def base_arrays(base: bytes) -> dict:
+    """The base mesh as the ``fresh_horse`` job's ``vanilla`` argument: positions, triangles,
+    per-vertex weights by bone name, and each bone's bind position (PDX mesh space)."""
+    from eu4unitgen.library.scanner import summarize_mesh
+
+    tree = parse_pdx_mesh(base)
+    mesh, skeleton = _only_mesh(tree)
+    names = {i: b for b, i in bone_indices(skeleton).items()}
+    skin = _child(mesh, "skin")["props"]
+    weights = []
+    for v in range(len(mesh["props"]["p"]) // 3):
+        row = {}
+        for k in range(SLOTS):
+            i, w = skin["ix"][v * SLOTS + k], skin["w"][v * SLOTS + k]
+            if i >= 0 and w > 0:
+                row[names[i]] = row.get(names[i], 0.0) + w
+        weights.append(row)
+    bones = {}
+    for name, rec in summarize_mesh(tree)["skeleton"].items():
+        if rec.get("bind"):
+            b = rec["bind"]
+            bones[name] = [b[3], b[7], b[11]]
+    return {"p": list(mesh["props"]["p"]), "tri": list(mesh["props"]["tri"]), "weights": weights, "bones": bones}
+
+
+def geometry_from_job(path) -> FreshGeometry:
+    """The ``fresh_horse`` job's geometry JSON -> FreshGeometry."""
+    import json
+    from pathlib import Path
+
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    return FreshGeometry(d["p"], d["n"], d["u0"], d["tri"], d["weights"])
