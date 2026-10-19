@@ -221,3 +221,49 @@ def compare(ours, vanilla, limits=None):
                   "flag": bool(r < lim if k in LOW_IS_BAD else r > lim)}
     out["hem"] = {"ours": o["hem"], "vanilla": v["hem"], "ratio": None, "limit": None, "flag": False}
     return out
+
+
+TAIL_HANG = ("HorseTailMiddle", "HorseTailTip", "HorseTailEnd")
+
+
+def tail_state(co, tris, bones, stations=6, reach=0.8, strip=0.5, gap=0.3, depth=2.5, slab=0.2):
+    """Whether a generated body has its own hanging tail (fresh_horse builds one when it hasn't).
+    At ``stations`` points down vanilla's hanging tail (TailMiddle -> TailEnd), a horizontal
+    slice of surface samples:
+      * present: surface within ``reach`` of the chain point (horizontally);
+      * fused: on the centre line (|x - chain x| < ``strip``) the surface runs from the tail
+        forward into the body (the rump, the caparison, the hind legs) with no gap of ``gap``
+        within ``depth``; a free tail has air in front of it.
+    -> {"state": "missing" (under half the stations present) | "fused" (most present ones fused)
+    | "short" (some lower stations missing: a stub, which barding would hide) | "free" (all but
+    at most one present, not fused), "stations": [[y, present, fused]]}. Thresholds assumed
+    (round 3), not tuned on many models."""
+    B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    chain = np.array([B[n] for n in TAIL_HANG])
+    seg = np.linalg.norm(np.diff(chain, axis=0), axis=1)
+    cum = np.concatenate([[0], np.cumsum(seg)])
+    pts = surface_samples(co, tris, n=200000)
+    out = []
+    for s in np.linspace(0.1, 0.9, stations) * cum[-1]:
+        i = min(np.searchsorted(cum, s, side="right") - 1, len(seg) - 1)
+        p = chain[i] + (chain[i + 1] - chain[i]) * (s - cum[i]) / seg[i]
+        sl = pts[np.abs(pts[:, 1] - p[1]) < slab]
+        d = np.hypot(sl[:, 0] - p[0], sl[:, 2] - p[2])
+        present = bool((d < reach).any())
+        fused = False
+        if present:
+            tail_z = sl[d < reach][:, 2].min()  # the tail's front
+            line = np.sort(sl[(np.abs(sl[:, 0] - p[0]) < strip) & (sl[:, 2] <= tail_z) & (sl[:, 2] > tail_z - depth)][:, 2])[::-1]
+            steps = np.diff(np.concatenate([[tail_z], line]))  # going forward (negative steps)
+            reached = len(line) and line[-1] < tail_z - depth + gap  # surface all the way forward
+            fused = bool(reached and (len(steps) == 0 or -steps.min() < gap))
+        out.append([round(float(p[1]), 2), present, fused])
+    n_present = sum(1 for _, pr, _ in out if pr)
+    n_fused = sum(1 for _, pr, fu in out if pr and fu)
+    if n_present < stations / 2:
+        state = "missing"
+    elif n_fused > n_present / 2:
+        state = "fused"
+    else:
+        state = "free" if n_present >= stations - 1 else "short"
+    return {"state": state, "stations": out}

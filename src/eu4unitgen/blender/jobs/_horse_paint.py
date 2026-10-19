@@ -11,16 +11,17 @@ bind positions) and a per-face ``part`` attribute (1 = the chanfron):
             the face looks along least), each darker at its lower edge;
   cloth     red: the rear caparison and the saddle, with a gold cross on each rear flank;
   panels    (parts 2 and 3, round 3) cloth or scale, with a gold band along each panel's hem;
-  iron, leather  stirrups and straps (parts 4 and 5).
+  iron, leather  stirrups and straps (parts 4 and 5);
+  hair      the built tail (part 6): the coat darkened, in streaks along it.
 
 Maps: diffuse RGB, specular RGBA (RGB 0: no unit colours; alpha = gloss, small values as the base
 game's), normal flat. Islands are bled outwards so mips and seams don't pick up the background.
 """
 import numpy as np
 
-COAT, SCALE, CLOTH, TRIM, CHANFRON, IRON, LEATHER = range(7)
-GLOSS = {COAT: 5, SCALE: 14, CLOTH: 4, TRIM: 12, CHANFRON: 16, IRON: 14, LEATHER: 6}
-# parts (_horse_barding): 2 cloth panel, 3 scale panel, 4 stirrup iron, 5 strap
+COAT, SCALE, CLOTH, TRIM, CHANFRON, IRON, LEATHER, HAIR = range(8)
+GLOSS = {COAT: 5, SCALE: 14, CLOTH: 4, TRIM: 12, CHANFRON: 16, IRON: 14, LEATHER: 6, HAIR: 7}
+# parts (_horse_barding): 2 cloth panel, 3 scale panel, 4 stirrup iron, 5 strap, 6 tail
 DEFAULTS = {"iron": (70, 70, 74), "leather": (60, 38, 24)}
 
 
@@ -43,6 +44,7 @@ def regions(centres: np.ndarray, normals: np.ndarray, part: np.ndarray, bones: d
         out[(part >= 2) & (part <= 3) & (y < face_hem + 0.35)] = TRIM
     out[part == 4] = IRON
     out[part == 5] = LEATHER
+    out[part == 6] = HAIR
     return out
 
 
@@ -85,6 +87,9 @@ def colour(points: np.ndarray, normals: np.ndarray, region: int, palette: dict, 
     if region in (IRON, LEATHER):
         key = "iron" if region == IRON else "leather"
         return np.array(palette.get(key, DEFAULTS[key]), dtype=np.float64)[None, :] * noise[:, None]
+    if region == HAIR:  # streaks across x (the tail hangs along y)
+        streak = 0.8 + 0.12 * np.sin(points[:, 0] * 23.0 + np.sin(points[:, 1] * 3.0))
+        return np.array(palette["coat"])[None, :] * (streak * noise)[:, None]
     if region == CHANFRON:
         rgb = np.array(palette["silver"])[None, :] * 1.08 * noise[:, None]
         rgb[np.abs(points[:, 0]) < 0.12] = palette["gold"]

@@ -28,6 +28,10 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        narrowed to vanilla's half-width x this), "leg_allow" (thin legs thickened to vanilla's radius x this), "tail_gap" (the caparison
        pushed off the tail),
        "chanfron": {"lift", "thickness", "facing"} (step 8: a plate merged in, 100% HorseHead),
+       "tail": {"build": "auto" | true | false, "cut": stub cut radius, _horse_barding.tail's sides, rings,
+       radii, flat} (round 3: with "auto", built when _horse_measure.tail_state says the generated
+       one is missing, fused or a stub; a fused tail or stub is cut off first, before the bake source
+       is taken),
        "barding": _horse_barding.panels' keywords (round 3: hanging panels, weighted from the body
        without legs), "stirrups": {"tread", "strap_top"} (round 3: 100% HorseSpineTop),
        "paint": {"palette": {silver, red, gold, coat}, "out_dir", "name", "size"} (step 8: textures),
@@ -498,25 +502,61 @@ def add_barding(obj, bones, barding, stirrups=None):
         attr.data.foreach_set("value", [0] * len(obj.data.polygons))
     log = {}
     for name, b in zip(("panels", "stirrups"), built):
-        me = bpy.data.meshes.new(name)
-        me.from_pydata(b["v"].tolist(), [], b["f"].tolist())
-        me.update()
-        me.attributes.new("part", "INT", "FACE").data.foreach_set("value", list(b["part"]))
-        me.attributes.new("hem", "FLOAT", "FACE").data.foreach_set("value", list(b["hem"]))
-        me.attributes.new("anchor", "FLOAT_VECTOR", "POINT").data.foreach_set("vector", b["anchor"].ravel().tolist())
-        o = bpy.data.objects.new(name, me)
-        bpy.context.scene.collection.objects.link(o)
-        activate(obj)
-        o.select_set(True)
-        bpy.ops.object.join()
+        join_piece(obj, name, b)
         log[name] = b["log"]
     return log
+
+
+def join_piece(obj, name, b):
+    """A built piece (_horse_barding arrays) joined into ``obj`` as its own piece, with face
+    attributes ``part`` and ``hem``, point attributes ``anchor`` and, for the tail, ``chain``
+    (vertices without one read 0)."""
+    if obj.data.attributes.get("part") is None:
+        attr = obj.data.attributes.new("part", "INT", "FACE")
+        attr.data.foreach_set("value", [0] * len(obj.data.polygons))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(b["v"].tolist(), [], b["f"].tolist())
+    me.update()
+    me.attributes.new("part", "INT", "FACE").data.foreach_set("value", list(b["part"]))
+    me.attributes.new("hem", "FLOAT", "FACE").data.foreach_set("value", list(b["hem"]))
+    me.attributes.new("anchor", "FLOAT_VECTOR", "POINT").data.foreach_set("vector", b["anchor"].ravel().tolist())
+    if "chain" in b:
+        me.attributes.new("chain", "FLOAT", "POINT").data.foreach_set("value", list(b["chain"]))
+    o = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(o)
+    activate(obj)
+    o.select_set(True)
+    bpy.ops.object.join()
+
+
+def cut_tail_stub(obj, bones, radius):
+    """A generated tail stub cut off (a capsule from TailMiddle past TailEnd: behind the rump, so
+    the rump itself stays) before our own tail is built in its place. -> triangles before, after
+    (the cut faces can make it more)."""
+    B = {k: Vector(v) for k, v in bones.items()}
+    end = B["HorseTailEnd"] + (B["HorseTailEnd"] - B["HorseTailTip"]).normalized() * 1.5
+    before = tri_count(obj)
+    boolean(obj, join(capsule("tail_cutter", B["HorseTailMiddle"], end, radius)))
+    keep_largest(obj)
+    return [before, tri_count(obj)]
+
+
+def tail_root(obj, bones, inside=0.35):
+    """Where our tail starts: the rump surface met going from TailTop towards SpineEnd, ``inside``
+    further in (buried, so no gap opens when the tail swings); SpineEnd itself if nothing is hit."""
+    from mathutils.bvhtree import BVHTree
+    top, end = Vector(bones["HorseTailTop"]), Vector(bones["HorseSpineEnd"])
+    d = (end - top).normalized()
+    bvh = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+    hit = bvh.ray_cast(top - d * 0.5, d, (end - top).length + 0.5)[0]
+    return list(hit + d * inside) if hit is not None else list(end)
 
 
 def pin_barding(obj, bones):
     """Panel vertices take the weights of the body vertex nearest their anchor, without leg, tail
     or rein bones (a panel hangs from the body and doesn't swing with the legs: round 2's lesson);
-    stirrups and straps 100% HorseSpineTop (as vanilla's, ~97%). -> how many vertices."""
+    stirrups and straps 100% HorseSpineTop (as vanilla's, ~97%); the tail along its chain
+    (_horse_barding.tail_weights). -> how many vertices."""
     from mathutils.kdtree import KDTree
     me = obj.data
     parts = face_parts(obj)
@@ -531,6 +571,9 @@ def pin_barding(obj, bones):
     tree.balance()
     anchor = [0.0] * (3 * len(me.vertices))
     me.attributes["anchor"].data.foreach_get("vector", anchor)
+    chain = [0.0] * len(me.vertices)
+    if me.attributes.get("chain") is not None:
+        me.attributes["chain"].data.foreach_get("value", chain)
     skip = set(hs.TAIL) | {"Rem"} | {f"Horse{leg}{p}" for leg in hs.LEGS for p in ("Up", "Down", "Knee", "Heel")}
     group = {g.index: g.name for g in obj.vertex_groups}
     n = 0
@@ -539,6 +582,8 @@ def pin_barding(obj, bones):
             continue
         if k in (hb.IRON, hb.LEATHER):
             row = {"HorseSpineTop": 1.0}
+        elif k == hb.TAIL:
+            row = hb.tail_weights(chain[vi])
         else:
             _, src, _ = tree.find(Vector(anchor[3 * vi:3 * vi + 3]))
             row = {group[g.group]: g.weight for g in me.vertices[src].groups if group[g.group] not in skip and g.weight > 0}
@@ -774,6 +819,15 @@ def main():
         if a.get("leg_allow"):  # round 3: legs no thinner than vanilla's x leg_allow, before the coarse voxels
             res["stages"]["leg_inflate"] = hs.leg_inflate(obj, vanilla, van["bones"], float(a.get("hem_y") or 6.0),
                                                           float(a["leg_allow"]))
+        tail = a.get("tail")
+        build_tail = False
+        if tail:  # round 3: our own tail when the generated one is missing, fused or a stub
+            import _horse_measure as hm
+            state = hm.tail_state(hs.verts(obj), hs.faces(obj), van["bones"])
+            build_tail = tail.get("build", "auto") is True or (tail.get("build", "auto") == "auto" and state["state"] != "free")
+            res["tail"] = {"source": state, "build": build_tail}
+            if build_tail and state["state"] != "missing":
+                res["tail"]["stub_cut_tris"] = cut_tail_stub(obj, van["bones"], float(tail.get("cut", 0.8)))
         debug_dump(a, obj, "4_trimmed")
         # the bake source: the fine surface after every edit so far; each later reshape of the
         # body moves it too (the voxel solid, relax and reduction don't: those are what the
@@ -790,7 +844,7 @@ def main():
             res["stages"]["holes_filled"] = {"boundary_edges": fill_holes(obj), "tris": tri_count(obj)}
         debug_dump(a, obj, "5_solid")
     else:
-        high = None
+        high, build_tail = None, False
         obj = control_horse(van["bones"])
         res["stages"]["built"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
         res["fit"] = {"scale": 1.0, "offset": [0, 0, 0], "note": "built on the skeleton: no fit"}
@@ -821,6 +875,11 @@ def main():
         res["chanfron"] = {"tris": add_chanfron(obj, van["bones"], **a["chanfron"])}
     if a.get("barding"):
         res["barding"] = add_barding(obj, van["bones"], a["barding"], a.get("stirrups"))
+    if src["kind"] == "model" and build_tail:
+        b = hb.tail(van["bones"], tail_root(obj, van["bones"]),
+                    **{k: v for k, v in a["tail"].items() if k in ("sides", "rings", "radii", "flat")})
+        join_piece(obj, "tail", b)
+        res["tail"]["built"] = b["log"]
     smart_uv(obj)
     wstats = {}
     transfer_weights(obj, vanilla, a.get("smooth", 2), a.get("influences", 3),
@@ -828,8 +887,8 @@ def main():
     res["weights"] = wstats
     if a.get("chanfron"):
         res["chanfron"]["pinned_vertices"] = pin_chanfron(obj)
-    if a.get("barding"):
-        res["barding"]["pinned_vertices"] = pin_barding(obj, van["bones"])
+    if a.get("barding") or build_tail:  # panels, stirrups and the tail: their own weights
+        res.setdefault("barding", {})["pinned_vertices"] = pin_barding(obj, van["bones"])
     if a.get("paint"):
         pt = a["paint"]
         res["textures"] = paint_textures(obj, van["bones"], pt["palette"], float(a.get("hem_y") or 0.0),

@@ -16,12 +16,16 @@ horse's fused skirts are cut off at the belly, and these hang in their place.
   * two-sided: every face again, reversed, ``back`` inside.
 Stirrups: a trapezoid iron loop (a square bar) across the horse under the rider's boot sole
 (``tread``, the left one; the right mirrored) and a strap up to ``strap_top``.
+Tail (when the generated one is missing, fused or a stub: _horse_measure.tail_state): a tapered
+tube along the vanilla tail chain from a root buried in the rump, its own piece, weighted along
+the chain like vanilla's (two neighbouring bones per vertex).
 Each part comes back as arrays (vertices, triangles, per-face part and hem, per-vertex anchor:
 the point whose body weights it takes).
 """
 import numpy as np
 
-CLOTH_PANEL, SCALE_PANEL, IRON, LEATHER = 2, 3, 4, 5
+CLOTH_PANEL, SCALE_PANEL, IRON, LEATHER, TAIL = 2, 3, 4, 5, 6
+TAIL_NODES = ("HorseSpineEnd", "HorseTailTop", "HorseTailMiddle", "HorseTailTip", "HorseTailEnd")
 
 
 def hull(points: np.ndarray) -> np.ndarray:
@@ -184,3 +188,65 @@ def stirrups(tread, strap_top, width: float = 0.9, height: float = 0.9, bar: flo
     v = np.array(v)
     return {"v": v, "f": np.array(f), "part": part, "hem": [0.0] * len(part), "anchor": v.copy(),
             "log": {"tris": len(part), "tread": [round(float(x), 2) for x in tread]}}
+
+
+def tail(bones: dict, root, sides: int = 6, rings: int = 8, radii=((0.0, 0.3), (0.25, 0.36), (0.55, 0.62),
+         (0.85, 0.5), (1.0, 0.18)), flat: float = 0.8) -> dict:
+    """The tail (module doc): ``root`` [x, y, z] inside the rump, then the vanilla tail bones
+    TailTop -> TailEnd; ``rings`` cross-sections (``sides``-gons, x radius ``flat`` x the z
+    radius) evenly along it, radius by the fraction along (``radii``: [[fraction, radius]]: the
+    dock, the hair widening, the taper), both ends capped. Per vertex ``chain``: its position as
+    t = node index + fraction along TAIL_NODES (root = node 0), for ``tail_weights``.
+    -> {"v", "f", "part", "hem", "anchor", "chain", "log"}."""
+    B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    nodes = np.array([root] + [B[n] for n in TAIL_NODES[1:]], dtype=np.float64)
+    seg = np.linalg.norm(np.diff(nodes, axis=0), axis=1)
+    cum = np.concatenate([[0], np.cumsum(seg)])
+    rad = np.array(radii, dtype=np.float64)
+    v, chain, f = [], [], []
+    for k in range(rings):
+        s = cum[-1] * k / (rings - 1)
+        i = min(np.searchsorted(cum, s, side="right") - 1, len(seg) - 1)
+        frac = (s - cum[i]) / seg[i]
+        c = nodes[i] + (nodes[i + 1] - nodes[i]) * frac
+        d = nodes[i + 1] - nodes[i]  # the ring's plane: perpendicular to its segment
+        d /= np.linalg.norm(d)
+        side = np.array([1.0, 0.0, 0.0])
+        other = np.cross(d, side)
+        other /= np.linalg.norm(other)
+        r = np.interp(k / (rings - 1), rad[:, 0], rad[:, 1])
+        for j in range(sides):
+            a = 2 * np.pi * j / sides
+            v.append(c + side * np.cos(a) * r * flat + other * np.sin(a) * r)
+            chain.append(i + frac)
+    for k in range(rings - 1):
+        for j in range(sides):
+            a, b = k * sides + j, k * sides + (j + 1) % sides
+            f += [(a, b, b + sides), (a, b + sides, a + sides)]
+    for k, t, flip in ((0, 0.0, True), (rings - 1, float(len(seg)), False)):  # caps: a fan round an end point
+        centre = len(v)
+        v.append(np.mean(v[k * sides:(k + 1) * sides], axis=0))
+        chain.append(t)
+        for j in range(sides):
+            a, b = k * sides + j, k * sides + (j + 1) % sides
+            f.append((centre, b, a) if flip else (centre, a, b))
+    v = np.array(v)
+    # outward: the side faces' winding checked against the tube's axis at one face
+    a, b, c = v[f[0][0]], v[f[0][1]], v[f[0][2]]
+    if np.dot(np.cross(b - a, c - a), a - nodes[0]) < 0:
+        f = [t[::-1] for t in f]
+    n = len(f)
+    return {"v": v, "f": np.array(f), "part": [TAIL] * n, "hem": [0.0] * n, "anchor": v.copy(),
+            "chain": np.array(chain), "log": {"tris": n, "length": round(float(cum[-1]), 2),
+                                              "root": [round(float(x), 2) for x in root]}}
+
+
+def tail_weights(t: float) -> dict:
+    """Bone weights at chain position ``t`` (``tail``): each bone (TAIL_NODES) is whole at the
+    middle of its own segment and blends with the next round each joint (vanilla's tail: about
+    half and half at a joint); the root's segment is HorseSpineEnd's."""
+    u = float(np.clip(t - 0.5, 0.0, len(TAIL_NODES) - 1))
+    i = min(int(np.floor(u)), len(TAIL_NODES) - 2)
+    frac = u - i
+    out = {TAIL_NODES[i]: 1.0 - frac, TAIL_NODES[i + 1]: frac}
+    return {k: w for k, w in out.items() if w > 1e-3}
