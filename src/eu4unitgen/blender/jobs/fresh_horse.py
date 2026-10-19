@@ -24,7 +24,9 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        "leg_top": y up to which legs are tracked, "cut".y may be "saddle" (vanilla's back height there),
        "lump": {"z0", "z1", "y0", "y1", "margin"} (mirror-based removal of a one-sided bulge),
        "voxel_fine": size (a closed solid before the edits), "hem_y", "leg_radius" (skirts raised to the
-       hem), "tail_gap" (the caparison pushed off the tail),
+       hem), "neck_allow" (the neck thinned to vanilla's thickness x this), "flank_allow" (each flank
+       narrowed to vanilla's half-width x this), "leg_allow" (thin legs thickened to vanilla's radius x this), "tail_gap" (the caparison
+       pushed off the tail),
        "chanfron": {"lift", "thickness", "facing"} (step 8: a plate merged in, 100% HorseHead),
        "paint": {"palette": {silver, red, gold, coat}, "out_dir", "name", "size"} (step 8: textures),
        "chain_weights": bool (head, leg and tail regions weighted by distance to their bone chains),
@@ -675,6 +677,13 @@ def main():
             res["stages"]["skirts_trimmed"] = {"hem_y": a["hem_y"], "tris_removed": trim_skirts(
                 obj, van["bones"], float(a["hem_y"]), float(a.get("leg_radius", 0.9)))}
             keep_largest(obj)
+        if a.get("neck_allow"):  # round 3: the neck no thicker than vanilla's x neck_allow
+            res["stages"]["neck_warp"] = hs.neck_warp(obj, vanilla, van["bones"], float(a["neck_allow"]))
+        if a.get("flank_allow"):  # round 3: each flank no wider than vanilla's x flank_allow
+            res["stages"]["flank_warp"] = hs.flank_warp(obj, vanilla, van["bones"], float(a["flank_allow"]))
+        if a.get("leg_allow"):  # round 3: legs no thinner than vanilla's x leg_allow, before the coarse voxels
+            res["stages"]["leg_inflate"] = hs.leg_inflate(obj, vanilla, van["bones"], float(a.get("hem_y") or 6.0),
+                                                          float(a["leg_allow"]))
         debug_dump(a, obj, "4_trimmed")
         if a.get("tail_gap"):
             res["stages"]["tail_cleared"] = {"vertices": clear_tail(obj, van["bones"], float(a["tail_gap"]))}

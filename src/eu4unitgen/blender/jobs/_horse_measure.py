@@ -8,8 +8,9 @@ a ray's entry and exit hits closer than 0.5) are skipped, so the numbers describ
   * width: rays in from either side at a quarter, half and three quarters of the way from belly
     to back (the widest);
   * belly: the belly's height above the ground (how much leg shows under the body);
-  * leg: each leg's thickness across (x) at the forearm/gaskin (Down-Knee) and the cannon
-    (Knee-Heel) midpoints, by a ray through the bone; thin legs under a deep body read as "sticks";
+  * leg: each leg's thickness at the forearm/gaskin (Down-Knee) and the cannon (Knee-Heel)
+    midpoints: the side and front extents of a thin slice of surface samples round the leg's own
+    centre; thin legs under a deep body read as "sticks";
   * neck: the thickness at HorseNeckMiddle perpendicular to the neck (NeckBase -> Head), by a ray;
   * volume of the closed surface (open meshes: approximate);
   * hem (reported, not judged): the lowest surface that isn't a leg, i.e. a skirt's hem;
@@ -76,10 +77,33 @@ def span_at(co, tris, point, direction, reach=10.0):
     return None
 
 
-def leg_thickness(co, tris, bones, leg, upper, lower):
-    """Thickness (across, along x) of ``leg`` halfway between joints ``upper`` and ``lower``."""
+def surface_samples(co, tris, n=80000, seed=0):
+    """``n`` points spread over the surface by area (slices of them work on any topology)."""
+    a, b, c = co[tris[:, 0]], co[tris[:, 1]], co[tris[:, 2]]
+    area = np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    rng = np.random.default_rng(seed)
+    pick = rng.choice(len(tris), size=n, p=area / area.sum())
+    u, v = rng.random(n), rng.random(n)
+    flip = u + v > 1
+    u[flip], v[flip] = 1 - u[flip], 1 - v[flip]
+    return a[pick] + (b[pick] - a[pick]) * u[:, None] + (c[pick] - a[pick]) * v[:, None]
+
+
+def leg_thickness(samples, bones, leg, upper, lower, slab=0.1, reach=0.9):
+    """Thickness of ``leg`` halfway between joints ``upper`` and ``lower``: the surface samples in
+    a horizontal slab there, within ``reach`` (x, z) of the leg's own centre (found from the
+    bone's point by recentring: a leg needn't sit exactly on the vanilla bone); the mean of its
+    side (z) and front (x) extents. None where no leg is found."""
     a, b = (np.array(bones[f"Horse{leg}{j}"], dtype=np.float64) for j in (upper, lower))
-    return span_at(co, tris, (a + b) / 2, (1.0, 0.0, 0.0))
+    mid = (a + b) / 2
+    sl = samples[np.abs(samples[:, 1] - mid[1]) < slab]
+    centre = mid[[0, 2]]
+    for _ in range(4):
+        near = sl[np.linalg.norm(sl[:, [0, 2]] - centre, axis=1) < reach]
+        if len(near) < 8:
+            return None
+        centre = (near[:, [0, 2]].min(axis=0) + near[:, [0, 2]].max(axis=0)) / 2
+    return float((np.ptp(near[:, 0]) + np.ptp(near[:, 2])) / 2)
 
 
 def leg_distance(co, bones):
@@ -132,8 +156,9 @@ def proportions(co, tris, bones, leg_radius=0.8, slab=0.3):
             "z": round(float(z), 3), "back": back, "belly": belly,
             "depth": None if back is None or belly is None else back - belly, "width": width,
             "hem": float(not_leg[:, 1].min()) if len(not_leg) else belly}
-    out["legs"] = {leg: {"upper": leg_thickness(co, tris, bones, leg, "Down", "Knee"),
-                         "cannon": leg_thickness(co, tris, bones, leg, "Knee", "Heel")} for leg in LEGS}
+    samples = surface_samples(co, tris)
+    out["legs"] = {leg: {"upper": leg_thickness(samples, bones, leg, "Down", "Knee"),
+                         "cannon": leg_thickness(samples, bones, leg, "Knee", "Heel")} for leg in LEGS}
     base, mid, head = (np.array(bones[n], dtype=np.float64) for n in ("HorseNeckBase", "HorseNeckMiddle", "HorseHead"))
     axis = (head - base) / np.linalg.norm(head - base)
     side = np.array([1.0, 0.0, 0.0])

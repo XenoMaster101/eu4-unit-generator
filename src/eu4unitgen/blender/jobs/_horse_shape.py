@@ -26,6 +26,15 @@ def verts(obj) -> np.ndarray:
     return a.reshape(-1, 3)
 
 
+def faces(obj) -> np.ndarray:
+    """Triangles (m x 3) of ``obj``'s mesh (its faces fanned)."""
+    out = []
+    for poly in obj.data.polygons:
+        v = poly.vertices
+        out += [(v[0], v[i], v[i + 1]) for i in range(1, len(v) - 1)]
+    return np.array(out, dtype=np.int64).reshape(-1, 3)
+
+
 def set_verts(obj, co: np.ndarray) -> None:
     obj.data.vertices.foreach_set("co", co.astype(np.float32).ravel())
     obj.data.update()
@@ -188,6 +197,181 @@ def reshape(obj, vanilla, bones: dict, leg_top: float = 6.0, anchors: int = 60, 
     log["max_vertex_move"] = float(np.linalg.norm(new - co, axis=1).max())
     log["head_after"] = {"poll": head_features(new, B["HorseNeckBase"])[2].round(2).tolist()}
     return log
+
+
+def _span(co, tris, point, direction, reach=10.0):
+    """(start, end) along ``direction`` (as offsets from ``point``) of the solid nearest ``point``
+    on a ray through it, or None."""
+    import _horse_measure as hm
+    hits = hm.ray_hits(co, tris, point - direction * reach, direction) - reach
+    pairs = [(hits[i], hits[i + 1]) for i in range(0, len(hits) - 1, 2)]
+    if not pairs:
+        return None
+    return min(pairs, key=lambda p: 0.0 if p[0] <= 0 <= p[1] else min(abs(p[0]), abs(p[1])))
+
+
+def neck_warp(obj, vanilla, bones: dict, allow: float = 1.15, samples=(0.1, 0.25, 0.4, 0.55, 0.7, 0.85)) -> dict:
+    """The neck thinned towards vanilla's: at fractions of NeckBase -> HorseHead, the thickness
+    perpendicular to the neck (in the vertical plane) is measured by a ray on both meshes; where
+    ours is thicker than vanilla's x ``allow``, that cross-section is scaled about its own centre
+    (never thickened). The ratio fades to 1 a quarter of the neck behind the base and at the head.
+    -> {fraction: [ours, vanilla, ratio]}."""
+    B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    base, head = B["HorseNeckBase"], B["HorseHead"]
+    axis = head - base
+    length = float(np.linalg.norm(axis))
+    axis /= length
+    up = np.cross(axis, np.array([1.0, 0.0, 0.0]))
+    up = up if up[1] > 0 else -up
+    co, tris = verts(obj), faces(obj)
+    vco, vtri = verts(vanilla), faces(vanilla)
+    ts, ratios, centres, log = [-0.25], [1.0], [0.0], {}
+    for t in samples:
+        point = base + axis * t * length
+        o, v = _span(co, tris, point, up), _span(vco, vtri, point, up)
+        if o is None or v is None:
+            continue
+        ratio = min(1.0, allow * (v[1] - v[0]) / (o[1] - o[0]))
+        ts.append(t)
+        ratios.append(ratio)
+        centres.append((o[0] + o[1]) / 2)
+        log[t] = [round(float(o[1] - o[0]), 3), round(float(v[1] - v[0]), 3), round(ratio, 3)]
+    ts.append(1.05)
+    ratios.append(1.0)
+    centres.append(centres[-1])
+    rel = co - base
+    tv = (rel @ axis) / length
+    radial = rel - np.outer(rel @ axis, axis)
+    u = radial @ up
+    near = (tv > -0.25) & (tv < 1.05) & (np.linalg.norm(radial, axis=1) < 4.0)
+    r = np.interp(tv, ts, ratios)
+    c = np.interp(tv, ts, centres)
+    shift = np.where(near, (c + (u - c) * r) - u, 0.0)
+    set_verts(obj, co + shift[:, None] * up)
+    return log
+
+
+def _leg_profile(points, chain_pts, ys, reach, slab):
+    """Per height in ``ys``: (centre (x, z), mean radius) of the leg's slice in ``points``, found
+    from the vanilla chain's point at that height by recentring; NaN where no leg is found."""
+    out = np.full((len(ys), 3), np.nan)
+    for i, y in enumerate(ys):
+        sl = points[np.abs(points[:, 1] - y) < slab]
+        k = int(np.clip(np.searchsorted(chain_pts[:, 1], y), 1, len(chain_pts) - 1))
+        p0, p1 = chain_pts[k - 1], chain_pts[k]
+        t = (y - p0[1]) / max(p1[1] - p0[1], 1e-9)
+        centre = (p0 + (p1 - p0) * np.clip(t, 0, 1))[[0, 2]]
+        for _ in range(4):
+            near = sl[np.linalg.norm(sl[:, [0, 2]] - centre, axis=1) < reach]
+            if len(near) < 8:
+                break
+            centre = (near[:, [0, 2]].min(axis=0) + near[:, [0, 2]].max(axis=0)) / 2
+        else:
+            out[i] = (centre[0], centre[1], np.linalg.norm(near[:, [0, 2]] - centre, axis=1).mean())
+    return out
+
+
+def leg_inflate(obj, vanilla, bones: dict, top: float, allow: float = 0.9, step: float = 0.25,
+                reach: float = 0.85, most: float = 2.5) -> dict:
+    """Thin legs thickened towards vanilla's: per leg and height (ground to ``top``, where the
+    legs meet the body), the mean radius of our slice and of vanilla's (surface samples, so
+    vanilla's sparse vertices don't matter); where ours is under vanilla's x ``allow``, the slice's
+    vertices move out from its centre (x, z) by that ratio (at most ``most``; never thinned).
+    The ratio fades to 1 over the top 0.8 so the legs still meet the body. -> per leg: the
+    thinnest ratio before and how many vertices moved."""
+    import _horse_measure as hm
+    co, vco = verts(obj), verts(vanilla)
+    vs = hm.surface_samples(vco, faces(vanilla))
+    os_ = hm.surface_samples(co, faces(obj), n=200000)
+    ys = np.arange(0.2, top, step)
+    B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    best = np.full(len(co), np.inf)
+    scale = np.ones(len(co))
+    centre_of = np.zeros((len(co), 2))
+    log = {}
+    for leg in LEGS:
+        chain_pts = leg_chain(B, leg)[::-1][::-1]
+        chain_pts = chain_pts[np.argsort(chain_pts[:, 1])]
+        ours, van = _leg_profile(os_, chain_pts, ys, reach, 0.1), _leg_profile(vs, chain_pts, ys, reach, 0.1)
+        ok = ~np.isnan(ours[:, 2]) & ~np.isnan(van[:, 2])
+        if ok.sum() < 3:
+            log[leg] = {"found": int(ok.sum())}
+            continue
+        ratio = np.clip(allow * van[ok, 2] / ours[ok, 2], 1.0, most)
+        ratio = np.convolve(np.pad(ratio, 2, mode="edge"), np.ones(5) / 5, mode="valid")  # smooth along the leg
+        fade = np.clip((top - ys[ok]) / 0.8, 0, 1)
+        ratio = 1 + (ratio - 1) * fade
+        cx, cz = np.interp(co[:, 1], ys[ok], ours[ok, 0]), np.interp(co[:, 1], ys[ok], ours[ok, 1])
+        d = np.hypot(co[:, 0] - cx, co[:, 2] - cz)
+        mine = (d < reach) & (co[:, 1] < top) & (d < best)
+        best[mine] = d[mine]
+        scale[mine] = np.interp(co[mine, 1], ys[ok], ratio)
+        centre_of[mine] = np.stack([cx[mine], cz[mine]], axis=1)
+        log[leg] = {"found": int(ok.sum()), "thinnest_ratio": round(float((ours[ok, 2] / van[ok, 2]).min()), 3),
+                    "most_scale": round(float(ratio.max()), 3)}
+    move = scale > 1.0
+    co[move, 0] = centre_of[move, 0] + (co[move, 0] - centre_of[move, 0]) * scale[move]
+    co[move, 2] = centre_of[move, 1] + (co[move, 2] - centre_of[move, 1]) * scale[move]
+    set_verts(obj, co)
+    log["moved"] = int(move.sum())
+    return log
+
+
+def _half_widths(points, ys, zs, cell):
+    """Max |x| per (y, z) cell and side (+x, -x) of ``points``: arrays (2, len(ys), len(zs)), NaN where empty."""
+    out = np.full((2, len(ys), len(zs)), np.nan)
+    iy = np.round((points[:, 1] - ys[0]) / cell).astype(int)
+    iz = np.round((points[:, 2] - zs[0]) / cell).astype(int)
+    ok = (iy >= 0) & (iy < len(ys)) & (iz >= 0) & (iz < len(zs))
+    for side, sel in ((0, points[:, 0] > 0), (1, points[:, 0] < 0)):
+        m = ok & sel
+        flat = np.full(len(ys) * len(zs), -np.inf)
+        np.maximum.at(flat, iy[m] * len(zs) + iz[m], np.abs(points[m, 0]))
+        flat[np.isinf(flat)] = np.nan
+        out[side] = flat.reshape(len(ys), len(zs))
+    return out
+
+
+def flank_warp(obj, vanilla, bones: dict, allow: float = 1.05, y0: float = 6.0, y1: float = 13.0,
+               cell: float = 0.5, least: float = 0.6) -> dict:
+    """Each flank narrowed towards vanilla's half-width, side by side: the generated torso can be
+    wider on one side (a 3/4-view reference: the near side's caparison flares) and wider than
+    vanilla's where the rider's legs hang. Per (y, z) cell of the torso (neck base to behind the
+    rump, ``y0``-``y1``) and side, our max |x| against vanilla's (both sides' mean; its thin
+    stirrups left out); where ours is over vanilla's x ``allow`` that side's x is scaled down (to
+    ``least`` at most; never widened). The ratio grid is smoothed; vertices near the leg chains
+    below y 9.5 keep their x (the legs are on their chains). -> the narrowest ratio per side."""
+    import _horse_measure as hm
+    B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    co = verts(obj)
+    ours = hm.surface_samples(co, faces(obj), n=250000)
+    van = hm.surface_samples(verts(vanilla), faces(vanilla), n=120000)
+    stir = (np.abs(van[:, 0]) > 2.9) & (van[:, 1] > 7.5) & (van[:, 1] < 10.5) & (van[:, 2] > -4.0) & (van[:, 2] < 0.5)
+    van = van[~stir]
+    ys = np.arange(y0, y1 + cell / 2, cell)
+    zs = np.arange(B["HorseNeckBase"][2], B["HorseSpineEnd"][2] + 2.5 + cell / 2, cell)
+    o = _half_widths(ours, ys, zs, cell)
+    v = np.nanmean(_half_widths(van, ys, zs, cell), axis=0)
+    ratio = np.where(np.isnan(o) | np.isnan(v[None]), 1.0, np.clip(allow * v[None] / o, least, 1.0))
+    pad = np.pad(ratio, ((0, 0), (1, 1), (1, 1)), mode="edge")
+    ratio = sum(pad[:, i:i + len(ys), j:j + len(zs)] for i in range(3) for j in range(3)) / 9.0
+    fy = np.clip((co[:, 1] - ys[0]) / cell, 0, len(ys) - 1)
+    fz = np.clip((co[:, 2] - zs[0]) / cell, 0, len(zs) - 1)
+    y0i, z0i = np.floor(fy).astype(int), np.floor(fz).astype(int)
+    y1i, z1i = np.minimum(y0i + 1, len(ys) - 1), np.minimum(z0i + 1, len(zs) - 1)
+    ty, tz = fy - y0i, fz - z0i
+    side = (co[:, 0] < 0).astype(int)
+    r = (ratio[side, y0i, z0i] * (1 - ty) * (1 - tz) + ratio[side, y1i, z0i] * ty * (1 - tz) +
+         ratio[side, y0i, z1i] * (1 - ty) * tz + ratio[side, y1i, z1i] * ty * tz)
+    inside = (co[:, 1] >= y0 - 1.0) & (co[:, 2] >= zs[0]) & (co[:, 2] <= zs[-1])
+    r = np.where(inside, r, 1.0)
+    r = 1 + (r - 1) * np.clip((co[:, 1] - (y0 - 1.0)) / 1.0, 0, 1)
+    legs = (hm.leg_distance(co, bones) < 1.0) & (co[:, 1] < 9.5)
+    r[legs] = 1.0
+    co[:, 0] *= r
+    set_verts(obj, co)
+    return {"narrowest": {"left": round(float(ratio[0].min()), 3), "right": round(float(ratio[1].min()), 3)},
+            "moved": int((r < 0.999).sum())}
 
 
 def flatten_lump(obj, z0: float, z1: float, y0: float, y1: float, margin: float = 0.3) -> int:
