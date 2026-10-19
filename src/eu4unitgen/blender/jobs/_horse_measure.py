@@ -8,9 +8,9 @@ a ray's entry and exit hits closer than 0.5) are skipped, so the numbers describ
   * width: rays in from either side at a quarter, half and three quarters of the way from belly
     to back (the widest);
   * belly: the belly's height above the ground (how much leg shows under the body);
-  * leg: each leg's thickness at the forearm/gaskin (Down-Knee) and the cannon (Knee-Heel), from
-    the vertices near the chain; thin legs under a deep body read as "sticks";
-  * neck: the cross-section at HorseNeckMiddle, perpendicular to the neck (NeckBase -> Head);
+  * leg: each leg's thickness across (x) at the forearm/gaskin (Down-Knee) and the cannon
+    (Knee-Heel) midpoints, by a ray through the bone; thin legs under a deep body read as "sticks";
+  * neck: the thickness at HorseNeckMiddle perpendicular to the neck (NeckBase -> Head), by a ray;
   * volume of the closed surface (open meshes: approximate);
   * hem (reported, not judged): the lowest surface that isn't a leg, i.e. a skirt's hem.
 ``compare`` divides ours by vanilla's and flags what is past its limit.
@@ -60,16 +60,22 @@ def top_bottom(co, tris, z, x=0.0):
     return (None if down is None else 60.0 - down), (None if up is None else -5.0 + up)
 
 
-def leg_thickness(co, bones, leg, upper, lower, reach=1.2):
-    """Thickness (x extent) of ``leg`` halfway between joints ``upper`` and ``lower``: vertices
-    within ``reach`` of that point in the slab along the bone."""
+def span_at(co, tris, point, direction, reach=10.0):
+    """Thickness of the solid around ``point`` along ``direction``: the entry and exit of the hit
+    pair that contains it, on a ray cast from ``reach`` away (any topology: no vertex sampling).
+    None if the point isn't inside anything."""
+    d = np.asarray(direction, dtype=np.float64) / np.linalg.norm(direction)
+    hits = ray_hits(co, tris, np.asarray(point) - d * reach, d)
+    for i in range(0, len(hits) - 1, 2):
+        if hits[i] <= reach <= hits[i + 1]:
+            return float(hits[i + 1] - hits[i])
+    return None
+
+
+def leg_thickness(co, tris, bones, leg, upper, lower):
+    """Thickness (across, along x) of ``leg`` halfway between joints ``upper`` and ``lower``."""
     a, b = (np.array(bones[f"Horse{leg}{j}"], dtype=np.float64) for j in (upper, lower))
-    mid, axis = (a + b) / 2, (b - a) / np.linalg.norm(b - a)
-    rel = co - mid
-    along = rel @ axis
-    across = np.linalg.norm(rel - along[:, None] * axis, axis=1)
-    near = co[(np.abs(along) < 0.15) & (across < reach)]
-    return float(np.ptp(near[:, 0])) if len(near) > 2 else None
+    return span_at(co, tris, (a + b) / 2, (1.0, 0.0, 0.0))
 
 
 def leg_distance(co, bones):
@@ -100,6 +106,7 @@ def stations(bones):
 
 
 def proportions(co, tris, bones, leg_radius=0.8, slab=0.3):
+    """Silhouette numbers of one mesh (module doc)."""
     co, tris = np.asarray(co, dtype=np.float64), np.asarray(tris, dtype=np.int64)
     out = {"slices": {}}
     legd = leg_distance(co, bones)
@@ -121,19 +128,14 @@ def proportions(co, tris, bones, leg_radius=0.8, slab=0.3):
             "z": round(float(z), 3), "back": back, "belly": belly,
             "depth": None if back is None or belly is None else back - belly, "width": width,
             "hem": float(not_leg[:, 1].min()) if len(not_leg) else belly}
-    out["legs"] = {leg: {"upper": leg_thickness(co, bones, leg, "Down", "Knee"),
-                         "cannon": leg_thickness(co, bones, leg, "Knee", "Heel")} for leg in LEGS}
+    out["legs"] = {leg: {"upper": leg_thickness(co, tris, bones, leg, "Down", "Knee"),
+                         "cannon": leg_thickness(co, tris, bones, leg, "Knee", "Heel")} for leg in LEGS}
     base, mid, head = (np.array(bones[n], dtype=np.float64) for n in ("HorseNeckBase", "HorseNeckMiddle", "HorseHead"))
     axis = (head - base) / np.linalg.norm(head - base)
-    near = co[np.abs((co - mid) @ axis) < slab]
     side = np.array([1.0, 0.0, 0.0])
     up = np.cross(axis, side)
     up = up if up[1] > 0 else -up
-    rel = near - mid
-    # the neck's own cross-section: the connected part near the bone (the head or body may cut the plane too)
-    rel = rel[np.linalg.norm(rel - (rel @ axis)[:, None] * axis, axis=1) < 3.0]
-    out["neck"] = {"thickness": float(np.ptp(rel @ up)) if len(rel) else None,
-                   "width": float(np.ptp(rel @ side)) if len(rel) else None}
+    out["neck"] = {"thickness": span_at(co, tris, mid, up), "width": span_at(co, tris, mid, side)}
     out["volume"] = volume(co, tris)
     return out
 

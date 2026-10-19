@@ -11,7 +11,8 @@ bodies in in-game tests 7-8, and a 0.5 rider on a 0.48 horse looks like vanilla'
 
 args: {"units": [{"name": ..., "root": node}], "frame": 1, "view": [x, y, z] (camera -> scene),
        "size": px, "camera": null | {fixed framing, see shoot_fixed}, "inherit_scale": false, "thumbs": px or 0 (each attached rigid part alone, by entity
-       name, for the Parts cards), "out_dir": ..., "result_path": ...}
+       name, for the Parts cards), "dump": bool (each unit's posed meshes as JSON in the root mesh's PDX space:
+       {node name: {"p", "tri"}}, for measuring e.g. where a rider's legs hang), "out_dir": ..., "result_path": ...}
 node: {"name", "mesh", "anim": path | null, "scale": float, "hidden": bool (a helper mesh: placed, not drawn),
        "attach": [{"bone", "bind": [12] | null, "node"}]}
 """
@@ -128,6 +129,39 @@ def points(loaded):
     return co
 
 
+def dump_posed(unit, loaded, path, bone=None):
+    """The posed, drawn meshes in the root mesh's own space (PDX axes, its pdxmesh scale taken out);
+    with ``bone``, as if that bone of the root's rig were at rest (the animation can turn the root)."""
+    import json
+    inv = (S @ Matrix.Scale(unit["root"].get("scale", 1.0), 4)).inverted()  # S is its own inverse
+    rig = loaded[0][2]
+    if bone and rig is not None and bone in rig.pose.bones:
+        rest = rig.matrix_world @ rig.data.bones[bone].matrix_local
+        posed = rig.matrix_world @ rig.pose.bones[bone].matrix
+        inv = inv @ rest @ posed.inverted()
+    out = {}
+    for node, objs, _ in loaded:
+        if node.get("hidden"):
+            continue
+        p, tri = [], []
+        for o in objs:
+            if o.type != "MESH":
+                continue
+            ev = o.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            me = ev.to_mesh()
+            me.calc_loop_triangles()
+            base = len(p) // 3
+            for v in me.vertices:
+                p += list(inv @ (o.matrix_world @ v.co))
+            tri += [base + i for lt in me.loop_triangles for i in lt.vertices]
+            ev.to_mesh_clear()
+        if p:
+            out[node["name"]] = {"p": p, "tri": tri}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f)
+    return path
+
+
 def shoot_fixed(sc, cam, c, path):
     """One framing for every unit (not fitted to each unit's bounds), so units render at the same
     scale and can be compared with each other and with an in-game screenshot at a known zoom.
@@ -150,7 +184,7 @@ def main() -> None:
     a = _pdx.args()
     ie = _pdx.io_module()
     scope_rig_lookup(ie)
-    out = {"tiles": {}, "seconds": {}, "thumbs": {}}
+    out = {"tiles": {}, "seconds": {}, "thumbs": {}, "dumps": {}}
     for unit in a["units"]:
         start = time.time()
         _pdx.clear_scene()
@@ -175,6 +209,9 @@ def main() -> None:
                 if o.type != "MESH" or node.get("hidden"):
                     o.hide_render = True
         path = os.path.join(a["out_dir"], f"{unit['name']}.png")
+        if a.get("dump"):
+            bone = a["dump"].get("bone") if isinstance(a["dump"], dict) else None
+            out["dumps"][unit["name"]] = dump_posed(unit, loaded, os.path.join(a["out_dir"], f"{unit['name']}_posed.json"), bone)
         if a.get("camera"):
             out["tiles"][unit["name"]] = shoot_fixed(scene, cam, a["camera"], path)
         else:
