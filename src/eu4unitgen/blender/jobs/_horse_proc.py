@@ -21,7 +21,8 @@ import _horse_measure as hm
 LEGS = ("FrontLeft", "FrontRight", "BackLeft", "BackRight")
 # reference / vanilla ratios are clipped: the generated model's legs are sticks and its fused
 # skirts widen the flanks, so those cues are only trusted near 1 (assumed, test 16)
-CLIP = {"depth": (0.9, 1.1), "width": (0.85, 1.1), "neck": (0.85, 1.0), "leg": (0.95, 1.1)}
+CLIP = {"depth": (0.9, 1.1), "width": (0.85, 1.0), "neck": (0.85, 1.0), "leg": (0.95, 1.1)}
+# width at most vanilla's: the vanilla rider's legs hang where vanilla's barrel ends (wider hides them, test 16b)
 
 
 def fit_ratios(ref_co, ref_tris, van_co, van_tris, bones) -> dict:

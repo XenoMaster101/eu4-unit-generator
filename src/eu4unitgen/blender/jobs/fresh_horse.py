@@ -932,6 +932,9 @@ def main():
         high, build_tail = None, False
         obj, res["fit"] = procedural_horse(van, src)
         res["stages"]["built"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
+        high = obj.copy()  # the bake source: the smooth surface before the reduction
+        high.data = obj.data.copy()
+        high.name = "bake_source"
         if a.get("tail"):
             import _horse_measure as hm
             state = hm.tail_state(hs.verts(obj), hs.faces(obj), van["bones"])
