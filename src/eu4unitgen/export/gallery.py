@@ -15,6 +15,11 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 MAX_DEPTH = 4  # horse -> rider -> weapon; base -> crew -> shield
+# The game's closest zoom, as render_unit's fixed ``camera``: matched by eye to an in-game
+# screenshot (test 15 tier 1, 852x732 crop, 2026-10-18) with the same horse and rider rendered over
+# it. Approximate: the game's camera is a perspective one and this is orthographic.
+GAME_CLOSE = {"view": [-0.15, 0.5, -0.85], "target": [0, 0, 3.0], "ortho_scale": 17.0,
+              "width": 852, "height": 732, "shadow": True}
 
 
 @dataclass

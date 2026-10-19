@@ -10,7 +10,7 @@ the mirror S). An attached entity keeps its own pdxmesh scale, not times its par
 bodies in in-game tests 7-8, and a 0.5 rider on a 0.48 horse looks like vanilla's riders.
 
 args: {"units": [{"name": ..., "root": node}], "frame": 1, "view": [x, y, z] (camera -> scene),
-       "size": px, "inherit_scale": false, "thumbs": px or 0 (each attached rigid part alone, by entity
+       "size": px, "camera": null | {fixed framing, see shoot_fixed}, "inherit_scale": false, "thumbs": px or 0 (each attached rigid part alone, by entity
        name, for the Parts cards), "out_dir": ..., "result_path": ...}
 node: {"name", "mesh", "anim": path | null, "scale": float, "hidden": bool (a helper mesh: placed, not drawn),
        "attach": [{"bone", "bind": [12] | null, "node"}]}
@@ -128,6 +128,24 @@ def points(loaded):
     return co
 
 
+def shoot_fixed(sc, cam, c, path):
+    """One framing for every unit (not fitted to each unit's bounds), so units render at the same
+    scale and can be compared with each other and with an in-game screenshot at a known zoom.
+    ``c``: {"view": camera -> scene, "target": the point at the image centre, "ortho_scale": scene
+    units across the image's wider side, "width", "height", "shadow": bool}."""
+    d = Vector(c["view"]).normalized()
+    target = Vector(c.get("target", (0, 0, 0)))
+    cam.location = target - d * 40
+    cam.rotation_euler = d.to_track_quat("-Z", "Y").to_euler()
+    cam.data.clip_end = 100
+    cam.data.ortho_scale = c["ortho_scale"]
+    sc.display.shading.show_shadows = bool(c.get("shadow", False))
+    sc.render.resolution_x, sc.render.resolution_y = c["width"], c["height"]
+    sc.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    return path
+
+
 def main() -> None:
     a = _pdx.args()
     ie = _pdx.io_module()
@@ -157,8 +175,11 @@ def main() -> None:
                 if o.type != "MESH" or node.get("hidden"):
                     o.hide_render = True
         path = os.path.join(a["out_dir"], f"{unit['name']}.png")
-        out["tiles"][unit["name"]] = cd.shoot(scene, cam, frame(loaded), a.get("view", (-0.7, 0.7, -0.35)), path,
-                                              a.get("size", 256))
+        if a.get("camera"):
+            out["tiles"][unit["name"]] = shoot_fixed(scene, cam, a["camera"], path)
+        else:
+            out["tiles"][unit["name"]] = cd.shoot(scene, cam, frame(loaded), a.get("view", (-0.7, 0.7, -0.35)),
+                                                  path, a.get("size", 256))
         if a.get("thumbs"):  # each rigid part alone, as posed, for the Parts cards
             rigid = [(n, objs) for n, objs, rig in loaded if n is not unit["root"] and not n.get("anim")
                      and not n.get("hidden") and n["name"] not in out["thumbs"]]

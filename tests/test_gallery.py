@@ -99,6 +99,19 @@ def test_gallery_renders_every_unit_in_one_job(session, tmp_path, monkeypatch):
     assert some.parts[("infantry", 1)] == {"Right_hand_node": "hr_mac_dory_1", "Left_hand_node": "hr_mac_hoplon_1"}
     assert some.parts[("cavalry", 1)] == {"Right_hand_node": "hr_mac_xyston_rider_1", "head": "hr_mac_crest_rider_1"}
     assert some.thumbs["hr_mac_dory_1"].size == (24, 24) and "hr_mac_crest_rider_1" in some.thumbs
+    assert renders[0]["camera"] is None  # each unit fitted to its tile by default
+
+
+def test_fixed_camera_reaches_the_job(session, tmp_path, monkeypatch):
+    """One framing for every unit (GAME_CLOSE), so ours and vanilla compare at the same scale."""
+    from eu4unitgen.export.gallery import GAME_CLOSE
+
+    runner = GalleryRunner()
+    monkeypatch.setattr(session, "runner", lambda: runner)
+    spec = SetSpec(tags=["MAC"], gfx="hellenicgfx", loadout=_loadout(tmp_path))
+    session.gallery(spec, [("cavalry", 1), ("cavalry", 3)], size=32, camera=GAME_CLOSE)
+    (args,) = [a for job, a in runner.calls if job == "render_unit"]
+    assert args["camera"] == GAME_CLOSE and len(args["units"]) == 2
 
 
 def test_retextured_meshes_are_staged_with_their_meshsettings_textures(session, tmp_path, monkeypatch):
