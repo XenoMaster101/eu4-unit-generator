@@ -725,13 +725,17 @@ def loadout_checklist(generated: GeneratedSet, mod_name: str, sprite_techs: dict
             lines += ["", f"BODY COMPARISON ({bodies})",
                       "[ ] B1 which body reads better as a Hellenistic soldier with the Greek helmet, up close and at "
                       "map scale? Note why (clothing, skin, silhouette, how the helmet sits)."]
+    lines += ["", "GENERAL"]
+    if res.parts:  # the part lines only when the set has parts
+        lines += [
+            "[ ] G1 every part follows its bone through idle, walk and attack (no floating, no lag).",
+            "[ ] G2 hoplon face: the country colour (or the fixed colour) as listed; rim bronze; the inside is not "
+            "see-through.",
+            "[ ] G3 blazon (if any): upright and not mirrored, seen from the front of the unit. If not: note how it is "
+            "turned.",
+            "[ ] G4 sizes: a part far too big or small, or sunk into / floating off the body: note which.",
+        ]
     lines += [
-        "",
-        "GENERAL",
-        "[ ] G1 every part follows its bone through idle, walk and attack (no floating, no lag).",
-        "[ ] G2 hoplon face: the country colour (or the fixed colour) as listed; rim bronze; the inside is not see-through.",
-        "[ ] G3 blazon (if any): upright and not mirrored, seen from the front of the unit. If not: note how it is turned.",
-        "[ ] G4 sizes: a part far too big or small, or sunk into / floating off the body: note which.",
         "[ ] E  error.log: note any line with hr_, .mesh, entity, attach, texture or animation"
         + (", and any with skeleton, bone or a fresh_horse name (a fresh mesh the engine can't bind to its "
            "skeleton)." if res.horses else "."),
