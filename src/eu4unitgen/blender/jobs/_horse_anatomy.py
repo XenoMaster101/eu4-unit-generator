@@ -50,7 +50,7 @@ DEFAULTS = {
     "hoof_height": 0.04, "leg_flat": 0.85,
     # the rider's thighs: the barrel's half-width beside the saddle stays under this (scene units;
     # assumed from round 3's rider_leg measure: the vanilla rider's thighs hang outside x ~2.5)
-    "rider_clear": 2.45,
+    "rider_clear": 2.1,
 }
 GROUPS = {  # which parameters each fitted measurement scales
     "depth": ("barrel_depth",),

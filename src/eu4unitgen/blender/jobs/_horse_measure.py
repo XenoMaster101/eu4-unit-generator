@@ -21,10 +21,11 @@ import numpy as np
 
 LEGS = ("FrontLeft", "FrontRight", "BackLeft", "BackRight")
 
-# ours / vanilla limits: past these the horse reads bloated or short-legged at map zoom. Assumed
-# (test 15 round 3): a barded horse may be somewhat bulkier than vanilla's bare one, not 1.5x.
-# Tightened after the in-game test 15 (depth 1.22x and the hem at 0.79x read as a sack on sticks).
-LIMITS = {"depth": 1.15, "width": 1.25, "belly": 0.85, "leg": 0.75, "neck": 1.3, "volume": 1.3}
+# ours / vanilla limits. Round 5 (user): limits only stop broken results, they don't pull the shape
+# towards vanilla's (a heavy warhorse may come out heavier). Assumed. History: round 3's tighter set
+# (depth 1.15, width 1.25, belly 0.85, legs 0.75, neck 1.3, volume 1.3) followed in-game test 15,
+# where depth 1.22x with the hem at 0.79x and stick legs read as a sack on sticks.
+LIMITS = {"depth": 1.3, "width": 1.4, "belly": 0.75, "leg": 0.7, "neck": 1.5, "volume": 1.6}
 # the seated rider's lower legs seen from the side, ours / vanilla's: the reference shows the boot
 # and stirrup outside the caparison (measured only when a posed rider is given)
 LIMITS_RIDER = {"rider_leg": 0.9}
