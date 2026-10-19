@@ -1,7 +1,7 @@
 """Blender job: render a plain model file (.glb/.gltf/.obj/.fbx, or a .mesh through io_pdx_mesh)
 from named views, for checking imported and generated geometry (Track C, test 15).
 
-args: {"model": path, "out_dir": path, "name": str, "size": 512,
+args: {"model": path, "out_dir": path, "name": str, "size": 512, "texture": diffuse image | null,
        "views": {"front": [azimuth_deg, elevation_deg], ...}, "result_path": path}
 Azimuth 0 looks along +Y (Blender's front view: the camera at -Y), 90 from +X (right side).
 Workbench, studio light, object colours by random (pieces) or a single grey.
@@ -48,6 +48,16 @@ def main() -> None:
     scene.render.engine = "BLENDER_WORKBENCH"
     scene.display.shading.light = "STUDIO"
     scene.display.shading.color_type = args.get("colour", "SINGLE")
+    if args.get("texture"):  # a diffuse image on the model's UVs
+        mat = bpy.data.materials.new("tex")
+        mat.use_nodes = True
+        node = mat.node_tree.nodes.new("ShaderNodeTexImage")
+        node.image = bpy.data.images.load(args["texture"])
+        mat.node_tree.links.new(node.outputs["Color"], mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"])
+        for o in objs:
+            o.data.materials.clear()
+            o.data.materials.append(mat)
+        scene.display.shading.color_type = "TEXTURE"
     scene.display.shading.single_color = (0.62, 0.62, 0.64)
     scene.display.shading.show_cavity = True
     scene.render.resolution_x = scene.render.resolution_y = int(args.get("size", 512))

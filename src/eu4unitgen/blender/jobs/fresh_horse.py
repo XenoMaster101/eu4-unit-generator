@@ -25,6 +25,8 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        "lump": {"z0", "z1", "y0", "y1", "margin"} (mirror-based removal of a one-sided bulge),
        "voxel_fine": size (a closed solid before the edits), "hem_y", "leg_radius" (skirts raised to the
        hem), "tail_gap" (the caparison pushed off the tail),
+       "chanfron": {"lift", "thickness", "facing"} (step 8: a plate merged in, 100% HorseHead),
+       "paint": {"palette": {silver, red, gold, coat}, "out_dir", "name", "size"} (step 8: textures),
        "chain_weights": bool (head, leg and tail regions weighted by distance to their bone chains),
        "target_tris", "quads" (QuadriFlow's target; default target_tris / 2), "relax", "smooth", "influences",
        "geometry_out": .json path, "preview_out": .obj path (Blender axes, for renders), "result_path"}
@@ -424,6 +426,103 @@ def decimate(obj, target, log=None, quads=None):
     return tri_count(obj)
 
 
+def add_chanfron(obj, bones, lift=0.06, thickness=0.04, facing=0.35):
+    """A chanfron merged into the mesh: the forehead and nose faces (in front of the poll, facing
+    out of the face: away from the head's axis, upwards) copied, lifted ``lift`` off the face and
+    given ``thickness``. Its faces get part = 1 (weighted 100% HorseHead after the transfer).
+    -> its triangle count."""
+    B = {k: Vector(v) for k, v in bones.items()}
+    head = B["HorseHead"]
+    axis = Vector((0.0, -1.5, -3.3)).normalized()  # the poll towards vanilla's muzzle
+    out_of_face = Vector((0.0, -axis.z, axis.y))  # the axis turned 90 degrees up
+    if out_of_face.y < 0:
+        out_of_face = -out_of_face
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.normal_update()
+    faces = [f for f in bm.faces if f.calc_center_median().z < head.z - 0.3 and f.normal.dot(out_of_face) > facing
+             and (f.calc_center_median() - head).dot(axis) < 3.0]
+    plate = bmesh.new()
+    vmap = {}
+    for f in faces:
+        vs = []
+        for v in f.verts:
+            if v.index not in vmap:
+                vmap[v.index] = plate.verts.new(v.co + v.normal * lift)
+            vs.append(vmap[v.index])
+        plate.faces.new(vs)
+    bm.free()
+    me = bpy.data.meshes.new("chanfron")
+    plate.to_mesh(me)
+    plate.free()
+    ch = bpy.data.objects.new("chanfron", me)
+    bpy.context.scene.collection.objects.link(ch)
+    activate(ch)
+    mod = ch.modifiers.new("solid", "SOLIDIFY")
+    mod.thickness, mod.offset, mod.use_rim = thickness, 1.0, True
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    mod = ch.modifiers.new("tri", "TRIANGULATE")
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    tris = tri_count(ch)
+    for o, value in ((obj, 0), (ch, 1)):
+        attr = o.data.attributes.new("part", "INT", "FACE")
+        attr.data.foreach_set("value", [value] * len(o.data.polygons))
+    activate(obj)
+    ch.select_set(True)
+    bpy.ops.object.join()
+    return tris
+
+
+def face_parts(obj):
+    attr = obj.data.attributes.get("part")
+    if attr is None:
+        return [0] * len(obj.data.polygons)
+    vals = [0] * len(obj.data.polygons)
+    attr.data.foreach_get("value", vals)
+    return vals
+
+
+def pin_chanfron(obj, bone="HorseHead"):
+    """Every vertex of a part-1 face weighted 100% to ``bone``. -> how many."""
+    parts = face_parts(obj)
+    pinned = {v for poly, part in zip(obj.data.polygons, parts) if part == 1 for v in poly.vertices}
+    group = obj.vertex_groups.get(bone) or obj.vertex_groups.new(name=bone)
+    for vi in pinned:
+        for g in list(obj.data.vertices[vi].groups):
+            obj.vertex_groups[g.group].remove([vi])
+        group.add([vi], 1.0, "REPLACE")
+    return len(pinned)
+
+
+def paint_textures(obj, bones, palette, hem_y, out_dir, name, size):
+    """Step 8: the textures (_horse_paint) as PNGs in ``out_dir``. -> paths and coverage."""
+    import _horse_paint as hp
+    me = obj.data
+    me.calc_loop_triangles()
+    uv = me.uv_layers.active.data
+    parts = face_parts(obj)
+    co = hs.verts(obj)
+    tris = np.array([lt.vertices[:] for lt in me.loop_triangles])
+    uvs = np.array([[uv[li].uv[:] for li in lt.loops] for lt in me.loop_triangles])
+    normals = np.array([lt.normal[:] for lt in me.loop_triangles])
+    centres = co[tris].mean(axis=1)
+    part = np.array([parts[lt.polygon_index] for lt in me.loop_triangles])
+    region = hp.regions(centres, normals, part, bones, hem_y)
+    diff, spec, normal, coverage = hp.paint(uvs, tris, co, normals, region, palette, bones, size)
+    paths = {}
+    for kind, arr in (("diffuse", diff), ("specular", spec), ("normal", normal)):
+        h, w = arr.shape[:2]
+        rgba = arr if arr.shape[2] == 4 else np.concatenate([arr, np.full((h, w, 1), 255, np.uint8)], axis=2)
+        img = bpy.data.images.new(f"{name}_{kind}", w, h, alpha=True)
+        img.pixels.foreach_set((rgba[::-1].astype(np.float32) / 255.0).ravel())  # Blender rows run up
+        path = os.path.join(out_dir, f"{name}_{kind}.png")
+        img.filepath_raw, img.file_format = path, "PNG"
+        img.save()
+        paths[kind] = path
+    counts = {int(r): int((region == r).sum()) for r in np.unique(region)}
+    return {"paths": paths, "coverage": coverage, "faces_by_region": counts}
+
+
 def smart_uv(obj):
     activate(obj)
     bpy.ops.object.mode_set(mode="EDIT")
@@ -611,11 +710,19 @@ def main():
         before, after, want, note = match_saddle(obj, vanilla, van["bones"])
         res["saddle"] = {"before": before, "after": after, "vanilla": want, "note": note,
                          "saddle_node_y": van["bones"]["Saddle_Node"][1]}
+    if a.get("chanfron"):
+        res["chanfron"] = {"tris": add_chanfron(obj, van["bones"], **a["chanfron"])}
     smart_uv(obj)
     wstats = {}
     transfer_weights(obj, vanilla, a.get("smooth", 2), a.get("influences", 3),
                      van["bones"] if a.get("chain_weights") else None, wstats)
     res["weights"] = wstats
+    if a.get("chanfron"):
+        res["chanfron"]["pinned_vertices"] = pin_chanfron(obj)
+    if a.get("paint"):
+        pt = a["paint"]
+        res["textures"] = paint_textures(obj, van["bones"], pt["palette"], float(a.get("hem_y") or 0.0),
+                                         pt["out_dir"], pt["name"], int(pt.get("size", 512)))
     verts, tris, unweighted = export(obj, a["geometry_out"], a.get("preview_out"))
     res["final"] = {"vertices": verts, "tris": tris, "unweighted_vertices": unweighted, "pieces": count_pieces(obj)}
     _pdx.write_result(a, res)
