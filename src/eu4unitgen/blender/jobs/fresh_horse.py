@@ -5,17 +5,21 @@ vanilla horse (given as arrays, not imported) and its bones are where the .mesh 
 
 source "model": a generated model file (glTF: Y up, facing +Z; PDX = (x, y, -z)), then
   clean-up: keep the largest piece; fit (uniform scale by nose-to-tail length, hooves on the
-  ground, centred); cut the rider: everything above ``cut.y`` between ``cut.z0`` and ``cut.z1``
-  (the saddle region; head, neck and tail stay); keep the largest piece again; fill holes.
+  ground, centred), then optionally the landmark fit; cut the rider: everything above ``cut.y``
+  between ``cut.z0`` and ``cut.z1`` (the saddle region; head, neck and tail stay); keep the
+  largest piece again; fill holes; optionally a voxel remesh into one closed manifold solid.
 source "control": a crude horse from capsules along the vanilla bones, voxel-remeshed into one
   closed surface (a pipeline control only, never shipped).
-Then both: decimate to ``target_tris``, triangulate, Smart UV Project, and weights by
+Then both: an even-sized remesh to about ``target_tris`` (QuadriFlow, then a collapse trim),
+one piece kept, Smart UV Project, and weights by
 nearest-surface interpolation from the vanilla horse (Data Transfer), smoothed ``smooth``
 times, limited to ``influences`` bones per vertex, normalised.
 
 args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]}},
        "source": {"kind": "model", "path"} | {"kind": "control"},
-       "cut": {"y", "z0", "z1"} | null, "target_tris", "smooth", "influences",
+       "cut": {"y", "z0", "z1"} | null, "voxel": size | null (model: voxel remesh after the cut),
+       "anatomy": bool (model: the landmark fit after the box fit),
+       "target_tris", "quads" (QuadriFlow's target; default target_tris / 2), "relax", "smooth", "influences",
        "geometry_out": .json path, "preview_out": .obj path (Blender axes, for renders), "result_path"}
 Result: counts per stage, the fit (scale, offset) and back heights (ours vs vanilla).
 """
@@ -29,7 +33,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bmesh  # noqa: E402 - Blender module
 import bpy  # noqa: E402 - Blender module
 from mathutils import Matrix, Vector  # noqa: E402 - Blender module
-from mathutils.bvhtree import BVHTree  # noqa: E402 - Blender module
 
 import _pdx  # noqa: E402
 
@@ -155,6 +158,88 @@ def fit(obj, vanilla):
     return s, list(off)
 
 
+def _smooth(t):
+    t = max(0.0, min(1.0, t))
+    return t * t * (3 - 2 * t)
+
+
+def _rotate_yz(co, pivot, angle):
+    """``co`` turned by ``angle`` (radians) about the X axis through ``pivot`` (the side plane)."""
+    d = co - pivot
+    c, s = math.cos(angle), math.sin(angle)
+    return pivot + Vector((d.x, d.y * c - d.z * s, d.y * s + d.z * c))
+
+
+def hooves(obj, mid_z):
+    """Per leg (front/back x left/right) the lowest region's centre (vertices within 0.6 of its floor)."""
+    out = {}
+    for end in ("Front", "Back"):
+        for side in ("Left", "Right"):
+            vs = [v.co for v in obj.data.vertices
+                  if ((v.co.z < mid_z) == (end == "Front")) and ((v.co.x > 0) == (side == "Left")) and v.co.y < 6]
+            if not vs:
+                continue
+            floor = min(v.y for v in vs)
+            low = [v for v in vs if v.y < floor + 0.6]
+            out[f"{end}{side}"] = Vector((sum(v.x for v in low) / len(low), floor, sum(v.z for v in low) / len(low)))
+    return out
+
+
+def _wrap(a):
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def nose(o):
+    """The centre of the front 3 units of the mesh above y 9 (the head, not a reaching hoof)."""
+    pts = [v.co for v in o.data.vertices if v.co.y > 9]
+    front = min(c.z for c in pts)
+    pts = [c for c in pts if c.z < front + 3.0]
+    return sum(pts, Vector()) / len(pts)
+
+
+def anatomy_fit(obj, vanilla, bones):
+    """Landmark fit after the box fit (test 15: TripoSG's proportions and pose aren't the vanilla
+    skeleton's). The box fit gets the length right (nose and legs line up along the body: measured
+    side profiles) but the generated horse stands lower: scale the height (and width) to the croup,
+    turn the head and neck about the neck base onto the vanilla nose, and swing each leg about
+    its top joint until its hoof is under the vanilla heel (straightens a lifted or striding leg)."""
+    B = {k: Vector(v) for k, v in bones.items()}
+    log = {}
+    croup_z = (B["Saddle_Node"].z + 3.0, B["Saddle_Node"].z + 4.0)
+    sy = top_at(vanilla, *croup_z, 1.0) / top_at(obj, *croup_z, 1.0)
+    for v in obj.data.vertices:
+        v.co.y *= sy
+        v.co.x *= sy
+    log.update(scale_xy=sy)
+    pivot = B["HorseNeckBase"]
+    ours_n, van_n = nose(obj), nose(vanilla)
+    turn = _wrap(math.atan2(van_n.y - pivot.y, van_n.z - pivot.z) - math.atan2(ours_n.y - pivot.y, ours_n.z - pivot.z))
+    reach = (van_n - pivot).length / max((ours_n - pivot).length, 1e-6)
+    for v in obj.data.vertices:
+        w = _smooth((pivot.z - v.co.z) / 2.5)  # 0 behind the neck base, 1 from 2.5 in front of it
+        if w > 0:
+            d = (v.co - pivot) * (1 + (reach - 1) * w)
+            d.x = v.co.x - pivot.x
+            v.co = _rotate_yz(pivot + d, pivot, turn * w)
+    log.update(nose={"ours": list(ours_n), "vanilla": list(van_n)}, head_turn_deg=math.degrees(turn), head_reach=reach)
+    mid_z = (B["HorseFrontLeftUp"].z + B["HorseBackLeftUp"].z) / 2
+    legs = {}
+    for key, hoof in hooves(obj, mid_z).items():
+        top, heel = B[f"Horse{key}Up"], B[f"Horse{key}Heel"]
+        turn = _wrap(math.atan2(0.0 - top.y, heel.z - top.z) - math.atan2(hoof.y - top.y, hoof.z - top.z))
+        left, front = key.endswith("Left"), key.startswith("Front")
+        for v in obj.data.vertices:
+            if (v.co.x > 0) != left or (v.co.z < mid_z) != front:
+                continue
+            w = _smooth((top.y - 1.0 - v.co.y) / 2.5)  # 0 above the joint, 1 from 3.5 below it
+            if w > 0:
+                v.co = _rotate_yz(v.co, top, turn * w)
+        legs[key] = {"hoof": list(hoof), "turn_deg": math.degrees(turn)}
+    log["legs"] = legs
+    obj.data.update()
+    return log
+
+
 def cut_rider(obj, cut):
     bm = bmesh.new()
     bm.from_mesh(obj.data)
@@ -228,19 +313,21 @@ def control_horse(bones):
     return obj
 
 
-def decimate(obj, target):
+def decimate(obj, target, log=None, quads=None):
     """Down to about ``target`` triangles with even-sized faces: QuadriFlow quads (target / 2),
     split into triangles. Collapse decimation leaves long slivers across flat areas, and an edge
-    spanning several bones stretches badly when they bend (test 15, control horse). A dense
-    source is collapse-decimated to ~60k first, which QuadriFlow handles quickly."""
+    spanning several bones stretches badly when they bend (test 15, control horse). QuadriFlow
+    needs a closed manifold input (a voxel remesh gives one) and otherwise does nothing; the
+    final collapse then does all the work, which ``quadriflow_ran`` reports."""
     activate(obj)
-    if tri_count(obj) > 60000:
-        mod = obj.modifiers.new("pre", "DECIMATE")
-        mod.decimate_type, mod.ratio = "COLLAPSE", 60000 / tri_count(obj)
-        bpy.ops.object.modifier_apply(modifier=mod.name)
-    bpy.ops.object.quadriflow_remesh(target_faces=max(100, int(target) // 2), use_preserve_sharp=False,
-                                     use_preserve_boundary=False, use_mesh_symmetry=False, smooth_normals=True,
-                                     mode="FACES", seed=0)
+    log = log if log is not None else {}
+    log["before_quadriflow"] = tri_count(obj)
+    status = bpy.ops.object.quadriflow_remesh(target_faces=max(100, int(quads or target // 2)), use_preserve_sharp=False,
+                                              use_preserve_boundary=False, use_mesh_symmetry=False,
+                                              smooth_normals=True, mode="FACES", seed=0)
+    log["quadriflow"] = sorted(status)
+    log["after_quadriflow"] = tri_count(obj)
+    log["quadriflow_ran"] = log["after_quadriflow"] != log["before_quadriflow"]  # it refuses non-manifold input silently
     mod = obj.modifiers.new("tri", "TRIANGULATE")
     bpy.ops.object.modifier_apply(modifier=mod.name)
     if tri_count(obj) > target:  # QuadriFlow lands near, not on, the target
@@ -359,12 +446,21 @@ def main():
         res["stages"]["largest_piece"] = {"tris": tri_count(obj)}
         s, off = fit(obj, vanilla)
         res["fit"] = {"scale": s, "offset": off}
+        if a.get("anatomy"):
+            res["fit"]["anatomy"] = anatomy_fit(obj, vanilla, van["bones"])
         cut = a.get("cut")
         if cut:
             res["stages"]["rider_cut"] = {"vertices_removed": cut_rider(obj, cut)}
             keep_largest(obj)
             res["stages"]["rider_cut"]["tris"] = tri_count(obj)
         res["stages"]["holes_filled"] = {"boundary_edges": fill_holes(obj), "tris": tri_count(obj)}
+        if a.get("voxel"):  # one closed manifold solid (QuadriFlow needs one): thin sheets (skirts, fringes,
+            activate(obj)   # reins) thickened, inner faces and the cut's opening gone
+            mod = obj.modifiers.new("solid", "REMESH")
+            mod.mode, mod.voxel_size = "VOXEL", float(a["voxel"])
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            res["stages"]["voxel_remesh"] = {"voxel": a["voxel"], "tris": tri_count(obj), "pieces": count_pieces(obj)}
+            keep_largest(obj)
     else:
         obj = control_horse(van["bones"])
         res["stages"]["built"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
@@ -378,7 +474,16 @@ def main():
                             ("saddle", (saddle[2] - 0.5, saddle[2] + 0.5))):
         res["back"][label] = {"ours": top_at(obj, z0, z1, 1.0), "vanilla": top_at(vanilla, z0, z1, 1.0)}
     res["saddle_node_y"] = saddle[1]
-    res["stages"]["decimated"] = {"tris": decimate(obj, int(a["target_tris"]))}
+    if a.get("relax"):  # even out voxel stair-steps before the reduction
+        activate(obj)
+        mod = obj.modifiers.new("relax", "SMOOTH")
+        mod.factor, mod.iterations = 0.5, int(a["relax"])
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+    log = {}
+    res["stages"]["decimated"] = {"tris": decimate(obj, int(a["target_tris"]), log, a.get("quads")), **log}
+    if count_pieces(obj) > 1:  # remeshing can leave a stray shell
+        keep_largest(obj)
+        res["stages"]["decimated"]["tris_one_piece"] = tri_count(obj)
     smart_uv(obj)
     transfer_weights(obj, vanilla, a.get("smooth", 2), a.get("influences", 3))
     verts, tris, unweighted = export(obj, a["geometry_out"], a.get("preview_out"))
