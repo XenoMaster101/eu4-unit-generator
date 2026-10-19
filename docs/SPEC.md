@@ -1574,6 +1574,46 @@ Goal: a **genuinely new** horse mesh from the reference, working in game on the 
   - **v20 vs vanilla:** depth 1.06, width 0.83, belly 0.92, legs 0.79 (gentler inflation; limit 0.75), neck 1.15, volume 0.90, rider_leg 0.97: all pass. 2,912 triangles. Deformation: idle 0.86-1.17, max 4.07, 36 flips, 7.0% | walk 0.89-1.11, 3.10, 3, 4.9% | attack 0.78-1.16, 5.09, 37, 8.1%. Idle has more flips than v17 (25) and vanilla (13); the worst edges are at NeckBase/SpineTop, not the tail. Bake: tilt mean 4.8°, body 8.0°.
   - **Lit renders** (gallery `lit`: EEVEE): io_pdx_mesh wires normal maps as G/A, but EU4's are plain RGB (vanilla horse: mean 126/127/252, alpha 255). The lit mode wires plain RGB with green inverted, because the import's axis swap mirrors the mesh and so the tangent frame. Only that way does the vanilla horse light correctly. Ours behaves the same under the same convention, so its handedness matches vanilla's (still **UNVERIFIED in game**). GAME_CLOSE elevation, front/side/3/4 (azimuths turned 45° for the idle pose's root turn): `build/test16/close/sheet_game_close.png`.
   - **Test 16** staged in `build/test16/stage` (tier 1 v20, tier 2 control, tier 3 vanilla), focused checklist `build/test16/checklist.txt`.
+  - **Test 16 (user, 2026-10-19):** better: the rider's leg and stirrup show, slimmer body, no tearing, animates. Still bad: the panels read as flat slabs (a box or tarp), the chest and neck mail looks like wool and is bulky, a broken white patch on the head, the front legs mostly hidden, the tail sticks up over the rump. **The control horse (tier 2) read more like a horse than the TripoSG one.**
+- **Round 4 (user, 2026-10-19): bake-off, A (TripoSG body, fixed) against B (the app's own procedural body fitted to the reference), through the same pipeline.** Renders before the game test: `build/test17/renders/`, critique `build/test17/critique.md`; test 17 staged (tier 1 B, tier 2 A, tier 3 vanilla).
+  - **Shared fixes:**
+    - **Tail:** anchored on our rump. Its hanging nodes move by the offset from vanilla's TailTop to our nearest rump point, and the weights stay on the tail bones.
+    - **Chanfron:** a plate made from scratch, cast onto the head (poll to muzzle, tapering, rounded corners), 188 triangles.
+    - **Draped barding** (`_horse_barding.drape`): tucked into the barrel, flare, folds growing toward the hem, per-panel hem sag with rounded corners, an opening for the tail.
+    - **Hem length setting:** `hem_length` runs from 0 (game-readable: the hem stops partway from knee or hock to the belly) to 1 (reference-accurate).
+    - **Panel top:** stays at y 8. Starting at the barrel's widest level hid the rider's thighs (rider_leg 0.83 / 0.78).
+    - **Paint:** mail at 0.25 with an anti-aliased rim in one continuous projection. A projection plane per face made a patchwork, and a hard rim at 0.2 aliased to speckle.
+    - **Head coat:** by the `HorseHead` weight. A generated head isn't at vanilla's poll.
+  - **B** (`fresh_horse` source `procedural`, `_horse_proc`):
+    - **Shape:** lofted tubes on the vanilla skeleton (barrel, neck, head, four legs). Each station's cross-section is a 16-direction outline of the vanilla template, with its reins and tail left out by their bones.
+    - **Fit to the reference:** `horse_proportions` ratios, clipped. Raw ratios were depth 1.20, width 1.14, neck 1.43, legs 1.14. Clipped: depth 1.1, width ≤ 1.0 (a wider barrel hides the vanilla rider's legs), neck ≤ 1.0, legs 0.95-1.1. The reference's topline is applied ±0.5, faded at the saddle.
+    - **Assembly:** voxel 0.15, relaxed. Its own smooth surface is the bake source (normal tilt 2.6°: nothing to add).
+  - **Results:**
+
+    | | depth | width | belly | legs | neck | rider leg | flips idle / walk / attack |
+    |---|---|---|---|---|---|---|---|
+    | B | 1.03 | 0.92 | 0.92 | 1.08 | 0.99 | 1.06 | 36 / 3 / 44 |
+    | A | 1.06 | 0.90 | 0.92 | 0.85 | 0.97 | 0.97 | 35 / 18 / 58 |
+    | vanilla | 1 | 1 | 1 | 1 | 1 | 1 | 13 / 8 / 32 |
+
+    Both pass every limit, and on both the tail moves like vanilla's.
+  - **Critique:**
+    - **B:** the cleaner horse outline, legs and stance.
+    - **A:** lumpier (TripoSG's barding mass in the neck and chest).
+    - **Both:** the textures are now the weakest part. Flat pale mail dominates the front, there's no painted shading, and at map scale they read as "grey front, red back".
+    - **Bending:** worse than vanilla in idle and attack, at the spine under the panels.
+  - **Provisional (B won the renders; confirm in test 17): the hybrid approach.**
+    - **Base body:** procedural, on the target skeleton, its sections measured from the base-game template and fitted to the reference's proportions and topline. The generated model gives shape cues, not geometry.
+    - **Armour and cloth:** driven by the reference (coverage, panel length and splits, drape) and built over the body.
+    - **Rigid parts:** TripoSG or procedural (chanfron, plates), merged and weighted to one bone.
+    - **Textures:** from the reference's colours, with a scale that reads at map size.
+  - **Not done in this round:**
+    - B's rump knob: vanilla's dock triangles are weighted mostly to SpineEnd, so filtering by bone misses them.
+    - Hoof shape.
+    - Painted shading.
+    - Panels made one caparison instead of separate aprons.
+    - Panel flips.
+    - TripoSG for rigid parts: the chanfron is procedural for now.
   - **For the generalization round:** flank width allowance, leg inflation, hem height and stirrup position must be derived automatically, not tuned per horse (v17/v20: flank 1.05, legs 1.25, hems from the reference limited to knee/hock + 0.4, stirrup tread from the posed rider's boot). Hem length becomes a user setting from game-readable (legs show) to reference-accurate (the reference's rear hem hangs to 1.3).
 
 ### Phase 4: Test loop
