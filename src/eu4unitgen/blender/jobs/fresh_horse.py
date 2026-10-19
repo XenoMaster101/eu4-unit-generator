@@ -33,7 +33,9 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        "paint": {"palette": {silver, red, gold, coat}, "out_dir", "name", "size"} (step 8: textures),
        "chain_weights": bool (head, leg and tail regions weighted by distance to their bone chains),
        "target_tris", "quads" (QuadriFlow's target; default target_tris / 2), "relax", "smooth", "influences",
-       "geometry_out": .json path, "preview_out": .obj path (Blender axes, for renders), "result_path"}
+       "geometry_out": .json path, "preview_out": .obj path (Blender axes, for renders),
+       "bake_source_out": .obj path (preview axes; model only): the fine surface for bake_horse, with
+       every reshape the low mesh gets (the edits, the tail cleared, the saddle matched), "result_path"}
 Result: counts per stage, the fit (scale, offset) and back heights (ours vs vanilla).
 """
 import json
@@ -318,11 +320,12 @@ def surface_top(obj, z, half=0.5, x=0.0):
     return max(hits) if hits else None
 
 
-def match_saddle(obj, vanilla, bones, tolerance=0.05, limit=1.0):
+def match_saddle(obj, vanilla, bones, tolerance=0.05, limit=1.0, also=()):
     """Our back at the saddle (surface height on the centre line within 0.5 of Saddle_Node along
     z) onto vanilla's, by a smooth vertical shift of the back (full within 1.5 of the saddle
     along z, none from 3.5; only above y 9). Saddle_Node itself never moves. A shift over
-    ``limit`` is refused (something else is wrong). -> (before, after, vanilla, note)."""
+    ``limit`` is refused (something else is wrong). The same shift field moves ``also`` (the
+    bake source: it must keep matching the low mesh). -> (before, after, vanilla, note)."""
     z = bones["Saddle_Node"][2]
     want = surface_top(vanilla, z)
     before = surface_top(obj, z)
@@ -332,11 +335,12 @@ def match_saddle(obj, vanilla, bones, tolerance=0.05, limit=1.0):
         delta = want - surface_top(obj, z)
         if abs(delta) <= tolerance / 2:
             break
-        for v in obj.data.vertices:
-            if v.co.y > 9.0:
-                w = 1.0 - _smooth((abs(v.co.z - z) - 1.5) / 2.0)
-                v.co.y += delta * w * _smooth((v.co.y - 9.0) / 1.5)
-        obj.data.update()
+        for o in (obj, *also):
+            for v in o.data.vertices:
+                if v.co.y > 9.0:
+                    w = 1.0 - _smooth((abs(v.co.z - z) - 1.5) / 2.0)
+                    v.co.y += delta * w * _smooth((v.co.y - 9.0) / 1.5)
+            o.data.update()
     return before, surface_top(obj, z), want, "matched"
 
 
@@ -702,14 +706,18 @@ def export(obj, geometry_out, preview_out):
 
 def debug_dump(a, obj, stage):
     """With ``debug_dir``: the mesh after ``stage`` as an OBJ (preview axes), for looking at."""
-    if not a.get("debug_dir"):
-        return
+    if a.get("debug_dir"):
+        write_obj(obj, os.path.join(a["debug_dir"], f"{stage}.obj"))
+
+
+def write_obj(obj, path):
+    """``obj`` as an OBJ file in preview axes (PDX (x, y, z) -> Blender (x, z, y))."""
     prev = obj.copy()
     prev.data = obj.data.copy()
     bpy.context.scene.collection.objects.link(prev)
     prev.data.transform(Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1))))
     activate(prev)
-    bpy.ops.wm.obj_export(filepath=os.path.join(a["debug_dir"], f"{stage}.obj"), export_selected_objects=True,
+    bpy.ops.wm.obj_export(filepath=path, export_selected_objects=True,
                           export_uv=False, export_materials=False)
     bpy.data.objects.remove(prev, do_unlink=True)
 
@@ -764,14 +772,22 @@ def main():
             res["stages"]["leg_inflate"] = hs.leg_inflate(obj, vanilla, van["bones"], float(a.get("hem_y") or 6.0),
                                                           float(a["leg_allow"]))
         debug_dump(a, obj, "4_trimmed")
+        # the bake source: the fine surface after every edit so far; each later reshape of the
+        # body moves it too (the voxel solid, relax and reduction don't: those are what the
+        # normal map makes up for)
+        high = obj.copy()
+        high.data = obj.data.copy()
+        high.name = "bake_source"  # not linked to the scene: the joins and selections below never see it
         if a.get("tail_gap"):
-            res["stages"]["tail_cleared"] = {"vertices": clear_tail(obj, van["bones"], float(a["tail_gap"]))}
+            res["stages"]["tail_cleared"] = {"vertices": clear_tail(obj, van["bones"], float(a["tail_gap"])),
+                                             "bake_source_vertices": clear_tail(high, van["bones"], float(a["tail_gap"]))}
         if a.get("voxel"):  # merge what the edits made overlap; closed in, closed out
             res["stages"]["solid"] = solidify(obj, a["voxel"])
         else:
             res["stages"]["holes_filled"] = {"boundary_edges": fill_holes(obj), "tris": tri_count(obj)}
         debug_dump(a, obj, "5_solid")
     else:
+        high = None
         obj = control_horse(van["bones"])
         res["stages"]["built"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
         res["fit"] = {"scale": 1.0, "offset": [0, 0, 0], "note": "built on the skeleton: no fit"}
@@ -795,7 +811,7 @@ def main():
         keep_largest(obj)
         res["stages"]["decimated"]["tris_one_piece"] = tri_count(obj)
     if src["kind"] == "model" and a.get("cut"):
-        before, after, want, note = match_saddle(obj, vanilla, van["bones"])
+        before, after, want, note = match_saddle(obj, vanilla, van["bones"], also=[high])
         res["saddle"] = {"before": before, "after": after, "vanilla": want, "note": note,
                          "saddle_node_y": van["bones"]["Saddle_Node"][1]}
     if a.get("chanfron"):
@@ -816,6 +832,9 @@ def main():
         res["textures"] = paint_textures(obj, van["bones"], pt["palette"], float(a.get("hem_y") or 0.0),
                                          pt["out_dir"], pt["name"], int(pt.get("size", 512)))
     verts, tris, unweighted = export(obj, a["geometry_out"], a.get("preview_out"))
+    if high is not None and a.get("bake_source_out"):
+        write_obj(high, a["bake_source_out"])
+        res["bake_source"] = {"path": a["bake_source_out"], "tris": tri_count(high)}
     res["final"] = {"vertices": verts, "tris": tris, "unweighted_vertices": unweighted, "pieces": count_pieces(obj)}
     _pdx.write_result(a, res)
 

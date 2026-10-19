@@ -16,12 +16,20 @@ default bake axes are the base game's convention (green up the image; SPEC Q3).
 Reports each map's path, the normal map's mean tilt from flat (base game 4-20 deg) on the texels
 the UVs cover, and how much of the low surface found the high one.
 
+Match check (before baking): the low body (part 0) and the high surface must be the same shape
+up to the reduction; every reshape of one has to be applied to the other (fresh_horse's
+``bake_source_out``). Each low body face is sampled (centre and its three mid-edge points) and the
+nearest high point found: faces further than ``mismatch`` are flagged, grouped into connected
+areas (centre, size, mean and worst gap, whether the low surface is above or below), and their
+texels written as a mask. With ``mismatch_flatten`` their texels bake flat.
+
 args: {"low": geometry .json, "high": [.obj (preview axes, as fresh_horse's debug_dump writes)],
        "diffuse": painted .png, "size": px, "cage", "distance", "samples", "ao_strength",
        "preview": bool (lit EEVEE renders with and without the normal map),
        "high_smooth": iterations (the high surface smoothed before baking), "strength": the tangent
        normals' x and y scaled by it (towards flat) and renormalised, "outlier": degrees (steeper
        texels are rays that hit the wrong surface: flat),
+       "mismatch": gap (default 0.3: about the coarse voxel, below it the reduction's own error) over which a low face is flagged, "mismatch_flatten": bool,
        "out_dir", "name", "result_path"}
 """
 import json
@@ -74,6 +82,59 @@ def low_object(geo):
     n = np.array(geo["n"], dtype=np.float64).reshape(-1, 3)
     me.normals_split_custom_set_from_vertices([tuple(v / max(np.linalg.norm(v), 1e-9)) for v in n])
     return obj, co, tris
+
+
+def match_check(lco, ltri, body, high, limit):
+    """Per low face (``body`` faces only): the gap to the high surface (module doc). -> (flagged
+    per face, report)."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    bvh = BVHTree.FromPolygons([tuple(v) for v in high[0]], [tuple(t) for t in high[1]])
+    tri = lco[ltri]
+    pts = np.stack([tri.mean(axis=1), (tri[:, 0] + tri[:, 1]) / 2, (tri[:, 1] + tri[:, 2]) / 2,
+                    (tri[:, 2] + tri[:, 0]) / 2], axis=1)
+    fn = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    fn /= np.maximum(np.linalg.norm(fn, axis=1, keepdims=True), 1e-12)
+    gap = np.zeros(len(ltri))
+    side = np.zeros(len(ltri))
+    for f in np.flatnonzero(body):
+        ds, ss = [], []
+        for q in pts[f]:
+            loc = bvh.find_nearest(Vector(q))[0]
+            d = np.array(loc) - q if loc is not None else np.zeros(3)
+            ds.append(np.linalg.norm(d) if loc is not None else 9.0)
+            ss.append(-np.dot(d, fn[f]))  # > 0: the low surface is outside (above) the high one
+        gap[f], side[f] = max(ds), np.mean(ss)
+    flagged = body & (gap > limit)
+    # connected areas of flagged faces (sharing a vertex)
+    parent = list(range(len(ltri)))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    by_vertex = {}
+    for f in np.flatnonzero(flagged):
+        for v in ltri[f]:
+            if v in by_vertex:
+                parent[root(f)] = root(by_vertex[v])
+            else:
+                by_vertex[v] = f
+    groups = {}
+    for f in np.flatnonzero(flagged):
+        groups.setdefault(root(f), []).append(f)
+    areas = []
+    for fs in sorted(groups.values(), key=len, reverse=True):
+        c = tri[fs].reshape(-1, 3)
+        areas.append({"faces": len(fs), "centre": [round(float(x), 2) for x in c.mean(axis=0)],
+                      "size": [round(float(x), 2) for x in np.ptp(c, axis=0)],
+                      "gap_mean": round(float(gap[fs].mean()), 3), "gap_max": round(float(gap[fs].max()), 3),
+                      "low_is": "above" if side[fs].mean() > 0 else "below"})
+    report = {"limit": limit, "gap_mean": round(float(gap[body].mean()), 3),
+              "gap_p95": round(float(np.percentile(gap[body], 95)), 3), "gap_max": round(float(gap[body].max()), 3),
+              "flagged_faces": int(flagged.sum()), "areas": areas[:12], "ok": not flagged.any()}
+    return flagged, report
 
 
 def bake_target(obj, name, size):
@@ -212,6 +273,7 @@ def main():
         c, t = load_obj(path)
         htri.append(t + sum(len(x) for x in hco))
         hco.append(c)
+    ln = np.array(geo["n"], dtype=np.float64).reshape(-1, 3)
     added = ltri[parts >= 1]  # the low mesh's own added parts: they bake themselves
     hco.append(lco)
     htri.append(added)
@@ -221,9 +283,12 @@ def main():
         mod = high.modifiers.new("smooth", "SMOOTH")
         mod.factor, mod.iterations = 0.5, int(a["high_smooth"])
         bpy.ops.object.modifier_apply(modifier=mod.name)
+    hv = np.empty(len(high.data.vertices) * 3)
+    high.data.vertices.foreach_get("co", hv)
+    hf = np.array([tuple(p.vertices) for p in high.data.polygons], dtype=np.int64).reshape(-1, 3)
+    flagged, match = match_check(lco, ltri, parts == 0, (hv.reshape(-1, 3), hf), float(a.get("mismatch", 0.3)))
     own = mesh_object("own_parts", lco, added)
     own.data.shade_smooth()  # with the low mesh's normals, so its rays find exactly their own surface
-    ln = np.array(geo["n"], dtype=np.float64).reshape(-1, 3)
     own.data.normals_split_custom_set_from_vertices([tuple(v / max(np.linalg.norm(v), 1e-9)) for v in ln])
     bpy.ops.object.select_all(action="DESELECT")
     for o in (high, own):
@@ -236,6 +301,8 @@ def main():
     low.select_set(True)
     mask = coverage_mask(low, size)
     part_masks = {int(k): coverage_mask(low, size, parts == k) for k in np.unique(parts)}
+    mis_mask = coverage_mask(low, size, flagged) if flagged.any() else np.zeros_like(mask)
+    match["flagged_texels_share"] = round(float(mis_mask.sum() / max(mask.sum(), 1)), 4)
     high.select_set(True)
     bk = scene.render.bake
     bk.use_selected_to_active = True
@@ -243,7 +310,8 @@ def main():
     bk.max_ray_distance = float(a.get("distance", 0.6))
     bk.margin = 6
     bk.normal_space = "TANGENT"
-    out = {"tris": {"low": int(len(ltri)), "high": int(sum(len(t) for t in htri)), "added_parts": int(len(added))}}
+    out = {"tris": {"low": int(len(ltri)), "high": int(sum(len(t) for t in htri)), "added_parts": int(len(added))},
+           "match": match}
     nimg = bake_target(low, "normal", size)
     bpy.ops.object.bake(type="NORMAL")
     nrm = pixels(nimg)
@@ -274,6 +342,9 @@ def main():
         if kpart >= 1:
             vec[m] = (0.0, 0.0, 1.0)
             nrm[m, :3] = (0.5, 0.5, 1.0)
+    if a.get("mismatch_flatten"):
+        vec[mis_mask] = (0.0, 0.0, 1.0)
+        nrm[mis_mask, :3] = (0.5, 0.5, 1.0)
     tilt = np.degrees(np.arccos(np.clip(vec[..., 2] / np.maximum(np.linalg.norm(vec, axis=2), 1e-6), -1, 1)))
     out["normal_tilt_deg"] = {"mean": round(float(tilt[mask].mean()), 2), "p95": round(float(np.percentile(tilt[mask], 95)), 2),
                               "by_part": {k: round(float(tilt[m].mean()), 2) for k, m in part_masks.items() if m.any()}}
@@ -285,6 +356,8 @@ def main():
     paths = {"normal": save(nrm, f"{name}_normal", od)}
     aoc = np.dstack([ao, ao, ao, np.ones_like(ao)])
     paths["ao"] = save(aoc, f"{name}_ao", od)
+    mm = np.dstack([mis_mask, mask * 0.25, np.zeros_like(ao), np.ones_like(ao)]).astype(np.float32)
+    paths["mismatch"] = save(mm, f"{name}_mismatch", od)  # red: flagged texels; dark green: the rest
     dimg = bpy.data.images.load(a["diffuse"])
     dimg.colorspace_settings.name = "Non-Color"  # the painted values as they are
     diff = pixels(dimg).copy()
