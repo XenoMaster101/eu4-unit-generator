@@ -275,7 +275,8 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
           tuck: float = 0.5, hems=None, slits=None, hem_length: float = 0.25, leg_clear: float = 0.4,
           readable: float = 0.55, back: float = 0.02, seam_z: float | None = None, band_h: float = 0.3,
           fold: float = 0.14, fold_len: float = 2.1, sag: float = 0.25, corner: float = 0.4,
-          tail_open: float = 1.5, top: float | None = None, leg_lift: float = 0.9, leg_cut: float = 1.1) -> dict:
+          tail_open: float = 1.5, top: float | None = None, leg_lift: float = 0.9, leg_cut: float = 1.1,
+          rider_cut=(8.0, 1.6)) -> dict:
     """Barding panels as draped cloth (test 16: the straight hanging slabs read as a box). They
     start tucked into the barrel at its widest level (``top``; when None, the level between y 7.5
     and 10.5 whose body slice is widest) round the outline there, then fall with ``flare`` and
@@ -288,7 +289,10 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
     Slits as panels(), at the front centre, and an opening ``tail_open`` wide at the rear centre
     for the tail. Without ``slits`` (round 5: one continuous caparison, not a row of aprons) the hem is
     one curve cut up by ``leg_lift`` over each leg (a Gaussian ``leg_cut`` wide along z), so the
-    legs swing free under it; with slits each panel's hem sags (as round 4). Two-sided below the top.
+    legs swing free under it; with slits each panel's hem sags (as round 4). ``rider_cut`` (y, width):
+    beside the saddle the top edge dips to y, a Gaussian ``width`` wide along z, under the seated
+    rider's leg (hung from the widest level all along, the cloth hid the rider's thighs); None: a
+    straight top. Two-sided below the top.
     -> {"v", "f", "part", "hem", "anchor", "log"}."""
     B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
     z0, z1 = B["HorseNeckBase"][2] - 2.0, B["HorseSpineEnd"][2] + 3.0
@@ -339,18 +343,23 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
     seam_z = B["HorseSpineTop"][2] + 0.5 if seam_z is None else seam_z
     fracs = (0.0, 0.4, 0.75)  # of the drop: the top and two fold rows; then the band and the hem
     v, anchor, cols = [], [], []
+    tops = np.full(n, top)
+    if rider_cut is not None and rider_cut[0] < top:
+        dip = np.exp(-((loop[:, 1] - B["Saddle_Node"][2] + 1.0) / rider_cut[1]) ** 2)  # round the rider's lower leg
+        tops = top - (top - rider_cut[0]) * dip
     for i, (x, z) in enumerate(loop):
         d = np.array([x, z]) - centre
         d /= np.linalg.norm(d)
-        drop = top - hem[i]
+        ti = tops[i]
+        drop = ti - hem[i]
         cols.append(len(v))
-        inner = centre + (np.array([x, z]) - centre) * 0.88
-        v.append([inner[0], top + tuck, inner[1]])
-        rows = [(top - f * drop, f) for f in fracs] + [(hem[i] + band_h, (drop - band_h) / drop), (hem[i], 1.0)]
+        inner = centre + (np.array([x, z]) - centre) * (0.88 - 0.08 * (top - ti) / max(top - 7.0, 1e-6))
+        v.append([inner[0], ti + tuck, inner[1]])
+        rows = [(ti - f * drop, f) for f in fracs] + [(hem[i] + band_h, (drop - band_h) / drop), (hem[i], 1.0)]
         for y, t in rows:
-            p = np.array([x, z]) + d * (flare * (top - y) + fold * t * wave[i])
+            p = np.array([x, z]) + d * (flare * (ti - y) + fold * t * wave[i])
             v.append([p[0], y, p[1]])
-        anchor += [[x, top, z]] * (len(rows) + 1)
+        anchor += [[x, ti, z]] * (len(rows) + 1)
     per = len(fracs) + 3  # points per column: tuck, top, two fold rows, band, hem
     f, part, fhem, hang = [], [], [], []
     for i in range(n):

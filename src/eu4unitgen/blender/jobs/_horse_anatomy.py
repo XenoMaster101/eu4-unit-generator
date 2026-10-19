@@ -42,8 +42,8 @@ DEFAULTS = {
     # neck
     "neck_base_depth": 0.30, "neck_throat_depth": 0.14, "neck_width": 0.6, "crest": 0.75,
     # head
-    "head_length": 0.30, "head_pitch": 40.0, "jowl_depth": 0.17, "forehead_width": 0.09, "muzzle_depth": 0.085,
-    "muzzle_width": 0.06, "ear_length": 0.05,
+    "head_length": 0.28, "head_pitch": 40.0, "jowl_depth": 0.19, "forehead_width": 0.09, "muzzle_depth": 0.1,
+    "muzzle_width": 0.065, "ear_length": 0.05,
     # legs (radii)
     "upper_arm": 0.085, "forearm": 0.06, "knee": 0.034, "stifle": 0.08, "gaskin": 0.05, "hock": 0.034,
     "cannon": 0.024, "fetlock": 0.031, "pastern": 0.024, "hoof_top": 0.028, "hoof_bottom": 0.037,

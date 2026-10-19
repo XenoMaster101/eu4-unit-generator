@@ -14,15 +14,23 @@ bind positions) and a per-face ``part`` attribute (1 = the chanfron):
   iron, leather  stirrups and straps (parts 4 and 5);
   hair      the built tail (part 6): the coat darkened, in streaks along it.
 
+Round 5 (test 17: ours read "grey front, red back" at map scale, vanilla "brown horse, dark
+legs"): the horse cues painted in as well -
+  coat      a bay (palette "coat"), going to dark points (palette "points") below the knees and
+            hocks;
+  mane      a dark line along the crest of the neck (palette "mane");
+  shading   painted light, as vanilla's diffuse has it: light from above (the smooth normal's up
+            component) and darker towards the belly; ``shade`` sets its strength (0: none).
+
 Maps: diffuse RGB, specular RGBA (RGB 0: no unit colours; alpha = gloss, small values as the base
 game's), normal flat. Islands are bled outwards so mips and seams don't pick up the background.
 """
 import numpy as np
 
-COAT, SCALE, CLOTH, TRIM, CHANFRON, IRON, LEATHER, HAIR = range(8)
-GLOSS = {COAT: 5, SCALE: 14, CLOTH: 4, TRIM: 12, CHANFRON: 16, IRON: 14, LEATHER: 6, HAIR: 7}
+COAT, SCALE, CLOTH, TRIM, CHANFRON, IRON, LEATHER, HAIR, MANE = range(9)
+GLOSS = {COAT: 5, SCALE: 14, CLOTH: 4, TRIM: 12, CHANFRON: 16, IRON: 14, LEATHER: 6, HAIR: 7, MANE: 6}
 # parts (_horse_barding): 2 cloth panel, 3 scale panel, 4 stirrup iron, 5 strap, 6 tail
-DEFAULTS = {"iron": (70, 70, 74), "leather": (60, 38, 24)}
+DEFAULTS = {"iron": (70, 70, 74), "leather": (60, 38, 24), "points": (36, 26, 21), "mane": (30, 22, 18)}
 
 
 def regions(centres: np.ndarray, normals: np.ndarray, part: np.ndarray, bones: dict, hem_y: float,
@@ -111,6 +119,8 @@ def colour(points: np.ndarray, normals: np.ndarray, region: int, palette: dict, 
     if region == HAIR:  # streaks across x (the tail hangs along y)
         streak = 0.8 + 0.12 * np.sin(points[:, 0] * 23.0 + np.sin(points[:, 1] * 3.0))
         return np.array(palette["coat"])[None, :] * (streak * noise)[:, None]
+    if region == MANE:
+        return np.array(palette.get("mane", DEFAULTS["mane"]), dtype=np.float64)[None, :] * noise[:, None]
     if region == CHANFRON:
         rgb = np.array(palette["silver"])[None, :] * 0.92 * noise[:, None]
         rgb[np.abs(points[:, 0]) < 0.12] = palette["gold"]
@@ -119,14 +129,34 @@ def colour(points: np.ndarray, normals: np.ndarray, region: int, palette: dict, 
     # is -z), no blotches
     B = {k: np.array(v) for k, v in bones.items()}
     muzzle = np.clip((B["HorseHead"][2] - 1.5 - points[:, 2]) / 1.5, 0, 1)
-    return np.array(palette["coat"])[None, :] * ((1.0 - 0.25 * muzzle) * (1.0 + (noise - 1.0) * 0.4))[:, None]
+    rgb = np.array(palette["coat"])[None, :] * ((1.0 - 0.25 * muzzle) * (1.0 + (noise - 1.0) * 0.4))[:, None]
+    # dark points: below the knees and hocks (+ 0.6), blending over 1.2
+    knee = min(B["HorseFrontLeftKnee"][1], B["HorseBackLeftKnee"][1]) + 0.6
+    k = np.clip((knee - points[:, 1]) / 1.2, 0, 1)[:, None]
+    return rgb * (1 - k) + np.array(palette.get("points", DEFAULTS["points"]), dtype=np.float64)[None, :] * k
+
+
+def mane_mask(points, normals, bones, half=0.3):
+    """Texels of the mane: within ``half`` of the centre line along the crest of the neck (near the
+    bones NeckBase -> HorseHead), on surfaces facing up."""
+    B = {k: np.array(v) for k, v in bones.items()}
+    a, b = B["HorseNeckBase"], B["HorseHead"]
+    d = b - a
+    t = np.clip(((points - a) @ d) / (d @ d), 0, 1)
+    crest = np.linalg.norm(points - (a + t[:, None] * d), axis=1)
+    return (np.abs(points[:, 0]) < half) & (normals[:, 1] > 0.3) & (crest < 1.3) & (t > 0.05) & (t < 0.97)
 
 
 def paint(uv: np.ndarray, tris: np.ndarray, co: np.ndarray, face_n: np.ndarray, region: np.ndarray,
-          palette: dict, bones: dict, size: int = 512, bleed: int = 6):
+          palette: dict, bones: dict, size: int = 512, bleed: int = 6, shade: float = 1.0, mane: bool = False):
     """-> (diffuse RGB uint8, specular RGBA uint8, normal RGBA uint8, coverage share).
     ``uv``: per triangle corner (T, 3, 2) in Blender convention (v up); ``tris``: (T, 3) vertex
     indices into ``co``."""
+    # smooth (vertex) normals for the painted light: face normals would paint every facet flat
+    vn = np.zeros_like(co)
+    for k in range(3):
+        np.add.at(vn, tris[:, k], face_n)
+    vn /= np.maximum(np.linalg.norm(vn, axis=1, keepdims=True), 1e-9)
     diff = np.zeros((size, size, 3), dtype=np.float64)
     gloss = np.zeros((size, size), dtype=np.float64)
     filled = np.zeros((size, size), dtype=bool)
@@ -150,6 +180,14 @@ def paint(uv: np.ndarray, tris: np.ndarray, co: np.ndarray, face_n: np.ndarray, 
         bary = np.stack([w0, lam[:, 0], lam[:, 1]], axis=1)[inside]
         pts = bary @ co[tris[t]]
         rgb = colour(pts, np.repeat(face_n[t][None, :], len(pts), axis=0), int(region[t]), palette, bones)
+        if mane and int(region[t]) in (SCALE, COAT):  # the mane, per texel (off by default: on the mail it read as holes)
+            m = mane_mask(pts, bary @ vn[tris[t]], bones)
+            if m.any():
+                rgb[m] = np.array(palette.get("mane", DEFAULTS["mane"]), dtype=np.float64)
+        if shade:  # light from above, the belly darker
+            ny = (bary @ vn[tris[t]])[:, 1]
+            light = (0.72 + 0.4 * (0.5 + 0.5 * ny)) * (0.86 + 0.14 * np.clip((pts[:, 1] - 5.0) / 7.0, 0, 1))
+            rgb = rgb * (1 + (light - 1) * shade)[:, None]
         px = q[inside].astype(int)
         diff[px[:, 1], px[:, 0]] = rgb
         gloss[px[:, 1], px[:, 0]] = GLOSS[int(region[t])]
