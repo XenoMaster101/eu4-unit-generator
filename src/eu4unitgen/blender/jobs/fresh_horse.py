@@ -18,7 +18,8 @@ nearest-surface interpolation from the vanilla horse (Data Transfer), smoothed `
 times, limited to ``influences`` bones per vertex, normalised.
 
 args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]}},
-       "source": {"kind": "model", "path"} | {"kind": "control"},
+       "source": {"kind": "model", "path"} | {"kind": "control"} | {"kind": "procedural", "fit_from": OBJ | null,
+       "voxel", "relax"} (bake-off horse B: _horse_proc's own body fitted to the reference),
        "cut": {"y", "z0", "z1"} | null, "voxel": size | null (model: voxel remesh after the cut),
        "reshape": bool (model: height to the croup, then _horse_shape.reshape onto the vanilla rest pose),
        "leg_top": y up to which legs are tracked, "cut".y may be "saddle" (vanilla's back height there),
@@ -384,6 +385,54 @@ def capsule(name, a, b, r):
         bpy.ops.mesh.primitive_uv_sphere_add(segments=12, ring_count=6, radius=r, location=c)
         parts.append(bpy.context.active_object)
     return parts
+
+
+def read_obj(path):
+    """(positions, triangles) in PDX space from a preview-axes OBJ (as debug_dump writes them)."""
+    co, tris = [], []
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("v "):
+            x, y, z = map(float, line.split()[1:4])
+            co.append((x, y, -z))
+        elif line.startswith("f "):
+            idx = [int(t.split("/")[0]) - 1 for t in line.split()[1:]]
+            tris += [(idx[0], idx[i], idx[i + 1]) for i in range(1, len(idx) - 1)]
+    return np.array(co, dtype=np.float64), np.array(tris, dtype=np.int64)
+
+
+def procedural_horse(van, src):
+    """Bake-off horse B: _horse_proc's tubes on the vanilla skeleton, fitted to the reference
+    model (``fit_from``: a preview-axes OBJ of it on the vanilla rest pose, e.g. a model build's
+    3_rider_cut stage), joined into one closed surface by a voxel remesh (``voxel``), relaxed
+    (``relax``). -> (object, fit log)."""
+    import _horse_proc as hp
+    vco = np.array(van["p"], dtype=np.float64).reshape(-1, 3)
+    vtri = np.array(van["tri"], dtype=np.int64).reshape(-1, 3)
+    fit = {"ratios": None, "raw": None, "topline": None}
+    if src.get("fit_from"):
+        rco, rtri = read_obj(src["fit_from"])
+        fit.update(hp.fit_ratios(rco, rtri, vco, vtri, van["bones"]))
+        fit["topline"] = hp.topline(rco, rtri, vco, vtri, van["bones"])
+    # the template's reins and tail are left out of the samples (by their dominant bone)
+    skip = {"Rem", "Stigbyglar", *hs.TAIL}
+    keep = []
+    for t in vtri:
+        score = {}
+        for vi in t:
+            for bone, w in van["weights"][vi].items():
+                score[bone] = score.get(bone, 0.0) + w
+        keep.append(max(score, key=score.get) not in skip if score else True)
+    built = hp.build(vco, vtri, van["bones"], fit["ratios"], fit["topline"], tri_keep=np.array(keep))
+    objs = [mesh_object(f"proc_{i}", v.tolist(), t.tolist()) for i, (v, t) in enumerate(built["tubes"])]
+    obj = join(objs)
+    solidify(obj, float(src.get("voxel", 0.15)))
+    if src.get("relax", 6):
+        activate(obj)
+        mod = obj.modifiers.new("relax", "SMOOTH")
+        mod.factor, mod.iterations = 0.5, int(src.get("relax", 6))
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+    obj.name = "procedural_horse"
+    return obj, {"scale": 1.0, "offset": [0, 0, 0], "note": "built on the skeleton", **fit, "build": built["log"]}
 
 
 def control_horse(bones):
@@ -878,6 +927,16 @@ def main():
             res["stages"]["solid"] = solidify(obj, a["voxel"])
         else:
             res["stages"]["holes_filled"] = {"boundary_edges": fill_holes(obj), "tris": tri_count(obj)}
+        debug_dump(a, obj, "5_solid")
+    elif src["kind"] == "procedural":
+        high, build_tail = None, False
+        obj, res["fit"] = procedural_horse(van, src)
+        res["stages"]["built"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
+        if a.get("tail"):
+            import _horse_measure as hm
+            state = hm.tail_state(hs.verts(obj), hs.faces(obj), van["bones"])
+            build_tail = a["tail"].get("build", "auto") is True or (a["tail"].get("build", "auto") == "auto" and state["state"] != "free")
+            res["tail"] = {"source": state, "build": build_tail}
         debug_dump(a, obj, "5_solid")
     else:
         high, build_tail = None, False
