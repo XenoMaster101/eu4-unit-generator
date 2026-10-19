@@ -13,6 +13,12 @@ args: {"units": [{"name": ..., "root": node}], "frame": 1, "view": [x, y, z] (ca
        "size": px, "camera": null | {fixed framing, see shoot_fixed}, "inherit_scale": false, "thumbs": px or 0 (each attached rigid part alone, by entity
        name, for the Parts cards), "dump": bool (each unit's posed meshes as JSON in the root mesh's PDX space:
        {node name: {"p", "tri"}}, for measuring e.g. where a rider's legs hang), "out_dir": ..., "result_path": ...}
+"lit": null | {"normal_maps": bool, "flip_green": bool, "sun": [x, y, z] (light -> scene), "energy", "roughness"}: EEVEE with a
+       sun instead of Workbench (which shows no normal maps), to judge a normal map: each material's
+       normal texture as plain RGB tangent space, green up (the base game's convention, SPEC Q3;
+       io_pdx_mesh wires it as G/A), Blender's tangents from the UVs, green inverted (``flip_green``,
+       default true: the import's axis swap mirrors the mesh and so the tangent frame; checked on
+       the vanilla horse, which lights right only so); ``normal_maps`` false leaves it out. Gloss isn't the game's: one ``roughness`` (default 0.6) everywhere, no metal.
 node: {"name", "mesh", "anim": path | null, "scale": float, "hidden": bool (a helper mesh: placed, not drawn),
        "attach": [{"bone", "bind": [12] | null, "node"}]}
 """
@@ -162,6 +168,64 @@ def dump_posed(unit, loaded, path, bone=None):
     return path
 
 
+def light(scene, objs, lit):
+    """The lit mode (module doc) on ``objs``' materials."""
+    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    scene.view_settings.view_transform = "Standard"
+    world_ = scene.world
+    world_.use_nodes = True
+    world_.node_tree.nodes["Background"].inputs["Color"].default_value = (*world_.color, 1)
+    world_.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.6
+    sun = bpy.data.objects.new("sun", bpy.data.lights.new("sun", "SUN"))
+    sun.data.energy = float(lit.get("energy", 3.5))
+    sun.rotation_euler = Vector(lit.get("sun", (0.4, 0.5, -0.75))).to_track_quat("-Z", "Y").to_euler()
+    scene.collection.objects.link(sun)
+    seen = set()
+    for o in objs:
+        for mat in (o.data.materials if o.type == "MESH" else []):
+            if mat is None or mat.name in seen or not mat.use_nodes:
+                continue
+            seen.add(mat.name)
+            nodes, links = mat.node_tree.nodes, mat.node_tree.links
+            bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
+            if bsdf is None:
+                continue
+            for name in ("Roughness", "Metallic", "Specular IOR Level", "Normal"):
+                for lk in [lk for lk in links if lk.to_socket == bsdf.inputs[name]]:
+                    links.remove(lk)
+            bsdf.inputs["Roughness"].default_value = float(lit.get("roughness", 0.6))
+            bsdf.inputs["Metallic"].default_value = 0.0
+            nmap = next((n for n in nodes if n.type == "NORMAL_MAP"), None)
+            if nmap is None or not lit.get("normal_maps", True):
+                continue
+            # the image behind the addon's chain: image -> separate -> combine -> normal map
+            tex = nmap
+            for socket in ("Color", 0, "Color"):
+                ins = tex.inputs[socket]
+                tex = ins.links[0].from_node if ins.links else None
+                if tex is None:
+                    break
+            if tex is None or tex.type != "TEX_IMAGE":
+                continue
+            for lk in list(nmap.inputs["Color"].links):
+                links.remove(lk)
+            src = tex.outputs["Color"]
+            if lit.get("flip_green", True):  # the import's axis swap mirrors the mesh, and the UV tangent frame with it
+                sep = nodes.new("ShaderNodeSeparateColor")
+                inv = nodes.new("ShaderNodeMath")
+                inv.operation, inv.inputs[0].default_value = "SUBTRACT", 1.0
+                comb = nodes.new("ShaderNodeCombineColor")
+                links.new(src, sep.inputs["Color"])
+                links.new(sep.outputs["Red"], comb.inputs["Red"])
+                links.new(sep.outputs["Green"], inv.inputs[1])
+                links.new(inv.outputs[0], comb.inputs["Green"])
+                links.new(sep.outputs["Blue"], comb.inputs["Blue"])
+                src = comb.outputs["Color"]
+            links.new(src, nmap.inputs["Color"])
+            nmap.space = "TANGENT"
+            links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+
+
 def shoot_fixed(sc, cam, c, path):
     """One framing for every unit (not fitted to each unit's bounds), so units render at the same
     scale and can be compared with each other and with an in-game screenshot at a known zoom.
@@ -208,6 +272,8 @@ def main() -> None:
             for o in objs:
                 if o.type != "MESH" or node.get("hidden"):
                     o.hide_render = True
+        if a.get("lit"):
+            light(scene, [o for _, objs, _ in loaded for o in objs], a["lit"])
         path = os.path.join(a["out_dir"], f"{unit['name']}.png")
         if a.get("dump"):
             bone = a["dump"].get("bone") if isinstance(a["dump"], dict) else None

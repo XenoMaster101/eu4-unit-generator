@@ -441,12 +441,14 @@ class Session:
         return out
 
     def gallery(self, spec: SetSpec, units: list[tuple[str, int]] | None = None, size: int = 256,
-                result: SetResult | None = None, thumbs: int = 0, camera: dict | None = None) -> "Gallery":
+                result: SetResult | None = None, thumbs: int = 0, camera: dict | None = None,
+                lit: dict | None = None) -> "Gallery":
         """Whole units, posed at their idle frame, as the game assembles them (Track F, F9): the
         generated set (``result``: a validation already run, else one now) over the mod and the
         game, each unit's entity tree staged and rendered in one background Blender run.
         ``units``: (unit type, tier), default all 12. ``camera``: one fixed framing for every tile
         (render_unit's ``camera``, e.g. gallery.GAME_CLOSE) instead of each unit fitted to its tile.
+        ``lit``: render_unit's lit mode (EEVEE with the normal maps on or off) instead of Workbench.
         Writes nothing outside a temporary folder."""
         import tempfile
 
@@ -484,7 +486,8 @@ class Session:
                 if jobs:
                     try:
                         res = self.runner().run_job("render_unit", {"units": jobs, "frame": 1, "size": size,
-                                                                    "thumbs": thumbs, "out_dir": tmp, "camera": camera},
+                                                                    "thumbs": thumbs, "out_dir": tmp, "camera": camera,
+                                                                    "lit": lit},
                                                  timeout=900)
                     except BlenderError as exc:
                         raise SpecError(f"the gallery needs Blender: {exc}") from exc
