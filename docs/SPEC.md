@@ -1614,6 +1614,35 @@ Goal: a **genuinely new** horse mesh from the reference, working in game on the 
     - Panels made one caparison instead of separate aprons.
     - Panel flips.
     - TripoSG for rigid parts: the chanfron is procedural for now.
+- **Round 5 (user, 2026-10-19): B must be our own anatomy.** User rule: reusing the vanilla horse mesh doesn't count, and a body traced from vanilla's cross-sections is too close to that. Test 17's in-game results weren't received (the message held only the template).
+  - **What round 4's B took from vanilla:** each station's cross-section outline, measured on vanilla's surface. That is shape, not vertices or topology.
+  - **Measured:**
+
+    | | median distance to vanilla | share within 0.15 |
+    |---|---|---|
+    | Round 4's B | 0.10 | 65% |
+    | TripoSG horse | 0.26 | 29% |
+    | Capsule control | 0.26 | 30% |
+
+  - **Standing check:** `horse_proportions` reports `vanilla_distance` for every mesh and flags "trace" when more than half its surface is within 0.15 (assumed thresholds).
+  - **B now** (`_horse_anatomy`, source kind `anatomy`):
+    - **From vanilla:** only the skeleton (bone positions) and the seat height (vanilla's back surface at Saddle_Node).
+    - **Shape:** named profile curves for barrel (topline, belly line, half-widths at breast, shoulder, ribs, flank, hip and buttock; superellipse sections; ellipsoid ends), neck (crest on the bones), head (length, pitch, jowl, forehead, muzzle; ears) and legs (radii at every joint, flattened, a hoof). Defaults are fractions of the seat height.
+    - **Fit to the reference:** build the default, measure it like the reference, scale each group by reference ÷ default within sanity limits only (0.7-1.6). The neck factor's square root goes to the throat and head (the reference's neck includes its armour). The topline comes from the reference's withers and croup.
+    - **Fitted factors:** depth 1.26, width 1.36, neck 1.6 (the limit), legs 1.35.
+    - **Width beside the saddle:** held to `rider_clear` 2.1 (the vanilla rider's thighs).
+    - **Result:** depth 1.19, width 1.10, belly 0.86, legs 1.04, volume 1.17, rider's leg 0.97. Median distance to vanilla 0.25 (34% within 0.15): not a trace.
+  - **Limits loosened** to broken-result thresholds (depth 1.3, width 1.4, belly ≥ 0.75, legs ≥ 0.7, neck 1.5, volume 1.6). Round 3's tighter set followed test 15's "sack on sticks".
+  - **Continuous caparison** (drape without slits):
+    - **Hem:** one curve, cut up over each leg; openings at the chest and tail. The top follows the barrel's widest line and dips under the rider's leg beside the saddle (`rider_cut`).
+    - **Weights:** trunk bones only, blended over neighbouring columns.
+    - **Bending:** B's inside-out triangles idle / walk / attack 30 / 4 / 45 → 12 / 3 / 5, against vanilla's 13 / 8 / 32. The panels' mixed per-column weights twisted the cloth; the bare body alone was 9 / 4 / 11.
+  - **Paint:** painted light (from above on smooth normals, darker belly), dark points below the knees and hocks, a bay coat. The mane is optional and off: on the mail it read as holes.
+  - **Critique** (`build/test18/critique.md`):
+    - **B:** our own geometry, the heaviest and the cleanest bending.
+    - **Map scale:** B still reads as "a grey and red block on stubby legs". At the game's 58° camera the deeper reference-driven barrel and the caparison hide the legs above the cannons.
+    - **Open decision for the user:** a shallower barrel than the reference, or a shorter caparison than `hem_length` 0 allows, or both.
+  - **Test 18** staged in `build/test18/stage`: tier 1 B, tier 2 A, tier 3 vanilla.
   - **For the generalization round:** flank width allowance, leg inflation, hem height and stirrup position must be derived automatically, not tuned per horse (v17/v20: flank 1.05, legs 1.25, hems from the reference limited to knee/hock + 0.4, stirrup tread from the posed rider's boot). Hem length becomes a user setting from game-readable (legs show) to reference-accurate (the reference's rear hem hangs to 1.3).
 
 ### Phase 4: Test loop
