@@ -25,6 +25,7 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        "lump": {"z0", "z1", "y0", "y1", "margin"} (mirror-based removal of a one-sided bulge),
        "voxel_fine": size (a closed solid before the edits), "hem_y", "leg_radius" (skirts raised to the
        hem), "tail_gap" (the caparison pushed off the tail),
+       "chain_weights": bool (head, leg and tail regions weighted by distance to their bone chains),
        "target_tris", "quads" (QuadriFlow's target; default target_tris / 2), "relax", "smooth", "influences",
        "geometry_out": .json path, "preview_out": .obj path (Blender axes, for renders), "result_path"}
 Result: counts per stage, the fit (scale, offset) and back heights (ours vs vanilla).
@@ -431,7 +432,7 @@ def smart_uv(obj):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
-def transfer_weights(obj, vanilla, smooth, influences):
+def transfer_weights(obj, vanilla, smooth, influences, bones=None, stats=None):
     for g in vanilla.vertex_groups:
         obj.vertex_groups.new(name=g.name)
     activate(obj)
@@ -445,6 +446,13 @@ def transfer_weights(obj, vanilla, smooth, influences):
     bpy.ops.object.modifier_apply(modifier=mod.name)
     rows = [{obj.vertex_groups[g.group].name: g.weight for g in v.groups if g.weight > 0}
             for v in obj.data.vertices]
+    if bones is not None:  # A: chain weights in the head, leg and tail regions; the torso keeps the surface's
+        co = hs.verts(obj)
+        chain, counts = hs.chain_weights(co, bones)
+        cleaned = hs.clean_surface_rows(co, rows, chain, bones)
+        rows = [c if c is not None else r for c, r in zip(chain, rows)]
+        if stats is not None:
+            stats["chain_regions"], stats["surface_rows_cleaned"] = counts, cleaned
     neighbours = [[] for _ in rows]
     for e in obj.data.edges:
         a, b = e.vertices
@@ -604,7 +612,10 @@ def main():
         res["saddle"] = {"before": before, "after": after, "vanilla": want, "note": note,
                          "saddle_node_y": van["bones"]["Saddle_Node"][1]}
     smart_uv(obj)
-    transfer_weights(obj, vanilla, a.get("smooth", 2), a.get("influences", 3))
+    wstats = {}
+    transfer_weights(obj, vanilla, a.get("smooth", 2), a.get("influences", 3),
+                     van["bones"] if a.get("chain_weights") else None, wstats)
+    res["weights"] = wstats
     verts, tris, unweighted = export(obj, a["geometry_out"], a.get("preview_out"))
     res["final"] = {"vertices": verts, "tris": tris, "unweighted_vertices": unweighted, "pieces": count_pieces(obj)}
     _pdx.write_result(a, res)

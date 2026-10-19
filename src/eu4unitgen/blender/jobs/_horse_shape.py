@@ -229,3 +229,107 @@ def nearest_on_chains(co: np.ndarray, chains: list[np.ndarray]) -> tuple[np.ndar
 def near_chains(co: np.ndarray, chains: list[np.ndarray], radius: float) -> np.ndarray:
     """Mask: vertices within ``radius`` of any of the polylines."""
     return nearest_on_chains(co, chains)[0] < radius
+
+
+def bone_segments(bones: dict) -> dict:
+    """Each deforming bone's segment (from the bone to its child; the chain ends extended: the
+    hoof to the ground, the head to the muzzle, the tail end past its tip)."""
+    B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    seg = {}
+    for leg in LEGS:
+        names = [f"Horse{leg}{p}" for p in ("Up", "Down", "Knee", "Heel")]
+        for a, b in zip(names[:-1], names[1:]):
+            seg[a] = (B[a], B[b])
+        heel = B[names[-1]]
+        seg[names[-1]] = (heel, np.array([heel[0], 0.0, heel[2]]))
+    neck = ["HorseNeckBase", "HorseNeckMiddle", "HorseHead"]
+    for a, b in zip(neck[:-1], neck[1:]):
+        seg[a] = (B[a], B[b])
+    head = B["HorseHead"]
+    seg["HorseHead"] = (head, head + np.array([0.0, -1.5, -3.3]))  # towards vanilla's muzzle
+    tail = ["HorseSpineEnd", "HorseTailTop", "HorseTailMiddle", "HorseTailTip", "HorseTailEnd"]
+    for a, b in zip(tail[1:-1], tail[2:]):
+        seg[a] = (B[a], B[b])
+    end, tip = B["HorseTailEnd"], B["HorseTailTip"]
+    seg["HorseTailEnd"] = (end, end + (end - tip) * 0.5)
+    return seg
+
+
+def segment_distance(co: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    d = b - a
+    t = np.clip(((co - a) @ d) / max(d @ d, 1e-12), 0, 1)
+    return np.linalg.norm(co - (a + t[:, None] * d), axis=1)
+
+
+def chain_weights(co: np.ndarray, bones: dict, power: float = 4.0) -> tuple[list, dict]:
+    """Per vertex: weights by distance to the bone chains (head and neck, each leg, the tail) in
+    their regions, else None (the torso keeps nearest-surface weights). -> (rows, region counts).
+    Each region includes its spine parent along the segment to the chain's first joint, so the
+    weights blend into the torso instead of stepping at the region's border. Regions: head/neck
+    in front of 0.8 behind the neck base, above y 9; a leg below y 9.3 within 0.9 of its chain
+    (1.4 above y 7.5);
+    the tail on the centre line (|x| < 0.7) behind the rump within 1.0 of its chain."""
+    B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    seg = bone_segments(bones)
+    regions = {"head": ("HorseSpineTop", "HorseNeckBase", ["HorseNeckBase", "HorseNeckMiddle", "HorseHead"]),
+               "tail": ("HorseSpineEnd", "HorseTailTop", ["HorseTailTop", "HorseTailMiddle", "HorseTailTip", "HorseTailEnd"])}
+    for leg in LEGS:
+        parent = "HorseSpineTop" if leg.startswith("Front") else "HorseSpineEnd"
+        regions[leg] = (parent, f"Horse{leg}Up", [f"Horse{leg}{p}" for p in ("Up", "Down", "Knee", "Heel")])
+    rows, counts = [None] * len(co), {}
+    for region, (parent, first, names) in regions.items():
+        dist = {b: segment_distance(co, *seg[b]) for b in names}
+        dist[parent] = segment_distance(co, B[parent], B[first])
+        chain_min = np.min([dist[b] for b in names], axis=0)
+        if region == "head":
+            mask = (co[:, 2] < B["HorseNeckBase"][2] + 0.8) & (co[:, 1] > 9.0)
+        elif region == "tail":
+            mask = (np.abs(co[:, 0]) < 0.7) & (co[:, 2] > B["HorseSpineEnd"][2] + 1.5) & (chain_min < 1.0)
+        else:  # the leg itself below the elbow or stifle, the shoulder or hip above it
+            mask = (co[:, 1] < 9.3) & (chain_min < np.where(co[:, 1] < 7.5, 0.9, 1.4))
+        idx = np.nonzero(mask)[0]
+        counts[region] = int(len(idx))
+        if not len(idx):
+            continue
+        order = [parent] + names
+        d = np.stack([dist[b][idx] for b in order], axis=1)
+        w = 1.0 / np.maximum(d, 0.05) ** power
+        for row, i in zip(w, idx):
+            if rows[i] is None:  # first region wins
+                top = np.argsort(-row)[:3]
+                total = row[top].sum()
+                rows[i] = {order[k]: float(row[k] / total) for k in top}
+    return rows, counts
+
+
+TAIL = ("HorseTailTop", "HorseTailMiddle", "HorseTailTip", "HorseTailEnd")
+
+
+def clean_surface_rows(co: np.ndarray, rows: list, chain_rows: list, bones: dict, far: float = 1.0) -> int:
+    """Nearest-surface weights of the torso (vertices without chain weights) cleaned of bones
+    that only fit vanilla's own shape: the tail (our rump sits where vanilla's tail is: the
+    caparison follows the hindquarters), the reins (``Rem``) and a leg's lower bones on vertices
+    farther than ``far`` from that leg's chain (a skirt doesn't swing with the leg). Emptied
+    rows fall back to the nearest spine bone. -> how many rows changed. In place."""
+    B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
+    seg = bone_segments(bones)
+    lower = {}
+    for leg in LEGS:
+        d = np.min([segment_distance(co, *seg[f"Horse{leg}{p}"]) for p in ("Down", "Knee", "Heel")], axis=0)
+        for p in ("Down", "Knee", "Heel"):
+            lower[f"Horse{leg}{p}"] = d > far
+    spine = ("HorseSpineTop", "HorseSpineEnd")
+    changed = 0
+    for i, row in enumerate(rows):
+        if chain_rows[i] is not None or not row:
+            continue
+        keep = {b: w for b, w in row.items()
+                if b not in TAIL and b != "Rem" and not (b in lower and lower[b][i])}
+        if len(keep) != len(row):
+            changed += 1
+            if not keep:
+                near = min(spine, key=lambda b: float(np.linalg.norm(co[i] - B[b])))
+                keep = {near: 1.0}
+            total = sum(keep.values())
+            rows[i] = {b: w / total for b, w in keep.items()}
+    return changed

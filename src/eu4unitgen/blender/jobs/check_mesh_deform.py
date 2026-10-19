@@ -9,7 +9,9 @@ those tracks), and measure every frame over all triangle edges and faces:
   * flips: triangles whose normal turns > 90 degrees from its rest normal carried by the
     triangle's dominant bone (the bone with the most weight over its three vertices);
   * the worst frame: the one whose edge furthest from its rest length (in log terms) is worst,
-    and the dominant bones of that edge's ends.
+    and the dominant bones of that edge's ends;
+  * at the frame with the most edges outside 0.85-1.2: their share, and the bones (dominant at
+    either end) with the most of them.
 
 Optional renders of each animation's worst frame (side and 3/4, vertices coloured by stretch:
 grey = rest length, red = stretched or squashed by 50% or more).
@@ -162,6 +164,15 @@ def main():
                 if (m.to_3x3() @ n0).dot(tri_normal(co, t)) < 0:
                     flips += 1
             res["flips"] = max(res["flips"], flips)
+            bad = {}
+            valid = [e for e, l0 in zip(edges, rest_len) if l0 > 1e-6]
+            for (p, q), r in zip(valid, ratios):
+                if not 0.85 <= r <= 1.2:
+                    for b in {dominant_v[p], dominant_v[q]} - {None}:
+                        bad[b] = bad.get(b, 0) + 1
+            if sum(bad.values()) > sum(res.get("bad_by_bone", {}).values()):
+                res["bad_by_bone"] = dict(sorted(bad.items(), key=lambda kv: -kv[1])[:8])
+                res["bad_share"] = sum(1 for r in ratios if not 0.85 <= r <= 1.2) / len(ratios)
         if a.get("renders"):
             scene.frame_set(res["worst_frame"])
             co = coords(mesh)
