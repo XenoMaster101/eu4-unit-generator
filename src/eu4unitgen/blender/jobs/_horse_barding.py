@@ -191,15 +191,15 @@ def stirrups(tread, strap_top, width: float = 0.9, height: float = 0.9, bar: flo
 
 
 def tail(bones: dict, root, sides: int = 6, rings: int = 8, radii=((0.0, 0.3), (0.25, 0.36), (0.55, 0.62),
-         (0.85, 0.5), (1.0, 0.18)), flat: float = 0.8) -> dict:
+         (0.85, 0.5), (1.0, 0.18)), flat: float = 0.8, offset=(0.0, 0.0, 0.0)) -> dict:
     """The tail (module doc): ``root`` [x, y, z] inside the rump, then the vanilla tail bones
-    TailTop -> TailEnd; ``rings`` cross-sections (``sides``-gons, x radius ``flat`` x the z
+    TailTop -> TailEnd moved by ``offset`` (onto our rump; the weights stay on the bones); ``rings`` cross-sections (``sides``-gons, x radius ``flat`` x the z
     radius) evenly along it, radius by the fraction along (``radii``: [[fraction, radius]]: the
     dock, the hair widening, the taper), both ends capped. Per vertex ``chain``: its position as
     t = node index + fraction along TAIL_NODES (root = node 0), for ``tail_weights``.
     -> {"v", "f", "part", "hem", "anchor", "chain", "log"}."""
     B = {k: np.array(v, dtype=np.float64) for k, v in bones.items()}
-    nodes = np.array([root] + [B[n] for n in TAIL_NODES[1:]], dtype=np.float64)
+    nodes = np.array([root] + [B[n] + np.asarray(offset, dtype=np.float64) for n in TAIL_NODES[1:]], dtype=np.float64)
     seg = np.linalg.norm(np.diff(nodes, axis=0), axis=1)
     cum = np.concatenate([[0], np.cumsum(seg)])
     rad = np.array(radii, dtype=np.float64)

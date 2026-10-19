@@ -48,14 +48,20 @@ def regions(centres: np.ndarray, normals: np.ndarray, part: np.ndarray, bones: d
     return out
 
 
-def _scale_shade(a: np.ndarray, b: np.ndarray, size: float = 0.32) -> np.ndarray:
-    """Scales in rows on the plane (a, b): 1 on a scale's face, darker towards its lower edge
-    and in the gaps (rows offset by half a scale)."""
+SCALE_SIZE = 0.2  # scene units; test 16: 0.32 read as big tiles and, soft-shaded, as wool
+
+
+def _scale_shade(a: np.ndarray, b: np.ndarray, size: float = SCALE_SIZE) -> np.ndarray:
+    """Scales in rows on the plane (a, b), rows offset by half a scale: each scale's face flat
+    and bright with a slight sheen towards its top, a thin dark rim at its rounded lower edge
+    (crisp, so the pattern reads as metal rather than a soft texture)."""
     row = np.floor(b / size)
     fa = (a / size + 0.5 * (row % 2)) % 1.0 - 0.5
     fb = (b / size) % 1.0
-    r = np.sqrt(fa ** 2 + (1.0 - fb) ** 2 * 0.8)
-    return np.clip(1.15 - 0.55 * r, 0.55, 1.0) * (0.92 + 0.08 * (fb > 0.15))
+    r = np.sqrt(fa ** 2 + (1.0 - fb) ** 2 * 0.7)  # distance from the scale's top centre
+    face = 0.9 + 0.1 * fb  # brighter towards the top
+    rim = (r > 0.5) & (r < 0.62)
+    return np.where(rim, 0.62, face)
 
 
 def colour(points: np.ndarray, normals: np.ndarray, region: int, palette: dict, bones: dict) -> np.ndarray:
@@ -94,7 +100,11 @@ def colour(points: np.ndarray, normals: np.ndarray, region: int, palette: dict, 
         rgb = np.array(palette["silver"])[None, :] * 1.08 * noise[:, None]
         rgb[np.abs(points[:, 0]) < 0.12] = palette["gold"]
         return rgb
-    return np.array(palette["coat"])[None, :] * noise[:, None]
+    # the coat (head, lower legs): quiet, the muzzle a little darker (HorseHead to the nose tip
+    # is -z), no blotches
+    B = {k: np.array(v) for k, v in bones.items()}
+    muzzle = np.clip((B["HorseHead"][2] - 1.5 - points[:, 2]) / 1.5, 0, 1)
+    return np.array(palette["coat"])[None, :] * ((1.0 - 0.25 * muzzle) * (1.0 + (noise - 1.0) * 0.4))[:, None]
 
 
 def paint(uv: np.ndarray, tris: np.ndarray, co: np.ndarray, face_n: np.ndarray, region: np.ndarray,

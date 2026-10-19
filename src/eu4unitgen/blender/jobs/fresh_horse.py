@@ -27,7 +27,7 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        hem), "neck_allow" (the neck thinned to vanilla's thickness x this), "flank_allow" (each flank
        narrowed to vanilla's half-width x this), "leg_allow" (thin legs thickened to vanilla's radius x this), "tail_gap" (the caparison
        pushed off the tail),
-       "chanfron": {"lift", "thickness", "facing"} (step 8: a plate merged in, 100% HorseHead),
+       "chanfron": add_chanfron's keywords (a plate made from scratch, merged in, 100% HorseHead),
        "tail": {"build": "auto" | true | false, "cut": stub cut radius, _horse_barding.tail's sides, rings,
        radii, flat} (round 3: with "auto", built when _horse_measure.tail_state says the generated
        one is missing, fused or a stub; a fused tail or stub is cut off first, before the bake source
@@ -442,35 +442,63 @@ def decimate(obj, target, log=None, quads=None):
     return tri_count(obj)
 
 
-def add_chanfron(obj, bones, lift=0.06, thickness=0.04, facing=0.35):
-    """A chanfron merged into the mesh: the forehead and nose faces (in front of the poll, facing
-    out of the face: away from the head's axis, upwards) copied, lifted ``lift`` off the face and
-    given ``thickness``. Its faces get part = 1 (weighted 100% HorseHead after the transfer).
+def add_chanfron(obj, bones, lift=0.06, thickness=0.05, start=0.12, stop=0.86, width=0.78, nose=0.45,
+                 rows=8, cols=6, corner=0.35, facing=None):
+    """A chanfron merged into the mesh as its own piece (part = 1; 100% HorseHead after the
+    transfer): a plate made from scratch, not the head's own faces (those gave a ragged outline,
+    test 16). The head's axis runs from HorseHead to the muzzle (the body point furthest along
+    vanilla's poll-to-muzzle direction); the plate covers ``start``..``stop`` of it, ``rows`` x
+    ``cols`` points, each cast down onto the face from above and lifted ``lift`` off it. Its
+    half-width is ``width`` x the head's half-width there (rays across), narrowing to ``nose`` x
+    at the muzzle end, the corners rounded (``corner``); ``thickness`` with a rim.
     -> its triangle count."""
-    B = {k: Vector(v) for k, v in bones.items()}
-    head = B["HorseHead"]
-    axis = Vector((0.0, -1.5, -3.3)).normalized()  # the poll towards vanilla's muzzle
-    out_of_face = Vector((0.0, -axis.z, axis.y))  # the axis turned 90 degrees up
-    if out_of_face.y < 0:
-        out_of_face = -out_of_face
+    from mathutils.bvhtree import BVHTree
+    head = Vector(bones["HorseHead"])
+    axis0 = Vector((0.0, -1.5, -3.3)).normalized()
+    co = hs.verts(obj)
+    rel = co - np.array(head)
+    tip = Vector(co[int(np.argmax(rel @ np.array(axis0)))])
+    axis = tip - head
+    length = axis.length
+    axis.normalize()
+    side = Vector((1.0, 0.0, 0.0))
+    up = axis.cross(side).normalized()
+    if up.y < 0:
+        up = -up
+    bvh = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+    grid = []
+    for i in range(rows):
+        u = start + (stop - start) * i / (rows - 1)
+        c = head + axis * (u * length)
+        hit = bvh.ray_cast(c + side * 4.0, -side, 8.0)[0]
+        half = max((hit - c).dot(side), 0.2) if hit is not None else 0.6
+        taper = width + (nose - width) * ((u - start) / (stop - start)) ** 1.5
+        row = []
+        for j in range(cols):
+            v = -1.0 + 2.0 * j / (cols - 1)
+            # rounded corners: the outer columns pull in at the two ends
+            e = min((u - start) / (stop - start), (stop - u) / (stop - start)) / corner
+            pull = 1.0 if abs(v) < 0.99 else 0.75 + 0.25 * min(e, 1.0)
+            pos = c + side * (v * half * taper * pull)
+            h = bvh.ray_cast(pos + up * 4.0, -up, 8.0)
+            if h[0] is None:
+                row.append(None)
+                continue
+            row.append(h[0] + h[1] * lift)
+        grid.append(row)
     bm = bmesh.new()
-    bm.from_mesh(obj.data)
+    vs = [[bm.verts.new(p) if p is not None else None for p in row] for row in grid]
+    for i in range(rows - 1):
+        for j in range(cols - 1):
+            q = [vs[i][j], vs[i][j + 1], vs[i + 1][j + 1], vs[i + 1][j]]
+            if all(x is not None for x in q):
+                bm.faces.new(q)
     bm.normal_update()
-    faces = [f for f in bm.faces if f.calc_center_median().z < head.z - 0.3 and f.normal.dot(out_of_face) > facing
-             and (f.calc_center_median() - head).dot(axis) < 3.0]
-    plate = bmesh.new()
-    vmap = {}
-    for f in faces:
-        vs = []
-        for v in f.verts:
-            if v.index not in vmap:
-                vmap[v.index] = plate.verts.new(v.co + v.normal * lift)
-            vs.append(vmap[v.index])
-        plate.faces.new(vs)
-    bm.free()
+    if bm.faces and sum(f.normal.dot(up) for f in bm.faces) < 0:
+        bmesh.ops.reverse_faces(bm, faces=list(bm.faces))
     me = bpy.data.meshes.new("chanfron")
-    plate.to_mesh(me)
-    plate.free()
+    bm.to_mesh(me)
+    bm.free()
     ch = bpy.data.objects.new("chanfron", me)
     bpy.context.scene.collection.objects.link(ch)
     activate(ch)
@@ -481,8 +509,9 @@ def add_chanfron(obj, bones, lift=0.06, thickness=0.04, facing=0.35):
     bpy.ops.object.modifier_apply(modifier=mod.name)
     tris = tri_count(ch)
     for o, value in ((obj, 0), (ch, 1)):
-        attr = o.data.attributes.new("part", "INT", "FACE")
-        attr.data.foreach_set("value", [value] * len(o.data.polygons))
+        if o.data.attributes.get("part") is None:
+            attr = o.data.attributes.new("part", "INT", "FACE")
+            attr.data.foreach_set("value", [value] * len(o.data.polygons))
     activate(obj)
     ch.select_set(True)
     bpy.ops.object.join()
@@ -541,15 +570,20 @@ def cut_tail_stub(obj, bones, radius):
     return [before, tri_count(obj)]
 
 
-def tail_root(obj, bones, inside=0.35):
-    """Where our tail starts: the rump surface met going from TailTop towards SpineEnd, ``inside``
-    further in (buried, so no gap opens when the tail swings); SpineEnd itself if nothing is hit."""
+def tail_anchor(obj, bones, inside=0.4, out=0.05):
+    """Where our tail sits: our rump's surface point nearest vanilla's TailTop (on the centre
+    line). -> (root: that point ``inside`` under the surface, buried so no gap opens when the tail
+    swings; offset: from TailTop to the point ``out`` above the surface, which the tail's hanging
+    nodes move by, so the tail lies on our rump instead of starting in the air behind it)."""
     from mathutils.bvhtree import BVHTree
-    top, end = Vector(bones["HorseTailTop"]), Vector(bones["HorseSpineEnd"])
-    d = (end - top).normalized()
+    top = Vector(bones["HorseTailTop"])
     bvh = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
-    hit = bvh.ray_cast(top - d * 0.5, d, (end - top).length + 0.5)[0]
-    return list(hit + d * inside) if hit is not None else list(end)
+    loc, normal, _, _ = bvh.find_nearest(Vector((0.0, top.y, top.z)))
+    if loc is None:
+        return list(bones["HorseSpineEnd"]), [0.0, 0.0, 0.0]
+    loc.x, normal.x = 0.0, 0.0
+    normal.normalize()
+    return list(loc - normal * inside), list(loc + normal * out - top)
 
 
 def pin_barding(obj, bones):
@@ -873,13 +907,15 @@ def main():
                          "saddle_node_y": van["bones"]["Saddle_Node"][1]}
     if a.get("chanfron"):
         res["chanfron"] = {"tris": add_chanfron(obj, van["bones"], **a["chanfron"])}
+    if build_tail:  # found on the body alone, before the panels join it
+        root, offset = tail_anchor(obj, van["bones"])
     if a.get("barding"):
         res["barding"] = add_barding(obj, van["bones"], a["barding"], a.get("stirrups"))
-    if src["kind"] == "model" and build_tail:
-        b = hb.tail(van["bones"], tail_root(obj, van["bones"]),
+    if build_tail:
+        b = hb.tail(van["bones"], root, offset=offset,
                     **{k: v for k, v in a["tail"].items() if k in ("sides", "rings", "radii", "flat")})
         join_piece(obj, "tail", b)
-        res["tail"]["built"] = b["log"]
+        res["tail"]["built"] = {**b["log"], "offset": [round(x, 2) for x in offset]}
     smart_uv(obj)
     wstats = {}
     transfer_weights(obj, vanilla, a.get("smooth", 2), a.get("influences", 3),
