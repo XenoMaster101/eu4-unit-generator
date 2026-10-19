@@ -5,9 +5,11 @@ vanilla horse (given as arrays, not imported) and its bones are where the .mesh 
 
 source "model": a generated model file (glTF: Y up, facing +Z; PDX = (x, y, -z)), then
   clean-up: keep the largest piece; fit (uniform scale by nose-to-tail length, hooves on the
-  ground, centred), then optionally the landmark fit; cut the rider: everything above ``cut.y``
-  between ``cut.z0`` and ``cut.z1`` (the saddle region; head, neck and tail stay); keep the
-  largest piece again; fill holes; optionally a voxel remesh into one closed manifold solid.
+  ground, centred), then optionally the reshape onto the vanilla rest pose and a fine voxel
+  solid; the rider cut off with a boolean box above the saddle line (head, neck and tail stay);
+  optionally a one-sided bulge pushed in, the skirts cut at a hem (legs and tail kept), the
+  caparison pushed off the tail; a coarse voxel solid (a voxel remesh needs closed input, and
+  booleans on a closed solid keep it closed).
 source "control": a crude horse from capsules along the vanilla bones, voxel-remeshed into one
   closed surface (a pipeline control only, never shipped).
 Then both: an even-sized remesh to about ``target_tris`` (QuadriFlow, then a collapse trim),
@@ -18,7 +20,11 @@ times, limited to ``influences`` bones per vertex, normalised.
 args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]}},
        "source": {"kind": "model", "path"} | {"kind": "control"},
        "cut": {"y", "z0", "z1"} | null, "voxel": size | null (model: voxel remesh after the cut),
-       "anatomy": bool (model: the landmark fit after the box fit),
+       "reshape": bool (model: height to the croup, then _horse_shape.reshape onto the vanilla rest pose),
+       "leg_top": y up to which legs are tracked, "cut".y may be "saddle" (vanilla's back height there),
+       "lump": {"z0", "z1", "y0", "y1", "margin"} (mirror-based removal of a one-sided bulge),
+       "voxel_fine": size (a closed solid before the edits), "hem_y", "leg_radius" (skirts raised to the
+       hem), "tail_gap" (the caparison pushed off the tail),
        "target_tris", "quads" (QuadriFlow's target; default target_tris / 2), "relax", "smooth", "influences",
        "geometry_out": .json path, "preview_out": .obj path (Blender axes, for renders), "result_path"}
 Result: counts per stage, the fit (scale, offset) and back heights (ours vs vanilla).
@@ -34,6 +40,9 @@ import bmesh  # noqa: E402 - Blender module
 import bpy  # noqa: E402 - Blender module
 from mathutils import Matrix, Vector  # noqa: E402 - Blender module
 
+import numpy as np  # noqa: E402 - Blender's numpy
+
+import _horse_shape as hs  # noqa: E402
 import _pdx  # noqa: E402
 
 
@@ -47,8 +56,10 @@ def mesh_object(name, verts, tris):
 
 
 def activate(obj):
+    bpy.context.view_layer.update()
     for o in bpy.context.view_layer.objects:
-        o.select_set(False)
+        if o is not None:
+            o.select_set(False)
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
 
@@ -158,97 +169,172 @@ def fit(obj, vanilla):
     return s, list(off)
 
 
-def _smooth(t):
-    t = max(0.0, min(1.0, t))
-    return t * t * (3 - 2 * t)
-
-
-def _rotate_yz(co, pivot, angle):
-    """``co`` turned by ``angle`` (radians) about the X axis through ``pivot`` (the side plane)."""
-    d = co - pivot
-    c, s = math.cos(angle), math.sin(angle)
-    return pivot + Vector((d.x, d.y * c - d.z * s, d.y * s + d.z * c))
-
-
-def hooves(obj, mid_z):
-    """Per leg (front/back x left/right) the lowest region's centre (vertices within 0.6 of its floor)."""
-    out = {}
-    for end in ("Front", "Back"):
-        for side in ("Left", "Right"):
-            vs = [v.co for v in obj.data.vertices
-                  if ((v.co.z < mid_z) == (end == "Front")) and ((v.co.x > 0) == (side == "Left")) and v.co.y < 6]
-            if not vs:
-                continue
-            floor = min(v.y for v in vs)
-            low = [v for v in vs if v.y < floor + 0.6]
-            out[f"{end}{side}"] = Vector((sum(v.x for v in low) / len(low), floor, sum(v.z for v in low) / len(low)))
-    return out
-
-
-def _wrap(a):
-    return (a + math.pi) % (2 * math.pi) - math.pi
-
-
-def nose(o):
-    """The centre of the front 3 units of the mesh above y 9 (the head, not a reaching hoof)."""
-    pts = [v.co for v in o.data.vertices if v.co.y > 9]
-    front = min(c.z for c in pts)
-    pts = [c for c in pts if c.z < front + 3.0]
-    return sum(pts, Vector()) / len(pts)
-
-
-def anatomy_fit(obj, vanilla, bones):
-    """Landmark fit after the box fit (test 15: TripoSG's proportions and pose aren't the vanilla
-    skeleton's). The box fit gets the length right (nose and legs line up along the body: measured
-    side profiles) but the generated horse stands lower: scale the height (and width) to the croup,
-    turn the head and neck about the neck base onto the vanilla nose, and swing each leg about
-    its top joint until its hoof is under the vanilla heel (straightens a lifted or striding leg)."""
-    B = {k: Vector(v) for k, v in bones.items()}
-    log = {}
-    croup_z = (B["Saddle_Node"].z + 3.0, B["Saddle_Node"].z + 4.0)
-    sy = top_at(vanilla, *croup_z, 1.0) / top_at(obj, *croup_z, 1.0)
+def scale_height(obj, vanilla, bones):
+    """Height and width scaled so the croup (the back 3-4 behind Saddle_Node, |x| < 1) is vanilla's:
+    the box fit gets the length right, but the generated horse stands lower (side profiles)."""
+    z = bones["Saddle_Node"][2]
+    s = top_at(vanilla, z + 3.0, z + 4.0, 1.0) / top_at(obj, z + 3.0, z + 4.0, 1.0)
     for v in obj.data.vertices:
-        v.co.y *= sy
-        v.co.x *= sy
-    log.update(scale_xy=sy)
-    pivot = B["HorseNeckBase"]
-    ours_n, van_n = nose(obj), nose(vanilla)
-    turn = _wrap(math.atan2(van_n.y - pivot.y, van_n.z - pivot.z) - math.atan2(ours_n.y - pivot.y, ours_n.z - pivot.z))
-    reach = (van_n - pivot).length / max((ours_n - pivot).length, 1e-6)
-    for v in obj.data.vertices:
-        w = _smooth((pivot.z - v.co.z) / 2.5)  # 0 behind the neck base, 1 from 2.5 in front of it
-        if w > 0:
-            d = (v.co - pivot) * (1 + (reach - 1) * w)
-            d.x = v.co.x - pivot.x
-            v.co = _rotate_yz(pivot + d, pivot, turn * w)
-    log.update(nose={"ours": list(ours_n), "vanilla": list(van_n)}, head_turn_deg=math.degrees(turn), head_reach=reach)
-    mid_z = (B["HorseFrontLeftUp"].z + B["HorseBackLeftUp"].z) / 2
-    legs = {}
-    for key, hoof in hooves(obj, mid_z).items():
-        top, heel = B[f"Horse{key}Up"], B[f"Horse{key}Heel"]
-        turn = _wrap(math.atan2(0.0 - top.y, heel.z - top.z) - math.atan2(hoof.y - top.y, hoof.z - top.z))
-        left, front = key.endswith("Left"), key.startswith("Front")
-        for v in obj.data.vertices:
-            if (v.co.x > 0) != left or (v.co.z < mid_z) != front:
-                continue
-            w = _smooth((top.y - 1.0 - v.co.y) / 2.5)  # 0 above the joint, 1 from 3.5 below it
-            if w > 0:
-                v.co = _rotate_yz(v.co, top, turn * w)
-        legs[key] = {"hoof": list(hoof), "turn_deg": math.degrees(turn)}
-    log["legs"] = legs
+        v.co.x *= s
+        v.co.y *= s
     obj.data.update()
-    return log
+    return s
 
 
-def cut_rider(obj, cut):
+def delete_vertices(obj, indices):
     bm = bmesh.new()
     bm.from_mesh(obj.data)
-    gone = [v for v in bm.verts if v.co.y > cut["y"] and cut["z0"] <= v.co.z <= cut["z1"]]
-    bmesh.ops.delete(bm, geom=gone, context="VERTS")
+    bm.verts.ensure_lookup_table()
+    gone = set(indices)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.index in gone], context="VERTS")
     bm.to_mesh(obj.data)
     bm.free()
     obj.data.update()
     return len(gone)
+
+
+def solidify(obj, voxel):
+    """A voxel remesh into one closed manifold solid (thin sheets thickened, inner faces gone),
+    largest piece kept. Its input must be closed: holes let the inside leak and the body vanishes."""
+    activate(obj)
+    mod = obj.modifiers.new("solid", "REMESH")
+    mod.mode, mod.voxel_size = "VOXEL", float(voxel)
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    out = {"voxel": voxel, "tris": tri_count(obj), "pieces": count_pieces(obj)}
+    keep_largest(obj)
+    out["tris_kept"] = tri_count(obj)
+    out["normals_flipped"] = outward(obj)
+    return out
+
+
+def outward(obj):
+    """Face normals made consistent and pointing out of the (closed) solid; booleans and the
+    voxel remesh read inside-out meshes inverted. -> whether they had pointed in."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    before = sum(f.normal.dot(f.calc_center_median()) for f in bm.faces)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.normal_update()
+    after = sum(f.normal.dot(f.calc_center_median()) for f in bm.faces)
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    return (before > 0) != (after > 0)
+
+
+def box(name, lo, hi):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=[(a + b) / 2 for a, b in zip(lo, hi)])
+    o = bpy.context.active_object
+    o.name = name
+    o.scale = [b - a for a, b in zip(lo, hi)]
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    return o
+
+
+def join(objs):
+    activate(objs[0])
+    for o in objs:
+        o.select_set(True)
+    bpy.ops.object.join()
+    return bpy.context.view_layer.objects.active
+
+
+def boolean(obj, cutter, operation="DIFFERENCE"):
+    activate(obj)
+    mod = obj.modifiers.new("bool", "BOOLEAN")
+    mod.operation, mod.object, mod.solver = operation, cutter, "EXACT"
+    mod.use_self, mod.use_hole_tolerant = True, True  # cutters made of overlapping capsules
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.data.objects.remove(cutter, do_unlink=True)
+
+
+def cut_rider_box(obj, cut):
+    """The rider removed with a boolean: a box above ``cut.y`` between ``cut.z0`` and ``cut.z1``
+    (head, neck and tail stay). On a closed solid the result is closed, with a flat cap at
+    exactly ``cut.y``: the back the rider sits on."""
+    before = tri_count(obj)
+    boolean(obj, box("rider_cutter", (-20, cut["y"], cut["z0"]), (20, 60, cut["z1"])))
+    return before - tri_count(obj)
+
+
+def trim_skirts(obj, bones, hem_y, leg_radius):
+    """Skirts and caparison end at ``hem_y`` (above the knees and hocks) so the legs swing free:
+    a boolean cut of everything below the hem except capsules of ``leg_radius`` round the vanilla
+    leg chains (the legs are on them after the reshape) and round the hanging tail."""
+    B = bones
+    cutter = box("skirt_cutter", (-20, -5, -40), (20, hem_y, 40))
+    keep = []
+    for leg in hs.LEGS:
+        pts = hs.leg_chain({k: np.array(v) for k, v in B.items()}, leg)
+        for p0, p1 in zip(pts[:-1], pts[1:]):
+            if p0[1] < hem_y + 1:
+                keep += capsule("leg_keep", p0.tolist(), p1.tolist(), leg_radius)
+    tail = [B[t] for t in ("HorseTailMiddle", "HorseTailTip", "HorseTailEnd")]
+    for p0, p1 in zip(tail[:-1], tail[1:]):
+        keep += capsule("tail_keep", p0, p1, 0.6)
+    keeper = join(keep)
+    for o in (keeper, cutter):
+        activate(o)
+        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    boolean(cutter, keeper)
+    before = tri_count(obj)
+    boolean(obj, cutter)
+    return before - tri_count(obj)
+
+
+def clear_tail(obj, bones, gap):
+    """The caparison pushed out to ``gap`` beyond the hanging tail (TailMiddle down; tail radius
+    0.45): every vertex off the centre line (|x| > 0.45) closer than that moves straight away from
+    the tail, so the tail and the caparison stay apart after the voxel solid."""
+    B = {k: np.array(v) for k, v in bones.items()}
+    co = hs.verts(obj)
+    dist, point = hs.nearest_on_chains(co, [hs.chain(B, ["HorseTailMiddle", "HorseTailTip", "HorseTailEnd"])])
+    move = (dist < 0.45 + gap) & (np.abs(co[:, 0]) > 0.45)
+    away = co[move] - point[move]
+    norm = np.linalg.norm(away, axis=1, keepdims=True)
+    co[move] = point[move] + away / np.maximum(norm, 1e-6) * (0.45 + gap)
+    hs.set_verts(obj, co)
+    return int(move.sum())
+
+
+def surface_top(obj, z, half=0.5, x=0.0):
+    """The highest surface point straight below y 60 over (x, z +- ``half``): rays cast down on
+    the faces (vertex samples miss a flat cap made of large faces). None if nothing is hit."""
+    from mathutils.bvhtree import BVHTree
+    bvh = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+    hits = []
+    for dz in (-half, -half / 2, 0.0, half / 2, half):
+        loc = bvh.ray_cast(Vector((x, 60.0, z + dz)), Vector((0, -1, 0)))[0]
+        if loc is not None:
+            hits.append(loc.y)
+    return max(hits) if hits else None
+
+
+def match_saddle(obj, vanilla, bones, tolerance=0.05, limit=1.0):
+    """Our back at the saddle (surface height on the centre line within 0.5 of Saddle_Node along
+    z) onto vanilla's, by a smooth vertical shift of the back (full within 1.5 of the saddle
+    along z, none from 3.5; only above y 9). Saddle_Node itself never moves. A shift over
+    ``limit`` is refused (something else is wrong). -> (before, after, vanilla, note)."""
+    z = bones["Saddle_Node"][2]
+    want = surface_top(vanilla, z)
+    before = surface_top(obj, z)
+    if before is None or abs(want - before) > limit:
+        return before, before, want, f"refused: a shift of {want - (before or 0):.2f} is over {limit}"
+    for _ in range(4):
+        delta = want - surface_top(obj, z)
+        if abs(delta) <= tolerance / 2:
+            break
+        for v in obj.data.vertices:
+            if v.co.y > 9.0:
+                w = 1.0 - _smooth((abs(v.co.z - z) - 1.5) / 2.0)
+                v.co.y += delta * w * _smooth((v.co.y - 9.0) / 1.5)
+        obj.data.update()
+    return before, surface_top(obj, z), want, "matched"
+
+
+def _smooth(t):
+    t = max(0.0, min(1.0, t))
+    return t * t * (3 - 2 * t)
 
 
 def fill_holes(obj):
@@ -426,6 +512,20 @@ def export(obj, geometry_out, preview_out):
     return len(p) // 3, len(tri) // 3, unweighted
 
 
+def debug_dump(a, obj, stage):
+    """With ``debug_dir``: the mesh after ``stage`` as an OBJ (preview axes), for looking at."""
+    if not a.get("debug_dir"):
+        return
+    prev = obj.copy()
+    prev.data = obj.data.copy()
+    bpy.context.scene.collection.objects.link(prev)
+    prev.data.transform(Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1))))
+    activate(prev)
+    bpy.ops.wm.obj_export(filepath=os.path.join(a["debug_dir"], f"{stage}.obj"), export_selected_objects=True,
+                          export_uv=False, export_materials=False)
+    bpy.data.objects.remove(prev, do_unlink=True)
+
+
 def main():
     a = _pdx.args()
     _pdx.clear_scene()
@@ -446,21 +546,36 @@ def main():
         res["stages"]["largest_piece"] = {"tris": tri_count(obj)}
         s, off = fit(obj, vanilla)
         res["fit"] = {"scale": s, "offset": off}
-        if a.get("anatomy"):
-            res["fit"]["anatomy"] = anatomy_fit(obj, vanilla, van["bones"])
+        if a.get("reshape"):
+            res["fit"]["height_scale"] = scale_height(obj, vanilla, van["bones"])
+            res["fit"]["reshape"] = hs.reshape(obj, vanilla, van["bones"], leg_top=float(a.get("leg_top", 6.0)))
+        debug_dump(a, obj, "1_reshaped")
+        if a.get("voxel_fine"):  # closed before any edit (TripoSG's pieces and open sheets)
+            res["stages"]["solid_fine"] = solidify(obj, a["voxel_fine"])
+        debug_dump(a, obj, "2_solid_fine")
         cut = a.get("cut")
         if cut:
-            res["stages"]["rider_cut"] = {"vertices_removed": cut_rider(obj, cut)}
+            if cut.get("y") == "saddle":  # the cap at vanilla's back height at the saddle
+                z = van["bones"]["Saddle_Node"][2]
+                cut = {**cut, "y": top_at(vanilla, z - 0.5, z + 0.5, 1.0)}
+            res["stages"]["rider_cut"] = {"y": cut["y"], "tris_removed": cut_rider_box(obj, cut)}
+        debug_dump(a, obj, "3_rider_cut")
+        lump = a.get("lump")
+        if lump:
+            res["stages"]["lump_flattened"] = {"vertices": hs.flatten_lump(
+                obj, lump["z0"], lump["z1"], lump["y0"], lump["y1"], lump.get("margin", 0.3))}
+        if a.get("hem_y"):
+            res["stages"]["skirts_trimmed"] = {"hem_y": a["hem_y"], "tris_removed": trim_skirts(
+                obj, van["bones"], float(a["hem_y"]), float(a.get("leg_radius", 0.9)))}
             keep_largest(obj)
-            res["stages"]["rider_cut"]["tris"] = tri_count(obj)
-        res["stages"]["holes_filled"] = {"boundary_edges": fill_holes(obj), "tris": tri_count(obj)}
-        if a.get("voxel"):  # one closed manifold solid (QuadriFlow needs one): thin sheets (skirts, fringes,
-            activate(obj)   # reins) thickened, inner faces and the cut's opening gone
-            mod = obj.modifiers.new("solid", "REMESH")
-            mod.mode, mod.voxel_size = "VOXEL", float(a["voxel"])
-            bpy.ops.object.modifier_apply(modifier=mod.name)
-            res["stages"]["voxel_remesh"] = {"voxel": a["voxel"], "tris": tri_count(obj), "pieces": count_pieces(obj)}
-            keep_largest(obj)
+        debug_dump(a, obj, "4_trimmed")
+        if a.get("tail_gap"):
+            res["stages"]["tail_cleared"] = {"vertices": clear_tail(obj, van["bones"], float(a["tail_gap"]))}
+        if a.get("voxel"):  # merge what the edits made overlap; closed in, closed out
+            res["stages"]["solid"] = solidify(obj, a["voxel"])
+        else:
+            res["stages"]["holes_filled"] = {"boundary_edges": fill_holes(obj), "tris": tri_count(obj)}
+        debug_dump(a, obj, "5_solid")
     else:
         obj = control_horse(van["bones"])
         res["stages"]["built"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
@@ -484,6 +599,10 @@ def main():
     if count_pieces(obj) > 1:  # remeshing can leave a stray shell
         keep_largest(obj)
         res["stages"]["decimated"]["tris_one_piece"] = tri_count(obj)
+    if src["kind"] == "model" and a.get("cut"):
+        before, after, want, note = match_saddle(obj, vanilla, van["bones"])
+        res["saddle"] = {"before": before, "after": after, "vanilla": want, "note": note,
+                         "saddle_node_y": van["bones"]["Saddle_Node"][1]}
     smart_uv(obj)
     transfer_weights(obj, vanilla, a.get("smooth", 2), a.get("influences", 3))
     verts, tris, unweighted = export(obj, a["geometry_out"], a.get("preview_out"))
