@@ -7,6 +7,9 @@ The job writes its result JSON to ``args["result_path"]``. The environment's pyt
 EU4UNITGEN_AI_PYTHON, then EU4UNITGEN_TRIPOSG_PYTHON (one environment serves both today). Extra
 environment variables (model folders such as U2NET_HOME, HF_HOME; HF_HUB_OFFLINE) are passed as
 given: jobs run offline on weights the user installed.
+
+Writes are guarded (ref3d.writeguard): every output path must be inside the project or the AI root,
+and the runner's own args/result files live in ``<AI root>/tmp``, not the system temp folder.
 """
 from __future__ import annotations
 
@@ -16,6 +19,8 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from eu4unitgen.ref3d.writeguard import allowed_roots, check_writes
 
 JOBS_DIR = Path(__file__).with_name("jobs")
 
@@ -41,12 +46,16 @@ class AIJobRunner:
             raise AIJobError(f"AI environment python not found at {self.python}")
         self.env = {k: str(v) for k, v in (env or {}).items()}
         self.timeout = timeout
+        self.roots = allowed_roots(self.python)
 
     def run_job(self, job: str, args: dict, timeout: float | None = None) -> AIJobResult:
         script = JOBS_DIR / f"{job}.py"
         if not script.is_file():
             raise AIJobError(f"no AI job {job!r} ({script})")
-        with tempfile.TemporaryDirectory(prefix="eu4unitgen_ai_") as tmp:
+        check_writes(args, self.roots, f"AI job {job}")
+        tmp_root = self.roots[-1] / "tmp"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="eu4unitgen_ai_", dir=tmp_root) as tmp:
             result_path = Path(tmp) / "result.json"
             args_path = Path(tmp) / "args.json"
             args_path.write_text(json.dumps({**args, "result_path": str(result_path)}), encoding="utf-8")

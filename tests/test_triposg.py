@@ -28,6 +28,7 @@ def test_runner_passes_args_and_reads_the_result(tmp_path, monkeypatch):
         "print('hello from the job')\n", encoding="utf-8")
     (jobs / "fails.py").write_text("raise SystemExit('no GPU')\n", encoding="utf-8")
     monkeypatch.setattr(triposg, "JOBS_DIR", jobs)
+    monkeypatch.setenv("EU4UNITGEN_AI_ROOT", str(tmp_path))
     r = TripoSGRunner(sys.executable, tmp_path, tmp_path)
     res = r.run_job("echo", {"x": 7})
     assert res.result == {"got": 7, "repo": str(tmp_path)} and "hello from the job" in res.log

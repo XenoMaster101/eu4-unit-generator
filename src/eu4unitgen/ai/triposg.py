@@ -19,6 +19,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from eu4unitgen.ref3d.writeguard import allowed_roots, check_writes
+
 JOBS_DIR = Path(__file__).with_name("jobs")
 
 
@@ -46,12 +48,16 @@ class TripoSGRunner:
             if not p.exists():
                 raise TripoSGError(f"TripoSG {what} not found at {p}")
         self.timeout = timeout
+        self.roots = allowed_roots(self.python)
 
     def run_job(self, job: str, args: dict, timeout: float | None = None) -> TripoSGResult:
         script = JOBS_DIR / f"{job}.py"
         if not script.is_file():
             raise TripoSGError(f"no TripoSG job {job!r} ({script})")
-        with tempfile.TemporaryDirectory(prefix="eu4unitgen_triposg_") as tmp:
+        check_writes(args, self.roots, f"TripoSG job {job}")
+        tmp_root = self.roots[-1] / "tmp"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="eu4unitgen_triposg_", dir=tmp_root) as tmp:
             result_path = Path(tmp) / "result.json"
             args_path = Path(tmp) / "args.json"
             args_path.write_text(json.dumps({**args, "repo": str(self.repo), "weights": str(self.weights),
