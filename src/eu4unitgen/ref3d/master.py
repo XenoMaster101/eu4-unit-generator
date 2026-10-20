@@ -144,7 +144,8 @@ def h3_sheet(s, views, asm, mev, verdict, m_arm, m_cl, path, version, ea_version
         r = mev["views"][vn]
         g = r["gates"]
         txt = [f"view {vn}" + (" (lower confidence: its camera drifted)" if r["low_confidence"] else ""),
-               *(f"{k}: {'PASS' if x['pass'] else 'FAIL'} {x['value']:.3g}" if isinstance(x.get("value"), (int, float))
+               *(f"{k}: not measured" if x.get("not_measured") else
+                 f"{k}: {'PASS' if x['pass'] else 'FAIL'} {x['value']:.3g} ({x.get('worst')})" if isinstance(x.get("value"), (int, float))
                  else f"{k}: {'PASS' if x['pass'] else 'FAIL'}" for k, x in g.items())]
         lm = g["landmarks"]
         if lm.get("head_value") is not None:

@@ -71,6 +71,9 @@ def main(args_path):
                                   "value": max(body) if body else None, "head_value": max(hd) if hd else None,
                                   "limit": g["landmark_max"], "head_limit": g.get("landmark_max_head", g["landmark_max"]),
                                   "over": bad}
+            for k, x in gates.items():  # M5's gates pass a metric that measured nothing; the master's don't
+                if x.get("value") is None and k != "landmarks":
+                    x["pass"], x["not_measured"] = False, True
             unmatched = sorted(set(refs[vn]["landmarks"]) - set(cand["landmarks"]))
             out[vn] = {"metrics": mets, "gates": gates, "failed": [k for k, x in gates.items() if not x["pass"]],
                        "landmarks_not_built": unmatched, "low_confidence": vn in lc}

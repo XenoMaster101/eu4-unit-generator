@@ -388,6 +388,7 @@ def main():
         sc.cycles.filter_width = 0.01 if kind == "id" else 1.5
         sc.view_settings.view_transform = "Standard" if flat else "AgX"
         sc.render.film_transparent = flat
+        sc.render.dither_intensity = 0.0 if flat else 1.0  # dither would nudge the exact class colours
 
     for vn, v in a["views"].items():
         W, H = v["size"]
@@ -395,8 +396,7 @@ def main():
         cob = camera(f"cam_{vn}", R, t, v["camera"]["focal"], v["camera"]["cx"], v["camera"]["cy"], W, H)
         for kind in (("id", "albedo") if brk else ("lit", "albedo", "id")):
             set_pass(kind)
-            sc.render.image_settings.color_mode = "RGBA" if kind != "lit" else "RGB"
-            render(sc, cob, out / f"{vn}_{kind}.png", W, H)
+            render(sc, cob, out / f"{vn}_{kind}.png", W, H, "RGBA" if kind != "lit" else "RGB")
             files[f"{vn}_{kind}"] = str(out / f"{vn}_{kind}.png")
     if not brk:
         set_pass("lit")

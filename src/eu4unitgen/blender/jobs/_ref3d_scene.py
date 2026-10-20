@@ -223,12 +223,12 @@ def set_engine_cycles(sc, samples):
     return "CPU"
 
 
-def render(sc, cam_ob, path, W, H):
+def render(sc, cam_ob, path, W, H, color_mode="RGB"):
     sc.camera = cam_ob
     sc.render.resolution_x, sc.render.resolution_y, sc.render.resolution_percentage = W, H, 100
     sc.render.filepath = str(path)
     sc.render.image_settings.file_format = "PNG"
-    sc.render.image_settings.color_mode = "RGB"
+    sc.render.image_settings.color_mode = color_mode
     bpy.ops.render.render(write_still=True)
 
 
