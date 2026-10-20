@@ -1677,6 +1677,7 @@ Goal: a **genuinely new** horse mesh from the reference, working in game on the 
     - **Map scale:** still "grey block, red saddle cloth, dark sticks". Two causes the rule doesn't touch: the breast is as deep as the girth (from the front 1.7 against vanilla's 3.1), and the flat grey mail. Breast depth is the next lever.
   - **Test 19** staged in `build/test19/stage`: tier 1 the new B, tier 2 test 18's B, tier 3 vanilla.
   - **After each round** the main render sheet is opened for the user automatically (user, round 6).
+- **SDXL inpainting 0.1 installed (user-approved, 2026-10-19):** weights `diffusers/stable-diffusion-xl-1.0-inpainting-0.1` (fp16, ~6.6 GB, CreativeML Open RAIL++-M) in `D:\eu4unitgen_ai\weights\sdxl_inpaint`. It runs in the existing `triposg_env` (diffusers 0.41, torch 2.14.1+cu126): no new packages, nothing in the repo or the app's .venv. Smoke test, offline: loads in 7 s; a 1024 px inpaint in 8 steps with CPU offload takes 37 s and peaks at 5.4 GB VRAM on the RTX 3060. Not wired into the app yet. Any other new install still needs the user's OK.
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
