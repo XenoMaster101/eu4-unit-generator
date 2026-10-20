@@ -726,6 +726,50 @@ def preload(shells):
         import trimesh  # noqa: F401
 
 
+def configure(a):
+    """Module settings from the job's args (main and every worker process)."""
+    global HEAD_TURN
+    CAM_LIMITS.update({vn: {k: tuple(v) for k, v in lim.items()} for vn, lim in (a.get("cameras") or {}).items()})
+    LM_WEIGHT.update(a.get("landmark_weights") or {})
+    EVALS.update(a.get("evals") or {})
+    HEAD_TURN = bool(a.get("head_turn"))
+    HEAD_FIT.update(a.get("head_fit") or {})
+
+
+_W = {}  # a worker's state: args, skeleton, views, checkpoints
+
+
+def _worker_init(args_path):
+    global WATCH
+    a = json.loads(Path(args_path).read_text(encoding="utf-8"))
+    preload(None)
+    configure(a)
+    WATCH = R.DriveWatch()
+    _W.update(a=a, sk=json.loads(Path(a["skeleton"]).read_text(encoding="utf-8")),
+              views={n: View(n, v, a["classes"], a) for n, v in a["views"].items()}, ck=R.Checkpoints(Path(a["out_dir"])))
+
+
+def _worker_fit(job):
+    """One (candidate, view set, restart) fit into its checkpoint, in a worker process (E-A full run:
+    the restarts and views run in parallel, then main finds them done)."""
+    key, base_shape, free, priors, seed, vns = job
+    ck, sk = _W["ck"], _W["sk"]
+    st = ck.load(key)
+    if st and st.get("done"):
+        return key
+    vs = {vn: _W["views"][vn] for vn in vns}
+    logf = open(Path(_W["a"]["out_dir"]) / f"fit_{key}.log", "a", encoding="utf-8")
+
+    def log(msg):
+        logf.write(msg + "\n")
+        logf.flush()
+
+    m, hist = fit_candidate(sk, vs, base_shape, free, priors, seed, log, ck, key)
+    cost = float(m.residuals(m.x0).dot(m.residuals(m.x0)) / 2)
+    ck.save(key, {"names": m.names, "x": m.x0, "hist": hist, "cost": cost, "done": True})
+    return key
+
+
 def main(args_path):
     global WATCH
     import cv2
@@ -747,12 +791,7 @@ def main(args_path):
         logf.flush()
 
     sk = json.loads(Path(a["skeleton"]).read_text(encoding="utf-8"))
-    CAM_LIMITS.update({vn: {k: tuple(v) for k, v in lim.items()} for vn, lim in (a.get("cameras") or {}).items()})
-    LM_WEIGHT.update(a.get("landmark_weights") or {})
-    global HEAD_TURN
-    HEAD_TURN = bool(a.get("head_turn"))
-    HEAD_FIT.update(a.get("head_fit") or {})
-    EVALS.update(a.get("evals") or {})
+    configure(a)
     views = {n: View(n, v, a["classes"], a) for n, v in a["views"].items()}
     defaults = {**RB.ha.DEFAULTS, "rider_clear": 99.0, "rider_clear_top": 99.0}  # the master isn't fitted round a game rider
     res = {"candidates": {}}
@@ -812,10 +851,26 @@ def main(args_path):
             log(f"{name}: scored earlier (checkpoint)")
         return rec is not None
 
+    def prefill(jobs):
+        """Run the not-yet-done fits in ``workers`` processes (args["workers"] > 1); the sequential code
+        then finds their checkpoints done."""
+        todo = [j for j in jobs if not (ck.load(j[0]) or {}).get("done")]
+        if a.get("workers", 1) <= 1 or len(todo) <= 1:
+            return
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+        log(f"parallel: {len(todo)} fits in {min(a['workers'], len(todo))} processes")
+        with ProcessPoolExecutor(min(a["workers"], len(todo)), mp_context=mp.get_context("spawn"),
+                                 initializer=_worker_init, initargs=(args_path,)) as ex:
+            for key in ex.map(_worker_fit, todo):
+                log(f"  {key}: done (parallel; its log: fit_{key}.log)")
+
     def run_independent(name, base_shape, priors):
         """SPEC S3's fallback (E-A round 10): each view fitted on its own (shape, camera, pose); the
         master body is L's, with R's rump (M10: L for head, neck, chest and forelegs, R for the
         hindquarters), scored in both views with each view's own camera and pose."""
+        prefill([(f"{name}_{vn}_r{k}", base_shape, True, priors, a["seed"] + 101 * k, [vn])
+                 for vn in views for k in range(a["restarts"])])
         per = {}
         for vn in views:
             runs = []
