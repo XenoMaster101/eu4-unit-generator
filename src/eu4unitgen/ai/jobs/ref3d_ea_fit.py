@@ -114,7 +114,7 @@ class View:
             ys, xs = np.nonzero(tb)
             self.zones[z] = {"zone": zm, "known": known, "inner": inner, "target": target,
                              "target_cells": cells(target), "cell_sel": cells(known) > 0,
-                             "known_ss": up(known), "inner_ss": up(inner),
+                             "known_ss": up(known), "inner_ss": up(inner), "box": zone_box(known),
                              "dt_target_edge": dist_to(tb), "edge_samples": sample(np.stack([xs, ys], 1), N_ZONE)}
         self.dt_out = dist_to(cv2.dilate(self.fg.astype(np.uint8), np.ones((2 * tol + 1,) * 2, np.uint8)).astype(bool))
         self.outside_ss = up((self.dt_out > 0) & ~self.never)
@@ -144,7 +144,7 @@ def lm_residuals(view, lm2):
 CELL = 12          # px: region fill and containment are compared per cell
 SS = 3             # the fit renders outlines at 3x: at 1x an edge's place is known to +-0.5 px, which
                    # swamped the finite differences of 1-5 px moves (E-A pilot, Jacobian check)
-W_LM, W_AREA, W_EDGE, W_CONT = 5.0, 0.5, 1.0, 0.5
+W_LM, W_AREA, W_EDGE, W_CONT = 10.0, 0.5, 1.0, 0.5
 
 
 def cells(m, c=CELL):
@@ -153,6 +153,18 @@ def cells(m, c=CELL):
     ph, pw = -H % c, -W % c
     p = np.pad(m.astype(np.float32), ((0, ph), (0, pw)))
     return p.reshape(p.shape[0] // c, c, p.shape[1] // c, c).mean(axis=(1, 3))
+
+
+def zone_box(known, margin=2):
+    """The zone's bounding box in supersampled pixels, aligned to the cells (whole cells, a margin
+    of cells round it): the zone terms are computed inside it only (E-A: the full-image distance
+    transform at 3x was most of each evaluation)."""
+    ys, xs = np.nonzero(known)
+    c = CELL
+    y0, x0 = max(0, (ys.min() // c - margin) * c), max(0, (xs.min() // c - margin) * c)
+    y1 = min(known.shape[0] // c * c, (ys.max() // c + margin + 1) * c)
+    x1 = min(known.shape[1] // c * c, (xs.max() // c + margin + 1) * c)
+    return y0 * SS, y1 * SS, x0 * SS, x1 * SS
 
 
 def up(m, s=SS):
@@ -169,12 +181,18 @@ def render_terms(view, V2, F):
     sil = RB.silhouette(V2 * SS, F, (H * SS, W * SS))
     r = []
     for z, Z in view.zones.items():
-        rm = sil & Z["known_ss"]
-        r.append(W_AREA * (cells(rm, CELL * SS) - Z["target_cells"])[Z["cell_sel"]])
+        y0, y1, x0, x1 = Z["box"]
+        rm = sil[y0:y1, x0:x1] & Z["known_ss"][y0:y1, x0:x1]
+        tc = Z["target_cells"][y0 // (CELL * SS):y1 // (CELL * SS), x0 // (CELL * SS):x1 // (CELL * SS)]
+        cs = Z["cell_sel"][y0 // (CELL * SS):y1 // (CELL * SS), x0 // (CELL * SS):x1 // (CELL * SS)]
+        r.append(W_AREA * (cells(rm, CELL * SS)[:tc.shape[0], :tc.shape[1]] - tc)[cs])
         if Z["edge_samples"] is not None:
-            d = dist_to(boundary(rm) & Z["inner_ss"])
-            e = Z["edge_samples"] * SS + SS // 2
-            r.append(W_EDGE * np.minimum(d[e[:, 1], e[:, 0]] / SS, 0.3 * view.bl) / view.bl)
+            d = dist_to(boundary(rm) & Z["inner_ss"][y0:y1, x0:x1])
+            e = Z["edge_samples"] * SS + SS // 2 - np.array([x0, y0])
+            ok = (e[:, 0] >= 0) & (e[:, 1] >= 0) & (e[:, 0] < x1 - x0) & (e[:, 1] < y1 - y0)
+            dd = np.full(len(e), 0.3 * view.bl * SS)
+            dd[ok] = d[e[ok, 1], e[ok, 0]]
+            r.append(W_EDGE * np.minimum(dd / SS, 0.3 * view.bl) / view.bl)
     r.append(W_CONT * cells(sil & view.outside_ss, CELL * SS).ravel())
     return np.concatenate(r)
 
@@ -235,20 +253,36 @@ class Model:
             poses[vn]["head_pitch"] = d[f"{vn}.pose.head_pitch"]
         return shape, skel, cams, poses
 
-    def geometry(self, x, vn):
+    def geometry(self, x, vn, mesh=True):
         import _ref3d_body as RB
         shape, skel, cams, poses = self.unpack(x)
         B, H = RB.skeleton(self.sk["bones"], self.sk["seat"], skel)
         P = {**shape, "head_pitch": poses[vn]["head_pitch"]}
         Bp = RB.pose(B, H, P, poses[vn])
+        if not mesh:  # landmarks need only the bones and parameters
+            return None, None, None, RB.landmarks(Bp, H, {**RB.ha.DEFAULTS, **P}), cams[vn]
         V, F, part, P = RB.build(Bp, H, P)
         return V, F, part, RB.landmarks(Bp, H, P), cams[vn]
+
+    def blocks(self, x):
+        """-> (smooth residuals: landmarks and priors, outline residuals)."""
+        import _ref3d_body as RB
+        smooth, rend = [], []
+        for vn, view in self.views.items():
+            V, F, part, lm3, cam = self.geometry(x, vn)
+            names = list(lm3)
+            p2, _ = RB.project(np.array([lm3[k] for k in names]), cam)
+            smooth.append(lm_residuals(view, dict(zip(names, p2))))
+            V2, _ = RB.project(V, cam)
+            rend.append(render_terms(view, V2, F))
+        smooth.append(self.prior_terms(x))
+        return np.concatenate(smooth), np.concatenate(rend)
 
     def residuals(self, x, which=("lm", "render", "prior")):
         import _ref3d_body as RB
         r = []
         for vn, view in self.views.items():
-            V, F, part, lm3, cam = self.geometry(x, vn)
+            V, F, part, lm3, cam = self.geometry(x, vn, mesh="render" in which)
             if "lm" in which:
                 names = list(lm3)
                 p2, _ = RB.project(np.array([lm3[k] for k in names]), cam)
@@ -275,7 +309,7 @@ class Model:
         return np.array(out)
 
 
-def solve(model, which, mask=None, max_nfev=60, seed=0):
+def solve(model, which, mask=None, max_nfev=60, seed=0, diff_step=0.15, loss="linear"):
     """least_squares over the parameters selected by ``mask`` (others fixed), in normalised
     variables (offset / the parameter's scale) with a fixed finite-difference step of 15% of a
     scale: the objective comes from rasterised outlines, so smaller steps (scipy's default is
@@ -292,10 +326,42 @@ def solve(model, which, mask=None, max_nfev=60, seed=0):
         xx[sel] = x0 + z * sc
         return model.residuals(xx, which)
 
-    res = least_squares(f, np.zeros(len(x0)), bounds=(lo, hi), diff_step=0.15, max_nfev=max_nfev, method="trf")
+    res = least_squares(f, np.zeros(len(x0)), bounds=(lo, hi), diff_step=diff_step, max_nfev=max_nfev, method="trf",
+                        loss=loss, f_scale=0.1 if loss != "linear" else 1.0)
     x[sel] = x0 + res.x * sc
     model.x0 = x
     return res
+
+
+class _Res:  # least_squares-like record for the history
+    def __init__(self, cost, nfev, message):
+        self.cost, self.nfev, self.njev, self.status, self.message = cost, nfev, 0, 0, message
+
+
+def powell(model, which, mask=None, maxfev=1500, f_scale=0.1):
+    """Derivative-free polish of the outline terms (E-A pilot 3: least_squares stopped after a few
+    evaluations on them, every step rejected on raster jitter). Powell's line searches, in the
+    normalised variables. Landmarks and priors stay squared; only the outline terms get the soft-L1
+    loss (outliers: occluders the labels missed). Pilot 5 put the landmarks under it too, and their
+    large residuals were discounted as outliers: B's worst landmark went from 9% to 24%."""
+    from scipy.optimize import minimize
+    x = model.x0.copy()
+    s = np.ones(len(x), bool) if mask is None else mask
+    x0, sc = x[s].copy(), model.scale[s]
+    lo, hi = (model.lo[s] - x0) / sc, (model.hi[s] - x0) / sc
+
+    def cost(z):
+        xx = x.copy()
+        xx[s] = x0 + np.clip(z, lo, hi) * sc
+        smooth, rend = model.blocks(xx)
+        r = rend / f_scale
+        return float(0.5 * smooth @ smooth + f_scale ** 2 * np.sum(np.sqrt(1 + r * r) - 1))
+
+    res = minimize(cost, np.zeros(len(x0)), method="Powell", bounds=list(zip(lo, hi)),
+                   options={"maxfev": maxfev, "xtol": 1e-3, "ftol": 1e-5})
+    x[s] = x0 + np.clip(res.x, lo, hi) * sc
+    model.x0 = x
+    return _Res(float(res.fun), int(res.nfev), str(res.message))
 
 
 def sel(model, prefixes):
@@ -324,27 +390,42 @@ def init_cameras(sk, views, shape, seed):
     return out
 
 
+def _note(hist, log, stage, r):
+    hist.append({"stage": stage, "cost": float(r.cost), "nfev": int(r.nfev), "njev": int(r.njev or 0),
+                 "status": int(r.status), "message": r.message})
+    log(f"  {stage} cost {r.cost:.4f} nfev {r.nfev} njev {r.njev} {r.message}")
+
+
+HEAD_STARTS = [(n, h) for n in (0.0, 25.0, 50.0) for h in (40.0, 65.0, 85.0)]
+
+
 def fit_candidate(sk, views, base_shape, free_shape, priors, seed, log):
-    """Cameras, then camera + pose, then (free shape) everything. -> (model, history)."""
+    """1. cameras from the landmarks (rest pose); 2. landmarks only (smooth: E-A pilot's Jacobian
+    check), camera + pose (+ proportions and shape when free), from 9 neck / head-pitch starts:
+    the reference carries its head far higher than vanilla's rest; 3. outlines added: camera + pose,
+    then shape, then everything, by Powell (derivative-free; rasterised outlines stay jittery at the
+    pixel). -> (model, history)."""
     rng = np.random.default_rng(seed)
     cams = init_cameras(sk, views, base_shape, seed)
     for c in cams.values():  # restarts differ: perturbed starts
         c["az"] += rng.normal(0, 4)
         c["el"] += rng.normal(0, 3)
-    poses = {vn: {leg: list(rng.normal(0, 4, 4)) for leg in LEGS} for vn in views}
-    m = Model(sk, views, free_shape, base_shape, priors, {"cam": cams, "pose": poses, "shape": {}, "skel": {}})
-    hist = []
+    hist, best = [], None
+    for neck, pitch in HEAD_STARTS:
+        poses = {vn: {**{leg: list(rng.normal(0, 4, 4)) for leg in LEGS}, "neck": [neck, 0.0], "head_pitch": pitch}
+                 for vn in views}
+        m = Model(sk, views, free_shape, base_shape, priors, {"cam": cams, "pose": poses, "shape": {}, "skel": {}})
+        keys = [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views] + (["shape.", "skel."] if free_shape else [])
+        r = solve(m, ("lm", "prior"), sel(m, keys), max_nfev=200, diff_step=0.01)
+        if best is None or r.cost < best[0].cost:
+            best = (r, m, (neck, pitch))
+    r, m, start = best
+    _note(hist, log, f"landmarks (start neck {start[0]:.0f}, pitch {start[1]:.0f})", r)
     vp = [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views]
-    r = solve(m, ("lm", "render", "prior"), sel(m, vp), max_nfev=40)
-    hist.append({"stage": "camera+pose", "cost": float(r.cost), "nfev": int(r.nfev), "njev": int(r.njev or 0), "status": int(r.status), "message": r.message})
-    log(f"  camera+pose cost {r.cost:.4f} nfev {r.nfev} njev {r.njev} {r.message}")
+    _note(hist, log, "outlines: camera+pose", powell(m, ("lm", "render", "prior"), sel(m, vp), maxfev=1500))
     if free_shape:
-        r = solve(m, ("lm", "render", "prior"), sel(m, ["shape.", "skel."]), max_nfev=40)
-        hist.append({"stage": "shape", "cost": float(r.cost), "nfev": int(r.nfev), "njev": int(r.njev or 0), "status": int(r.status), "message": r.message})
-        log(f"  shape cost {r.cost:.4f} nfev {r.nfev} njev {r.njev} {r.message}")
-        r = solve(m, ("lm", "render", "prior"), None, max_nfev=30)
-        hist.append({"stage": "joint", "cost": float(r.cost), "nfev": int(r.nfev), "njev": int(r.njev or 0), "status": int(r.status), "message": r.message})
-        log(f"  joint cost {r.cost:.4f} nfev {r.nfev} njev {r.njev} {r.message}")
+        _note(hist, log, "outlines: shape", powell(m, ("lm", "render", "prior"), sel(m, ["shape.", "skel."]), maxfev=1500))
+        _note(hist, log, "outlines: joint", powell(m, ("lm", "render", "prior"), None, maxfev=2000))
     return m, hist
 
 
@@ -405,24 +486,42 @@ def load_shell(path, cell_frac=0.006):
     return RB.decimate(V, F, cell_frac * diag)
 
 
-def shell_place(Vs, x, cam_L):
-    """Shell (TripoSG frame: x right, y up, z towards the viewer of the input view) -> PDX space.
-    x: [rx, ry, rz (deg, small extra turn), log scale, tx, ty, tz]; the start puts the shell's frame
-    on camera L's axes (the shell was made from view L)."""
-    import _ref3d_body as RB
+def shell_canonical(Vs):
+    """Rotation putting a shell in the body's frame (E-A: TripoSG returns each shell in its own
+    canonical orientation, not the input camera's: seed 11 came out side-on, seed 44 turned 90 deg).
+    Up stays y (legs point down in every shell); the main horizontal axis becomes z; the end whose
+    top is higher (the neck rises) is the head, sent to -Z. -> 3x3 matrix."""
+    c = Vs - Vs.mean(axis=0)
+    xz = c[:, [0, 2]]
+    w, v = np.linalg.eigh(np.cov(xz.T))
+    ax = v[:, np.argmax(w)]  # long axis in (x, z)
+    th = np.arctan2(ax[0], ax[1])  # angle from +z
+    R = np.array([[np.cos(-th), 0, np.sin(-th)], [0, 1, 0], [-np.sin(-th), 0, np.cos(-th)]])
+    z = (c @ R.T)[:, 2]
+    y = c[:, 1]
+    lo, hi = np.percentile(z, 25), np.percentile(z, 75)
+    if np.percentile(y[z > hi], 95) > np.percentile(y[z < lo], 95):  # the head is at +z: turn round
+        R = np.diag([-1.0, 1.0, -1.0]) @ R
+    return R
+
+
+def shell_place(Vs, x, R0):
+    """Shell -> PDX space: the canonical rotation ``R0``, then x: [rx, ry, rz (deg), log scale,
+    tx, ty, tz] about the body's target point. A shell is near-symmetric, so its handedness is not
+    solved."""
     from scipy.spatial.transform import Rotation
-    R, _ = RB.camera_matrix(cam_L)
-    base = R.T @ np.diag([1.0, 1.0, -1.0])  # shell axes -> camera L axes (right-handed frame)
+
+    import _ref3d_body as RB
     extra = Rotation.from_euler("xyz", x[:3], degrees=True).as_matrix()
     c = Vs.mean(axis=0)
-    Xrh = RB.TARGET * np.array([-1.0, 1.0, 1.0]) + np.exp(x[3]) * ((Vs - c) @ (base @ extra).T) + x[4:7]
-    return Xrh * np.array([-1.0, 1.0, 1.0])  # back to PDX (mirrored x)
+    return RB.TARGET + np.exp(x[3]) * ((Vs - c) @ (extra @ R0).T) + x[4:7]
 
 
 def fit_shell(Vs, Fs, views, cams, height):
     """Similarity placement of a shell against the horse masks of both views (outline chamfer)."""
     import _ref3d_body as RB
     from scipy.optimize import least_squares
+    R0 = shell_canonical(Vs)
     span = float(np.ptp(Vs[:, 1]))
     x0 = np.array([0, 0, 0, np.log(height / max(span, 1e-6)), 0, 0, 0], float)
     edges = {}
@@ -432,7 +531,7 @@ def fit_shell(Vs, Fs, views, cams, height):
         edges[vn] = (dist_to(fb), sample(np.stack([xs, ys], 1), 200))
 
     def f(x):
-        X = shell_place(Vs, x, cams["L"])
+        X = shell_place(Vs, x, R0)
         r = []
         for vn, view in views.items():
             V2, _ = RB.project(X, cams[vn])
@@ -445,8 +544,8 @@ def fit_shell(Vs, Fs, views, cams, height):
             r.append(np.minimum(dist_to(sb)[e[:, 1], e[:, 0]], 0.3 * view.bl) / view.bl)
         return np.concatenate(r)
 
-    res = least_squares(f, x0, x_scale=np.array([5, 5, 5, 0.05, 0.3, 0.3, 0.3]), diff_step=1e-3, max_nfev=80)
-    return res.x, float(res.cost)
+    res = least_squares(f, x0, x_scale=np.array([5, 5, 5, 0.05, 0.3, 0.3, 0.3]), diff_step=0.02, max_nfev=80)
+    return res.x, float(res.cost), R0
 
 
 def shell_widths(X, B, H, allowance):
@@ -552,8 +651,8 @@ def main(args_path):
         for p in a["shells"]:
             nm = Path(p).stem
             Vs, Fs = load_shell(p)
-            x, cost = fit_shell(Vs, Fs, views, cams, height)
-            X = shell_place(Vs, x, cams["L"])
+            x, cost, R0 = fit_shell(Vs, Fs, views, cams, height)
+            X = shell_place(Vs, x, R0)
             rec = {"path": p, "placement": x.tolist(), "cost": cost, "tris": int(len(Fs)), "views": {}}
             for vn, view in views.items():
                 V2, _ = RB.project(X, cams[vn])

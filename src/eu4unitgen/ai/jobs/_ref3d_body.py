@@ -194,7 +194,10 @@ def silhouette(V2, F, shape, sel=None):
     m = np.zeros(shape, np.uint8)
     tri = V2[F if sel is None else F[sel]]
     tri = np.round(tri * 16).astype(np.int32)  # 4 bits of sub-pixel precision
-    cv2.fillPoly(m, list(tri), 1, lineType=cv2.LINE_8, shift=4)
+    # one call per triangle: fillPoly with many polygons fills by the even-odd rule, so overlapping
+    # triangles cancel (E-A pilots 1-6: holes wherever tubes overlap, legs inside the barrel)
+    for t in tri:
+        cv2.fillConvexPoly(m, t, 1, lineType=cv2.LINE_8, shift=4)
     return m > 0
 
 
