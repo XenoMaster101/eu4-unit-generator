@@ -97,7 +97,10 @@ def camera(name, R, t, focal, cx, cy, W, H):
     # 4.2: shift 0.1 moved a 660 x 790 image's axis point 66 px): the axis lands at u = W/2 - shift_x W
     cd.shift_x = (W / 2 - cx) / W
     cd.shift_y = (cy - H / 2) / W
-    cd.clip_start, cd.clip_end = 0.01, 5000
+    # depth range: a band round the target (E-B: fitted cameras sit up to ~2000 units away, nearly
+    # orthographic; with 0.01-5000 Workbench's depth buffer couldn't separate millimetre layers)
+    dist = float(t[2])
+    cd.clip_start, cd.clip_end = max(0.01, dist - 60.0), dist + 60.0
     ob = bpy.data.objects.new(name, cd)
     bpy.context.scene.collection.objects.link(ob)
     right, up, fwd = R

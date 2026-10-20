@@ -33,7 +33,7 @@ EB_DEFAULTS = {
     "withers_m": 1.55,  # assumed master scale: a 15-hand horse at the withers (the reference gives no size)
     "penetration_limit_m": 0.001,  # SPEC M5: zero penetrations over 1 mm
     "body_visible_max": 0.01,  # assumed: at most 1% of the covered surface shows the body between plates
-    "period_target": 0.05,  # calibrate the plate size to within 5% (the gate allows 15%)
+    "period_target": 0.08,  # calibrate the plate size to within 8% (the gate allows 15%)
     "mirror_tol": 0.3,  # units: a triangle's mirror image must lie this close to a known triangle
     "visibility_tol": 0.05,  # units (~6 mm): an occluder nearer than this to a sample doesn't hide it
     "occluders": ["leather", "trim", "plume"],  # straps, trim and plume lie over the armour: unknown under them
@@ -67,7 +67,7 @@ def job_args(s: dict, cfg: dict, ea_dir: Path, cand: str, out: Path) -> tuple[di
     b = {"skeleton": ea_args["skeleton"], "body": body, "view_name": vn, "classes": ea_args["classes"],
          "view": {"labels": v["labels"], "inpainted": v["inpainted"], "size": [W, H]},
          "occluders": cfg["occluders"], "plate": cfg["plate"], "withers_m": cfg["withers_m"],
-         "penetration_limit_m": cfg["penetration_limit_m"], "label_tol_px": tol, "mirror_tol": cfg["mirror_tol"], "visibility_tol": cfg["visibility_tol"],
+         "penetration_limit_m": cfg["penetration_limit_m"], "label_tol_px": tol, "close_px": max(2, round(0.02 * v["body_length"])), "mirror_tol": cfg["mirror_tol"], "visibility_tol": cfg["visibility_tol"],
          "samples": cfg["samples"], "out_dir": str(out), "debug_dir": str(out) if cfg.get("debug") else None}
     m = {"image": v["image"], "labels": v["labels"], "fg": v["fg"], "inpainted": v["inpainted"],
          "classes": ea_args["classes"], "occluders": cfg["occluders"], "lit": str(out / f"{vn}_lit.png"),
@@ -96,12 +96,14 @@ def correct(plate: dict, r: dict, m: dict, cfg: dict) -> list[str]:
     """SPEC M6 for plates: the size by the period ratios, tilt for plate-plate cuts, standoff for
     plate-body cuts. Mutates ``plate``; returns what changed."""
     did = []
-    ax = m.get("axes") or {}
-    for axis, key in (("y", "pitch_m"), ("x", "spacing_m")):
-        q = ax.get(axis)
-        if q and abs(q["ratio"] - 1) > cfg["period_target"]:
-            plate[key] = plate[key] / q["ratio"]
-            did.append(f"{key} / {q['ratio']:.3f}")
+    # the gated period ratio (the reference's dominant axis), clamped to the metric's search window and
+    # damped; the plate keeps its proportions (E-B: per-axis ratios jumped between harmonics, went negative)
+    q = (m.get("plate_period") or {}).get("ratio")
+    if q and abs(q - 1) > cfg["period_target"]:
+        f = min(max(q, 0.6), 1.7) ** 0.7
+        plate["pitch_m"] /= f
+        plate["spacing_m"] /= f
+        did.append(f"plate size / {f:.3f} (period ratio {q:.3f})")
     # crossing plates and plates in the body are fixed per plate in the job (local tilt, then
     # removal); globally, more tilt and standoff only while the job had to remove over 5% of them
     rm = r.get("removed") or {}
@@ -109,7 +111,7 @@ def correct(plate: dict, r: dict, m: dict, cfg: dict) -> list[str]:
     if rm.get("crossing", 0) / n > 0.05 and plate["tilt_clear"] < 4:
         plate["tilt_clear"] *= 1.5
         did.append(f"tilt_clear x1.5 ({rm['crossing']} plates removed for crossing)")
-    if rm.get("in_body", 0) / n > 0.05 and plate["standoff_m"] < 0.012:  # padding over 12 mm isn't armour any more
+    if rm.get("in_body", 0) / n > 0.05 and plate["standoff_m"] < 0.008:  # padding over ~8 mm isn't armour any more
         plate["standoff_m"] *= 1.5
         did.append(f"standoff x1.5 ({rm['in_body']} plates removed: in the body)")
     return did
@@ -150,7 +152,9 @@ def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None
         mr = ai.run_job("ref3d_eb_measure", m).result
         gt = gates(r, mr, cfg, g)
         plate_used = dict(cfg["plate"])
-        did = correct(cfg["plate"], r, mr, cfg)
+        # corrections only while a gate fails (E-B: a passing round 2 was "corrected" for its removals
+        # and round 3 failed on gaps)
+        did = [] if all(x["pass"] for x in gt.values()) else correct(cfg["plate"], r, mr, cfg)
         rounds.append({"round": k, "plate": plate_used, "blender": r, "measure": mr, "gates": gt, "corrections": did})
         print(f"E-B round {k}: " + json.dumps({n: x["value"] for n, x in gt.items()}, default=float)
               + (f"; next: {'; '.join(did)}" if did else ""), flush=True)

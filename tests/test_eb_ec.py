@@ -25,14 +25,18 @@ def test_eb_gates_pass_and_fail_each_on_its_own():
 
 def test_eb_correct_scales_plates_by_period_and_lifts_only_on_many_removals():
     plate = {"pitch_m": 0.05, "spacing_m": 0.035, "tilt_clear": 1.5, "standoff_m": 0.004}
-    m = {"axes": {"y": {"ratio": 1.25}, "x": {"ratio": 1.02}}}
-    did = eb.correct(plate, _eb_result(), m, {"period_target": 0.05})
-    assert abs(plate["pitch_m"] - 0.04) < 1e-12 and plate["spacing_m"] == 0.035 and len(did) == 1
+    m = {"plate_period": {"ratio": 1.25}}
+    did = eb.correct(plate, _eb_result(), m, {"period_target": 0.08})
+    f = 1.25 ** 0.7  # damped, the plate's proportions kept
+    assert abs(plate["pitch_m"] - 0.05 / f) < 1e-12 and abs(plate["spacing_m"] - 0.035 / f) < 1e-12 and len(did) == 1
+    wild = {"pitch_m": 0.05, "spacing_m": 0.035, "tilt_clear": 1.5, "standoff_m": 0.004}
+    eb.correct(wild, _eb_result(), {"plate_period": {"ratio": -4.0}}, {"period_target": 0.08})
+    assert wild["spacing_m"] > 0  # a bad reading is clamped to the search window, never flips the size
     plate2 = dict(plate)
-    eb.correct(plate2, _eb_result(removed={"in_body": 40, "crossing": 40, "of": 500}), {}, {"period_target": 0.05})
+    eb.correct(plate2, _eb_result(removed={"in_body": 40, "crossing": 40, "of": 500}), {}, {"period_target": 0.08})
     assert plate2["tilt_clear"] > plate["tilt_clear"] and plate2["standoff_m"] > plate["standoff_m"]
     plate3 = dict(plate)
-    assert eb.correct(plate3, _eb_result(removed={"in_body": 5, "crossing": 5, "of": 500}), {}, {"period_target": 0.05}) == []
+    assert eb.correct(plate3, _eb_result(removed={"in_body": 5, "crossing": 5, "of": 500}), {}, {"period_target": 0.08}) == []
 
 
 def _ec_result(errs, inter=0, stretch=1.05):

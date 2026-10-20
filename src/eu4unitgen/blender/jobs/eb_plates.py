@@ -62,6 +62,23 @@ EV_COLOUR = {"observed": (0.25, 0.75, 0.3), "inferred": (0.95, 0.7, 0.1), "symme
 # ---------------------------------------------------------------- body and coverage
 
 
+def _maxfilter(m, r):
+    """Separable max filter (radius r) of a boolean image."""
+    from numpy.lib.stride_tricks import sliding_window_view as sw
+    k = 2 * r + 1
+    x = np.pad(m, ((r, r), (0, 0)))
+    x = sw(x, k, axis=0).max(axis=-1)
+    x = np.pad(x, ((0, 0), (r, r)))
+    return sw(x, k, axis=1).max(axis=-1)
+
+
+def closing(m, r):
+    """Morphological closing (dilate, then erode) with a square of radius r."""
+    if r < 1:
+        return m
+    return ~_maxfilter(~_maxfilter(m, r), r)
+
+
 BARY = np.array([[1 / 3, 1 / 3, 1 / 3], [0.6, 0.2, 0.2], [0.2, 0.6, 0.2], [0.2, 0.2, 0.6],
                  [0.45, 0.45, 0.1], [0.1, 0.45, 0.45], [0.45, 0.1, 0.45]])
 
@@ -86,11 +103,17 @@ def coverage(a, Vs, Fs, part, Bp, cam, bvh, cam_pos, tubes):
     for i in np.nonzero(vreg)[0]:  # vertices buried in another tube aren't surface (the head excepted:
         if in_other_tube(Vs[i], part[i], body_tubes):  # E-A's head + chanfron swells over the neck)
             vreg[i] = False
-    freg = vreg[Fs].all(axis=1)
+    freg = vreg[Fs].any(axis=1)  # triangles across the neck-barrel seam too (with all(): a bare strip there)
     scale_i = names.index("scale")
     unknown_cls = {names.index(c) for c in a["occluders"] if c in names}
     tol = a["label_tol_px"]
     vt = a["visibility_tol"]
+    # the armour region in L: scale, with the straps and trim lying inside it, closed (E-B on pilot 12's
+    # body: per-sample votes flipped between scale and the straps across it, and the plates fragmented)
+    r = a["close_px"]
+    occl = np.isin(lab, list(unknown_cls))
+    armour = closing(lab == scale_i, r) & ((lab == scale_i) | occl)
+    armour = closing(armour, r // 2)
     fids = np.nonzero(freg)[0]
     state = np.full(len(Fs), -1)
     ev = np.full(len(Fs), 3)
@@ -113,16 +136,21 @@ def coverage(a, Vs, Fs, part, Bp, cam, bvh, cam_pos, tubes):
             if not len(win):
                 continue
             c = np.bincount(win).argmax()
-            if c in unknown_cls:
+            if armour[int(v), int(u)]:
+                yes += 1
+            elif c in unknown_cls:
                 continue
-            yes += c == scale_i
-            no += c != scale_i
+            else:
+                no += 1
             inpainted += bool(inp[int(v), int(u)])
         if yes + no >= 2:
             state[f] = 1 if yes >= no else 0
             ev[f] = 1 if inpainted * 2 > yes + no else 0
     cen = Vs[Fs].mean(axis=1)
     known = fids[state[fids] >= 0]
+    if a.get("debug_dir"):
+        c2, _ = RB.project(to_pdx(cen[fids]), cam)
+        np.save(Path(a["debug_dir"]) / "coverage_faces.npy", np.c_[c2, state[fids]])
     print("coverage: region faces", len(fids), "known", len(known), "scale", int((state == 1).sum()),
           "hidden samples", hidden, flush=True)
     if not len(known):
@@ -608,13 +636,16 @@ def gaps(bvh_all, n_body_faces, Vs, normals, covered, rng, n=4000, lift=0.05):
     if not len(idx):
         return None
     pick = rng.choice(idx, min(n, len(idx)), replace=False)
-    body = 0
+    body = seen = 0
     for i in pick:
         o = Vector(Vs[i] + normals[i] * lift)
         loc, normal, fi, dist = bvh_all.ray_cast(o, Vector(-normals[i]), 2 * lift)
+        if loc is not None and fi < n_body_faces and (loc - Vector(Vs[i])).length > 0.5 * lift:
+            continue  # another body part (a foreleg) lies over this spot: occluded, not a gap
+        seen += 1
         if loc is not None and fi < n_body_faces:
             body += 1
-    return body / len(pick)
+    return body / max(seen, 1)
 
 
 # ---------------------------------------------------------------- live Geometry Nodes setup
