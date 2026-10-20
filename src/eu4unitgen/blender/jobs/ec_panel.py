@@ -284,6 +284,7 @@ def texture(a, Vf, rows, cols, F, body_bvh_parts, mpu, res_px):
     vv = np.linspace(0, rows, H)
     rgb = np.zeros((H, W, 3), np.float32)
     ev = np.full((H, W), 2, np.int8)
+    cls_t = np.full((H, W), names.index("cloth"), np.int16)  # the texels' classes: the reference's labels
     allV = np.vstack([body_bvh_parts[0], Vf])
     allF = np.vstack([body_bvh_parts[1], F + len(body_bvh_parts[0])])
     bvh = BVHTree.FromPolygons([tuple(p) for p in allV], [tuple(int(i) for i in f) for f in allF])
@@ -314,6 +315,7 @@ def texture(a, Vf, rows, cols, F, body_bvh_parts, mpu, res_px):
                 if not visible(bvh, cam_pos, p, 0.02):
                     continue
                 rgb[yi, xi] = img[int(round(w)), int(round(u))]
+                cls_t[yi, xi] = lab[int(round(w)), int(round(u))]
                 ev[yi, xi] = k
     seen = ev < 2
     base = push_pull(rgb, seen)
@@ -338,6 +340,7 @@ def texture(a, Vf, rows, cols, F, body_bvh_parts, mpu, res_px):
             d, src = min(cands)
             if 0 <= src < W and seen[yi, src]:
                 fill[yi, xi] = rgb[yi, src]
+                cls_t[yi, xi] = cls_t[yi, src]
     # feather the border: observed texels within ``feather`` of the unseen part blend toward the
     # continuation (E-C: the seam metric sat at the gate, 8.2)
     fpx = 4
@@ -348,7 +351,7 @@ def texture(a, Vf, rows, cols, F, body_bvh_parts, mpu, res_px):
         dist[seen & grown & (dist > k)] = k
     wgt = np.clip(dist / (fpx + 1.0), 0.0, 1.0)[..., None]
     rgb = np.where(seen[..., None], wgt * rgb + (1 - wgt) * fill, fill)
-    return np.clip(rgb, 0, 255).astype(np.uint8), ev
+    return np.clip(rgb, 0, 255).astype(np.uint8), ev, np.where(cls_t >= 0, cls_t, names.index("cloth"))
 
 
 def _maxfilter_bool(m, r):
@@ -491,7 +494,9 @@ def main():
         tex = load_rgb(a["texture_from"])
         ev = np.full(tex.shape[:2], 3, np.int8)
     else:
-        tex, ev = texture(a, Vf, rows, cols, Fg, (Vs, Fs), mpu, a["texture_px"])
+        tex, ev, cls_t = texture(a, Vf, rows, cols, Fg, (Vs, Fs), mpu, a["texture_px"])
+        lab_rgb = np.array([a["classes"][c] for c in a["classes"]], np.uint8)[cls_t]
+        save_png(out / "panel_labels.png", lab_rgb)  # the master's class map of the panel
     save_png(out / "panel_texture.png", tex)
     evc = np.zeros(ev.shape + (3,), np.uint8)
     evc[ev == 0] = (60, 200, 80)

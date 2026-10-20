@@ -93,7 +93,11 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     for name, m, ev in (("panel_left", m_cl, "observed L / R, prior"), ("panel_right", m_cr, "symmetry")):
         r = m["final"]["result"]
         d = Path(r["texture"]["path"]).parent
+        lab_p = Path(m["final"]["result"]["texture"].get("labels") or (Path(r["texture"]["path"]).parent / "panel_labels.png"))
+        if name == "panel_right":  # the far panel's texture is the near one's: so are its labels
+            lab_p = Path(m_cl["final"]["result"]["texture"]["path"]).parent / "panel_labels.png"
         panels.append({"name": name, "vertices": str(d / "panel_vertices.json"), "texture": r["texture"]["path"],
+                       "labels": str(lab_p) if lab_p.is_file() else None,
                        "rows": r["panel"]["rows"], "cols": r["panel"]["cols"], "evidence": ev})
     decals = [{"name": d["name"], "view": vn, "xy": d["xy"], "size": d["size"], "class": DECAL_CLASS[d["name"]]}
               for vn, v in views.items() for d in v["details"] if d["name"] in DECAL_CLASS]

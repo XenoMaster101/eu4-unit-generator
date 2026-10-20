@@ -332,7 +332,11 @@ def main():
             Vf = Vf.reshape(rows + 1, cols, 3)[:keep + 1].reshape(-1, 3)
             rows = keep
         tex = load_rgb(pn["texture"]).astype(np.float64)
-        idx = classify_texture(tex, names.index("cloth"), names.index("trim"))
+        if pn.get("labels"):  # the reference's labels carried into the texture (gold in shade isn't cloth)
+            idx = decode(load_rgb(pn["labels"]), a["classes"])
+            idx = np.where(np.isin(idx, [names.index("cloth"), names.index("trim")]), idx, names.index("cloth"))
+        else:
+            idx = classify_texture(tex, names.index("cloth"), names.index("trim"))
         if brk == "trim_removed":  # E-D: the trim painted out (cloth colour)
             tex[idx == names.index("trim")] = pal.get("cloth", [140, 30, 40])
             idx[:] = names.index("cloth")
