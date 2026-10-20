@@ -834,9 +834,22 @@ def main(args_path):
                   {"cam": cams, "pose": poses, "shape": shape, "skel": skel, "hp": shape.get("head_profile")})
         if candidate_done(name):
             return m
+        hist_c = []
+        if "R" in bests:
+            # R's camera and pose were solved for R's own body: re-solve them for the master body (E-A
+            # pilot 10: reused as they were, R's legs scored 0.14)
+            key = f"{name}_combined"
+            st = ck.load(key)
+            if st and st.get("done"):
+                m.x0, hist_c = np.array(st["x"], float), st["hist"]
+                log(f"{key}: done earlier (checkpoint)")
+            else:
+                r = powell(m, ("lm", "render", "prior"), sel(m, ["R.cam.", "R.pose."]), maxfev=EVALS["outlines: camera+pose"])
+                _note(hist_c, log, "combined: R camera+pose for the master body", r)
+                ck.save(key, {"names": m.names, "x": m.x0, "hist": hist_c, "done": True})
         n = min(len(r) for r in per.values())
         costs = [sum(per[vn][k][0] for vn in per) for k in range(n)]
-        finish(name, m, bests["L"][2] + (bests["R"][2] if "R" in bests else []),
+        finish(name, m, bests["L"][2] + (bests["R"][2] if "R" in bests else []) + hist_c,
                {"restarts": [{"cost": c} for c in costs], "independent": True,
                 "parts": {"L": "everything but the rump", "R": RUMP}})
         return m
