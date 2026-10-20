@@ -24,6 +24,8 @@ where = ["src"]
 "eu4unitgen.library" = ["base_models.json", "bodies.json", "additions.json", "materials.json", "templates.json", "vocabulary.json"]
 "eu4unitgen.pdxscript" = ["templates/*.j2"]
 "eu4unitgen.blender" = ["jobs/*.py"]
+"eu4unitgen.ref3d" = ["templates/*.json"]
+"eu4unitgen.ai" = ["jobs/*.py"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

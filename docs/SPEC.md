@@ -1702,7 +1702,7 @@ The round 6 readability rule applies only at stage 7.
 #### M0. What we have (inspected 2026-10-19)
 - **Reference** (`assets_in/horse_ref/Byzantine Cataphract Armor Reference Sheet.png`, 1536×1024): an illustrated composite.
   - **View L:** front-3/4 from the horse's left, the rider on it. The horse is about 600×750 px, mid-stride with the near foreleg lifted.
-  - **View R:** rear-3/4 from the right, rider on it, smaller. It shows the hindquarters, the tail, the right hind leg and the rear caparison.
+  - **View R:** rear-3/4 from the horse's **left** (corrected at S1, 2026-10-19: the rider's left arm and stirrup are on the image's left, the larger nearer haunch is left of the tail), rider on it, smaller. It shows the hindquarters, the tail, both hind legs, the left foreleg and the rear caparison; of the right side only a strip of the right haunch and the right hind leg.
   - **Close-ups:** the saddle and the caparison's cloth panel (border, fringe, embroidered cross). The rest are the rider's helmet, armour, shield, spear and sword.
   - **The two views are separate illustrations of the same design, not a calibrated pair.** Details disagree: in R the hindquarters carry scale armour under a red cloth layer; in L the red side panels with crosses dominate. Treat each view as separate, weak evidence.
 - **Hardware:** RTX 3060 12 GB (driver 617.42), i7-10700K (8 cores / 16 threads), 32 GB RAM, D: 876 GB free.
@@ -1751,8 +1751,7 @@ Classes:
 - `prior`: anatomy or rule only.
 
 Each stage writes an **evidence map**: renders coloured by class, and the share of surface area per class and per component. Expected guesses:
-- **The right side of the head, neck, shoulder and right foreleg:** not in R (it shows the right rear). Symmetry from L.
-- **The right flank and caparison:** R shows its rear half; the front half is symmetry.
+- **The whole right side except a strip of the right haunch and the right hind leg** (both views are from the left): head, neck, shoulder, right foreleg, flank and caparison. Symmetry from the left.
 - **Under the caparison and armour:** the body, upper legs, belly, inner hem faces. Prior.
 - **Under the rider:** saddle seat, back, the flank behind the rider's leg and stirrup (L), the croup under the rider's cloak (R). Inpainted or prior; the saddle close-up helps.
 - **Behind the reins:** strips of neck armour (L). Inpainted.
@@ -1764,7 +1763,7 @@ Each stage writes an **evidence map**: renders coloured by class, and the share 
 **Extra reference views that would remove the most guessing, in order:**
 1. A true left side view of the same horse without a rider, legs straight. It fixes proportions, hem lines, panel layout and the scale rows, and removes the pose ambiguity.
 2. A front view: chest width, chanfron front, breast strap, front panels.
-3. A right side or rear view of the same design (today's R is a different illustration).
+3. A right side view of the same design (both of today's views are from the left).
 4. A top-down or high 3/4 view of the back and saddle without the rider.
 5. A close-up of the scales: plate shape, overlap and rivets.
 
@@ -2025,6 +2024,33 @@ Implementation of the full pipeline starts only if:
 - E-B and E-C reach their thresholds.
 
 If a spike keeps failing, stop and reassess with the user; no requirement is lowered without the user's OK. Further installs (SAM 2, ControlNet depth, IP-Adapter, LPIPS, DINOv2, `cma`) are listed above and wait for the user's OK.
+
+#### M10. Approval (user, 2026-10-19): H1 and spikes E-A to E-D, with these requirements
+1. **Master fidelity first.** A highly detailed reconstruction of the original reference. No geometry reduction for EU4 while making the master. No EU4 horse geometry as a substitute for new geometry.
+2. **E-D judges visual quality too, not only numbers:** horse anatomy, proportions, armour coverage, surface complexity and resemblance to the reference. A high score never overrides an obviously wrong look.
+3. **No fixed 2,900-triangle budget for the game version.** Find out whether EU4 supports higher-detail units. After the master is approved, test game models at about **3K, 6K, 10K and 15K triangles** (as the engine allows), comparing in-game look and performance, **including a crowded-battle frame-rate check** (many units on screen), before choosing a budget. (This replaces M3's "no new in-game performance tests".)
+4. **Installs justified:** licence verified before installing; only what the current experiment needs; the AI environment stays separate from the app's.
+5. **View priorities:** view L (front-3/4) for the head, neck, chest and forelegs; view R (rear-3/4) for the hindquarters, including the scale armour under the red cloth. Conflicting details are shown at H1 for the user's decision.
+6. **Checkpoints are mandatory:** each shows the reference and the result side by side, and says what succeeded, what failed and what is uncertain. Nothing advances past a checkpoint without the user's approval.
+7. **The master stays separate:** independently editable, never overwritten by the EU4 version.
+8. **E-B must include a close-up render** of the plates on the neck and chest (overlap, curvature, thickness), not only the whole horse.
+
+The full cataphract build starts only after the spikes pass **and** the user explicitly approves it. **Order:** the spikes use H1's outputs (cleaned views, labels, landmarks, conflict choices), so S1 runs to H1 and stops; E-A to E-D follow the user's H1 approval.
+
+#### M11. S1 run (2026-10-19): reference analysis up to H1
+- **Code:**
+  - `ref3d/s1.py`: app side, Pillow only. Crops, removal masks from polygons, versioned outputs (`refs/clean/vNNN`, `h1/vNNN`, never overwritten), a manifest with input hashes and settings, the H1 sheets.
+  - AI-environment jobs (`ai/env.py` `AIJobRunner`, `python -I`, offline): `ref3d_inpaint` (SDXL, per seed, the original pasted back outside the grown and feathered mask, a seam score), `ref3d_mask` (BiRefNet), `ref3d_labels` (HSV colour rules inside the horse mask, zones turning a colour into a part, per-class palettes kept apart for observed and inpainted pixels).
+  - Template `ref3d/templates/horse.json` (landmark names, label classes). Subject config `assets_in/cataphract_horse/subject.json` (git-ignored: crops, removal polygons, zones, landmarks, colour rules, inpaint settings, conflicts; sheet pixels).
+- **No installs:** the AI environment already had everything (SDXL weights, rembg BiRefNet-general, OpenCV, numpy).
+- **Runs:**
+  - v001: SDXL redrew a rider in 6 of 8 seeds, and the seam score proposed one of them. Fix: an OpenCV Telea prefill before SDXL, and the rider-gone check (foreground share at most 0.10 above the back line) that rejects a seed whatever its seam score.
+  - v002: crashed during masking (a system error); left incomplete.
+  - v003 (756 s): 7 of 8 seeds pass on L, 6 of 8 on R. Sheets in `h1/v003/`.
+- **v003 by eye (for H1):**
+  - **L:** every passing seed invents the saddle (the rider covered it). Proposed seed 33 has an olive saddle with gold discs, which doesn't match the saddle close-up. Seed 88's dark leather saddle is the closest, so the recommendation is 88. In every seed the reins strip across the neck is a smeared band of scales (C4, C7). The neck plates there are inpainted guesses, which matters for E-B's close-up.
+  - **R:** the rider covered the head and neck, so every seed invents them: 66 a red disc crest, a gold ladder shape on the left and a red cloth flap; 88 a gold disc (a shield remnant) on the haunch. The hindquarters, the part R is used for, are mostly original pixels in all of them. Proposed seed 66 is acceptable; R's head and neck are never used (L has priority there).
+  - **Labels:** L's coat share (34%) is too high: the shadowed cloth under the caparison and the dark saddle read as coat. R leaves 11% unclassified and labels the gold ladder shape as trim. Both need the colour rules tightened or a hand correction before the labels are relied on.
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
