@@ -87,13 +87,10 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
                   over={"rounds": 0, "reruns": 1, "panel": {**left_panel, "side": "right"}, "hem_landmarks": {"L": [], "R": []}},
                   extra={"texture_from": m_cl["final"]["result"]["texture"]["path"]})
     note("cloth right: built from the left panel (symmetry)")
-    m_cf = ec.run(subject_path, ea_version, ai_python, blender, cand, out=out / "cloth_front",
-                  over={"panel": {"side": "front", "cols": 32, "rows": 20, "drop_m": [0.6] * 5},
-                        "hem_landmarks": {"L": ["hem_front"], "R": []}, "reruns": 2})
-    note(f"cloth front: {m_cf['verdict']}")
+    # the chest panel isn't built: the near foreleg steps through it and a one-piece cloth tangles round
+    # the forelegs (master dev run, E-C front mode); it needs a pattern split at the legs (listed at H3)
     panels = []
-    for name, m, ev in (("panel_left", m_cl, "observed L / R, prior"), ("panel_right", m_cr, "symmetry"),
-                        ("panel_front", m_cf, "observed L (left half), prior")):
+    for name, m, ev in (("panel_left", m_cl, "observed L / R, prior"), ("panel_right", m_cr, "symmetry")):
         r = m["final"]["result"]
         d = Path(r["texture"]["path"]).parent
         panels.append({"name": name, "vertices": str(d / "panel_vertices.json"), "texture": r["texture"]["path"],
@@ -124,7 +121,7 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     verdict = {"master_gates_pass": master_ev["pass"],
                "failed": {vn: r["failed"] for vn, r in master_ev["views"].items()},
                "ed3d_every_break_caught": all(x["caught"] for x in e_d.values()), "ed3d": e_d,
-               "armour": m_arm["verdict"], "cloth_left": m_cl["verdict"], "cloth_front": m_cf["verdict"]}
+               "armour": m_arm["verdict"], "cloth_left": m_cl["verdict"]}
     sheet_path = out / "h3_sheet.png"
     h3_sheet(s, views, asm, master_ev, verdict, m_arm, m_cl, sheet_path, out.name, ea_version, cand)
     manifest = {"stage": "master build", "subject": s["name"], "version": out.name, "approved": s["approved"],
@@ -165,7 +162,7 @@ def h3_sheet(s, views, asm, mev, verdict, m_arm, m_cl, path, version, ea_version
     if arm_detail:
         tiles.append(("plates: overlap, curvature, thickness", Image.open(arm_detail), False))
     tiles += [("unseen right side (symmetry and prior)", Image.open(f["unseen_right"]), False),
-              ("front", Image.open(f["front"]), False)]
+              ("front (the chest panel isn't built)", Image.open(f["front"]), False)]
     rows.append(("close-ups", tiles))
     return s1.grid_sheet(rows, f"H3: master {version} next to the reference ({s['name']}; body E-A {ea_version} {cand})",
                          path, tile=(420, 460))

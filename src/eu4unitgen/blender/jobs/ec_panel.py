@@ -51,7 +51,7 @@ def visible(bvh, cam_pos, p, tol):
     return hit[0] is None or (hit[0] - Vector(p)).length <= tol
 
 
-def seam_front(a, Vs, vpart, cam, bvh, cam_pos, n_st, front_z):
+def seam_front(a, Vs, vpart, cam, bvh, cam_pos, n_st, front_z, below_y=None):
     """The chest panel's seam: across the chest at the height where L's chest cloth begins (the
     highest visible cloth vertex per station across; L sees the left half, the seam is fitted
     symmetric: a quadratic in |x|). -> (stations x (PDX), seam heights y (PDX))."""
@@ -61,6 +61,8 @@ def seam_front(a, Vs, vpart, cam, bvh, cam_pos, n_st, front_z):
     cloth = {names.index(c) for c in a["panel_classes"] if c in names}
     X = to_pdx(Vs)
     chest = (vpart == 0) & (X[:, 2] < front_z)
+    if below_y is not None:  # below the shoulder joint (master v005: the forelock and plume's red set the seam at the head)
+        chest &= X[:, 1] < below_y
     p2, _ = RB.project(X, cam)
     xs, ys = [], []
     for i in np.nonzero(chest)[0]:
@@ -185,8 +187,8 @@ def build_panel(a, st, top, proxy_bvh, mpu):
                 last = p
             elif last is not None:
                 p = np.array([last[0], to_scene(np.array([[0, y, 0]]))[0][1], last[2]])
-            elif front:
-                p = to_scene(np.array([[zc[c], y, -1.0]]))[0]
+            elif front:  # in front of the chest, never inside the collider (master v005: it started inside and exploded)
+                p = to_scene(np.array([[zc[c], y, pn["_front_z"] - clear]]))[0]
             else:
                 p = to_scene(np.array([[sign * 1.0, y, zc[c]]]))[0]
             V[r, c] = p
@@ -421,7 +423,9 @@ def main():
     R, t = RB.camera_matrix(camL)
     front_z = 0.5 * (Bp["HorseFrontLeftUp"][2] + Bp["HorseFrontRightUp"][2]) + 0.15 * Hs  # the armour's patch line
     if a["panel"].get("side") == "front":
-        st, top = seam_front(a, Vs, vpart, camL, bvh, Vector(-R.T @ t), 24, front_z)
+        st, top = seam_front(a, Vs, vpart, camL, bvh, Vector(-R.T @ t), 24, front_z,
+                             0.5 * (Bp["HorseFrontLeftUp"][1] + Bp["HorseFrontRightUp"][1]))
+        a["_chest_front_z"] = float(V[vpart == 0, 2].min())
     else:
         st, top = seam_and_extent(a, Vs, vpart, camL, bvh, Vector(-R.T @ t), mpu, 24,
                                   front_z if a["panel"].get("behind_shoulder", True) else None)
@@ -440,6 +444,7 @@ def main():
 
     pn = a["panel"]
     rows, cols = pn["rows"], pn["cols"]
+    a["panel"]["_front_z"] = a.get("_chest_front_z", 0.0) - a["armour_m"] / mpu
     V0, Pat, drops = build_panel(a, st, top, proxy_bvh, mpu)
     Fg = grid_faces(rows, cols)  # rows: the intervals; (rows + 1) x cols vertices
     Vf = simulate(V0, Pat, Fg, cols, proxy, a, mpu, sc)
