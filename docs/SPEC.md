@@ -1679,6 +1679,353 @@ Goal: a **genuinely new** horse mesh from the reference, working in game on the 
   - **After each round** the main render sheet is opened for the user automatically (user, round 6).
 - **SDXL inpainting 0.1 installed (user-approved, 2026-10-19):** weights `diffusers/stable-diffusion-xl-1.0-inpainting-0.1` (fp16, ~6.6 GB, CreativeML Open RAIL++-M) in `D:\eu4unitgen_ai\weights\sdxl_inpaint`. It runs in the existing `triposg_env` (diffusers 0.41, torch 2.14.1+cu126): no new packages, nothing in the repo or the app's .venv. Smoke test, offline: loads in 7 s; a 1024 px inpaint in 8 steps with CPU offload takes 37 s and peaks at 5.4 GB VRAM on the RTX 3060. Not wired into the app yet. Any other new install still needs the user's OK.
 
+### Track M: Reference-to-3D master pipeline (FEASIBILITY, 2026-10-19; nothing built, awaiting the user's approval)
+**Mission (user, 2026-10-19):** a fully automated, reusable reference-image-to-3D pipeline, proved first on the Byzantine cataphract's armoured horse. **New priority:** the highest practical fidelity to the reference. Game integration work is paused. The EU4 writer, skeleton, animation and loading are proven and stay as they are; production assets are not modified.
+
+**Production order:**
+1. Reference analysis.
+2. High-detail MASTER model.
+3. Reference-camera reconstruction.
+4. Render and quantitative fidelity evaluation.
+5. Automated corrections.
+6. Human review and approval.
+7. Game-ready model derived from the approved master.
+8. Retopology, baking, rigging, EU4 integration.
+
+**The master:**
+- It is never overwritten.
+- It has no triangle budget and no readability rule.
+- It isn't bound to vanilla's proportions.
+
+The round 6 readability rule applies only at stage 7.
+
+#### M0. What we have (inspected 2026-10-19)
+- **Reference** (`assets_in/horse_ref/Byzantine Cataphract Armor Reference Sheet.png`, 1536×1024): an illustrated composite.
+  - **View L:** front-3/4 from the horse's left, the rider on it. The horse is about 600×750 px, mid-stride with the near foreleg lifted.
+  - **View R:** rear-3/4 from the right, rider on it, smaller. It shows the hindquarters, the tail, the right hind leg and the rear caparison.
+  - **Close-ups:** the saddle and the caparison's cloth panel (border, fringe, embroidered cross). The rest are the rider's helmet, armour, shield, spear and sword.
+  - **The two views are separate illustrations of the same design, not a calibrated pair.** Details disagree: in R the hindquarters carry scale armour under a red cloth layer; in L the red side panels with crosses dominate. Treat each view as separate, weak evidence.
+- **Hardware:** RTX 3060 12 GB (driver 617.42), i7-10700K (8 cores / 16 threads), 32 GB RAM, D: 876 GB free.
+- **Software:**
+  - **Blender 4.2 LTS:** Geometry Nodes, cloth simulation, Cycles bake. Add-ons: io_pdx_mesh only.
+  - **`D:\eu4unitgen_ai\triposg_env`:** torch 2.14.1+cu126, diffusers 0.41, transformers 5.20, accelerate, peft, OpenCV 5, scikit-image (with scipy), trimesh, pymeshlab, rembg with BiRefNet-general.
+  - **Weights:** TripoSG (MIT) and SDXL inpainting 0.1 (installed, approved).
+- **TripoSG evidence (test 15, crop with the rider; `renders/sheet_raw.png`):**
+  - **Output:** a recognisable horse, caparison and head outline. 1.65 M triangles, 125 pieces, not watertight, 177 s, 5.35 GB VRAM.
+  - **Fused into one shell:** the rider, shield and reins; the cloth with the body and legs.
+  - **Not geometry:** the scales (smooth drapery).
+  - **Wrong:** the tail is lost inside the caparison; the pose is the reference's mid-stride.
+  - **So it gives an outer shell, not an anatomy:** what is under the cloth isn't in the image, so it can't come out of the model.
+- **Procedural evidence:** `_horse_anatomy` (round 5: named parameters, fitted to measurements; our own, 0.20 median distance from vanilla). It bends best of everything tried (8 / 2 / 7 flips vs vanilla 13 / 8 / 32). It has never been fitted to the reference's 2D outline: so far only to TripoSG-derived measurements.
+
+#### M1. Reconstruction feasibility, per component
+Classes:
+- **P:** reliable with procedural tools.
+- **I:** needs image-to-3D.
+- **H:** hybrid.
+- **X:** can't be inferred from the reference (prior only).
+
+| Component | Class | Why | Seen in |
+|---|---|---|---|
+| Overall volume and proportions (visible outline) | H | Procedural anatomy optimised to both views' outlines and landmarks. TripoSG's shell as a 3D prior for depth the 2D views can't fix (chest width, barrel roundness). | L, R |
+| Head (shape under the chanfron) | H | Mostly covered by the chanfron. Muzzle, jaw, ears and eye visible in L. Procedural head (needs more parameters: cheek, nostril, eye socket, jaw), fitted to L. TripoSG head as a second target. | L |
+| Ears, eyes, nostrils | P | Small, standard; placed by landmarks. | L |
+| Legs below the cloth, hooves | P | Visible in L (3 legs) and R (2); a fitted procedural leg is cleaner than TripoSG's thin uneven legs. | L, R |
+| Tail | P | Long, dark, hanging (R). Guide curves plus hair cards or strands. | R |
+| Horse body under the caparison and armour | X | Not in the image. Comes from the anatomy prior, constrained to sit inside the armour and cloth shell. | — |
+| Neck and chest scale armour | P (structure) + H (shape) | The armour's outer surface is visible (L) and fitted like the body. The plates are Geometry Nodes on that surface. Plate size, row direction and overlap are read from L, where plates are ~8-12 px. | L |
+| Hindquarter scale skirt | P + H | Visible in R only, partly under the red cloth. | R |
+| Caparison (red cloth panels) | P (cloth sim) + H (target) | The cut lines, hem heights and panel layout are visible: L side and front, R rear. The drape is simulated. TripoSG's shell is a target the sim result is compared against. Fold placement is plausible, not 1:1. | L, R, close-up |
+| Chanfron | P | Conforms to the fitted head, with eye openings; ridge and plate edges from L. | L |
+| Bridle, breast strap, girth, straps | P | Curves on the surface from landmarks. The reins are removed (the rider's; game-irrelevant). Head straps stay. | L |
+| Gold trim, borders, fringe, tassels | P | Curve-following geometry on the panel edges; instanced tassels. | L, R, close-up |
+| Embroidered crosses, ornament | P (placement) + texture | Projected where seen. Mirrored or procedural decal where not. Relief optional. | L, R, close-up |
+| Saddle | H | The close-up gives its shape; the seat under the rider is inferred. | close-up, L |
+| Plume on the poll (red tuft) | P | Hair cards. | L |
+| Materials and colours | H | Procedural materials (metal plates, cloth, gold, coat) matched to observed colours. Unique ornament projected from the views. | L, R, close-ups |
+
+**Inferred surfaces, and how the uncertainty is recorded.** Every master vertex gets an `evidence` attribute:
+- `observed_L`, `observed_R`, `observed_both`: visible in that reference camera, inside the horse mask, outside any inpainted area (raycast visibility);
+- `inpainted`: seen only through a cleaned (SDXL) area;
+- `symmetry`: mirrored from the observed other side;
+- `prior`: anatomy or rule only.
+
+Each stage writes an **evidence map**: renders coloured by class, and the share of surface area per class and per component. Expected guesses:
+- **The right side of the head, neck, shoulder and right foreleg:** not in R (it shows the right rear). Symmetry from L.
+- **The right flank and caparison:** R shows its rear half; the front half is symmetry.
+- **Under the caparison and armour:** the body, upper legs, belly, inner hem faces. Prior.
+- **Under the rider:** saddle seat, back, the flank behind the rider's leg and stirrup (L), the croup under the rider's cloak (R). Inpainted or prior; the saddle close-up helps.
+- **Behind the reins:** strips of neck armour (L). Inpainted.
+- **In R:** the strip behind the second lance. Inpainted.
+- **Underside:** belly, chest bottom, hoof soles, between the legs. Prior.
+- **Centre front of the chest:** half-seen in L. Symmetry.
+- **The head under the chanfron:** prior, constrained by the chanfron's outline.
+
+**Extra reference views that would remove the most guessing, in order:**
+1. A true left side view of the same horse without a rider, legs straight. It fixes proportions, hem lines, panel layout and the scale rows, and removes the pose ambiguity.
+2. A front view: chest width, chanfron front, breast strap, front panels.
+3. A right side or rear view of the same design (today's R is a different illustration).
+4. A top-down or high 3/4 view of the back and saddle without the rider.
+5. A close-up of the scales: plate shape, overlap and rivets.
+
+A single consistent **turnaround sheet** (front, side, back, 3/4) of the riderless horse beats all of these. Inconsistent illustrations cost more than missing ones: they force a choice per detail (a human checkpoint).
+
+#### M2. Missing requirements
+Status: **have** = installed; **OK?** = needs the user's approval before install. Licences are as published by their authors; to be re-checked from the actual licence files before any install (**UNVERIFIED** until then).
+
+| Need | Option | Licence / commercial | Local / cost | Automation | Improves | Essential? | Status |
+|---|---|---|---|---|---|---|---|
+| Rider, shield, lance and reins removal | SDXL inpainting 0.1 | CreativeML Open RAIL++-M; commercial use allowed with use restrictions | local, free | diffusers script | cleaned references | essential | have |
+| Background and horse masks | BiRefNet-general (rembg) | MIT | local | yes | silhouette masks | essential | have |
+| Region labels (scale / cloth / trim / chanfron / coat / leg …) | **human-drawn polygons in an app annotation screen** (no install), or SAM 2 | SAM 2: Apache-2.0 (UNVERIFIED) | local, ~0.9 GB weights | prompts from boxes; still needs labels | coverage metric, colour metric | essential: labels; SAM 2 optional (speed) | build / OK? |
+| Landmarks (eye, ears, muzzle, withers, knees, hocks, hooves, hem corners, chanfron corners) | **human clicks in the same annotation screen**; an animal pose model later (e.g. ViTPose+ AP-10K, licence to check) | — | local | clicks: no install | landmark metric, camera and pose solve | essential: clicks | build |
+| Camera and pose solve | scipy optimisers (present) on Blender silhouette renders; CMA-ES (`cma`, BSD) optional | BSD | local | yes | reference-camera reconstruction | essential: scipy | have / OK? |
+| Differentiable rendering (faster, finer solves) | nvdiffrast / PyTorch3D | NVIDIA source licence (non-commercial) / BSD | local | yes | — | **no**: nvdiffrast's licence and both need a CUDA toolkit build the machine doesn't have | rejected |
+| Image-to-3D shell | TripoSG | MIT | local | yes; best-of-N seeds | H components | essential | have |
+| Image-to-3D, larger models | TRELLIS (MIT; needs ≥ 16 GB VRAM, doesn't fit 12 GB), Hunyuan3D (excluded: licence territory), cloud (Tripo, Meshy, Rodin: paid, outputs under their terms) | — | — | — | — | no | rejected |
+| Depth- or normal-guided texture generation for unseen and inpainted areas | ControlNet depth SDXL (diffusers; RAIL++), IP-Adapter SDXL (Apache-2.0, style from the reference) | as listed, UNVERIFIED | local, ~2.5 + ~1 GB | diffusers script | texture consistency on unseen surfaces | optional at first (procedural materials cover the repeating parts); essential for unique ornament where unseen | OK? |
+| Multi-view image generation (plausible unseen sides) | MV-Adapter (code Apache-2.0, weights UNVERIFIED; SDXL-based, VRAM UNVERIFIED on 12 GB), Zero123++, SV3D (Stability non-commercial community licence: likely excluded) | mixed | local | yes | evidence for symmetry / prior areas | optional, high risk (consistency) | research only |
+| Texturing GUIs | StableProjectorz (freeware, Windows, GUI only), Dream Textures (GPL-3, Blender add-on; 4.2 support UNVERIFIED), ComfyUI (GPL-3, HTTP API) | — | local | weak / weak / good | — | no: our own diffusers scripts do the same and stay scriptable | not needed |
+| Perceptual metrics | SSIM (scikit-image, present); LPIPS (BSD-2); DINOv2 features (Apache-2.0) | as listed | local, small | yes | structural/perceptual similarity | SSIM essential (have); LPIPS, DINOv2 optional | have / OK? |
+| Cloth, Geometry Nodes, curves, bake | Blender 4.2 built-ins | GPL | local | `blender --background` | B, C, D, E, baking | essential | have |
+| GPU Cycles bake | Blender preferences: CUDA device | — | — | set in the job | bake speed (master bakes are large) | optional | check |
+| Hardware | 12 GB VRAM: SDXL + ControlNet fp16 with CPU offload ~8-10 GB (UNVERIFIED); TripoSG 5.4 GB. 32 GB RAM: masters with instanced plates are fine; realised plates (~10⁵-10⁶ plates) only inside the bake job. Disk: ~1-3 GB per master version | — | — | — | — | enough | have |
+
+No Blender add-on is essential. Paid ones (UV packers, cloth tools) aren't needed.
+
+#### M3. EU4 optimisation strategy (stage 7; budget as measured)
+- **Budget:** vanilla horse 1,874 triangles; ours have shipped 2,900-2,950 under the 3,000 limit (the `fresh_mesh` rule). No new in-game performance tests.
+- **Textures:** we ship 512² diffuse, normal and specular (**UNVERIFIED** cost; vanilla's horse diffuse is smaller). Stays 512².
+
+| Master feature | In the game model | Rough triangles |
+|---|---|---|
+| Silhouette: body, neck, head, ears, legs, tail | geometry | ~1,700-1,900 |
+| Large armour sections (neck and chest shell, hindquarter skirt) | merged into the body's outer surface (no separate thickness), so the silhouette is the armour's | included above |
+| Chanfron | own geometry, 100% HorseHead | ~150 |
+| Caparison panels | geometry: outer surface and hem silhouette, two-sided where it hangs; the hem's big waves stay geometry | ~600-800 |
+| Individual plates | normal, diffuse and gloss bake only | 0 |
+| Cloth folds | the large ones that change the hem outline as geometry; the rest normal-map | (in the panels) |
+| Straps, trim, borders | bake (diffuse, normal, gloss); a strap only if it changes the outline at GAME_CLOSE | 0-60 |
+| Fringe, tassels | bake into the hem band (alpha-tested cards are UNVERIFIED for unit shaders, so not planned) | 0 |
+| Fine ornament, embroidery | diffuse and normal only | 0 |
+
+The game model is derived from the master by the existing chain:
+- QuadriFlow retopology of a merged outer shell;
+- bake (now from the master's real plates and folds, not a painted guess);
+- chain weights;
+- trunk-weighted panels;
+- the readability rule;
+- `write_fresh`.
+
+Stage 7 reports **master-vs-game fidelity loss** with the same metrics.
+
+#### M4. Stages
+Applies to every stage:
+- **Reproducible from configs:** every stage reruns from configs and earlier stages' outputs, with no manual mesh editing. Each writes a versioned folder (`<subject>/master/vNNN/…`, content-hashed, read-only once written) and a provenance log (generator, parameters, seeds, input hashes).
+- **Proof package, required to pass:** the artifact; a render; a comparison with the reference; the metrics; a list of visible discrepancies; evidence the geometry is new (generator provenance, plus `vanilla_distance` for the body).
+
+**S1. Reference analysis**
+- **In:** the original sheet, the subject config.
+- **Tools:** BiRefNet; SDXL inpainting; the annotation screen (new, PySide6).
+- **Operations:**
+  1. Crop the views.
+  2. Make masks.
+  3. Inpaint the rider, shield, lance and reins: masks from boxes plus BiRefNet's rider/horse split, then 4 seeds each.
+  4. Region labels and landmarks per view.
+  5. List the conflicts between views.
+- **Out:** `refs/original/` (untouched), `refs/clean/vNNN/` (with the inpaint masks), labels, landmarks, a conflict list, a palette per region.
+- **Validation:** the inpainted area per view (share of the horse mask). Inpaint candidates are scored for continuity (seam colour and edge difference) and ranked by it.
+- **Fail:** the inpaint invents structure (a new strap, a leg); labels or landmarks missing.
+- **Recovery:** other seeds; a smaller mask; mark the area "unknown" instead of inpainting it.
+- **Proceed:** human checkpoint **H1**.
+
+**S2. Master body (horse anatomy)**
+- **In:** S1; the anatomy template (horse); TripoSG candidates (N seeds on the cleaned view L).
+- **Operations:**
+  1. Fit the camera and pose per view (S3's solver).
+  2. Optimise the anatomy parameters (≈40) to the outlines (labels: coat, legs) and landmarks in both views.
+  3. Use TripoSG's shell only as a depth prior: chest and barrel widths, which no 2D view fixes.
+  4. Head parameters from L.
+  5. Tail curves from R.
+- **Out:** the body in the reference pose and in a neutral rest pose, both on the vanilla skeleton's bones (bones only), with the `evidence` attribute.
+- **Validation:** silhouette IoU and landmark error on the bare-coat regions; anatomy sanity (joint angles, limb lengths within horse ranges, kept in the template, not tied to this horse).
+- **Fail:** IoU or landmarks under the gates; the optimiser stuck; implausible anatomy.
+- **Recovery:** restart from other initialisations; a wider parameter group (e.g. a free head shape); the best TripoSG seed as a prior.
+- **Proceed:** the gates (M5).
+
+**S3. Reference-camera reconstruction** (a solver used by S2 and every later stage)
+- **Solves per view:** focal length, camera rotation and translation, joint angles of the pose.
+- **Method:** scipy (Nelder-Mead / Powell; CMA-ES if approved) on silhouette distance plus landmark error, with Blender Workbench silhouette renders. Each evaluation is a fast flat render or our own numpy raster of a decimated proxy.
+- **Out:** a camera per view, the reference pose, residuals.
+- **Fail:** residuals over gate.
+- **Recovery:** more landmarks (back to H1); fit the two views independently.
+
+**S4. Armour (Geometry Nodes plates)**
+- **In:** the body.
+- **Shell:** offset by the armour thickness and fitted to the armour outline in L and R (the same optimiser, on offset parameters per region).
+- **Coverage:** from the region labels projected onto the surface through each solved camera, with symmetry for the unseen side.
+- **Plates:** Poisson-distributed points on the shell, each oriented along a per-region direction field (rows run around the neck, down the chest). Overlap comes from ordering and tilt.
+- **Configurable per region:** plate shape (a small curved mesh with real thickness), size, spacing, tilt and curvature.
+- **Out:** the live Geometry Nodes setup plus a realised cache.
+- **Validation:**
+  - plate count and spacing against the reference's plate frequency (FFT of the region's pixels at the solved camera vs the render);
+  - coverage IoU per region;
+  - penetrations (plates through the body or each other; counted by BVH);
+  - gaps (body visible through the plates).
+- **Fail:** penetrations or gaps over threshold; frequency off by > 15%.
+- **Recovery:** optimise offset and tilt; regional plate size; a smoothed shell at high curvature.
+
+**S5. Caparison (cloth simulation)**
+- **In:** body and armour (a smoothed collision proxy, not the plates), the panel pattern from the labels (cut lines, hem heights per view).
+- **Operations:**
+  1. Panels as flat patterns pinned along the top seam.
+  2. Simulate in background Blender with fixed settings and seed.
+  3. Freeze the result into the master as a new version; the pattern and settings stay as the procedural source.
+- **Validation:** silhouette and hem line against L and R; intersections with the body or armour; stretch (cloth edge length vs pattern); comparison with TripoSG's drapery shell.
+- **Fail:** explosion, intersections, panels sticking, the hem off the reference.
+- **Recovery:** a grid of a few stiffness, collision-distance and pin sets as candidates, best by metrics; then pattern edits (hem length, panel width), optimised.
+
+**S6. Decorative geometry and chanfron**
+- **Chanfron:** a surface patch over the fitted head (forehead, nose, cheek plates), eye openings at the eye landmarks, an offset, thickness, and a ridge.
+- **Trim, borders, fringe:** curves along the cloth panels' boundaries after S5.
+- **Straps:** curves projected on the surface between landmarks (breast strap, bridle, girth); buckles and rosettes as instanced small meshes from a parts library (our own, made from scratch).
+- **Tassels:** instanced along hem curves.
+- **Validation:** the key-detail checklist (M5 metric 6); clearance (no detail inside the body).
+- **Fail:** a detail missing or misplaced against its landmark.
+- **Recovery:** re-place by landmark; add the generator instance named in the detail list.
+
+**S7. Texturing** (materials)
+- **Procedural base:** metal plates, cloth, gold, leather and coat, with colours fitted to the observed region palette in Lab (lighting-compensated, see M5).
+- **Unique ornament** (crosses, embroidered borders): projected from the cleaned views through the solved cameras where `observed`; mirrored for `symmetry`; generated (ControlNet depth + IP-Adapter, if approved) or a procedural decal for `prior`, and flagged.
+- **De-lighting** of projected pixels: divide by the shading of our own render of the fitted geometry under an estimated light. The illustration's painted light can't be removed fully; the residual is reported.
+- **Out:** PBR master maps (base colour, metallic, roughness, normal).
+
+**S8. Evaluation, correction, approval**
+- **Evaluate:** all metrics (M5) in both reference cameras.
+- **Correct:** the M6 loop, up to a capped number of rounds.
+- **Approve:** **H3**.
+- **Then stage 7** (game model, **H4**), then stage 8 (EU4 integration, then an in-game test as before).
+
+#### M5. Automated fidelity evaluation
+- **Renders in each solved reference camera, three kinds:**
+  1. **flat ID:** one colour per component and region, for masks;
+  2. **albedo:** for colour;
+  3. **lit:** a light fitted to the reference's dominant light direction (estimated from the shading of the observed coat and metal against our normals), for structural metrics.
+- **Masks:** the horse after rider removal. Inpainted pixels are scored separately and weighted lower; they are never counted as observed truth.
+- **Saved per evaluation:** side-by-sides, overlay and difference images, per-region masks, `metrics.json`.
+- **Metrics, each reported on its own:**
+  1. **Silhouette:** IoU per view and per region (legs, head, neck, body, cloth), plus contour distance (mean and 95th percentile, px / body length). Per-region IoU so a thin leg or a missing tail can't hide inside a good overall IoU.
+  2. **Colour:** ΔE2000 between region mean colours (albedo render vs the reference's region, lighting-compensated), plus a histogram distance.
+  3. **Landmarks:** projected named master landmarks vs annotated ones, px / body length, per landmark.
+  4. **Armour coverage:** per-class IoU and a confusion matrix of the label map (scale, cloth, trim, chanfron, coat, strap) vs the rendered ID map.
+  5. **Structure / perception:** SSIM on edge maps; LPIPS and DINOv2 similarity if approved. Secondary only: they reward texture-like noise and are fooled by style.
+  6. **Key details:** a per-subject list (cross on each panel, breast strap, bridle rosette, fringe, tassels, chanfron ridge, eye openings, tail…), each with its expected place. Present = the master has the generator instance **and** its projection lands within tolerance of its reference position **and** a local patch match passes.
+- **Gates (hard, before any composite):**
+  - region IoU ≥ 0.85 on observed regions;
+  - landmark error ≤ 2.5% of body length (each);
+  - coverage class IoU ≥ 0.7;
+  - every key detail present;
+  - zero penetrations over 1 mm (master scale);
+  - ΔE2000 ≤ 8 per region.
+
+  All assumed: calibrated in E-D (M9). A failed gate fails the stage whatever the composite.
+- **Composite** (ranking candidates only, never pass/fail): a weighted sum with documented weights, stored in the subject config. Starting proposal: silhouette 0.25, landmarks 0.20, coverage 0.20, details 0.15, colour 0.15, structure 0.05.
+- **Style accounting:**
+  - the reference is painted: high-frequency texture and highlights won't match a render;
+  - colour is compared on region means and histograms, not per pixel;
+  - structure is compared on edges, not raw pixels;
+  - camera mismatch is removed by the solved camera; the residual is reported per view.
+
+#### M6. Correction: how each failure gets fixed automatically
+| Failure (found by) | Automatic fix | Kind |
+|---|---|---|
+| Body outline or landmark off (1, 3) | re-optimise anatomy parameters, with pose and camera fixed; then joint, camera and pose | parameter optimisation |
+| Pose mismatch (3, leg landmarks) | optimise joint angles | parameter optimisation |
+| TripoSG shell defects (lumps, fused parts, a wrong chest) | best of N seeds (8 seeds ≈ 25 min), ranked by the gates and composite on its depth-prior role | best of candidates |
+| A bad inpaint (S1) | other seeds; a smaller mask; mark the area unknown | best of candidates / regenerate region |
+| Armour coverage off (4) | re-project the labels; widen or shrink the region masks by optimisation against coverage IoU | parameter optimisation |
+| Plate size or row direction off (FFT) | optimise plate size, spacing and the direction-field angle per region | parameter optimisation |
+| Plate penetrations or gaps | optimise offset, tilt and scale; smooth the shell locally where curvature is high | parameter optimisation / regenerate region |
+| Cloth sim failure or bad drape (1, hem landmarks) | candidates over stiffness, collision distance and pins; then optimise the pattern's hem and panel widths | best of candidates, then optimisation |
+| Detail missing or misplaced (6) | re-place by landmark; add the missing instance from the detail list | rule-based regenerate |
+| Region colour off (2) | solve material colours in Lab against the compensated reference colour | direct solve |
+| Texture seam or inconsistency on unseen areas | regenerate that area (ControlNet + IP-Adapter if approved, else procedural), best of N by seam metric | regenerate region / best of candidates |
+| Global failure after K rounds | stop and report; never lower a gate without the user's OK | human |
+
+Every correction round is a new master version; the loop keeps the best version and the history.
+
+#### M7. Automation vs judgement
+- **Fully automatable, and achievable:** every stage's execution, the metrics, the gates, the candidate generation and ranking, versioning, the proof packages, the evidence maps, deriving the game model.
+- **Hard to automate (artistic judgement):**
+  - whether folds look like cloth;
+  - whether a guessed right side is plausible;
+  - which view wins when the two illustrations disagree;
+  - how much of the illustration's stylisation to copy;
+  - whether a high-scoring master actually *looks like* the reference;
+  - what to give up for the game model.
+- **Human checkpoints:**
+  - **H1, after S1 (~10-15 min):** approve the cleaned references (the inpaint is plausible, nothing invented), the region labels, the landmarks, and the conflict choices per detail.
+  - **H2, after S2 (~5 min):** approve the anatomy and pose (side-by-sides plus the evidence map), before armour and cloth are built on it.
+  - **H3, after S8 (the main approval):** the master against the reference with the full metric report and discrepancy list. Approve, or name what's wrong (which becomes a new gate or detail).
+  - **H4, after stage 7:** the game model vs the master at GAME_CLOSE and map scale; approve the losses.
+  - **In-game test:** as before (checklists).
+
+Between checkpoints nothing waits for the user.
+
+#### M8. Generalisation
+- **Reusable (any subject, any unit type):**
+  - reference analysis: crop, masks, inpaint, labels, landmarks, conflicts;
+  - the camera and pose solver (any template with bones and landmarks);
+  - the metric suite, gates and proof packages;
+  - versioned masters with the evidence attribute;
+  - the surface-plate generator (horse armour, rider lamellar, scale shirts);
+  - the cloth module (caparison, cloaks, banners);
+  - the curve-trim and detail-instancing modules;
+  - material fitting and projection texturing;
+  - stage 7's derivation (retopology, bake, weights to a target skeleton, the readability rule).
+- **Template-specific (one per body type; horse first):**
+  - the anatomy generator and its parameter bounds;
+  - the landmark set;
+  - the region taxonomy;
+  - the skeleton mapping (vanilla horse bones; a human template later for riders and infantry);
+  - the readability rule's measurement (legs for horses).
+- **Subject config (per reference, in `assets_in/<subject>/subject.json`, git-ignored):**
+  - views and crops;
+  - which detail list and template to use;
+  - region coverage, plate parameters per region, cloth pattern, palette, camera priors;
+  - gates' overrides (only with the user's OK);
+  - composite weights.
+
+  Nothing about this cataphract is hard-coded: no coverage, cameras, proportions, colours or geometry. Templates ship in the repo (`data/ref3d/templates/horse.json`); masters and references never do (rules 1 and 8).
+- **Code layout (proposed):**
+  - `src/eu4unitgen/ref3d/`: orchestration and configs, app side;
+  - `blender/jobs/ref3d_*.py`: body fit, plates, cloth, details, renders, bake;
+  - `ai/jobs/ref3d_*.py`: inpainting, optional texture generation;
+  - a thin GUI annotation screen.
+
+#### M9. Risks and the evidence that would justify implementation
+| Risk | Severity | Why | Mitigation | Evidence needed (spike) |
+|---|---|---|---|---|
+| Single-image ambiguity (two inconsistent illustrated views) | high | most of the surface is symmetry or prior; the views disagree | evidence maps; per-detail conflict choice at H1; ask for a turnaround sheet | S1 run on the sheet: share of surface observed (expected well under half) and the conflict list |
+| TripoSG horse anatomy quality | medium-high | a shell with fused cloth, no anatomy under it | TripoSG only as a depth and drapery prior; body from the fitted procedural anatomy | **E-A:** 8 TripoSG seeds on the cleaned view L vs the procedural fit vs hybrid, all metrics in both cameras, per component |
+| Geometry Nodes plates conforming to the surface | medium | rows break at high curvature and seams; penetrations at straps | per-region direction fields; a smoothed shell; penetration and gap metrics | **E-B:** plates on the fitted neck and chest shell: penetrations, gaps and FFT plate frequency vs L |
+| Cloth sim reliability | medium-high | collisions with fine armour are slow and unstable; folds are plausible, not the reference's | collide with a smoothed proxy; fixed seeds; candidate grid | **E-C:** one side panel simulated from the pattern: hem-line error vs L and R, intersections, 5 reruns identical |
+| Texture consistency on unseen surfaces | high | projection covers only observed areas; generated areas drift in style | procedural materials for everything repeating (consistent by construction); only unique ornament projected or generated, and flagged | E-C's panel textured: seam metric at the observed/unseen border |
+| Automated correction of geometric errors | medium-high | low-dimensional parameters optimise well; local shape errors don't | regional parameters; best of candidates; capped rounds then the user | E-A's optimiser residuals and convergence on 3 restarts |
+| Numerical similarity vs real visual fidelity | high | IoU and SSIM can score a wrong-looking model well, and the painted style lowers honest scores | hard gates per region and detail; metrics never combined for pass/fail; H3 | **E-D, metric sensitivity:** deliberately broken masters (trim removed, caparison 10% shorter, plates 30% bigger, head 5° off, wrong red); every break must fail at least one gate, and an unbroken one must pass |
+
+**Proposed next step, after the user's approval:**
+- the cleaning (S1) on the sheet;
+- spikes E-A to E-D, each with its full proof package and no game work.
+
+Implementation of the full pipeline starts only if:
+- the cleaned references pass H1;
+- E-D shows the metrics catch every deliberate break;
+- E-A beats round 5's B on the gates in both cameras;
+- E-B and E-C reach their thresholds.
+
+If a spike keeps failing, stop and reassess with the user; no requirement is lowered without the user's OK. Further installs (SAM 2, ControlNet depth, IP-Adapter, LPIPS, DINOv2, `cma`) are listed above and wait for the user's OK.
+
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
 
