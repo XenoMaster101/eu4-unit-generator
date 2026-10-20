@@ -37,6 +37,12 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        is taken),
        "barding": {"style": "drape" (_horse_barding.drape: draped cloth) | "slab" (panels(), test 16's), + its keywords} (round 3: hanging panels, weighted from the body
        without legs), "stirrups": {"tread", "strap_top"} (round 3: 100% HorseSpineTop),
+       "readability": {"mode": "auto" (default) | "reference", "leg_share", "depth_floor", "hem_steps"}
+       (round 6, the user's rule: at the game camera the legs show at least leg_share (default
+       _horse_read.LEG_SHARE) of vanilla's visible length; "auto" first makes an anatomy barrel
+       shallower, never under depth_floor (default 1.05) x vanilla's depth, then shortens a draped
+       hem along hem_steps until it passes; "reference" leaves the reference's look alone and
+       only reports),
        "paint": {"palette": {silver, red, gold, coat}, "out_dir", "name", "size", "hem_y" (the coat below it;
        default the skirt hem_y)} (step 8: textures),
        "chain_weights": bool (head, leg and tail regions weighted by distance to their bone chains),
@@ -61,10 +67,65 @@ from mathutils import Matrix, Vector  # noqa: E402 - Blender module
 import numpy as np  # noqa: E402 - Blender's numpy
 
 import _horse_barding as hb  # noqa: E402
+import _horse_read as hr  # noqa: E402
 import _horse_shape as hs  # noqa: E402
 import _pdx  # noqa: E402
 
 STEEP = 2.0  # _horse_shape.steepness max over which a reshape is reported (smooth warps here: about 1.5)
+DEPTH_FLOOR = 1.05  # the user's rule (round 6): readability never makes a barrel shallower than this x vanilla's
+HEM_STEPS = tuple(-0.25 * i for i in range(9))  # drape hem_length 0 .. -2, tried in turn while the legs don't show (assumed)
+
+
+class Readability:
+    """The round 6 rule's settings and measurements (fresh_horse args "readability")."""
+
+    def __init__(self, cfg, van, barding):
+        cfg = cfg or {}
+        self.auto = cfg.get("mode", "auto") == "auto"
+        self.share = float(cfg.get("leg_share", hr.LEG_SHARE))
+        self.depth_floor = float(cfg.get("depth_floor", DEPTH_FLOOR))
+        self.hem_steps = [float(h) for h in cfg.get("hem_steps", HEM_STEPS)]
+        self.bones = van["bones"]
+        vco = np.array(van["p"], dtype=np.float64).reshape(-1, 3)
+        vtri = np.array(van["tri"], dtype=np.int64).reshape(-1, 3)
+        self.vanilla_arrays = (vco, vtri)
+        self.vanilla = hr.leg_visible(vco, vtri, self.bones)["length"]
+        self.vanilla_depth = None
+        self.barding = barding if barding and barding.get("style") == "drape" else None
+        self.log = {"mode": "auto" if self.auto else "reference", "leg_share": self.share,
+                    "vanilla_leg": self.vanilla, "steps": []}
+
+    def depth_ratio(self, depth):
+        if self.vanilla_depth is None:
+            import _horse_measure as hm
+            v = self.vanilla_arrays
+            self.vanilla_depth = hm.summary(hm.proportions(v[0], v[1], self.bones))["depth"]
+        return depth / self.vanilla_depth
+
+    def legs(self, co, tri, part=None, hem_length=None, extra=()):
+        """Visible leg length with the drape (at ``hem_length``, default its own) hung on this body,
+        and the ``extra`` pieces (_horse_barding arrays: the stirrups, the tail) beside it."""
+        co, tri = np.asarray(co, dtype=np.float64), np.asarray(tri, dtype=np.int64)
+        part = np.zeros(len(tri), dtype=np.int64) if part is None else np.asarray(part)
+        pieces = list(extra)
+        if self.barding is not None:
+            kw = {k: v for k, v in self.barding.items() if k != "style"}
+            if hem_length is not None:
+                kw["hem_length"] = hem_length
+            pieces.append(hb.drape(co, self.bones, **kw))  # on the body alone, as add_barding hangs it
+        for b in pieces:
+            co, tri = np.vstack([co, b["v"]]), np.vstack([tri, np.asarray(b["f"]) + len(co)])
+            part = np.concatenate([part, np.asarray(b["part"])])
+        return hr.leg_visible(co, tri, self.bones, part)["length"]
+
+    def passes(self, length):
+        return length >= self.share * self.vanilla
+
+    def step(self, **kw):
+        kw["leg_ratio"] = round(kw["leg"] / self.vanilla, 3)
+        kw["passes"] = self.passes(kw["leg"])
+        self.log["steps"].append(kw)
+        return kw["passes"]
 
 
 def mesh_object(name, verts, tris):
@@ -438,12 +499,31 @@ def procedural_horse(van, src):
     return obj, {"scale": 1.0, "offset": [0, 0, 0], "note": "built on the skeleton", **fit, "build": built["log"]}
 
 
-def anatomy_horse(van, vanilla, src):
+def shallower(ha, bones, seat, params, read):
+    """The readability rule's first step (round 6): while the legs (with the caparison hung at its
+    own hem) don't show enough, the barrel 0.05 x vanilla's depth shallower, never under
+    ``read.depth_floor``; measured on the anatomy's tubes, before the remesh. -> (params, built)."""
+    params = dict(params)
+    for _ in range(8):
+        built = ha.build(bones, seat, params)
+        co, tri = ha._joined(built["tubes"])
+        ratio = read.depth_ratio(ha.measure(built["tubes"], bones)["depth"])
+        ok = read.step(stage="depth", depth=round(ratio, 3), barrel_depth=round(built["params"]["barrel_depth"], 4),
+                       leg=read.legs(co, tri))
+        if ok or ratio <= read.depth_floor + 0.005:
+            return params, built
+        want = max(read.depth_floor, ratio - 0.05)
+        params["barrel_depth"] = built["params"]["barrel_depth"] * want / ratio
+    return params, built
+
+
+def anatomy_horse(van, vanilla, src, read=None):
     """Bake-off horse B, round 5: _horse_anatomy's own parametric horse on the vanilla skeleton
     (from vanilla only the bones and the seat height: its back's surface at Saddle_Node), its
     parameters driven by the reference model (``fit_from``: a preview-axes OBJ of it on the vanilla
     rest pose) and ``params`` overrides, joined by a voxel remesh (``voxel``) and relaxed
-    (``relax``). -> (object, fit log)."""
+    (``relax``); with ``read`` (a Readability in auto mode) made shallower first (``shallower``).
+    -> (object, fit log)."""
     import _horse_anatomy as ha
     bones = van["bones"]
     seat = surface_top(vanilla, bones["Saddle_Node"][2])
@@ -452,7 +532,10 @@ def anatomy_horse(van, vanilla, src):
         rco, rtri = read_obj(src["fit_from"])
         fit.update(ha.fit(bones, seat, rco, rtri, params))
         params = fit["params"]
-    built = ha.build(bones, seat, params)
+    if read is not None and read.auto:
+        params, built = shallower(ha, bones, seat, params, read)
+    else:
+        built = ha.build(bones, seat, params)
     fit["achieved"] = ha.measure(built["tubes"], bones)
     objs = [mesh_object(f"anat_{i}", v.tolist(), t.tolist()) for i, (v, t) in enumerate(built["tubes"])]
     obj = join(objs)
@@ -598,6 +681,25 @@ def add_chanfron(obj, bones, lift=0.06, thickness=0.05, start=0.12, stop=0.86, w
     ch.select_set(True)
     bpy.ops.object.join()
     return tris
+
+
+def shorter_hem(obj, barding, read, extra=()):
+    """The readability rule's second step (round 6): the drape's hem_length, from its own along
+    ``read.hem_steps`` (each shorter), the first whose legs show enough on this body (the reduced
+    one, with its chanfron, and the ``extra`` pieces still to join: _horse_barding arrays, e.g. the
+    stirrups and the tail); in reference mode, or when none does, the shortest tried. -> hem_length."""
+    own = float(barding.get("hem_length", 0.25))
+    tri, part = [], []
+    for poly, p in zip(obj.data.polygons, face_parts(obj)):
+        v = poly.vertices
+        tri += [(v[0], v[i], v[i + 1]) for i in range(1, len(v) - 1)]
+        part += [p] * (len(v) - 2)
+    co = hs.verts(obj)
+    hem = own
+    for hem in [own] + [h for h in read.hem_steps if h < own]:
+        if read.step(stage="hem", hem_length=hem, leg=read.legs(co, tri, part, hem, extra)) or not read.auto:
+            break
+    return hem
 
 
 def add_barding(obj, bones, barding, stirrups=None):
@@ -928,6 +1030,7 @@ def main():
             g.add([vi], w, "REPLACE")
     res = {"stages": {}}
     src = a["source"]
+    read = Readability(a.get("readability"), van, a["barding"]) if a.get("barding") else None
     if src["kind"] == "model":
         obj = import_model(src["path"])
         res["stages"]["imported"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
@@ -990,7 +1093,7 @@ def main():
         debug_dump(a, obj, "5_solid")
     elif src["kind"] in ("procedural", "anatomy"):
         high, build_tail = None, False
-        obj, res["fit"] = (anatomy_horse(van, vanilla, src) if src["kind"] == "anatomy" else procedural_horse(van, src))
+        obj, res["fit"] = (anatomy_horse(van, vanilla, src, read) if src["kind"] == "anatomy" else procedural_horse(van, src))
         res["stages"]["built"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
         high = obj.copy()  # the bake source: the smooth surface before the reduction
         high.data = obj.data.copy()
@@ -1033,11 +1136,17 @@ def main():
         res["chanfron"] = {"tris": add_chanfron(obj, van["bones"], **a["chanfron"])}
     if build_tail:  # found on the body alone, before the panels join it
         root, offset = tail_anchor(obj, van["bones"])
-    if a.get("barding"):
-        res["barding"] = add_barding(obj, van["bones"], a["barding"], a.get("stirrups"))
-    if build_tail:
         b = hb.tail(van["bones"], root, offset=offset,
                     **{k: v for k, v in a["tail"].items() if k in ("sides", "rings", "radii", "flat")})
+    if a.get("barding"):
+        barding = dict(a["barding"])
+        if read is not None and read.barding is not None:  # with what else hangs off the body
+            extra = ([hb.stirrups(**a["stirrups"])] if a.get("stirrups") else []) + ([b] if build_tail else [])
+            barding["hem_length"] = shorter_hem(obj, barding, read, extra)
+        res["barding"] = add_barding(obj, van["bones"], barding, a.get("stirrups"))
+    if read is not None:
+        res["readability"] = read.log
+    if build_tail:
         join_piece(obj, "tail", b)
         res["tail"]["built"] = {**b["log"], "offset": [round(x, 2) for x in offset]}
     smart_uv(obj)

@@ -9,9 +9,14 @@ args: {"vanilla": {"p", "tri", "bones"} (core.fresh_mesh.base_arrays),
        posed rider in horse space, through Saddle_Node: how much of its lower legs each horse hides;
        our stirrups and straps, parts 4-5 in the geometry's "part", don't count; vanilla's do),
        "overlays": [{"name", "draw": [[label | "vanilla", [r, g, b, a]], ...], "view": "side" | "front" | "top"}],
+       "textures": {label | "vanilla": diffuse image path} | null (the readability contrast; ours a
+       geometry .json's "u0", vanilla's ``vanilla.u0``),
        "out_dir", "size": px, "result_path"}
 Result: {"vanilla": proportions, "meshes": {label: {"proportions", "compare", "flags": [metric],
-         "vanilla_distance"}}, "overlays": {name: path}}.
+         "vanilla_distance", "readability"}}, "vanilla_readability", "overlays": {name: path}}.
+readability (round 6, _horse_read): the visible leg length at the game camera and its ratio to
+vanilla's (flagged "legs" under LEG_SHARE), the head-and-neck outline share, and with textures the
+region colours and their contrast (flagged "contrast" when the legs' is under CONTRAST_MIN).
 vanilla_distance (the user's rule: a body traced from vanilla's doesn't count as our own): the body
 surface (part 0) against vanilla's (without its reins and tail by their bones: given as
 ``vanilla.keep``, a triangle mask, when the caller has the weights), both sampled by area, each
@@ -29,6 +34,7 @@ import numpy as np  # noqa: E402 - Blender's numpy
 from mathutils import Matrix, Vector  # noqa: E402 - Blender module
 
 import _horse_measure as hm  # noqa: E402
+import _horse_read as hr  # noqa: E402
 import _pdx  # noqa: E402
 
 # camera direction (camera -> scene) and up, PDX space: side = from the horse's left (+X)
@@ -59,11 +65,11 @@ RIDER_GEAR = (4, 5)  # stirrup iron and strap (_horse_barding): round the rider'
 
 
 def load(path):
-    """(positions n x 3, triangles m x 3, per-triangle part or None) in PDX space."""
+    """(positions n x 3, triangles m x 3, per-triangle part or None, UVs or None) in PDX space."""
     if path.lower().endswith(".json"):
         d = json.loads(open(path, encoding="utf-8").read())
         return (np.array(d["p"], dtype=np.float64).reshape(-1, 3), np.array(d["tri"], dtype=np.int64).reshape(-1, 3),
-                np.array(d["part"]) if "part" in d else None)
+                np.array(d["part"]) if "part" in d else None, np.array(d["u0"]) if "u0" in d else None)
     co, tris = [], []
     for line in open(path, encoding="utf-8"):
         if line.startswith("v "):
@@ -72,7 +78,26 @@ def load(path):
         elif line.startswith("f "):
             idx = [int(t.split("/")[0]) - 1 for t in line.split()[1:]]
             tris += [(idx[0], idx[i], idx[i + 1]) for i in range(1, len(idx) - 1)]
-    return np.array(co, dtype=np.float64), np.array(tris, dtype=np.int64), None
+    return np.array(co, dtype=np.float64), np.array(tris, dtype=np.int64), None, None
+
+
+def image_rgb(path):
+    """An image file as an h x w x 3 sRGB array (0-255), row 0 at the top."""
+    img = bpy.data.images.load(path)
+    img.colorspace_settings.name = "sRGB"
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    return (px.reshape(h, w, 4)[::-1, :, :3] * 255.0).astype(np.float64)  # Blender's rows run bottom up
+
+
+def readability(co, tris, part, bones, uv=None, texture=None):
+    out = {"leg": hr.leg_visible(co, tris, bones, part), "outline": hr.outline(co, tris, bones, part)}
+    if texture and uv is not None and len(uv):
+        out["colours"] = hr.colours(co, tris, uv, image_rgb(texture), bones, part)
+        out["contrast"] = hr.contrast(out["colours"])
+    return out
 
 
 def mesh_object(name, co, tris, rgba):
@@ -114,10 +139,12 @@ def main():
     vp = hm.proportions(vco, vtri, bones)
     if legs is not None:
         vp["rider_leg"] = hm.visible_from_side(vco, vtri, legs)
-    res = {"vanilla": vp, "meshes": {}, "overlays": {}}
+    tex = a.get("textures") or {}
+    vread = readability(vco, vtri, None, bones, van.get("u0"), tex.get("vanilla"))
+    res = {"vanilla": vp, "vanilla_readability": vread, "meshes": {}, "overlays": {}}
     loaded = {"vanilla": (vco, vtri)}
     for label, path in a["meshes"].items():
-        co, tris, part = load(path)
+        co, tris, part, uv = load(path)
         loaded[label] = (co, tris)
         p = hm.proportions(co, tris, bones)
         if legs is not None:  # the horse and its barding covering the leg; our stirrups don't count
@@ -127,8 +154,13 @@ def main():
         body = tris if part is None else tris[part == 0]
         vkeep = vtri if van.get("keep") is None else vtri[np.array(van["keep"], dtype=bool)]
         vd = vanilla_distance(co, body, vco, vkeep)
+        rd = readability(co, tris, part, bones, uv, tex.get(label))
+        rd["leg_ratio"] = round(rd["leg"]["length"] / vread["leg"]["length"], 3)
         flags = [k for k, c in cmp_.items() if c["flag"]] + (["trace"] if vd["trace"] else [])
-        res["meshes"][label] = {"proportions": p, "compare": cmp_, "flags": flags, "vanilla_distance": vd}
+        flags += ["legs"] if rd["leg_ratio"] < hr.LEG_SHARE else []
+        flags += ["contrast"] if rd.get("contrast", {}).get("leg_rest", 99) < hr.CONTRAST_MIN else []
+        res["meshes"][label] = {"proportions": p, "compare": cmp_, "flags": flags, "vanilla_distance": vd,
+                                "readability": rd}
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_WORKBENCH"
     sh = scene.display.shading

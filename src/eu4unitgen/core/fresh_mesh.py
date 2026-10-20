@@ -159,7 +159,8 @@ def check_fresh(base: bytes, fresh: bytes) -> list[str]:
 
 def base_arrays(base: bytes) -> dict:
     """The base mesh as the ``fresh_horse`` job's ``vanilla`` argument: positions, triangles,
-    per-vertex weights by bone name, and each bone's bind position (PDX mesh space)."""
+    UVs (``u0``, image convention), per-vertex weights by bone name, and each bone's bind position
+    (PDX mesh space)."""
     from eu4unitgen.library.scanner import summarize_mesh
 
     tree = parse_pdx_mesh(base)
@@ -179,7 +180,8 @@ def base_arrays(base: bytes) -> dict:
         if rec.get("bind"):
             b = rec["bind"]
             bones[name] = [b[3], b[7], b[11]]
-    return {"p": list(mesh["props"]["p"]), "tri": list(mesh["props"]["tri"]), "weights": weights, "bones": bones}
+    return {"p": list(mesh["props"]["p"]), "tri": list(mesh["props"]["tri"]), "u0": list(mesh["props"].get("u0", [])),
+            "weights": weights, "bones": bones}
 
 
 def geometry_from_job(path) -> FreshGeometry:

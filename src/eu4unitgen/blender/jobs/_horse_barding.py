@@ -276,7 +276,7 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
           readable: float = 0.55, back: float = 0.02, seam_z: float | None = None, band_h: float = 0.3,
           fold: float = 0.14, fold_len: float = 2.1, sag: float = 0.25, corner: float = 0.4,
           tail_open: float = 1.5, top: float | None = None, leg_lift: float = 0.9, leg_cut: float = 1.1,
-          rider_cut=(8.0, 1.6)) -> dict:
+          rider_cut=(8.0, 1.6), above: float = 1.2, min_drop: float = 0.8) -> dict:
     """Barding panels as draped cloth (test 16: the straight hanging slabs read as a box). They
     start tucked into the barrel at its widest level (``top``; when None, the level between y 7.5
     and 10.5 whose body slice is widest) round the outline there, then fall with ``flare`` and
@@ -285,7 +285,10 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
     corners round up by ``corner``.
     Hems: the reference's (``hems``), never above the body's belly - 0.3, nor below a floor set by
     ``hem_length``: 0 = game-readable (``readable`` of the way from knee or hock up to the belly,
-    so the legs show), 1 = reference-accurate (knee or hock + ``leg_clear`` only).
+    so the legs show), 1 = reference-accurate (knee or hock + ``leg_clear`` only); below 0 shorter
+    still (round 6, the readability rule's last step): -1 = ``above`` over the belly, the barrel's
+    underside showing, -2 twice that (a band round the barrel). A hem stays ``min_drop`` under the
+    top edge.
     Slits as panels(), at the front centre, and an opening ``tail_open`` wide at the rear centre
     for the tail. Without ``slits`` (round 5: one continuous caparison, not a row of aprons) the hem is
     one curve cut up by ``leg_lift`` over each leg (a Gaussian ``leg_cut`` wide along z), so the
@@ -314,10 +317,15 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
     joint = np.where(loop[:, 1] < mid_z, knee, hock)
     floor_read = joint + (belly - joint) * readable
     floor_ref = joint + leg_clear
-    floor = floor_read + (floor_ref - floor_read) * float(np.clip(hem_length, 0.0, 1.0))
+    hl = float(np.clip(hem_length, -2.0, 1.0))
+    if hl >= 0:
+        floor, cap = floor_read + (floor_ref - floor_read) * hl, belly - 0.3
+    else:  # shorter than game-readable (round 6): up past the belly, ``above`` over it at -1, on at -2
+        floor = floor_read + (belly + above - floor_read) * -hl
+        cap = belly - 0.3 + (above + 0.3) * -hl
     hems = np.array(hems or [[z0, 4.7], [z1, 4.7]], dtype=np.float64)
     hem_ref = np.interp(loop[:, 1], hems[:, 0], hems[:, 1])
-    hem = np.minimum(np.maximum(hem_ref, floor), belly - 0.3)
+    hem = np.minimum(np.maximum(hem_ref, floor), cap)
     open_ = np.zeros(n, dtype=bool)
     for zs in (slits or []):
         open_ |= (loop[:, 1] - zs) * (loop[nxt, 1] - zs) < 0
@@ -347,6 +355,7 @@ def drape(body: np.ndarray, bones: dict, offset: float = 0.08, column: float = 0
     if rider_cut is not None and rider_cut[0] < top:
         dip = np.exp(-((loop[:, 1] - B["Saddle_Node"][2] + 1.0) / rider_cut[1]) ** 2)  # round the rider's lower leg
         tops = top - (top - rider_cut[0]) * dip
+    hem = np.minimum(hem, tops - min_drop)  # a short hem never meets the top (beside the saddle it dips)
     for i, (x, z) in enumerate(loop):
         d = np.array([x, z]) - centre
         d /= np.linalg.norm(d)

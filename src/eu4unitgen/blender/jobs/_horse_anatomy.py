@@ -27,7 +27,8 @@ scale with the skeleton) and the profile curves below:
 ``fit`` drives the parameters from the reference model: it builds the default horse, measures
 it and the reference the same way (_horse_measure.proportions; topline by rays), and scales
 each group by reference / default within ``SANITY``. Next to the saddle the barrel is held under
-``rider_clear`` (the vanilla rider's thighs hang there).
+``rider_clear`` (the vanilla rider's thighs hang there), and above ``rider_knee`` inside a line
+narrowing to ``rider_clear_top`` at ``rider_hip``.
 """
 import numpy as np
 
@@ -51,6 +52,9 @@ DEFAULTS = {
     # the rider's thighs: the barrel's half-width beside the saddle stays under this (scene units;
     # assumed from round 3's rider_leg measure: the vanilla rider's thighs hang outside x ~2.5)
     "rider_clear": 2.1,
+    # above rider_knee x H the line narrows to rider_clear_top at rider_hip x H (round 6: test 18's B,
+    # whose rider's leg showed 0.97 of vanilla's, beside the saddle: 2.1 at y 9.1, 1.58 at 11.0)
+    "rider_knee": 0.735, "rider_hip": 0.89, "rider_clear_top": 1.58,
 }
 GROUPS = {  # which parameters each fitted measurement scales
     "depth": ("barrel_depth",),
@@ -157,6 +161,8 @@ def build(bones: dict, seat: float, params: dict | None = None, nang: int = 20, 
     # beside the saddle the vanilla rider's thighs hang: the barrel stays inside them
     near_seat = np.exp(-((zs - sz) / 2.0) ** 2)
     w = w + (np.minimum(w, P["rider_clear"]) - w) * np.clip(near_seat * 1.6, 0, 1)
+    clear_y = H * np.array([P["rider_knee"], P["rider_hip"]])
+    clear_x = np.array([P["rider_clear"], P["rider_clear_top"]])
     rings = []
     for z, ty, by, ww in zip(zs, t_y, b_y, w):
         f = 1.0  # the ends close as ellipsoids
@@ -166,8 +172,15 @@ def build(bones: dict, seat: float, params: dict | None = None, nang: int = 20, 
         elif z > zB - lb:
             f = np.sqrt(max(1 - ((z - (zB - lb)) / lb) ** 2, 0.04))
         c = np.array([0.0, (ty + by) / 2 + (1 - f) * (ty - by) * 0.15, z])
-        rings.append(_ring(c, np.array([1.0, 0, 0]), np.array([0, 1.0, 0]), ww * f, (ty - by) / 2 * f,
-                           P["roundness"], ang, P["top_narrow"]))
+        ring = _ring(c, np.array([1.0, 0, 0]), np.array([0, 1.0, 0]), ww * f, (ty - by) / 2 * f,
+                     P["roundness"], ang, P["top_narrow"])
+        # and above the rider's knees inside the line the rider's legs slope in along (round 6: a shallower
+        # barrel is widest higher up, where only the cap on the widest kept it in before)
+        hi = ring[:, 1] > clear_y[0]
+        if hi.any():
+            room = np.interp(ring[hi, 1], clear_y, clear_x) / np.maximum(np.abs(ring[hi, 0]), 1e-6)
+            ring[:, 0] *= 1 + (min(1.0, float(room.min())) - 1) * min(1.0, 1.6 * float(np.exp(-((z - sz) / 2.0) ** 2)))
+        rings.append(ring)
     tubes.append(_loft(rings))
     log["barrel"] = {"z": [round(float(zF), 2), round(float(zB), 2)], "depth": round(float(t_y[len(zs) // 3] - b_y[len(zs) // 3]), 2),
                      "max_half_width": round(float(w.max()), 2), "withers": round(float(top[1]), 2)}
