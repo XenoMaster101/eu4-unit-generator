@@ -1,0 +1,213 @@
+"""Track M spike E-A (SPEC M9): which body wins in both reference cameras: TripoSG shells (N seeds
+on the cleaned view L), the procedural anatomy fitted to the 2D references, a hybrid (the fit with
+TripoSG-derived widths as a prior), or round 5's B?
+
+Steps (each a new version folder under ``<subject>/spikes/ea/``; nothing overwritten):
+  shells: TripoSG on the approved cleaned view L (background removed by the approved horse mask),
+          one raw mesh per seed (``shells/vNNN``).
+  fit:    the camera and pose per view and the anatomy shape, by least squares in the AI
+          environment (job ref3d_ea_fit), for every candidate; all scored by the M5 gates in both
+          cameras; three restarts (``fit/vNNN``).
+
+usage: python -m eu4unitgen.ref3d.ea shells <subject.json> --seeds 8
+       python -m eu4unitgen.ref3d.ea fit <subject.json> --ai-python <env python> [--shells vNNN]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import time
+from pathlib import Path
+
+from PIL import Image
+
+from eu4unitgen.ref3d import s1
+from eu4unitgen.ref3d.writeguard import allowed_roots, check_writes
+
+
+def shell_input(s: dict, out: Path) -> Path:
+    """The approved cleaned view L, its background removed by the approved horse mask (RGBA),
+    cropped to the horse with a margin: TripoSG's input."""
+    root, ap = s["_root"], s["approved"]
+    k = s["chosen"]["L"]
+    clean = root / "refs" / "clean" / ap["clean"]
+    rgb = Image.open(clean / f"L_seed{k}.png").convert("RGB")
+    alpha = Image.open(clean / f"L_seed{k}_fg.png").convert("L")
+    rgba = rgb.copy()
+    rgba.putalpha(alpha)
+    x0, y0, x1, y1 = alpha.point(lambda v: 255 if v > 127 else 0).getbbox()
+    m = int(0.05 * max(x1 - x0, y1 - y0))
+    rgba = rgba.crop((max(0, x0 - m), max(0, y0 - m), min(rgb.width, x1 + m), min(rgb.height, y1 + m)))
+    p = out / "input_L.png"
+    rgba.save(p)
+    return p
+
+
+def shells(subject_path: Path, seeds: list[int], python: str | None = None) -> dict:
+    from eu4unitgen.ai.triposg import TripoSGRunner
+
+    s = s1.load_subject(subject_path)
+    r = TripoSGRunner(python)
+    check_writes({"out_dir": str(s["_root"] / "spikes")}, allowed_roots(r.python), "E-A shells")
+    out = s1.next_version(s["_root"] / "spikes" / "ea" / "shells")
+    t0 = time.time()
+    img = shell_input(s, out)
+    res = {}
+    for seed in seeds:
+        res[str(seed)] = r.generate(img, out / f"seed{seed}.glb", seed=seed)
+        print("seed", seed, {k: res[str(seed)][k] for k in ("faces", "components", "seconds_generate")}, flush=True)
+    manifest = {"stage": "E-A shells", "subject": s["name"], "version": out.name, "approved": s["approved"],
+                "input": {"path": str(img), "sha256": s1.sha256(img)}, "seeds": res,
+                "settings": {"steps": 50, "guidance": 7.0, "octree_depth": 9}, "seconds": round(time.time() - t0, 1)}
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    return manifest
+
+
+EA_DEFAULTS = {
+    "candidates": ["b2", "procedural", "hybrid"], "restarts": 3, "seed": 7,
+    # assumed: armour and cloth thickness over the barrel, as a fraction of the seat height
+    "armour_allowance": 0.03,
+    "body": {"legs": ["leg", "coat"], "head": ["chanfron", "coat", "leather"]},
+    "occluders": {"legs": ["cloth", "trim", "leather", "scale", "tail", "plume", "chanfron"],
+                  "head": ["plume", "cloth", "trim", "scale"]},
+}
+
+
+def fit_args(s: dict, out: Path, shells_dir: Path | None, skeleton: Path) -> dict:
+    """The ref3d_ea_fit job's arguments from the subject config and the approved H1 outputs."""
+    from eu4unitgen.ref3d import ed2d
+    base = ed2d.build_args(s, out)
+    cfg = {**EA_DEFAULTS, **(s.get("ea") or {})}
+    gates = base["gates"]
+    views = {}
+    for n, v in base["views"].items():
+        sv = s["views"][n]
+        zones = s1.zones_in_crop(sv)
+        z = {"legs": zones.get("legs", [])}
+        if sv.get("head"):
+            z["head"] = [q for name in sv["head"]["zones"] if name != "plume" for q in zones[name]]
+        views[n] = {k: v[k] for k in ("image", "labels", "fg", "inpainted", "never_use", "landmarks", "body_length")}
+        views[n]["zones"] = z
+    shells = sorted(str(p) for p in shells_dir.glob("seed*.glb")) if shells_dir else []
+    return {"skeleton": str(skeleton), "views": views, "classes": base["classes"], "gates": gates,
+            "label_scale": gates["label_scale"], "shells": shells, "out_dir": str(out), **cfg}
+
+
+def _view_key(r: dict) -> tuple:
+    """A candidate's standing in one camera: gates passed, worst region IoU, worst landmark."""
+    g = r["gates"]
+    return (sum(1 for x in g.values() if x["pass"]), g["region_iou"]["worst"] or 0.0, -(g["landmarks"]["worst"] or 9.0))
+
+
+def beats(cand: dict, ref: dict) -> bool:
+    """SPEC M9 'beats round 5's B on the gates in both cameras': in every camera at least as many
+    gates passed, worst region IoU and worst landmark no worse; strictly better in at least one."""
+    better = False
+    for vn, r in cand["views"].items():
+        a, b = _view_key(r), _view_key(ref["views"][vn])
+        if a[0] < b[0] or a[1] < b[1] - 1e-9 or a[2] < b[2] - 1e-9:
+            return False
+        better |= a != b
+    return better
+
+
+def verdict(res: dict, converge: float = 0.25) -> dict:
+    """E-A's pass: the best fitted candidate passes the region and landmark gates in both cameras,
+    beats round 5's B, and its restarts end within ``converge`` (relative) of the best cost."""
+    c = res["candidates"]
+    fitted = [n for n in ("procedural", "hybrid") if n in c]
+    if not fitted:
+        return {"pass": False, "why": "no fitted candidate"}
+    best = max(fitted, key=lambda n: min(_view_key(r) for r in c[n]["views"].values()))
+    rec = c[best]
+    gates_ok = all(g["pass"] for r in rec["views"].values() for g in r["gates"].values())
+    costs = [r["cost"] for r in rec.get("restarts", [])]
+    conv = bool(costs) and (max(costs) - min(costs)) <= converge * max(min(costs), 1e-9)
+    b = "b2" in c and beats(rec, c["b2"])
+    return {"pass": gates_ok and b and conv, "best": best, "gates_pass": gates_ok, "beats_b2": b,
+            "restarts_converge": conv, "restart_costs": costs,
+            "worst": {vn: {k: g["worst"] for k, g in r["gates"].items()} for vn, r in rec["views"].items()}}
+
+
+def sheet(res: dict, s: dict, path: Path, version: str):
+    """Every candidate in both cameras: the shaded body over the darkened reference (landmark
+    errors in red), the outline over the reference, and its numbers."""
+    rows = []
+    for name, rec in res["candidates"].items():
+        tiles = []
+        for vn, r in rec["views"].items():
+            tiles.append((f"{vn}: body over the reference", Image.open(r["render"]), False))
+            tiles.append((f"{vn}: outline", Image.open(r["outline"]), False))
+        txt = []
+        for vn, r in rec["views"].items():
+            reg = ", ".join(f"{z} {v:.2f}" for z, v in r["regions"].items() if v is not None)
+            txt.append(f"{vn}: IoU {reg}; landmarks worst {r['gates']['landmarks']['worst'] * 100:.1f}% "
+                       f"(rms {r['landmark_rms'] * 100:.1f}%); outside mask {r['outside_share'] * 100:.0f}%")
+            txt.append("   gates: " + ", ".join(f"{k} {'ok' if g['pass'] else 'FAIL'}" for k, g in r["gates"].items()))
+        vd = rec.get("vanilla_distance")
+        if vd:
+            txt.append(f"vanilla distance median {vd['median']:.2f}, within 0.15: {vd['within_0.15'] * 100:.0f}%")
+        if rec.get("restarts"):
+            txt.append("restart costs: " + ", ".join(f"{x['cost']:.3f}" for x in rec["restarts"]))
+        tiles.append(("", text_tile("\n".join(s1._wrap(t, 46) for t in txt)), False))
+        rows.append((name, tiles))
+    for name, rec in (res.get("shells") or {}).items():
+        tiles = [(f"{vn}: shell", Image.open(r["render"]), False) for vn, r in rec["views"].items()]
+        txt = [f"{vn}: horse IoU {r['horse_iou']:.2f}; " + ", ".join(f"{z} {v:.2f}" for z, v in r["regions"].items() if v is not None)
+               for vn, r in rec["views"].items()]
+        txt.append(f"placement cost {rec['cost']:.3f}" + ("  (BEST: hybrid prior)" if name == res.get("best_shell") else ""))
+        tiles.append(("", text_tile("\n".join(s1._wrap(t, 46) for t in txt)), False))
+        rows.append((f"TripoSG\n{name}", tiles))
+    return s1.grid_sheet(rows, f"E-A body candidates in both reference cameras: {s['name']} {version}", path,
+                         tile=(300, 360))
+
+
+def text_tile(text: str, size=(300, 360)):
+    return s1.text_tile(text, size)
+
+
+def fit(subject_path: Path, ai_python: str, shells_version: str | None) -> dict:
+    from eu4unitgen.ai.env import AIJobRunner
+
+    s = s1.load_subject(subject_path)
+    root = s["_root"] / "spikes" / "ea"
+    check_writes({"out_dir": str(root)}, allowed_roots(ai_python), "E-A fit")
+    skeleton = root / "inputs" / "skeleton.json"
+    if not skeleton.is_file():
+        raise FileNotFoundError(f"{skeleton}: write the vanilla skeleton first (bones, seat; read from the install)")
+    out = s1.next_version(root / "fit")
+    t0 = time.time()
+    args = fit_args(s, out, root / "shells" / shells_version if shells_version else None, skeleton)
+    res = AIJobRunner(ai_python, timeout=6 * 3600).run_job("ref3d_ea_fit", args).result
+    sheet(res, s, out / "ea_sheet.png", out.name)
+    manifest = {"stage": "E-A fit", "subject": s["name"], "version": out.name, "approved": s["approved"],
+                "shells_version": shells_version, "settings": {k: v for k, v in args.items() if k != "views"},
+                "verdict": verdict(res), "sheet": str(out / "ea_sheet.png"),
+                "result": res, "seconds": round(time.time() - t0, 1)}
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=float), encoding="utf-8")
+    return manifest
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = p.add_subparsers(dest="cmd", required=True)
+    a = sub.add_parser("shells")
+    a.add_argument("subject", type=Path)
+    a.add_argument("--seeds", type=int, default=8)
+    a.add_argument("--python", default=os.environ.get("EU4UNITGEN_TRIPOSG_PYTHON"))
+    b = sub.add_parser("fit")
+    b.add_argument("subject", type=Path)
+    b.add_argument("--ai-python", required=True)
+    b.add_argument("--shells", help="shells version (vNNN) to align and use as the hybrid's prior")
+    args = p.parse_args(argv)
+    if args.cmd == "fit":
+        m = fit(args.subject, args.ai_python, args.shells)
+        print(json.dumps({"version": m["version"], "seconds": m["seconds"]}, indent=1))
+    elif args.cmd == "shells":
+        m = shells(args.subject, [11 * (k + 1) for k in range(args.seeds)], args.python)
+        print(json.dumps({"version": m["version"], "seconds": m["seconds"]}, indent=1))
+
+
+if __name__ == "__main__":
+    main()

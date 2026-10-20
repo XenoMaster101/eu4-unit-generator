@@ -225,8 +225,11 @@ def build(bones: dict, seat: float, params: dict | None = None, nang: int = 20, 
         front = leg.startswith("Front")
         chain = [B[f"Horse{leg}{j}"] for j in ("Up", "Down", "Knee", "Heel")]
         hoof_h = P["hoof_height"] * H
-        ground = np.array([chain[-1][0], 0.0, chain[-1][2]])
-        nodes = chain + [np.array([chain[-1][0], hoof_h, chain[-1][2]]), ground]
+        # a posed leg (Track M: a lifted hoof) gives its hoof's top and sole; else straight down to the ground
+        ground = B.get(f"Horse{leg}Sole", np.array([chain[-1][0], 0.0, chain[-1][2]]))
+        hoof_top = B.get(f"Horse{leg}HoofTop", np.array([chain[-1][0], hoof_h, chain[-1][2]]))
+        down = (ground - hoof_top) / max(np.linalg.norm(ground - hoof_top), 1e-9)
+        nodes = chain + [hoof_top, ground]
         r_nodes = ([P["upper_arm"], P["forearm"], P["knee"], P["fetlock"], P["hoof_top"], P["hoof_bottom"]] if front else
                    [P["stifle"], P["gaskin"], P["hock"], P["fetlock"], P["hoof_top"], P["hoof_bottom"]])
         seg = np.linalg.norm(np.diff(nodes, axis=0), axis=1)
@@ -252,7 +255,7 @@ def build(bones: dict, seat: float, params: dict | None = None, nang: int = 20, 
         rings = []
         for s_, r, p, t in zip(ss, rad, pos, tans):
             if s_ >= cum[-2]:
-                t = np.array([0.0, -1.0, 0.0])  # the hoof stands upright
+                t = down  # the hoof stands upright (along its own axis when posed)
             _, u, v = _frame(t)
             flat = P["leg_flat"] if s_ < cum[-2] else 1.0
             rings.append(_ring(p, u, v, r * flat, r * (2 - flat), 2.0, ang))
