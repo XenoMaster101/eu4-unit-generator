@@ -84,6 +84,11 @@ EA_DEFAULTS = {
     # per view: the neck's sideways bend and the head's turn (E-A pilot 8: the reference's head turns
     # to the viewer; with sagittal joints only, its landmarks stayed 3-5% off)
     "head_turn": True,
+    # E-A round 10 (pilots 7-9: the head's landmarks stuck at 5-7%): the head and chanfron as their own
+    # shape (a free profile at ``stations`` along the head) in a stage of their own against the head view
+    "head_fit": {"view": "L", "stations": 8, "evals": 3000},
+    # SPEC S3's fallback: each view fitted on its own; the master is L's body with R's rump (M10)
+    "independent": True,
 }
 
 

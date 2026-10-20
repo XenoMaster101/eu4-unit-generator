@@ -81,6 +81,22 @@ def head_direction(P) -> np.ndarray:
     return np.array([np.cos(pitch) * np.sin(yaw), -np.sin(pitch), -np.cos(pitch) * np.cos(yaw)])
 
 
+HEAD_T = (-0.08, 1.0)  # the head's stations run from just behind the poll (t < 0) to the muzzle (1)
+
+
+def head_profile_at(P, t):
+    """Track M's free head shape (E-A round 10: the reference's head is under a chanfron that no
+    parametric head matches): ``P["head_profile"]`` holds K depth multipliers, K width multipliers
+    and K vertical offsets (fractions of the seat height, along the head's up), at K stations evenly
+    over HEAD_T. -> (depth x, width x, offset) at ``t``; (1, 1, 0) without a profile (the game's head)."""
+    hp = P.get("head_profile")
+    if not hp:
+        return 1.0, 1.0, 0.0
+    k = len(hp) // 3
+    ts = np.linspace(HEAD_T[0], HEAD_T[1], k)
+    return (float(np.interp(t, ts, hp[:k])), float(np.interp(t, ts, hp[k:2 * k])), float(np.interp(t, ts, hp[2 * k:])))
+
+
 def _frame(t):
     t = t / np.linalg.norm(t)
     side = np.array([1.0, 0.0, 0.0])
@@ -215,7 +231,9 @@ def build(bones: dict, seat: float, params: dict | None = None, nang: int = 20, 
                                                       0.5 * (P["jowl_depth"] + P["muzzle_depth"]), P["muzzle_depth"]]) * H
         half = np.interp(t, [-0.08, 0.3, 1.0], [0.85 * P["forehead_width"], P["forehead_width"], P["muzzle_width"]]) * H
         f = np.sqrt(max(1 - ((t - 0.9) / 0.1) ** 2, 0.15)) if t > 0.9 else 1.0
-        c = p - v * depth * 0.35  # the head's top line runs along the axis; the jaw hangs below
+        dm, wm, off = head_profile_at(P, t)
+        depth, half = depth * dm, half * wm
+        c = p - v * depth * 0.35 + v * off * H  # the head's top line runs along the axis; the jaw hangs below
         rings.append(_ring(c, u, v, half * f, depth / 2 * f, 2.3, ang))
     tubes.append(_loft(rings))
     _, u, v = _frame(hd)

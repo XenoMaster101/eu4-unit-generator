@@ -136,7 +136,9 @@ def _head_point(B, H, P, t, side, up):
     depth = np.interp(t, [-0.08, 0.2, 0.45, 1.0], [0.8 * P["jowl_depth"], P["jowl_depth"],
                                                   0.5 * (P["jowl_depth"] + P["muzzle_depth"]), P["muzzle_depth"]]) * H
     half = np.interp(t, [-0.08, 0.3, 1.0], [0.85 * P["forehead_width"], P["forehead_width"], P["muzzle_width"]]) * H
-    c = B["HorseHead"] + hd * (t * L) - v * depth * 0.35
+    dm, wm, off = ha.head_profile_at(P, t)  # the free head shape, as the anatomy builds it
+    depth, half = depth * dm, half * wm
+    c = B["HorseHead"] + hd * (t * L) - v * depth * 0.35 + v * off * H
     return c + u * side * half + v * up * depth / 2
 
 

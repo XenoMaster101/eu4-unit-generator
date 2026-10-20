@@ -182,6 +182,10 @@ SS = 3             # the fit renders outlines at 3x: at 1x an edge's place is kn
                    # swamped the finite differences of 1-5 px moves (E-A pilot, Jacobian check)
 W_LM, W_AREA, W_EDGE, W_CONT = 10.0, 0.5, 1.0, 0.5
 HEAD_TURN = False  # args["head_turn"]: neck and head yaw per view (E-A round 9)
+HEAD_FIT = {}  # args["head_fit"]: {"view", "stations", "evals"}: the free head shape and its own stage (round 10)
+HEAD_PARAMS = ["head_length", "jowl_depth", "forehead_width", "muzzle_depth", "muzzle_width", "ear_length"]
+HEAD_LM = {"poll", "eye", "muzzle_front", "nostril", "bit_ring", "chin", "throat", "ear_tip_a", "ear_tip_b"}
+RUMP = ["croup_rise", "rump_drop", "rump_behind", "hip_width", "buttock_width"]  # R's part of the master (M10)
 LM_WEIGHT = {}  # landmark -> weight, from args["landmark_weights"] (pilot 7: the head's landmarks lost to the outlines)
 
 
@@ -260,6 +264,13 @@ class Model:
                     add(f"shape.{p}", v0, 0.15 * abs(base_shape[p]), 0.5 * base_shape[p], 2.0 * base_shape[p])
             for k in SKEL:
                 add(f"skel.{k}", init["skel"].get(k, 1.0), 0.05, 0.75, 1.35)
+            K = HEAD_FIT.get("stations", 0)
+            hp0 = list(init.get("hp") or ([1.0] * K + [1.0] * K + [0.0] * K))
+            for i in range(3 * K):  # depth and width multipliers, then vertical offsets
+                if i < 2 * K:
+                    add(f"hp.{i}", hp0[i], 0.08, 0.5, 1.8)
+                else:
+                    add(f"hp.{i}", hp0[i], 0.01, -0.12, 0.12)
         for vn in views:
             ci = cam_internal(init["cam"][vn])
             for c in CAM:
@@ -283,11 +294,16 @@ class Model:
         d = dict(zip(self.names, x))
         shape = dict(self.base)
         skel = {}
+        hp = []
         for k, v in d.items():
             if k.startswith("shape."):
                 shape[k[6:]] = v
             elif k.startswith("skel."):
                 skel[k[5:]] = v
+            elif k.startswith("hp."):
+                hp.append(v)
+        if hp:
+            shape["head_profile"] = hp
         cams, poses = {}, {}
         for vn in self.views:
             cams[vn] = cam_orbit({c: d[f"{vn}.cam.{c}"] for c in CAM})
@@ -354,6 +370,10 @@ class Model:
                 out.append(w * (v - mu) / sig)
             elif kind == "skel":
                 out.append(0.02 * (v - 1.0) / 0.3)
+            elif kind == "hp":  # a weak pull to the parametric head (multipliers 1, offsets 0)
+                k = int(name[3:])
+                ref = 0.0 if k >= 2 * HEAD_FIT.get("stations", 0) else 1.0
+                out.append(0.02 * (v - ref) / (0.05 if ref == 0.0 else 0.3))
             elif kind == "pose":
                 out.append(0.004 * v / 30.0 if not name.endswith("head_pitch") else 0.0)  # yaws too: a weak pull to straight
         return np.array(out)
@@ -472,7 +492,7 @@ def restore(sk, views, free_shape, base_shape, priors, state):
     x = dict(zip(state["names"], state["x"]))
     m = Model(sk, views, free_shape, base_shape, priors,
               {"cam": {vn: {c: x[f"{vn}.cam.{c}"] for c in CAM} for vn in views}, "pose": {vn: {} for vn in views},
-               "shape": {}, "skel": {}})
+               "shape": {}, "skel": {}, "hp": [x[n] for n in state["names"] if n.startswith("hp.")]})
     if m.names != state["names"]:
         raise ValueError("checkpoint doesn't match this candidate's parameters")
     m.x0 = np.array(state["x"], float)
@@ -521,6 +541,11 @@ def fit_candidate(sk, views, base_shape, free_shape, priors, seed, log, ck=None,
     if free_shape:
         stages += [("outlines: shape", sel(m, ["shape.", "skel."]), EVALS["outlines: shape"]),
                    ("outlines: joint", None, EVALS["outlines: joint"])]
+    hv = HEAD_FIT.get("view")
+    if free_shape and HEAD_FIT and hv in views:  # E-A round 10: the head (and chanfron) as its own shape
+        stages += [("outlines: head", sel(m, ["hp."] + [f"shape.{p}" for p in HEAD_PARAMS]
+                                         + [f"{hv}.pose.neck", f"{hv}.pose.head_pitch", f"{hv}.pose.head_yaw"]),
+                    HEAD_FIT.get("evals", 3000))]
     done = {h["stage"].removesuffix(" (resumed)") for h in hist}
     for stage, mask, fev in stages:
         if stage in done:
@@ -563,9 +588,13 @@ def score_view(view, sil, lm2, gates):
     out["outside_share"] = float((sil & (view.dt_out > 0) & ~view.never).sum() / area)
     out["horse_iou"] = M.tol_iou(sil & ~view.never, view.fg, view.tol)
     reg = [v for v in out["regions"].values() if v is not None]
+    head_max = gates.get("landmark_max_head", gates["landmark_max"])  # the head may get its own limit (painted reference)
     lms = list(out["landmarks"].values())
+    lm_ok = all(v <= (head_max if k in HEAD_LM else gates["landmark_max"]) for k, v in out["landmarks"].items())
     out["gates"] = {"region_iou": {"pass": bool(reg) and min(reg) >= gates["region_iou_min"], "worst": min(reg) if reg else None},
-                    "landmarks": {"pass": bool(lms) and max(lms) <= gates["landmark_max"], "worst": max(lms) if lms else None}}
+                    "landmarks": {"pass": bool(lms) and lm_ok, "worst": max(lms) if lms else None,
+                                  "worst_body": max([v for k, v in out["landmarks"].items() if k not in HEAD_LM], default=None),
+                                  "worst_head": max([v for k, v in out["landmarks"].items() if k in HEAD_LM], default=None)}}
     out["landmark_rms"] = float(np.sqrt(np.mean(np.square(lms)))) if lms else None
     return out
 
@@ -719,6 +748,7 @@ def main(args_path):
     LM_WEIGHT.update(a.get("landmark_weights") or {})
     global HEAD_TURN
     HEAD_TURN = bool(a.get("head_turn"))
+    HEAD_FIT.update(a.get("head_fit") or {})
     EVALS.update(a.get("evals") or {})
     views = {n: View(n, v, a["classes"], a) for n, v in a["views"].items()}
     defaults = {**RB.ha.DEFAULTS, "rider_clear": 99.0, "rider_clear_top": 99.0}  # the master isn't fitted round a game rider
@@ -729,6 +759,8 @@ def main(args_path):
         shape, skel, cams, poses = m.unpack(m.x0)
         rec = {"history": hist, "shape": shape, "skeleton": skel, "cameras": cams, "poses": poses, "views": {}}
         for vn, view in views.items():
+            if vn not in m.views:  # an independent fit of one view
+                continue
             V, F, part, lm3, cam = m.geometry(m.x0, vn)
             V2, _ = RB.project(V, cam)
             sil = RB.silhouette(V2, F, view.shape)
@@ -758,13 +790,14 @@ def main(args_path):
         log(f"{name}: " + json.dumps({vn: {"regions": r["regions"], "lm_worst": r["gates"]["landmarks"]["worst"],
                                            "outside": r["outside_share"]} for vn, r in rec["views"].items()}))
 
-    def fitted(key, base_shape, free, priors, seed):
-        """One fit, or its finished checkpoint. -> (cost, model, history)."""
+    def fitted(key, base_shape, free, priors, seed, vs=None):
+        """One fit (of ``vs``, default every view), or its finished checkpoint. -> (cost, model, history)."""
+        vs = vs or views
         st = ck.load(key)
         if st and st.get("done"):
             log(f"{key}: done earlier (checkpoint)")
-            return st["cost"], restore(sk, views, free, base_shape, priors, st), st["hist"]
-        m, hist = fit_candidate(sk, views, base_shape, free, priors, seed, log, ck, key)
+            return st["cost"], restore(sk, vs, free, base_shape, priors, st), st["hist"]
+        m, hist = fit_candidate(sk, vs, base_shape, free, priors, seed, log, ck, key)
         cost = float(m.residuals(m.x0).dot(m.residuals(m.x0)) / 2)
         ck.save(key, {"names": m.names, "x": m.x0, "hist": hist, "cost": cost, "done": True})
         return cost, m, hist
@@ -776,7 +809,41 @@ def main(args_path):
             log(f"{name}: scored earlier (checkpoint)")
         return rec is not None
 
+    def run_independent(name, base_shape, priors):
+        """SPEC S3's fallback (E-A round 10): each view fitted on its own (shape, camera, pose); the
+        master body is L's, with R's rump (M10: L for head, neck, chest and forelegs, R for the
+        hindquarters), scored in both views with each view's own camera and pose."""
+        per = {}
+        for vn in views:
+            runs = []
+            for k in range(a["restarts"]):
+                log(f"{name} view {vn} restart {k}")
+                runs.append(fitted(f"{name}_{vn}_r{k}", base_shape, True, priors, a["seed"] + 101 * k, {vn: views[vn]}))
+            per[vn] = runs
+            best = min(runs, key=lambda r: r[0])
+            if not candidate_done(f"{name}_{vn}"):
+                finish(f"{name}_{vn}", best[1], best[2], {"restarts": [{"cost": r[0], "history": r[2]} for r in runs]})
+        bests = {vn: min(r, key=lambda q: q[0]) for vn, r in per.items()}
+        mL = bests["L"][1]
+        shape, skel, cams, poses = mL.unpack(mL.x0)
+        if "R" in bests:
+            sR, _, cR, pR = bests["R"][1].unpack(bests["R"][1].x0)
+            shape = {**shape, **{k: sR[k] for k in RUMP}}
+            cams, poses = {**cams, "R": cR["R"]}, {**poses, "R": pR["R"]}
+        m = Model(sk, views, True, base_shape, priors,
+                  {"cam": cams, "pose": poses, "shape": shape, "skel": skel, "hp": shape.get("head_profile")})
+        if candidate_done(name):
+            return m
+        n = min(len(r) for r in per.values())
+        costs = [sum(per[vn][k][0] for vn in per) for k in range(n)]
+        finish(name, m, bests["L"][2] + (bests["R"][2] if "R" in bests else []),
+               {"restarts": [{"cost": c} for c in costs], "independent": True,
+                "parts": {"L": "everything but the rump", "R": RUMP}})
+        return m
+
     def run_fitted(name, base_shape, free, priors):
+        if a.get("independent") and free:
+            return run_independent(name, base_shape, priors)
         runs = []
         for k in range(a["restarts"]):
             log(f"{name} restart {k}")
