@@ -140,10 +140,14 @@ def verdict(res: dict, converge: float = 0.25, low_confidence: tuple = ()) -> di
     fitted = [n for n in ("procedural", "hybrid") if n in c]
     if not fitted:
         return {"pass": False, "why": "no fitted candidate"}
-    best = max(fitted, key=lambda n: min(_view_key(r) for r in c[n]["views"].values()))
+    best = max(fitted, key=lambda n: min(_view_key(r) for vn, r in c[n]["views"].items() if vn not in low_confidence))
     rec = c[best]
     gates_ok = all(g["pass"] for vn, r in rec["views"].items() if vn not in low_confidence for g in r["gates"].values())
     costs = [r["cost"] for r in rec.get("restarts", [])]
+    if rec.get("independent") and low_confidence:  # judged on the deciding views' own fits (R doesn't decide)
+        per = [c.get(f"{best}_{vn}", {}).get("restarts", []) for vn in rec["views"] if vn not in low_confidence]
+        if per and all(per):
+            costs = [sum(x[k]["cost"] for x in per) for k in range(min(len(x) for x in per))]
     conv = bool(costs) and (max(costs) - min(costs)) <= converge * max(min(costs), 1e-9)
     b = "b2" in c and beats({**rec, "views": {vn: r for vn, r in rec["views"].items() if vn not in low_confidence}}, c["b2"])
     return {"pass": gates_ok and b and conv, "best": best, "gates_pass": gates_ok, "beats_b2": b,
