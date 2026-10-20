@@ -68,10 +68,18 @@ def _rot_x(deg):
     return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
 
 
+def _rot_y(deg):
+    """About Y; positive turns a point ahead (-Z) toward +X (the horse's left)."""
+    a = np.radians(-deg)
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+
 def pose(bones, seat, P, a):
     """Posed bones (with HoofTop / Sole per leg). ``a``: {"FrontLeft": [up, down, knee, heel], ...,
-    "neck": [base, middle]} in degrees; on a leg positive swings the part below the joint forwards
-    (-Z); on the neck positive raises it."""
+    "neck": [base, middle], "neck_yaw": [base, middle]} in degrees; on a leg positive swings the part
+    below the joint forwards (-Z); on the neck positive raises it; neck_yaw (optional, Track M: the
+    reference's neck turns to the viewer) bends it sideways, positive to the horse's left."""
     B = {n: np.array(v, dtype=np.float64) for n, v in bones.items()}
     hoof_h = P["hoof_height"] * seat
     for leg in LEGS:
@@ -88,9 +96,10 @@ def pose(bones, seat, P, a):
             B[f"Horse{leg}{n}"] = pts[j]
         B[f"Horse{leg}HoofTop"], B[f"Horse{leg}Sole"] = pts[4], pts[5]
     nb_, nm_ = a.get("neck", [0, 0])
-    for i, (joint, deg) in enumerate((("HorseNeckBase", nb_), ("HorseNeckMiddle", nm_))):
-        if deg:
-            R, c = _rot_x(deg), B[joint]
+    yb, ym = a.get("neck_yaw", [0, 0])
+    for i, (joint, deg, yaw) in enumerate((("HorseNeckBase", nb_, yb), ("HorseNeckMiddle", nm_, ym))):
+        if deg or yaw:
+            R, c = _rot_y(yaw) @ _rot_x(deg), B[joint]
             for n in ("HorseNeckMiddle", "HorseHead")[i:]:
                 B[n] = c + R @ (B[n] - c)
     return B
@@ -114,8 +123,7 @@ def build(bones, seat, params):
 
 
 def _head_frame(P):
-    pitch = np.radians(P["head_pitch"])
-    hd = np.array([0.0, -np.sin(pitch), -np.cos(pitch)])
+    hd = ha.head_direction(P)
     _, u, v = ha._frame(hd)
     return hd, u, v
 

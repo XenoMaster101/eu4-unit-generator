@@ -181,6 +181,7 @@ CELL = 12          # px: region fill and containment are compared per cell
 SS = 3             # the fit renders outlines at 3x: at 1x an edge's place is known to +-0.5 px, which
                    # swamped the finite differences of 1-5 px moves (E-A pilot, Jacobian check)
 W_LM, W_AREA, W_EDGE, W_CONT = 10.0, 0.5, 1.0, 0.5
+HEAD_TURN = False  # args["head_turn"]: neck and head yaw per view (E-A round 9)
 LM_WEIGHT = {}  # landmark -> weight, from args["landmark_weights"] (pilot 7: the head's landmarks lost to the outlines)
 
 
@@ -270,6 +271,10 @@ class Model:
             for j in range(2):
                 add(f"{vn}.pose.neck.{j}", init["pose"][vn].get("neck", [0, 0])[j], 8, -45, 45)
             add(f"{vn}.pose.head_pitch", init["pose"][vn].get("head_pitch", base_shape["head_pitch"]), 8, 0, 95)
+            if HEAD_TURN:  # E-A round 9: the reference's head turns to the viewer; sagittal joints can't
+                for j in range(2):
+                    add(f"{vn}.pose.neck_yaw.{j}", init["pose"][vn].get("neck_yaw", [0, 0])[j], 5, -30, 30)
+                add(f"{vn}.pose.head_yaw", init["pose"][vn].get("head_yaw", 0.0), 5, -40, 40)
         self.x0, self.scale = np.array(self.x0, float), np.array(self.scale, float)
         self.lo, self.hi = np.array(self.lo, float), np.array(self.hi, float)
         self.x0 = np.clip(self.x0, self.lo + 1e-9, self.hi - 1e-9)
@@ -289,13 +294,16 @@ class Model:
             poses[vn] = {leg: [d[f"{vn}.pose.{leg}.{j}"] for j in range(4)] for leg in LEGS}
             poses[vn]["neck"] = [d[f"{vn}.pose.neck.{j}"] for j in range(2)]
             poses[vn]["head_pitch"] = d[f"{vn}.pose.head_pitch"]
+            if HEAD_TURN:
+                poses[vn]["neck_yaw"] = [d[f"{vn}.pose.neck_yaw.{j}"] for j in range(2)]
+                poses[vn]["head_yaw"] = d[f"{vn}.pose.head_yaw"]
         return shape, skel, cams, poses
 
     def geometry(self, x, vn, mesh=True):
         import _ref3d_body as RB
         shape, skel, cams, poses = self.unpack(x)
         B, H = RB.skeleton(self.sk["bones"], self.sk["seat"], skel)
-        P = {**shape, "head_pitch": poses[vn]["head_pitch"]}
+        P = {**shape, "head_pitch": poses[vn]["head_pitch"], "head_yaw": poses[vn].get("head_yaw", 0.0)}
         Bp = RB.pose(B, H, P, poses[vn])
         if not mesh:  # landmarks need only the bones and parameters
             return None, None, None, RB.landmarks(Bp, H, {**RB.ha.DEFAULTS, **P}), cams[vn]
@@ -347,7 +355,7 @@ class Model:
             elif kind == "skel":
                 out.append(0.02 * (v - 1.0) / 0.3)
             elif kind == "pose":
-                out.append(0.004 * v / 30.0 if not name.endswith("head_pitch") else 0.0)
+                out.append(0.004 * v / 30.0 if not name.endswith("head_pitch") else 0.0)  # yaws too: a weak pull to straight
         return np.array(out)
 
 
@@ -709,6 +717,8 @@ def main(args_path):
     sk = json.loads(Path(a["skeleton"]).read_text(encoding="utf-8"))
     CAM_LIMITS.update({vn: {k: tuple(v) for k, v in lim.items()} for vn, lim in (a.get("cameras") or {}).items()})
     LM_WEIGHT.update(a.get("landmark_weights") or {})
+    global HEAD_TURN
+    HEAD_TURN = bool(a.get("head_turn"))
     EVALS.update(a.get("evals") or {})
     views = {n: View(n, v, a["classes"], a) for n, v in a["views"].items()}
     defaults = {**RB.ha.DEFAULTS, "rider_clear": 99.0, "rider_clear_top": 99.0}  # the master isn't fitted round a game rider

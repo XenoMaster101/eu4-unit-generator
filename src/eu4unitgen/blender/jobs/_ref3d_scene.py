@@ -142,7 +142,7 @@ def body_in_view(a, sk):
     b = a["body"]
     vn = a["view_name"]
     B, Hs = RB.skeleton(sk["bones"], sk["seat"], b["skeleton"])
-    P = {**b["shape"], "head_pitch": b["poses"][vn]["head_pitch"]}
+    P = {**b["shape"], "head_pitch": b["poses"][vn]["head_pitch"], "head_yaw": b["poses"][vn].get("head_yaw", 0.0)}
     Bp = RB.pose(B, Hs, P, b["poses"][vn])
     V, F, part, P2 = RB.build(Bp, Hs, P)
     return Bp, Hs, P2, V, F, part

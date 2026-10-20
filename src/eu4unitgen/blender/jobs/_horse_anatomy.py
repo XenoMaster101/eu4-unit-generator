@@ -75,6 +75,12 @@ def _smooth(a, passes=3):
     return a
 
 
+def head_direction(P) -> np.ndarray:
+    """The head's axis from the poll: pitched down by head_pitch, turned by head_yaw (deg, + = +X)."""
+    pitch, yaw = np.radians(P["head_pitch"]), np.radians(P.get("head_yaw", 0.0))
+    return np.array([np.cos(pitch) * np.sin(yaw), -np.sin(pitch), -np.cos(pitch) * np.cos(yaw)])
+
+
 def _frame(t):
     t = t / np.linalg.norm(t)
     side = np.array([1.0, 0.0, 0.0])
@@ -195,9 +201,9 @@ def build(bones: dict, seat: float, params: dict | None = None, nang: int = 20, 
         rings.append(_ring(c, u, v, d * P["neck_width"] / 2, d / 2, 2.2, ang))
     tubes.append(_loft(rings))
     log["neck"] = {"stations": len(rings), "base_depth": round(P["neck_base_depth"] * H, 2)}
-    # ---- head: from the poll, pitched down
-    pitch = np.radians(P["head_pitch"])
-    hd = np.array([0.0, -np.sin(pitch), -np.cos(pitch)])
+    # ---- head: from the poll, pitched down (and turned by head_yaw, positive to the horse's left:
+    # Track M fits a reference whose head turns to the viewer; 0, the default, is the game's straight head)
+    hd = head_direction(P)
     L = P["head_length"] * H
     poll = B["HorseHead"]
     rings = []

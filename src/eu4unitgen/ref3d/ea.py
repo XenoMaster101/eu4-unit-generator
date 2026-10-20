@@ -81,6 +81,9 @@ EA_DEFAULTS = {
     # per view: {param: [lo, hi]} narrowing the camera's bounds (the subject config sets each view's
     # azimuth window: which side of the horse the view shows)
     "cameras": {},
+    # per view: the neck's sideways bend and the head's turn (E-A pilot 8: the reference's head turns
+    # to the viewer; with sagittal joints only, its landmarks stayed 3-5% off)
+    "head_turn": True,
 }
 
 
