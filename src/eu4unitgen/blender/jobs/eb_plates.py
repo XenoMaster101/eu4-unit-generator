@@ -62,71 +62,94 @@ EV_COLOUR = {"observed": (0.25, 0.75, 0.3), "inferred": (0.95, 0.7, 0.1), "symme
 # ---------------------------------------------------------------- body and coverage
 
 
+BARY = np.array([[1 / 3, 1 / 3, 1 / 3], [0.6, 0.2, 0.2], [0.2, 0.6, 0.2], [0.2, 0.2, 0.6],
+                 [0.45, 0.45, 0.1], [0.1, 0.45, 0.45], [0.45, 0.1, 0.45]])
+
+
 def coverage(a, Vs, Fs, part, Bp, cam, bvh, cam_pos, tubes):
-    """Per vertex: (covered 0/1, evidence index, in the region). See the module doc, step 2."""
+    """Per triangle of E-B's region (the neck and the barrel in front of the saddle; only the union's
+    outer surface, the head excepted): covered or not, and the evidence. Each triangle samples 7
+    points through L's solved camera: visible ones read L's labels (majority in the label tolerance);
+    scale counts for, cloth / coat / chanfron / legs against, straps, trim and plume over the armour
+    are unknown; inpainted pixels make the evidence "inferred". A triangle with 2+ known samples takes
+    their majority (observed / inferred); the rest take their mirror triangle's ("symmetry"), then the
+    nearest known triangle's ("prior"); then a majority over the 8 nearest triangles, twice.
+    (E-B on pilot 10's body: per vertex, 778 vertices for the whole region, one label pixel each.)
+    -> (covered per face, evidence per face, region per face, region per vertex)."""
     classes = a["classes"]
     names = list(classes)
     lab = decode(load_rgb(a["view"]["labels"]), classes)
     inp = load_rgb(a["view"]["inpainted"])[..., 0] > 127
     Hh, Ww = lab.shape
-    region = (part == 1) | ((part == 0) & (to_pdx(Vs)[:, 2] < Bp["Saddle_Node"][2]))
-    for i in np.nonzero(region)[0]:  # vertices buried in another tube aren't surface
-        if in_other_tube(Vs[i], part[i], tubes):
-            region[i] = False
-    p2, _ = RB.project(to_pdx(Vs), cam)
+    vreg = (part == 1) | ((part == 0) & (to_pdx(Vs)[:, 2] < Bp["Saddle_Node"][2]))
+    body_tubes = {q: t for q, t in tubes.items() if q not in (2, 3, 4)}
+    for i in np.nonzero(vreg)[0]:  # vertices buried in another tube aren't surface (the head excepted:
+        if in_other_tube(Vs[i], part[i], body_tubes):  # E-A's head + chanfron swells over the neck)
+            vreg[i] = False
+    freg = vreg[Fs].all(axis=1)
     scale_i = names.index("scale")
     unknown_cls = {names.index(c) for c in a["occluders"] if c in names}
-    n = len(Vs)
-    state = np.full(n, -1)  # -1 unknown, 0 not covered, 1 covered
-    ev = np.full(n, -1)
     tol = a["label_tol_px"]
-    for i in np.nonzero(region)[0]:
-        u, v = p2[i]
-        if not (0 <= u < Ww and 0 <= v < Hh):
-            continue
-        d = Vector(Vs[i]) - cam_pos
-        L = d.length
-        hit = bvh.ray_cast(cam_pos, d.normalized(), L - 1e-3)
-        if hit[0] is not None and (hit[0] - Vector(Vs[i])).length > 2e-3:
-            continue  # hidden in L
-        y0, y1 = int(max(v - tol, 0)), int(min(v + tol + 1, Hh))
-        x0, x1 = int(max(u - tol, 0)), int(min(u + tol + 1, Ww))
-        win = lab[y0:y1, x0:x1].ravel()
-        win = win[win >= 0]
-        if not len(win):
-            continue  # outside the horse: the fit's outline residual, not evidence
-        c = np.bincount(win).argmax()
-        if c in unknown_cls:
-            continue
-        state[i] = 1 if c == scale_i else 0
-        ev[i] = 1 if inp[int(v), int(u)] else 0
-    seen = state >= 0
-    kd = KDTree(int(seen.sum()))
-    for k, i in enumerate(np.nonzero(seen)[0]):
-        kd.insert(Vector(Vs[i]), int(i))
+    vt = a["visibility_tol"]
+    fids = np.nonzero(freg)[0]
+    state = np.full(len(Fs), -1)
+    ev = np.full(len(Fs), 3)
+    hidden = 0
+    for f in fids:
+        tri = Vs[Fs[f]]
+        pts = BARY @ tri
+        p2, _ = RB.project(to_pdx(pts), cam)
+        yes = no = inpainted = 0
+        for x, (u, v) in zip(pts, p2):
+            if not (0 <= u < Ww and 0 <= v < Hh):
+                continue
+            d = Vector(x) - cam_pos
+            hit = bvh.ray_cast(cam_pos, d.normalized(), d.length - 1e-3)
+            if hit[0] is not None and (hit[0] - Vector(x)).length > vt:
+                hidden += 1
+                continue
+            win = lab[int(max(v - tol, 0)):int(min(v + tol + 1, Hh)), int(max(u - tol, 0)):int(min(u + tol + 1, Ww))].ravel()
+            win = win[win >= 0]
+            if not len(win):
+                continue
+            c = np.bincount(win).argmax()
+            if c in unknown_cls:
+                continue
+            yes += c == scale_i
+            no += c != scale_i
+            inpainted += bool(inp[int(v), int(u)])
+        if yes + no >= 2:
+            state[f] = 1 if yes >= no else 0
+            ev[f] = 1 if inpainted * 2 > yes + no else 0
+    cen = Vs[Fs].mean(axis=1)
+    known = fids[state[fids] >= 0]
+    print("coverage: region faces", len(fids), "known", len(known), "scale", int((state == 1).sum()),
+          "hidden samples", hidden, flush=True)
+    if not len(known):
+        raise RuntimeError("E-B: no region triangle is seen in L")
+    kd = KDTree(len(known))
+    for f in known:
+        kd.insert(Vector(cen[f]), int(f))
     kd.balance()
-    for i in np.nonzero(region & ~seen)[0]:
-        m = Vs[i] * np.array([-1.0, 1.0, 1.0])  # the mirror image across the horse's midplane
-        co, j, dist = kd.find(Vector(m))
-        if j is not None and dist < a["mirror_tol"]:
-            state[i], ev[i] = state[j], (1 if ev[j] == 1 else 2)
-    for i in np.nonzero(region & (state < 0))[0]:
-        co, j, dist = kd.find(Vector(Vs[i]))
-        state[i], ev[i] = state[j], 3
-    # majority over the 10 nearest region vertices, twice (single-vertex label noise)
-    idx = np.nonzero(region)[0]
-    kr = KDTree(len(idx))
-    for i in idx:
-        kr.insert(Vector(Vs[i]), int(i))
+    for f in fids[state[fids] < 0]:
+        co, g, dist = kd.find(Vector(cen[f] * np.array([-1.0, 1.0, 1.0])))  # the mirror across the midplane
+        if g is not None and dist < a["mirror_tol"]:
+            state[f], ev[f] = state[g], (1 if ev[g] == 1 else 2)
+    for f in fids[state[fids] < 0]:
+        co, g, dist = kd.find(Vector(cen[f]))
+        state[f], ev[f] = state[g], 3
+    kr = KDTree(len(fids))
+    for f in fids:
+        kr.insert(Vector(cen[f]), int(f))
     kr.balance()
     for _ in range(2):
         new = state.copy()
-        for i in idx:
-            nb = [j for _, j, _ in kr.find_n(Vector(Vs[i]), 10)]
-            new[i] = 1 if np.mean(state[nb] == 1) >= 0.5 else 0
+        for f in fids:
+            nb = [g for _, g, _ in kr.find_n(Vector(cen[f]), 8)]
+            new[f] = 1 if np.mean(state[nb] == 1) >= 0.5 else 0
         state = new
-    state[~region] = 0
-    return state, ev, region
+    state[~freg] = 0
+    return state == 1, ev, freg, vreg
 
 
 # ---------------------------------------------------------------- plate layout
@@ -279,6 +302,162 @@ def layout(a, bvh, Bp, Hs, cover_at, mpu, Vs, Fs, vn, fpart, tubes):
     return plates
 
 
+def layout_surface(a, Vs, Fs, vn, cov_f, fev, Bp, Hs, mpu):
+    """Plate frames on the covered surface itself (E-B on pilot 10's body: rays from the axis slipped
+    through the tubes' junctions or ended out of reach, and half the covered surface had no plate).
+    Each covered vertex gets a row coordinate (arc length along the neck-to-breast axis) and a column
+    coordinate (its angle round the axis from the anchor line, times the ring's median radius); every
+    covered triangle takes the lattice points (rows at the pitch, columns at the spacing) inside it in
+    those coordinates. A plate's normal is the interpolated vertex normal; "down" is the triangle's
+    gradient of the row coordinate. -> plates (by row), as ``layout``."""
+    pl = a["plate"]
+    pitch, spacing = pl["pitch_m"] / mpu, pl["spacing_m"] / mpu
+    sa, C, T = axis_curve(Bp, Hs, pitch / 8)
+    A, Bd = ring_frames(T)
+    vids = np.unique(Fs[cov_f])
+    if not len(vids):
+        return []
+    P = Vs[vids]
+    d2 = ((P[:, None, :] - C[None, :, :]) ** 2).sum(axis=2)
+    k = d2.argmin(axis=1)
+    rel = P - C[k]
+    s_v = sa[k] + np.einsum("ij,ij->i", rel, T[k])
+    rad = rel - np.einsum("ij,ij->i", rel, T[k])[:, None] * T[k]
+    th = np.arctan2(np.einsum("ij,ij->i", rad, Bd[k]), np.einsum("ij,ij->i", rad, A[k]))
+    R_v = np.linalg.norm(rad, axis=1)
+    u_v = ring_arc(s_v, th, R_v, pitch / 2)
+    # integrate the surface fields (E-B: axis projection piled rows up where the axis bends)
+    s_v, u_v = integrate_fields(vids, Fs[cov_f], Vs, vn, T[k], th, s_v, u_v)
+    S = np.full(len(Vs), np.nan)
+    U = np.full(len(Vs), np.nan)
+    S[vids], U[vids] = s_v, u_v
+    placed = {}
+    for f in np.nonzero(cov_f)[0]:
+        tri = Fs[f]
+        ss, uu = S[tri], U[tri]
+        if np.ptp(th[np.searchsorted(vids, tri)]) > np.pi:  # straddles the cut behind / under the axis
+            continue
+        k0, k1 = int(np.ceil(ss.min() / pitch)), int(np.floor(ss.max() / pitch))
+        for row in range(k0, k1 + 1):
+            off = 0.5 * (row % 2) * pl["stagger"] * spacing
+            j0, j1 = int(np.ceil((uu.min() - off) / spacing)), int(np.floor((uu.max() - off) / spacing))
+            for col in range(j0, j1 + 1):
+                if (row, col) in placed:
+                    continue
+                q = np.array([row * pitch, col * spacing + off])
+                M2 = np.array([[ss[1] - ss[0], ss[2] - ss[0]], [uu[1] - uu[0], uu[2] - uu[0]]])
+                if abs(np.linalg.det(M2)) < 1e-12:
+                    continue
+                b1, b2 = np.linalg.solve(M2, q - np.array([ss[0], uu[0]]))
+                b0 = 1 - b1 - b2
+                if min(b0, b1, b2) < -1e-9:
+                    continue
+                pos = b0 * Vs[tri[0]] + b1 * Vs[tri[1]] + b2 * Vs[tri[2]]
+                z = b0 * vn[tri[0]] + b1 * vn[tri[1]] + b2 * vn[tri[2]]
+                z /= np.linalg.norm(z)
+                e1, e2 = Vs[tri[1]] - Vs[tri[0]], Vs[tri[2]] - Vs[tri[0]]
+                G = np.array([[e1 @ e1, e1 @ e2], [e1 @ e2, e2 @ e2]])
+                if abs(np.linalg.det(G)) < 1e-18:
+                    continue
+                ga, gb = np.linalg.solve(G, np.array([ss[1] - ss[0], ss[2] - ss[0]]))
+                dn = ga * e1 + gb * e2  # the row coordinate's gradient: down the rows
+                dn = dn - (dn @ z) * z
+                if np.linalg.norm(dn) < 1e-12:
+                    continue
+                dn /= np.linalg.norm(dn)
+                y = -dn
+                x = np.cross(y, z)
+                placed[(row, col)] = {"pos": pos, "x": x, "y": y, "z": z, "ev": int(fev[f]), "row": row}
+    plates = []
+    h, w = pl["height_frac"] * pitch, pl["width_frac"] * spacing
+    tri_area = 0.5 * np.linalg.norm(np.cross(Vs[Fs[cov_f, 1]] - Vs[Fs[cov_f, 0]], Vs[Fs[cov_f, 2]] - Vs[Fs[cov_f, 0]]), axis=1).sum()
+    print("layout: covered area", round(float(tri_area), 2), "lattice cells", round(float(tri_area / (pitch * spacing)), 1),
+          "placed", len(placed), "s range", round(float(s_v.min()), 2), round(float(s_v.max()), 2),
+          "u range", round(float(u_v.min()), 2), round(float(u_v.max()), 2), "pitch", round(pitch, 3), "spacing", round(spacing, 3), flush=True)
+    dbg = a.get("debug_dir")
+    if dbg:
+        np.save(Path(dbg) / "lattice.npy", np.array([[*k, *placed[k]["pos"], *placed[k]["x"], *placed[k]["y"], *placed[k]["z"]]
+                                                    for k in sorted(placed)]))
+    for key in sorted(placed):
+        c = placed[key]
+        if not crowded(c, plates, pitch, spacing, w, h):
+            plates.append(c)
+    print("layout: after the spacing rule", len(plates), flush=True)
+    return plates
+
+
+def integrate_fields(vids, F, Vs, vn, Tv, th, s0, u0, iters=600):
+    """Row and column coordinates whose differences along every mesh edge match the surface fields:
+    "down" (the axis direction flattened onto the surface) and "across" (perpendicular to it on the
+    surface), by least squares (Jacobi), started from the axis-based coordinates. Edges across the
+    ring's cut (opposite the anchor line) are dropped, so the columns open there."""
+    idx = -np.ones(len(Vs), int)
+    idx[vids] = np.arange(len(vids))
+    E = np.vstack([F[:, [0, 1]], F[:, [1, 2]], F[:, [2, 0]]])
+    E = np.unique(np.sort(E, axis=1), axis=0)
+    a, b = idx[E[:, 0]], idx[E[:, 1]]
+    keep = np.abs(th[a] - th[b]) < np.pi * 0.8
+    a, b = a[keep], b[keep]
+    P, N = Vs[vids], vn[vids]
+    d = Tv - np.einsum("ij,ij->i", Tv, N)[:, None] * N
+    d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+    x = np.cross(-d, N)  # the plate's x: across the column
+    e = P[b] - P[a]
+    gs = np.einsum("ij,ij->i", 0.5 * (d[a] + d[b]), e)  # wanted s[b] - s[a]
+    gu = np.einsum("ij,ij->i", 0.5 * (x[a] + x[b]), e)
+    deg = np.bincount(a, minlength=len(vids)) + np.bincount(b, minlength=len(vids))
+    s, u = s0.copy(), u0.copy()
+    for _ in range(iters):
+        for v, g in ((s, gs), (u, gu)):
+            acc = np.zeros(len(vids))
+            np.add.at(acc, a, v[b] - g)
+            np.add.at(acc, b, v[a] + g)
+            new = np.where(deg > 0, acc / np.maximum(deg, 1), v)
+            v += 0.8 * (new - v)
+    return s - s.min(), u
+
+
+def ring_arc(s_v, th, R_v, ds, nth=72):
+    """Arc length round the axis from the anchor line (signed), per vertex: each ring (an s bin ``ds``
+    wide) as a polar curve r(theta) (median radius per angle bin, gaps filled round the circle),
+    integrated sqrt(r^2 + r'^2) dtheta from theta 0, then interpolated between rings. (E-A pilot 10's
+    neck is a tall ellipse: angle x median radius put the narrow sides' columns closer than a plate.)"""
+    nb = int(s_v.max() // ds) + 1
+    tb = np.linspace(-np.pi, np.pi, nth + 1)
+    tc = 0.5 * (tb[1:] + tb[:-1])
+    si = np.clip((s_v // ds).astype(int), 0, nb - 1)
+    ti = np.clip(np.searchsorted(tb, th) - 1, 0, nth - 1)
+    r = np.full((nb, nth), np.nan)
+    for b in range(nb):
+        m = si == b
+        if m.sum() < 6:
+            continue
+        for t in np.unique(ti[m]):
+            r[b, t] = np.median(R_v[m & (ti == t)])
+        ok = ~np.isnan(r[b])
+        x = np.r_[tc[ok] - 2 * np.pi, tc[ok], tc[ok] + 2 * np.pi]
+        r[b] = np.interp(tc, x, np.tile(r[b][ok], 3))
+    filled = ~np.isnan(r[:, 0])
+    for t in range(nth):  # rings with too few vertices: from their neighbours along the axis
+        r[:, t] = np.interp(np.arange(nb), np.nonzero(filled)[0], r[filled, t])
+    for _ in range(3):  # smooth round the ring (noisy medians inflated r' and the arc by ~15%)
+        r = (np.roll(r, -1, axis=1) + 2 * r + np.roll(r, 1, axis=1)) / 4
+    dth = tb[1] - tb[0]
+    dr = (np.roll(r, -1, axis=1) - np.roll(r, 1, axis=1)) / (2 * dth)
+    seg = np.sqrt(r ** 2 + dr ** 2) * dth
+    cum = np.concatenate([np.zeros((nb, 1)), np.cumsum(seg, axis=1)], axis=1)  # at the bin edges tb
+    zero = np.array([np.interp(0.0, tb, cum[b]) for b in range(nb)])
+    arc = cum - zero[:, None]  # signed, 0 at the anchor line
+    # bilinear: along s between ring centres, along theta between edges
+    sc = (s_v / ds) - 0.5
+    b0 = np.clip(np.floor(sc).astype(int), 0, nb - 1)
+    b1 = np.clip(b0 + 1, 0, nb - 1)
+    f = np.clip(sc - b0, 0, 1)
+    a0 = np.array([np.interp(t, tb, arc[b]) for t, b in zip(th, b0)])
+    a1 = np.array([np.interp(t, tb, arc[b]) for t, b in zip(th, b1)])
+    return (1 - f) * a0 + f * a1
+
+
 def crowded(c, plates, pitch, spacing, w, h):
     """Would plate ``c`` sit on an accepted one? Its top within 0.7 pitch below (or 0.2 h above)
     an accepted plate's top, inside that plate's column (E-B v001: rings perpendicular to the bent
@@ -291,7 +470,10 @@ def crowded(c, plates, pitch, spacing, w, h):
     for q in (plates[-400:][k] for k in np.nonzero(near)[0]):
         d = c["pos"] - q["pos"]
         dx, dd = d @ q["x"], -(d @ q["y"])  # across q's column; down q's length
-        if abs(dx) < 0.95 * w and -0.2 * h < dd < 0.7 * pitch:
+        if q["row"] == c["row"]:
+            if abs(dx) < 0.8 * w:  # the same row: only a real overlap (touching edges: the penetration check)
+                return True
+        elif abs(dx) < 0.95 * w and -0.2 * h < dd < 0.7 * pitch:
             return True
     return False
 
@@ -529,25 +711,11 @@ def main():
                           Vs[idx].min(axis=0), Vs[idx].max(axis=0))
     R, t = RB.camera_matrix(cam)
     cam_pos = Vector(-R.T @ t)
-    state, ev, region = coverage(a, Vs, Fs, vpart, Bp, cam, bvh, cam_pos, tubes)
-    kd = KDTree(len(Vs))
-    for i in np.nonzero(region)[0]:
-        kd.insert(Vector(Vs[i]), int(i))
-    kd.balance()
-
-    edge = float(np.median(np.linalg.norm(Vs[Fs[:, 0]] - Vs[Fs[:, 1]], axis=1)))
-
-    def cover_at(p):
-        """Covered (and the evidence) at a surface point: its nearest region vertex's, when one is
-        near (a hit far from the region, e.g. the barrel's rear, isn't covered)."""
-        co, j, d = kd.find(Vector(p))
-        if j is None or d > 2.5 * edge:
-            return False, 3
-        return state[j] == 1, int(ev[j])
+    cov_f, fev, zone_f, region = coverage(a, Vs, Fs, vpart, Bp, cam, bvh, cam_pos, tubes)
 
     pl = a["plate"]
     nrm = vertex_normals(Vs, Fs)
-    plates = layout(a, bvh, Bp, Hs, cover_at, mpu, Vs, Fs, nrm, part, tubes)
+    plates = layout_surface(a, Vs, Fs, nrm, cov_f, fev, Bp, Hs, mpu)
     pitch, spacing = pl["pitch_m"] / mpu, pl["spacing_m"] / mpu
     w, h = pl["width_frac"] * spacing, pl["height_frac"] * pitch
     th, standoff = pl["thickness_m"] / mpu, pl["standoff_m"] / mpu
@@ -611,12 +779,10 @@ def main():
     m_coat = material("coat", (0.16, 0.09, 0.05), 0.0, 0.6)
     m_plate = material("plate_steel", (0.78, 0.76, 0.72), 1.0, 0.28)
     m_back = material("backing_leather", (0.05, 0.03, 0.02), 0.0, 0.75)
-    zone_f = region[Fs].all(axis=1)
     body_zone = mesh_object("body_zone", Vs, Fs[zone_f], (0, 1, 0), col)
     body_rest = mesh_object("body_other", Vs, Fs[~zone_f], (0, 0, 1), col)
     for ob in (body_zone, body_rest):
         ob.data.materials.append(m_coat)
-    cov_f = (state[Fs] == 1).all(axis=1)
     back_V = Vs + nrm * (pl["backing_m"] / mpu)
     backing = mesh_object("backing", back_V, Fs[cov_f], (1, 0, 0), col)
     backing.data.materials.append(m_back)
@@ -656,11 +822,12 @@ def main():
     cov_v[np.unique(Fs[cov_f])] = True
     for k in range(3):
         cov_v[Fs[~cov_f][:, k]] = False
-    res["gaps"] = {"body_visible": gaps(bvh_all, len(Fs), Vs, nrm, cov_v, rng, lift=8 * standoff)}
+    lift = standoff + 4 * th + pl["backing_m"] / mpu
+    res["gaps"] = {"body_visible": gaps(bvh_all, len(Fs), Vs, nrm, cov_v, rng, lift=lift)}
     # without the backing: the share of the covered surface not under a plate (slits between columns)
     comb_F2 = np.vstack([Fs, allF + nb + nbk])
     bvh_np = BVHTree.FromPolygons([tuple(v) for v in comb_V], [tuple(int(i) for i in f) for f in comb_F2])
-    res["gaps"]["not_under_a_plate"] = gaps(bvh_np, len(Fs), Vs, nrm, cov_v, rng, lift=8 * standoff)
+    res["gaps"]["not_under_a_plate"] = gaps(bvh_np, len(Fs), Vs, nrm, cov_v, rng, lift=lift)
     print("gaps", res["gaps"], flush=True)
 
     # ---- cameras and renders

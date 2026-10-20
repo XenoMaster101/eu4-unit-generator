@@ -29,12 +29,13 @@ from eu4unitgen.ref3d.writeguard import allowed_roots, check_writes
 
 EB_DEFAULTS = {
     "view": "L",
-    "rounds": 6,
+    "rounds": 1,
     "withers_m": 1.55,  # assumed master scale: a 15-hand horse at the withers (the reference gives no size)
     "penetration_limit_m": 0.001,  # SPEC M5: zero penetrations over 1 mm
     "body_visible_max": 0.01,  # assumed: at most 1% of the covered surface shows the body between plates
     "period_target": 0.05,  # calibrate the plate size to within 5% (the gate allows 15%)
-    "mirror_tol": 0.3,  # units: a vertex's mirror image must lie this close to a body vertex
+    "mirror_tol": 0.3,  # units: a triangle's mirror image must lie this close to a known triangle
+    "visibility_tol": 0.05,  # units (~6 mm): an occluder nearer than this to a sample doesn't hide it
     "occluders": ["leather", "trim", "plume"],  # straps, trim and plume lie over the armour: unknown under them
     "samples": 96,
     "plate": {
@@ -66,8 +67,8 @@ def job_args(s: dict, cfg: dict, ea_dir: Path, cand: str, out: Path) -> tuple[di
     b = {"skeleton": ea_args["skeleton"], "body": body, "view_name": vn, "classes": ea_args["classes"],
          "view": {"labels": v["labels"], "inpainted": v["inpainted"], "size": [W, H]},
          "occluders": cfg["occluders"], "plate": cfg["plate"], "withers_m": cfg["withers_m"],
-         "penetration_limit_m": cfg["penetration_limit_m"], "label_tol_px": tol, "mirror_tol": cfg["mirror_tol"],
-         "samples": cfg["samples"], "out_dir": str(out)}
+         "penetration_limit_m": cfg["penetration_limit_m"], "label_tol_px": tol, "mirror_tol": cfg["mirror_tol"], "visibility_tol": cfg["visibility_tol"],
+         "samples": cfg["samples"], "out_dir": str(out), "debug_dir": str(out)}
     m = {"image": v["image"], "labels": v["labels"], "fg": v["fg"], "inpainted": v["inpainted"],
          "classes": ea_args["classes"], "occluders": cfg["occluders"], "lit": str(out / f"{vn}_lit.png"),
          "id": str(out / f"{vn}_id.png"), "label_scale": ea_args["label_scale"], "body_length": v["body_length"]}

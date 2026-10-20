@@ -183,6 +183,7 @@ SS = 3             # the fit renders outlines at 3x: at 1x an edge's place is kn
 W_LM, W_AREA, W_EDGE, W_CONT = 10.0, 0.5, 1.0, 0.5
 HEAD_TURN = False  # args["head_turn"]: neck and head yaw per view (E-A round 9)
 HEAD_FIT = {}  # args["head_fit"]: {"view", "stations", "evals"}: the free head shape and its own stage (round 10)
+HEAD_WIDTHS = {"forehead_width", "muzzle_width"}
 HEAD_PARAMS = ["head_length", "jowl_depth", "forehead_width", "muzzle_depth", "muzzle_width", "ear_length"]
 HEAD_LM = {"poll", "eye", "muzzle_front", "nostril", "bit_ring", "chin", "throat", "ear_tip_a", "ear_tip_b"}
 RUMP = ["croup_rise", "rump_drop", "rump_behind", "hip_width", "buttock_width"]  # R's part of the master (M10)
@@ -260,17 +261,19 @@ class Model:
                 v0 = init["shape"].get(p, base_shape[p])
                 if p in SIGNED:
                     add(f"shape.{p}", v0, 0.02, -0.15, 0.15)
+                elif p in HEAD_WIDTHS:  # anatomy sanity: widths unseen in a side or 3/4 view
+                    add(f"shape.{p}", v0, 0.05 * abs(base_shape[p]), 0.8 * base_shape[p], 1.25 * base_shape[p])
                 else:
                     add(f"shape.{p}", v0, 0.15 * abs(base_shape[p]), 0.5 * base_shape[p], 2.0 * base_shape[p])
             for k in SKEL:
                 add(f"skel.{k}", init["skel"].get(k, 1.0), 0.05, 0.75, 1.35)
             K = HEAD_FIT.get("stations", 0)
             hp0 = list(init.get("hp") or ([1.0] * K + [1.0] * K + [0.0] * K))
-            for i in range(3 * K):  # depth and width multipliers, then vertical offsets
-                if i < 2 * K:
-                    add(f"hp.{i}", hp0[i], 0.08, 0.5, 1.8)
-                else:
-                    add(f"hp.{i}", hp0[i], 0.01, -0.12, 0.12)
+            # anatomy sanity (SPEC S2; E-A pilot 11: L's 3/4 view can't tell the head's width from its
+            # depth, and the fit widened the head into a bulb that only matched L's outline)
+            for i in range(3 * K):  # depth multipliers, width multipliers, vertical offsets
+                lo, hi, sc_ = ((0.7, 1.5, 0.08) if i < K else (0.85, 1.2, 0.05) if i < 2 * K else (-0.06, 0.06, 0.01))
+                add(f"hp.{i}", hp0[i], sc_, lo, hi)
         for vn in views:
             ci = cam_internal(init["cam"][vn])
             for c in CAM:
@@ -495,7 +498,7 @@ def restore(sk, views, free_shape, base_shape, priors, state):
                "shape": {}, "skel": {}, "hp": [x[n] for n in state["names"] if n.startswith("hp.")]})
     if m.names != state["names"]:
         raise ValueError("checkpoint doesn't match this candidate's parameters")
-    m.x0 = np.array(state["x"], float)
+    m.x0 = np.clip(np.array(state["x"], float), m.lo + 1e-9, m.hi - 1e-9)  # bounds may have narrowed since
     return m
 
 

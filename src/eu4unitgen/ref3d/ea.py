@@ -97,7 +97,9 @@ def fit_args(s: dict, out: Path, shells_dir: Path | None, skeleton: Path) -> dic
     from eu4unitgen.ref3d import ed2d
     base = ed2d.build_args(s, out)
     cfg = {**EA_DEFAULTS, **(s.get("ea") or {})}
-    gates = base["gates"]
+    gates = dict(base["gates"])
+    if cfg.get("head_landmark_max"):  # the user's head allowance (painted reference; SPEC M15)
+        gates["landmark_max_head"] = cfg["head_landmark_max"]
     views = {}
     for n, v in base["views"].items():
         sv = s["views"][n]
@@ -130,20 +132,22 @@ def beats(cand: dict, ref: dict) -> bool:
     return better
 
 
-def verdict(res: dict, converge: float = 0.25) -> dict:
+def verdict(res: dict, converge: float = 0.25, low_confidence: tuple = ()) -> dict:
     """E-A's pass: the best fitted candidate passes the region and landmark gates in both cameras,
-    beats round 5's B, and its restarts end within ``converge`` (relative) of the best cost."""
+    beats round 5's B, and its restarts end within ``converge`` (relative) of the best cost. Views in
+    ``low_confidence`` (the user's rule for R, SPEC M15) are scored and reported but don't block."""
     c = res["candidates"]
     fitted = [n for n in ("procedural", "hybrid") if n in c]
     if not fitted:
         return {"pass": False, "why": "no fitted candidate"}
     best = max(fitted, key=lambda n: min(_view_key(r) for r in c[n]["views"].values()))
     rec = c[best]
-    gates_ok = all(g["pass"] for r in rec["views"].values() for g in r["gates"].values())
+    gates_ok = all(g["pass"] for vn, r in rec["views"].items() if vn not in low_confidence for g in r["gates"].values())
     costs = [r["cost"] for r in rec.get("restarts", [])]
     conv = bool(costs) and (max(costs) - min(costs)) <= converge * max(min(costs), 1e-9)
-    b = "b2" in c and beats(rec, c["b2"])
+    b = "b2" in c and beats({**rec, "views": {vn: r for vn, r in rec["views"].items() if vn not in low_confidence}}, c["b2"])
     return {"pass": gates_ok and b and conv, "best": best, "gates_pass": gates_ok, "beats_b2": b,
+            "low_confidence": list(low_confidence),
             "restarts_converge": conv, "restart_costs": costs,
             "worst": {vn: {k: g["worst"] for k, g in r["gates"].items()} for vn, r in rec["views"].items()}}
 
@@ -211,7 +215,7 @@ def fit(subject_path: Path, ai_python: str, shells_version: str | None, resume: 
     manifest = {"stage": "E-A fit", "subject": s["name"], "version": out.name, "approved": s["approved"],
                 "shells_version": shells_version, "resumed": bool(resume),
                 "settings": {k: v for k, v in args.items() if k != "views"},
-                "verdict": verdict(res), "sheet": str(out / "ea_sheet.png"),
+                "verdict": verdict(res, low_confidence=tuple(args.get("low_confidence") or ())), "sheet": str(out / "ea_sheet.png"),
                 "result": res, "seconds": round(time.time() - t0, 1)}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=float), encoding="utf-8")
     return manifest
