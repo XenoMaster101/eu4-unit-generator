@@ -29,7 +29,7 @@ from eu4unitgen.ref3d.writeguard import allowed_roots, check_writes
 
 EB_DEFAULTS = {
     "view": "L",
-    "rounds": 1,
+    "rounds": 6,
     "withers_m": 1.55,  # assumed master scale: a 15-hand horse at the withers (the reference gives no size)
     "penetration_limit_m": 0.001,  # SPEC M5: zero penetrations over 1 mm
     "body_visible_max": 0.01,  # assumed: at most 1% of the covered surface shows the body between plates
@@ -68,7 +68,7 @@ def job_args(s: dict, cfg: dict, ea_dir: Path, cand: str, out: Path) -> tuple[di
          "view": {"labels": v["labels"], "inpainted": v["inpainted"], "size": [W, H]},
          "occluders": cfg["occluders"], "plate": cfg["plate"], "withers_m": cfg["withers_m"],
          "penetration_limit_m": cfg["penetration_limit_m"], "label_tol_px": tol, "mirror_tol": cfg["mirror_tol"], "visibility_tol": cfg["visibility_tol"],
-         "samples": cfg["samples"], "out_dir": str(out), "debug_dir": str(out)}
+         "samples": cfg["samples"], "out_dir": str(out), "debug_dir": str(out) if cfg.get("debug") else None}
     m = {"image": v["image"], "labels": v["labels"], "fg": v["fg"], "inpainted": v["inpainted"],
          "classes": ea_args["classes"], "occluders": cfg["occluders"], "lit": str(out / f"{vn}_lit.png"),
          "id": str(out / f"{vn}_id.png"), "label_scale": ea_args["label_scale"], "body_length": v["body_length"]}
