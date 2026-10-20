@@ -57,3 +57,22 @@ def test_original_is_untouched(tmp_path):
     out.mkdir()
     s1.removal_masks(s, s1.crop_views(s, out), out)
     assert s1.sha256(tmp_path / "sheet.png") == before
+
+
+def test_never_use_regions_are_in_crop_pixels(tmp_path):
+    v = {"crop": [10, 20, 110, 90], "never_use": {"crest": {"polygons": [[20, 30], [40, 30], [40, 50]], "why": "invented"},
+                                                  "flaps": {"polygons": [[[60, 30], [70, 30], [70, 40]], [[80, 30], [90, 30], [90, 40]]],
+                                                            "why": "invented"}}}
+    polys = s1.never_use_in_crop(v)
+    assert len(polys) == 3 and polys[0][0] == (10.0, 10.0)
+    assert s1.never_use_in_crop({"crop": [0, 0, 5, 5]}) == []
+
+
+def test_relabel_needs_chosen_seeds_and_their_files(tmp_path):
+    p = _subject(tmp_path)
+    with pytest.raises(ValueError, match="chosen"):
+        s1.relabel(p, "v001", "unused")
+    p = _subject(tmp_path, chosen={"L": "7"})
+    with pytest.raises(FileNotFoundError, match="missing from v001"):
+        s1.relabel(p, "v001", "unused")
+    assert not (tmp_path / "refs" / "clean" / "v001").exists()  # nothing written on failure

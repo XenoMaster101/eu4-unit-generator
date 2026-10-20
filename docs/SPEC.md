@@ -1762,7 +1762,7 @@ Each stage writes an **evidence map**: renders coloured by class, and the share 
 
 **Extra reference views that would remove the most guessing, in order:**
 1. A true left side view of the same horse without a rider, legs straight. It fixes proportions, hem lines, panel layout and the scale rows, and removes the pose ambiguity.
-2. A front view: chest width, chanfron front, breast strap, front panels.
+2. A front view of the horse: chest width, chanfron front, breast strap, front panels, and the neck plates behind the reins (inferred in every cleaned L seed; H1, 2026-10-20).
 3. A right side view of the same design (both of today's views are from the left).
 4. A top-down or high 3/4 view of the back and saddle without the rider.
 5. A close-up of the scales: plate shape, overlap and rivets.
@@ -2051,6 +2051,16 @@ The full cataphract build starts only after the spikes pass **and** the user exp
   - **L:** every passing seed invents the saddle (the rider covered it). Proposed seed 33 has an olive saddle with gold discs, which doesn't match the saddle close-up. Seed 88's dark leather saddle is the closest, so the recommendation is 88. In every seed the reins strip across the neck is a smeared band of scales (C4, C7). The neck plates there are inpainted guesses, which matters for E-B's close-up.
   - **R:** the rider covered the head and neck, so every seed invents them: 66 a red disc crest, a gold ladder shape on the left and a red cloth flap; 88 a gold disc (a shield remnant) on the haunch. The hindquarters, the part R is used for, are mostly original pixels in all of them. Proposed seed 66 is acceptable; R's head and neck are never used (L has priority there).
   - **Labels:** L's coat share (34%) is too high: the shadowed cloth under the caparison and the dark saddle read as coat. R leaves 11% unclassified and labels the gold ladder shape as trim. Both need the colour rules tightened or a hand correction before the labels are relied on.
+
+#### M12. H1 decisions (user, 2026-10-20) and the label passes
+- **Seeds:** L = 88 (its leather saddle matches the close-up), R = 66.
+- **Never use (R):** `never_use` regions in the subject config, labelled `excluded`, left out of shares and palettes, never used by later stages: the invented head, neck and red disc crest (L has priority there), the gold ladder shape (a remnant of the rider's leg at the mask edge, not an SDXL invention) and the invented red flap. 28% of R's horse.
+- **Neck behind the reins:** accepted as inferred. E-B continues the plate pattern of the visible chest armour up the neck and marks the neck as inferred in its close-up.
+- **Labels: automatic only, no hand edits.** `s1 --labels-from vNNN [--sam2 <weights>]` reruns only the labelling into a new version.
+  - v004, tighter rules: coat only inside the legs, tail and muzzle zones; gold in shade (hue 18-28) as trim; unmatched pixels take the nearest matched class within 60 px. Shadowed cloth was fixed (coat 34% → 1%), but shaded gold scale edges and leather straps share hue, saturation and value: L's neck read as leather (28%). Colour rules can't separate them.
+  - **SAM 2.1 hiera-large** (Apache-2.0, code and checkpoints, verified on the GitHub README and the model card): weights only (898 MB, `D:\eu4unitgen_ai\weights\sam2.1-hiera-large`), run through the AI environment's transformers 5.20 (`Sam2Model`); no package installed. Automatic mask generation: a 64×64 point grid, pred IoU ≥ 0.5, stability ≥ 0.7 (stricter defaults left L's neck unsegmented); fp32, because fp16 breaks the NMS post-process; transformers' multi-crop mode is broken (a tensor size error), so single crop. About 30 s for both views, 3.4 GB VRAM.
+  - **Segment vote:** inside each segment, ambiguous pixels (leather or unmatched) take the majority class of the segment's confident pixels when those are at least 30% of it; a mostly-leather segment (a strap) keeps its colours. Coat abstains (keeps its zone pixels, never votes or spreads): in v005 a segment joining the tail and haunch voted the haunch into coat. A `saddle` zone in L turns scale into leather (seed 88's grey-leather saddle reads as metal by colour).
+  - v006 (proposed): L scale 25%, cloth 28%, trim 16%, leather 12%, chanfron 9%, leg 9%; R cloth 24%, tail 23%, scale 21%, trim 18%, leather 6%, leg 9%; unclassified 0 on both. By segment vote: 27% (L) and 11% (R); by neighbour: 15% and 10%. Left: a few leather specks in L's shaded lower caparison; the saddle zone's straight edge (on inpainted pixels).
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.

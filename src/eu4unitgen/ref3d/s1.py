@@ -20,6 +20,8 @@ nothing is overwritten) with a manifest: input hashes, settings, seeds, results.
 
 usage: python -m eu4unitgen.ref3d.s1 <subject.json> --ai-python <env python> --sdxl <weights dir>
        --u2net <rembg model dir>
+       python -m eu4unitgen.ref3d.s1 <subject.json> --ai-python <env python> --labels-from vNNN
+         [--sam2 <weights dir>]  (labels only, on that version's ``chosen`` seeds, into a new version)
 """
 from __future__ import annotations
 
@@ -212,6 +214,96 @@ def _wrap(text, width):
     return "\n".join(out)
 
 
+def label_views(s: dict, ai, views: dict, out: Path, sam2: str | None = None) -> dict:
+    """views: {name: (cleaned image, horse mask, inpainted mask)} -> the ref3d_labels result. With
+    ``sam2`` (the weights folder) and the config's ``segments`` settings, SAM 2 segments the views
+    first and the labels use the segment vote."""
+    cc = s["colour_classes"]
+    segs = {}
+    if sam2 and s.get("segments"):
+        segs = ai.run_job("ref3d_segments", {"images": {n: str(img) for n, (img, _, _) in views.items()},
+                                             "weights": sam2, "out_dir": str(out), **s["segments"]}).result
+    lab = ai.run_job("ref3d_labels", {
+        "views": {n: {"image": str(img), "fg": str(fg), "inpainted": str(inp), "zones": zones_in_crop(s["views"][n]),
+                      "never_use": never_use_in_crop(s["views"][n]), "segments": segs.get(n, {}).get("npy")}
+                  for n, (img, fg, inp) in views.items()},
+        "rules": cc["rules"], "zone_map": cc["zone_map"], "neighbour_radius": cc.get("neighbour_radius", 0),
+        "segment_vote": cc.get("segment_vote") if segs else None,
+        "colours": s["_template"]["classes"], "out_dir": str(out)}).result
+    for n in lab:
+        lab[n]["segments"] = segs.get(n)
+    return lab
+
+
+def labels_sheet(s: dict, views: dict, lab: dict, path: Path, version: str):
+    """views: {name: (cleaned image, seed)}."""
+    t = s["_template"]
+    lrows = []
+    for name, (img, k) in views.items():
+        v, L = s["views"][name], lab[name]
+        shares = ", ".join(f"{c} {x * 100:.0f}%" for c, x in sorted(L["shares"].items(), key=lambda kv: -kv[1]))
+        why = "; ".join(f"{z}: {e['why']}" for z, e in (v.get("never_use") or {}).items())
+        info = (_wrap(shares, 40) + f"\ninpainted: {L['inpainted_share'] * 100:.0f}% of the horse"
+                + f"\nlabelled by segment vote: {L.get('segment_share', 0) * 100:.0f}%"
+                + f"\nlabelled by neighbour: {L.get('neighbour_share', 0) * 100:.0f}%"
+                + (f"\nexcluded (never used): {L['excluded_share'] * 100:.0f}%\n" + _wrap(why, 40) if why else ""))
+        lrows.append((_wrap(f"view {name}\nseed {k}", 18),
+                      [("labels over the cleaned view\n(yellow: inpainted; orange: by segment;\ncyan: by neighbour; hatched: never used)",
+                        Image.open(L["overlay"]), False),
+                       ("label map", Image.open(L["labels"]), False)]
+                      + ([(f"SAM 2 segments ({L['segments']['segments']})", Image.open(L["segments"]["png"]), False)]
+                         if L.get("segments") else [])
+                      + [
+                       (f"landmarks ({len(v.get('landmarks', {}))})", landmark_image(Image.open(img), v.get("landmarks", {}), v["crop"]), False),
+                       ("", text_tile(info), False)]))
+    legend = "  ".join(f"{c}: {tuple(rgb)}" for c, rgb in t["classes"].items())
+    return grid_sheet(lrows, f"H1 labels and landmarks: {s['name']} {version} (proposed; you approve or correct)",
+                      path, tile=(380, 460), notes=["classes (label colours): " + legend])
+
+
+def never_use_in_crop(v: dict) -> list:
+    """A view's ``never_use`` regions ({name: {"polygons", "why"}}, sheet px) as crop-px polygons."""
+    return [to_crop(p, v["crop"]) for e in (v.get("never_use") or {}).values() for p in polygons(e["polygons"])]
+
+
+def text_tile(text: str, size=(380, 460)) -> Image.Image:
+    im = Image.new("RGB", size, (36, 36, 36))
+    ImageDraw.Draw(im).multiline_text((8, 8), text, fill=(225, 225, 225), font=_font(15), spacing=5)
+    return im
+
+
+def relabel(subject_path: Path, from_version: str, ai_python: str, sam2: str | None = None) -> dict:
+    """Rerun only the labelling on an earlier version's cleaned views (the config's ``chosen`` seeds).
+    Writes a new version: labels, the H1 labels sheet, a manifest naming the version it builds on."""
+    from eu4unitgen.ai.env import AIJobRunner
+
+    s = load_subject(subject_path)
+    root = s["_root"]
+    src = root / "refs" / "clean" / from_version
+    chosen = s.get("chosen") or {}
+    if not chosen:
+        raise ValueError("relabel needs the subject config's chosen seeds")
+    views = {n: (src / f"{n}_seed{k}.png", src / f"{n}_seed{k}_fg.png", src / f"{n}_mask_used.png") for n, k in chosen.items()}
+    for n, paths in views.items():
+        for q in paths:
+            if not q.is_file():
+                raise FileNotFoundError(f"view {n}: {q} is missing from {from_version}")
+    out = next_version(root / "refs" / "clean")
+    h1 = root / "h1" / out.name
+    h1.mkdir(parents=True)
+    t0 = time.time()
+    lab = label_views(s, AIJobRunner(ai_python), views, out, sam2)
+    labels_sheet(s, {n: (views[n][0], k) for n, k in chosen.items()}, lab, h1 / "h1_labels.png", out.name)
+    manifest = {"stage": "S1 labels", "subject": s["name"], "version": out.name, "based_on": from_version,
+                "inputs": {"subject": {"path": str(subject_path), "sha256": sha256(subject_path)},
+                           **{f"{n}_image": {"path": str(p[0]), "sha256": sha256(p[0])} for n, p in views.items()}},
+                "chosen": chosen, "colour_classes": s["colour_classes"], "segments": s.get("segments") if sam2 else None,
+                "never_use": {n: s["views"][n].get("never_use") for n in chosen}, "labels": lab,
+                "sheets": {"labels": str(h1 / "h1_labels.png")}, "seconds": round(time.time() - t0, 1)}
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    return manifest
+
+
 # ---- the stage ----
 
 def run(subject_path: Path, ai_python: str, sdxl: str, u2net: str) -> dict:
@@ -252,13 +344,8 @@ def run(subject_path: Path, ai_python: str, sdxl: str, u2net: str) -> dict:
         ok = [k for k in r["seeds"] if r["seeds"][k]["rider_gone"]]
         chosen[name] = str(want) if want is not None else (min(ok, key=lambda k: r["seeds"][k]["seam"]) if ok else None)
         r["passing"] = len(ok)
-    t = s["_template"]
-    lab = ai.run_job("ref3d_labels", {
-        "views": {n: {"image": seeds[n]["seeds"][k]["path"], "fg": fg[f"{n}_seed{k}"]["path"],
-                      "inpainted": str(clean / f"{n}_mask_used.png"), "zones": zones_in_crop(s["views"][n])}
-                  for n, k in chosen.items() if k is not None},
-        "rules": s["colour_classes"]["rules"], "zone_map": s["colour_classes"]["zone_map"],
-        "colours": t["classes"], "out_dir": str(clean)}).result
+    lab = label_views(s, ai, {n: (seeds[n]["seeds"][k]["path"], fg[f"{n}_seed{k}"]["path"], clean / f"{n}_mask_used.png")
+                              for n, k in chosen.items() if k is not None}, clean)
     # sheets
     rows = []
     for name, r in seeds.items():
@@ -285,21 +372,8 @@ def run(subject_path: Path, ai_python: str, sdxl: str, u2net: str) -> dict:
                h1 / "h1_cleaning.png",
                notes=["seam = gradient on the inpaint edge / just outside it (1 = no visible edge): a ranking aid only.",
                       "Inpainted pixels are not verified information: they are kept apart in every later stage."])
-    lrows = []
-    for name, k in chosen.items():
-        if k is None:
-            continue
-        v, L = s["views"][name], lab[name]
-        cimg = Image.open(seeds[name]["seeds"][k]["path"])
-        shares = ", ".join(f"{c} {x * 100:.0f}%" for c, x in sorted(L["shares"].items(), key=lambda kv: -kv[1]))
-        lrows.append((_wrap(f"view {name}\nseed {k}", 18),
-                      [("labels over the cleaned view\n(yellow line: inpainted area)", Image.open(L["overlay"]), False),
-                       ("label map", Image.open(L["labels"]), False),
-                       (f"landmarks ({len(v.get('landmarks', {}))})", landmark_image(cimg, v.get("landmarks", {}), v["crop"]), False),
-                       (_wrap(shares, 40) + f"\ninpainted: {L['inpainted_share'] * 100:.0f}% of the horse", Image.new("RGB", (10, 10), (36, 36, 36)), False)]))
-    legend = "  ".join(f"{c}: {tuple(rgb)}" for c, rgb in t["classes"].items())
-    grid_sheet(lrows, f"H1 labels and landmarks: {s['name']} {clean.name} (proposed; you approve or correct)",
-               h1 / "h1_labels.png", tile=(380, 460), notes=["classes (label colours): " + legend])
+    labels_sheet(s, {n: (seeds[n]["seeds"][k]["path"], k) for n, k in chosen.items() if k is not None}, lab,
+                 h1 / "h1_labels.png", clean.name)
     conflict_sheet(s, h1 / "h1_conflicts.png", {n: seeds[n]["seeds"][k]["path"] for n, k in chosen.items() if k is not None})
     manifest["views"] = {n: {"crop": s["views"][n]["crop"], "inpaint": seeds.get(n), "chosen_seed": chosen.get(n),
                              "labels": lab.get(n)} for n in s["views"]}
@@ -314,10 +388,17 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("subject", type=Path)
     p.add_argument("--ai-python", required=True)
-    p.add_argument("--sdxl", required=True)
-    p.add_argument("--u2net", required=True)
+    p.add_argument("--sdxl")
+    p.add_argument("--u2net")
+    p.add_argument("--labels-from", metavar="vNNN", help="rerun only the labelling on this version's chosen seeds")
+    p.add_argument("--sam2", help="SAM 2.1 weights folder: segment the views and use the segment vote")
     a = p.parse_args(argv)
-    m = run(a.subject, a.ai_python, a.sdxl, a.u2net)
+    if a.labels_from:
+        m = relabel(a.subject, a.labels_from, a.ai_python, a.sam2)
+    elif not (a.sdxl and a.u2net):
+        p.error("a full run needs --sdxl and --u2net")
+    else:
+        m = run(a.subject, a.ai_python, a.sdxl, a.u2net)
     print(json.dumps({k: m[k] for k in ("version", "sheets", "seconds")}, indent=1))
 
 

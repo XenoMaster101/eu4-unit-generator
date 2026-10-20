@@ -44,7 +44,8 @@
   "leg": [110, 70, 160],
   "tail": [30, 160, 90],
   "plume": [255, 80, 160],
-  "unclassified": [255, 255, 255]
+  "unclassified": [255, 255, 255],
+  "excluded": [70, 70, 70]
  },
  "class_notes": {
   "scale": "metal plates (scale, lamellar)",
@@ -56,6 +57,7 @@
   "leg": "coat inside the leg zones",
   "tail": "tail hair inside the tail zone",
   "plume": "a plume or tuft (red inside the plume zone)",
-  "unclassified": "no colour rule matched: shown, not guessed"
+  "unclassified": "no colour rule matched and no labelled pixel near: shown, not guessed",
+  "excluded": "inside a never_use region: invented or overruled pixels that later stages must not use"
  }
 }
