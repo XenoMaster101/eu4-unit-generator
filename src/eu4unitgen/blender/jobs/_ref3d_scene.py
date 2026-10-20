@@ -117,9 +117,15 @@ def look_camera(name, target, az, el, dist, lens=60.0):
     cd.clip_start, cd.clip_end = 0.01, 5000
     ob = bpy.data.objects.new(name, cd)
     bpy.context.scene.collection.objects.link(ob)
-    loc = Vector(target + d * dist)
-    ob.location = loc
-    ob.rotation_euler = (Vector(target) - loc).to_track_quat("-Z", "Y").to_euler()
+    loc = np.asarray(target, float) + d * dist
+    # Y is up in these scenes (to_track_quat assumes Blender's Z up and rolled the views 90 deg)
+    fwd = np.asarray(target, float) - loc
+    fwd /= np.linalg.norm(fwd)
+    right = np.cross(fwd, [0.0, 1.0, 0.0])
+    right /= np.linalg.norm(right)
+    up = np.cross(right, fwd)
+    M = Matrix(((right[0], up[0], -fwd[0]), (right[1], up[1], -fwd[1]), (right[2], up[2], -fwd[2])))
+    ob.matrix_world = Matrix.Translation(Vector(loc)) @ M.to_4x4()
     return ob
 
 

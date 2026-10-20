@@ -159,6 +159,78 @@ def classify_texture(tex, cloth_i, trim_i):
     return np.where(gold, trim_i, cloth_i)
 
 
+BARY7 = np.array([[1 / 3, 1 / 3, 1 / 3], [0.6, 0.2, 0.2], [0.2, 0.6, 0.2], [0.2, 0.2, 0.6],
+                  [0.45, 0.45, 0.1], [0.1, 0.45, 0.45], [0.45, 0.1, 0.45]])
+
+
+def label_faces(a, Vs, Fs, fpart, want, cand_parts, bvh):
+    """S6 by projection: per body triangle of ``cand_parts``, 7 samples through each view's solved
+    camera (R on the barrel only: the body stands in L's pose) with visibility; each sample's label
+    (majority in a 5 px window). A triangle takes the class of ``want`` with the most votes when that
+    class has 3+ samples and outvotes the others; triangles no view decides take their mirror's
+    (symmetry). -> class name per face (None: none), evidence per face ("observed" / "symmetry")."""
+    names = list(a["classes"])
+    out = np.full(len(Fs), None, object)
+    ev = np.full(len(Fs), None, object)
+    labs = {vn: decode(load_rgb(v["labels"]), a["classes"]) for vn, v in a["views"].items()}
+    for vn, v in a["views"].items():
+        never = poly_mask(labs[vn].shape, v.get("never_use"))
+        labs[vn][never] = -1
+    fids = np.nonzero(np.isin(fpart, cand_parts))[0]
+    votes = np.zeros((len(Fs), len(names) + 1), int)
+    for vn, v in a["views"].items():
+        lab = labs[vn]
+        Hh, Ww = lab.shape
+        R, t = RB.camera_matrix(v["camera"])
+        cpos = Vector(-R.T @ t)
+        for f in fids:
+            if vn != "L" and fpart[f] != 0:
+                continue
+            pts = BARY7 @ Vs[Fs[f]]
+            p2, _ = RB.project(to_pdx(pts), v["camera"])
+            for x, (u, w) in zip(pts, p2):
+                if not (0 <= u < Ww and 0 <= w < Hh):
+                    continue
+                d = Vector(x) - cpos
+                hit = bvh.ray_cast(cpos, d.normalized(), d.length - 1e-3)
+                if hit[0] is not None and (hit[0] - Vector(x)).length > 0.05:
+                    continue
+                win = lab[int(max(w - 2, 0)):int(w + 3), int(max(u - 2, 0)):int(u + 3)].ravel()
+                win = win[win >= 0]
+                if len(win):
+                    votes[f, np.bincount(win).argmax()] += 1
+    wi = [names.index(c) for c in want]
+    for f in fids:
+        if votes[f].sum() < 3:
+            continue
+        best = int(np.argmax(votes[f]))
+        if best in wi and votes[f, best] >= 3:
+            out[f], ev[f] = names[best], "observed"
+        else:
+            ev[f] = "observed"  # decided: not one of ``want``
+    cen = Vs[Fs].mean(axis=1)
+    known = fids[ev[fids] != None]  # noqa: E711
+    if len(known):
+        from mathutils.kdtree import KDTree
+        kd = KDTree(len(known))
+        for f in known:
+            kd.insert(Vector(cen[f]), int(f))
+        kd.balance()
+        for f in fids[ev[fids] == None]:  # noqa: E711
+            co, g, dist = kd.find(Vector(cen[f] * np.array([-1.0, 1.0, 1.0])))
+            if g is not None and dist < 0.3:
+                out[f], ev[f] = out[g], "symmetry"
+    return out, ev
+
+
+def shell(Vs, Fs, sel, nrm, offset):
+    """The selected faces of the body, offset along the vertex normals (their own copy). -> (V, F)."""
+    used = np.unique(Fs[sel])
+    remap = -np.ones(len(Vs), int)
+    remap[used] = np.arange(len(used))
+    return Vs[used] + nrm[used] * offset, remap[Fs[sel]]
+
+
 def main():
     t0 = time.time()
     a = json.loads(open(sys.argv[sys.argv.index("--") + 1], encoding="utf-8").read())
@@ -224,10 +296,31 @@ def main():
         P3 = pv.reshape(-1, k, 3)
         c3 = P3.mean(axis=1, keepdims=True)
         pv = (c3 + 1.3 * (P3 - c3)).reshape(-1, 3)
-    add("plates", to_scene(pv), pf[:, ::-1], "scale", principled("plates", lin("scale"), 1.0, 0.3))
+    add("plates", to_scene(pv), pf[:, ::-1], "scale", principled("plates", lin("scale"), 0.85, 0.35))
     bv, bf = read_obj(arm / "backing.obj")
     add("backing", to_scene(bv), bf[:, ::-1], "scale", principled("backing", (0.03, 0.02, 0.015), 0.0, 0.8))
     res["parts"]["armour"] = {"plates_tris": int(len(pf)), "backing_tris": int(len(bf))}
+
+    # ---- S6 by projection: straps, saddle (leather) and gold bands (trim) on the neck and barrel
+    from _ref3d_scene import vertex_normals
+    body_bvh = BVHTree.FromPolygons([tuple(v) for v in Vs], [tuple(int(i) for i in f) for f in Fs])
+    fcls_lab, fev_lab = label_faces(a, Vs, Fs, part, ["leather", "trim"], [0, 1], body_bvh)
+    nrm_b = vertex_normals(Vs, Fs)
+    seam_y = a.get("cloth_seam_y")  # below the caparison's seam, trim belongs to the panels
+    res["parts"]["label_shells"] = {}
+    for c, off, thick, metal in (("leather", 0.02, 0.006, 0.0), ("trim", 0.02, 0.004, 0.8)):
+        sel = fcls_lab == c
+        if c == "trim" and seam_y is not None:
+            sel &= cen[:, 1] > seam_y
+        if brk == "trim_removed" and c == "trim":
+            continue
+        if sel.sum() == 0:
+            continue
+        sv, sf = shell(Vs, Fs, sel, nrm_b, off / mpu)
+        ob = add(f"shell_{c}", sv, sf, c, principled(f"shell_{c}", lin(c), metal, 0.45))
+        so = ob.modifiers.new("thickness", "SOLIDIFY")
+        so.thickness = thick / mpu
+        res["parts"]["label_shells"][c] = {"faces": int(sel.sum()), "symmetry": int((sel & (fev_lab == "symmetry")).sum())}
 
     # ---- cloth panels
     names = list(a["classes"])
@@ -369,8 +462,9 @@ def main():
 
     # ---- renders
     world_sky(sc)
+    sc.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 1.0
     sun = bpy.data.objects.new("sun", bpy.data.lights.new("sun", "SUN"))
-    sun.data.energy = 3.0
+    sun.data.energy = 4.0
     sun.rotation_euler = (math.radians(50), math.radians(-20), math.radians(35))
     sc.collection.objects.link(sun)
     res["cycles_device"] = set_engine_cycles(sc, a.get("samples", 96))
@@ -381,7 +475,7 @@ def main():
             ob.data.materials.clear()
             ob.data.materials.append({"lit": lit, "albedo": alb, "id": idm}[kind])
         flat = kind != "lit"
-        sc.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.0 if flat else 0.35
+        sc.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.0 if flat else 1.0  # the reference reads bright
         sun.hide_render = flat
         sc.cycles.samples = 1 if kind == "id" else (16 if kind == "albedo" else a.get("samples", 96))
         sc.cycles.use_denoising = kind == "lit"

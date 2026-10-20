@@ -51,7 +51,51 @@ def visible(bvh, cam_pos, p, tol):
     return hit[0] is None or (hit[0] - Vector(p)).length <= tol
 
 
-def seam_and_extent(a, Vs, vpart, cam, bvh, cam_pos, mpu, n_st):
+def seam_front(a, Vs, vpart, cam, bvh, cam_pos, n_st, front_z):
+    """The chest panel's seam: across the chest at the height where L's chest cloth begins (the
+    highest visible cloth vertex per station across; L sees the left half, the seam is fitted
+    symmetric: a quadratic in |x|). -> (stations x (PDX), seam heights y (PDX))."""
+    names = list(a["classes"])
+    lab = decode(load_rgb(a["views"]["L"]["labels"]), a["classes"])
+    Hh, Ww = lab.shape
+    cloth = {names.index(c) for c in a["panel_classes"] if c in names}
+    X = to_pdx(Vs)
+    chest = (vpart == 0) & (X[:, 2] < front_z)
+    p2, _ = RB.project(X, cam)
+    xs, ys = [], []
+    for i in np.nonzero(chest)[0]:
+        u, v = p2[i]
+        if not (0 <= u < Ww and 0 <= v < Hh) or not visible(bvh, cam_pos, Vs[i], 0.05):
+            continue
+        if lab[int(v), int(u)] in cloth:
+            xs.append(abs(X[i, 0]))
+            ys.append(X[i, 1])
+    if len(xs) < 10:
+        raise RuntimeError(f"L shows only {len(xs)} cloth vertices on the chest")
+    xs, ys = np.array(xs), np.array(ys)
+    xmax = 0.95 * np.abs(X[chest, 0]).max()
+    st = np.linspace(-xmax, xmax, n_st)
+    top = []
+    w = 2 * xmax / (n_st - 1)
+    for x in np.abs(st):
+        m = np.abs(xs - x) < 1.5 * w
+        top.append(np.percentile(ys[m], 95) if m.sum() >= 3 else np.nan)
+    top = np.array(top)
+    ok = ~np.isnan(top)
+    c = np.polyfit(np.abs(st[ok]), top[ok], 2) if ok.sum() >= 3 else np.array([0.0, 0.0, np.nanmax(top)])
+    return st, np.polyval(c, np.abs(st))
+
+
+def surface_z(bvh, x, y, z_out):
+    """The proxy's front surface at (x, y): a ray from in front of the horse (PDX -z) backward."""
+    o = Vector(to_scene(np.array([[x, y, -z_out]]))[0])
+    loc, normal, fi, dist = bvh.ray_cast(o, Vector((0.0, 0.0, 1.0)), 2 * z_out)
+    if loc is None:
+        return None
+    return np.array(loc), np.array(normal)
+
+
+def seam_and_extent(a, Vs, vpart, cam, bvh, cam_pos, mpu, n_st, front_z=None):
     """The panel's top seam (scene frame) from L's cloth labels on the near side of the barrel.
     -> (stations z (PDX), seam heights y (PDX)), or raises when L shows no cloth on the barrel."""
     names = list(a["classes"])
@@ -74,8 +118,13 @@ def seam_and_extent(a, Vs, vpart, cam, bvh, cam_pos, mpu, n_st):
         raise RuntimeError(f"L shows only {len(zs)} cloth vertices on the barrel's near side")
     zs, ys = np.array(zs), np.array(ys)
     lo, hi = np.percentile(zs, 3), np.percentile(zs, 97)
-    ext = a["panel"].get("extend", 0.0) * (hi - lo)  # the panel runs past the labelled cloth's ends
-    lo, hi = lo - ext, hi + ext  # (E-C: the side hem landmark sat at the panel's front edge)
+    # the panel runs past the labelled cloth's ends (E-C: the side hem landmark sat at the panel's front
+    # edge); not at the front in the master: the near foreleg stands in front of the cloth (z: the horse faces -Z)
+    span = hi - lo
+    lo = lo - a["panel"].get("extend_front", a["panel"].get("extend", 0.0)) * span
+    hi = hi + a["panel"].get("extend_rear", a["panel"].get("extend", 0.0)) * span
+    if front_z is not None:  # the side panel starts behind the shoulder: the chest's cloth is the chest panel's
+        lo = max(lo, front_z)  # (master v004: the near panel covered the shoulder the reference armours)
     st = np.linspace(lo, hi, n_st)
     width = (hi - lo) / (n_st - 1)
     top = []
@@ -112,8 +161,9 @@ def build_panel(a, st, top, proxy_bvh, mpu):
     -> (V start (rows+1, cols, 3), pattern (rows+1, cols, 2) in units, column drops in units)."""
     pn = a["panel"]
     cols, rows = pn["cols"], pn["rows"]
-    zc = np.linspace(st[0], st[-1], cols)
+    zc = np.linspace(st[0], st[-1], cols)  # stations: z along the side, or x across the chest (front)
     yc = np.interp(zc, st, top)
+    front = pn.get("side") == "front"
     ctrl = np.array(pn["drop_m"]) / mpu
     drops = np.interp(np.linspace(0, 1, cols), np.linspace(0, 1, len(ctrl)), ctrl)
     clear = pn["start_clear_m"] / mpu
@@ -124,12 +174,19 @@ def build_panel(a, st, top, proxy_bvh, mpu):
         last = None
         for r in range(rows + 1):
             y = yc[c] - drops[c] * r / rows
-            hit = surface_x(proxy_bvh, y, zc[c], x_out, sign)
-            if hit is not None and sign * hit[1][0] < -0.2:  # facing out (scene -x is PDX +x, the near side)
+            if front:
+                hit = surface_z(proxy_bvh, zc[c], y, x_out)
+                facing = hit is not None and hit[1][2] < -0.2  # facing forward (-Z)
+            else:
+                hit = surface_x(proxy_bvh, y, zc[c], x_out, sign)
+                facing = hit is not None and sign * hit[1][0] < -0.2  # facing out (scene -x is PDX +x)
+            if facing:
                 p = hit[0] + hit[1] * clear
                 last = p
             elif last is not None:
-                p = np.array([last[0], to_scene(np.array([[0, y, zc[c]]]))[0][1], last[2]])
+                p = np.array([last[0], to_scene(np.array([[0, y, 0]]))[0][1], last[2]])
+            elif front:
+                p = to_scene(np.array([[zc[c], y, -1.0]]))[0]
             else:
                 p = to_scene(np.array([[sign * 1.0, y, zc[c]]]))[0]
             V[r, c] = p
@@ -362,7 +419,12 @@ def main():
     bvh = BVHTree.FromPolygons([tuple(v) for v in Vs], [tuple(int(i) for i in f) for f in Fs])
     camL = a["views"]["L"]["camera"]
     R, t = RB.camera_matrix(camL)
-    st, top = seam_and_extent(a, Vs, vpart, camL, bvh, Vector(-R.T @ t), mpu, 24)
+    front_z = 0.5 * (Bp["HorseFrontLeftUp"][2] + Bp["HorseFrontRightUp"][2]) + 0.15 * Hs  # the armour's patch line
+    if a["panel"].get("side") == "front":
+        st, top = seam_front(a, Vs, vpart, camL, bvh, Vector(-R.T @ t), 24, front_z)
+    else:
+        st, top = seam_and_extent(a, Vs, vpart, camL, bvh, Vector(-R.T @ t), mpu, 24,
+                                  front_z if a["panel"].get("behind_shoulder", True) else None)
     res["seam"] = {"z": st.tolist(), "y": top.tolist()}
 
     # the collision proxy: the body offset by the armour under the cloth
