@@ -20,7 +20,8 @@ inside the horse mask: armour and cloth lie over it); weak priors.
 args: {"skeleton": json path, "views": {name: {"image", "labels", "fg", "inpainted", "never_use",
        "landmarks", "body_length", "zones": {"legs": [poly], "head": [poly]}}}, "classes": {name: rgb},
        "occluders": {zone: [class]}, "body": {zone: [class]}, "candidates": [...], "shells": [glb],
-       "restarts", "seed", "label_scale", "gates", "armour_allowance", "out_dir", "result_path"}
+       "restarts", "seed", "label_scale", "gates", "armour_allowance", "cameras": {view: {param: [lo, hi]}},
+       "landmark_weights": {name: w}, "evals": {stage: n}, "out_dir", "result_path"}
 """
 import json
 import sys
@@ -42,10 +43,34 @@ SHAPE = ["barrel_depth", "withers_rise", "croup_rise", "rump_drop", "breast_ahea
          "hoof_top", "hoof_bottom", "hoof_height"]
 SIGNED = {"withers_rise", "croup_rise"}  # can cross zero: absolute scale and bounds
 SKEL = ["leg_f", "leg_b", "body", "neck"]
-CAM = ["az", "el", "roll", "dist", "focal", "cx", "cy"]
-CAM_SCALE = {"az": 5, "el": 5, "roll": 3, "dist": 10, "focal": 300, "cx": 20, "cy": 20}
-CAM_BOUNDS = {"az": (-180, 180), "el": (-25, 45), "roll": (-15, 15), "dist": (20, 400), "focal": (200, 20000),
+# Solved camera parameters: "scale" is px per unit at the target (focal / dist), "persp" the
+# perspective strength (10 / dist). E-A pilot 7 solved focal and dist directly: L slid to the dist
+# bound with focal following, since one coordinate step changed both size and perspective.
+CAM = ["az", "el", "roll", "persp", "scale", "cx", "cy"]
+CAM_SCALE = {"az": 5, "el": 5, "roll": 3, "persp": 0.03, "scale": 3, "cx": 20, "cy": 20}
+# roll: the illustrations stand on level ground (pilot 7 pinned L's roll at -14); az is narrowed
+# per view by args["cameras"] (pilot 7: leg-only landmarks let R fit the mirrored front view)
+CAM_BOUNDS = {"az": (-180, 180), "el": (-25, 45), "roll": (-8, 8), "persp": (0.005, 0.5), "scale": (5, 300),
               "cx": (-2000, 4000), "cy": (-2000, 4000)}
+CAM_LIMITS = {}  # view -> {param: (lo, hi)}, from args["cameras"]
+EVALS = {"landmarks": 400, "outlines: camera+pose": 4000, "outlines: shape": 3000, "outlines: joint": 5000}
+
+
+def cam_internal(c):
+    """A camera as solved (CAM) from an orbit camera {az, el, roll, dist, focal, cx, cy}."""
+    if "persp" in c:
+        return dict(c)
+    return {**{k: c[k] for k in ("az", "el", "roll", "cx", "cy")}, "persp": 10.0 / c["dist"], "scale": c["focal"] / c["dist"]}
+
+
+def cam_orbit(c):
+    """The orbit camera _ref3d_body projects with, from a solved one."""
+    dist = 10.0 / c["persp"]
+    return {**{k: c[k] for k in ("az", "el", "roll", "cx", "cy")}, "dist": dist, "focal": c["scale"] * dist}
+
+
+def cam_bounds(vn, c):
+    return CAM_LIMITS.get(vn, {}).get(c, CAM_BOUNDS[c])
 LEGS = ("FrontLeft", "FrontRight", "BackLeft", "BackRight")
 POSE_BOUNDS = {"Front": [(-45, 60), (-60, 60), (-110, 20), (-60, 60)],
                "Back": [(-45, 45), (-60, 60), (-30, 90), (-60, 60)]}
@@ -128,7 +153,7 @@ class View:
 
 def lm_residuals(view, lm2):
     import _ref3d_body as RB
-    r = []
+    r, order = [], []
     names = [k for k in RB.BODY_LANDMARKS if k in view.lm and k in lm2]
     pairs = {a: b for a, b in RB.UNORDERED}
     done = set()
@@ -140,17 +165,23 @@ def lm_residuals(view, lm2):
             d1 = np.r_[lm2[a_] - view.lm[a_], lm2[b_] - view.lm[b_]]
             d2 = np.r_[lm2[b_] - view.lm[a_], lm2[a_] - view.lm[b_]]
             r.append(d1 if np.sum(d1 ** 2) <= np.sum(d2 ** 2) else d2)
+            order.append(k)
             done |= {a_, b_}
         else:
             r.append(lm2[k] - view.lm[k])
+            order.append(k)
             done.add(k)
-    return W_LM * np.concatenate(r) / view.bl if r else np.zeros(0)
+    if not r:
+        return np.zeros(0)
+    w = np.concatenate([np.full(len(d), LM_WEIGHT.get(k, 1.0)) for d, k in zip(r, order)])
+    return W_LM * w * np.concatenate(r) / view.bl
 
 
 CELL = 12          # px: region fill and containment are compared per cell
 SS = 3             # the fit renders outlines at 3x: at 1x an edge's place is known to +-0.5 px, which
                    # swamped the finite differences of 1-5 px moves (E-A pilot, Jacobian check)
 W_LM, W_AREA, W_EDGE, W_CONT = 10.0, 0.5, 1.0, 0.5
+LM_WEIGHT = {}  # landmark -> weight, from args["landmark_weights"] (pilot 7: the head's landmarks lost to the outlines)
 
 
 def cells(m, c=CELL):
@@ -229,8 +260,9 @@ class Model:
             for k in SKEL:
                 add(f"skel.{k}", init["skel"].get(k, 1.0), 0.05, 0.75, 1.35)
         for vn in views:
+            ci = cam_internal(init["cam"][vn])
             for c in CAM:
-                add(f"{vn}.cam.{c}", init["cam"][vn][c], CAM_SCALE[c], *CAM_BOUNDS[c])
+                add(f"{vn}.cam.{c}", ci[c], CAM_SCALE[c], *cam_bounds(vn, c))
             for leg in LEGS:
                 for j in range(4):
                     lo, hi = POSE_BOUNDS["Front" if leg.startswith("Front") else "Back"][j]
@@ -253,7 +285,7 @@ class Model:
                 skel[k[5:]] = v
         cams, poses = {}, {}
         for vn in self.views:
-            cams[vn] = {c: d[f"{vn}.cam.{c}"] for c in CAM}
+            cams[vn] = cam_orbit({c: d[f"{vn}.cam.{c}"] for c in CAM})
             poses[vn] = {leg: [d[f"{vn}.pose.{leg}.{j}"] for j in range(4)] for leg in LEGS}
             poses[vn]["neck"] = [d[f"{vn}.pose.neck.{j}"] for j in range(2)]
             poses[vn]["head_pitch"] = d[f"{vn}.pose.head_pitch"]
@@ -403,14 +435,15 @@ def init_cameras(sk, views, shape, seed):
     out = {}
     B, H = RB.skeleton(sk["bones"], sk["seat"], {})
     for vn, view in views.items():
-        starts = (20, 35, 50) if vn == "L" else (-35, -50, -65)
+        lo, hi = cam_bounds(vn, "az")
+        lo, hi = max(lo, -170), min(hi, 170)
         best = None
-        for az in starts:
+        for az in np.linspace(lo, hi, 5)[1:-1]:  # three starts inside the view's window
             ys, xs = np.nonzero(view.fg)
-            c0 = {"az": az + rng.normal(0, 3), "el": 8 + rng.normal(0, 3), "roll": 0.0, "dist": 60.0,
+            c0 = {"az": float(np.clip(az + rng.normal(0, 3), lo + 1, hi - 1)), "el": 8 + rng.normal(0, 3), "roll": 0.0, "dist": 60.0,
                   "focal": 60.0 * (ys.max() - ys.min()) / 14.0, "cx": float(xs.mean()), "cy": float(ys.mean())}
             m = Model(sk, {vn: view}, False, shape, {}, {"cam": {vn: c0}, "pose": {vn: {}}, "shape": {}, "skel": {}})
-            r = solve(m, ("lm",), sel(m, [f"{vn}.cam."]), max_nfev=200)
+            r = solve(m, ("lm",), sel(m, [f"{vn}.cam."]), max_nfev=EVALS["landmarks"])
             if best is None or r.cost < best[0]:
                 best = (r.cost, m.unpack(m.x0)[2][vn])
         out[vn] = best[1]
@@ -458,25 +491,28 @@ def fit_candidate(sk, views, base_shape, free_shape, priors, seed, log, ck=None,
     else:
         rng = np.random.default_rng(seed)
         cams = init_cameras(sk, views, base_shape, seed)
-        for c in cams.values():  # restarts differ: perturbed starts
-            c["az"] += rng.normal(0, 4)
-            c["el"] += rng.normal(0, 3)
+        for vn, c in cams.items():  # restarts differ: perturbed starts, inside the bounds
+            lo, hi = cam_bounds(vn, "az")
+            c["az"] = float(np.clip(c["az"] + rng.normal(0, 4), lo + 0.5, hi - 0.5))
+            lo, hi = cam_bounds(vn, "el")
+            c["el"] = float(np.clip(c["el"] + rng.normal(0, 3), lo + 0.5, hi - 0.5))
         best = None
         for neck, pitch in HEAD_STARTS:
             poses = {vn: {**{leg: list(rng.normal(0, 4, 4)) for leg in LEGS}, "neck": [neck, 0.0], "head_pitch": pitch}
                      for vn in views}
             m = Model(sk, views, free_shape, base_shape, priors, {"cam": cams, "pose": poses, "shape": {}, "skel": {}})
             keys = [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views] + (["shape.", "skel."] if free_shape else [])
-            r = solve(m, ("lm", "prior"), sel(m, keys), max_nfev=200, diff_step=0.01)
+            r = solve(m, ("lm", "prior"), sel(m, keys), max_nfev=EVALS["landmarks"], diff_step=0.01)
             if best is None or r.cost < best[0].cost:
                 best = (r, m, (neck, pitch))
         r, m, start = best
         _note(hist, log, f"landmarks (start neck {start[0]:.0f}, pitch {start[1]:.0f})", r)
         save(m)
     vp = [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views]
-    stages = [("outlines: camera+pose", sel(m, vp), 1500)]
+    stages = [("outlines: camera+pose", sel(m, vp), EVALS["outlines: camera+pose"])]
     if free_shape:
-        stages += [("outlines: shape", sel(m, ["shape.", "skel."]), 1500), ("outlines: joint", None, 2000)]
+        stages += [("outlines: shape", sel(m, ["shape.", "skel."]), EVALS["outlines: shape"]),
+                   ("outlines: joint", None, EVALS["outlines: joint"])]
     done = {h["stage"].removesuffix(" (resumed)") for h in hist}
     for stage, mask, fev in stages:
         if stage in done:
@@ -671,6 +707,9 @@ def main(args_path):
         logf.flush()
 
     sk = json.loads(Path(a["skeleton"]).read_text(encoding="utf-8"))
+    CAM_LIMITS.update({vn: {k: tuple(v) for k, v in lim.items()} for vn, lim in (a.get("cameras") or {}).items()})
+    LM_WEIGHT.update(a.get("landmark_weights") or {})
+    EVALS.update(a.get("evals") or {})
     views = {n: View(n, v, a["classes"], a) for n, v in a["views"].items()}
     defaults = {**RB.ha.DEFAULTS, "rider_clear": 99.0, "rider_clear_top": 99.0}  # the master isn't fitted round a game rider
     res = {"candidates": {}}

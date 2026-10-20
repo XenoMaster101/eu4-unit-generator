@@ -73,6 +73,14 @@ EA_DEFAULTS = {
     "body": {"legs": ["leg", "coat"], "head": ["chanfron", "coat", "leather"]},
     "occluders": {"legs": ["cloth", "trim", "leather", "scale", "tail", "plume", "chanfron"],
                   "head": ["plume", "cloth", "trim", "scale"]},
+    # E-A pilot 7: the outlines outweighed the head's landmarks (worst 6.7%, the gate 2.5%)
+    "landmark_weights": {k: 3.0 for k in ("poll", "eye", "muzzle_front", "nostril", "bit_ring", "chin", "throat",
+                                          "ear_tip_a", "ear_tip_b")},
+    # evaluations per stage (pilot 7 ran out in every outline stage at 1500 / 1500 / 2000)
+    "evals": {"landmarks": 400, "outlines: camera+pose": 4000, "outlines: shape": 3000, "outlines: joint": 5000},
+    # per view: {param: [lo, hi]} narrowing the camera's bounds (the subject config sets each view's
+    # azimuth window: which side of the horse the view shows)
+    "cameras": {},
 }
 
 
