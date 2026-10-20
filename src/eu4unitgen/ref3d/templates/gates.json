@@ -1,0 +1,27 @@
+{
+ "schema": 1,
+ "note": "SPEC M5 hard gates, generic (any subject). Values marked assumed until E-D calibrates them; a subject may override a gate only with the user's OK.",
+ "gates": {
+  "region_iou_min": 0.85,
+  "landmark_max": 0.025,
+  "coverage_iou_min": 0.7,
+  "coverage_min_share": 0.005,
+  "delta_e_max": 8.0,
+  "detail_ncc_min": 0.5,
+  "plate_period_tol": 0.15,
+  "region_min_px": 500,
+  "hue_max_deg": 6.0,
+  "label_scale": 0.01
+ },
+ "gate_notes": {
+  "region_iou_min": "M5: per-region IoU on observed pixels (and the whole horse)",
+  "landmark_max": "M5: each landmark, fraction of body length; also the key-detail search radius",
+  "coverage_iou_min": "M5: per label class IoU on observed pixels, classes with at least coverage_min_share of them",
+  "delta_e_max": "M5: CIEDE2000 (kL = 2, textile weighting) between region-core means, exposure-compensated",
+  "detail_ncc_min": "assumed (E-D 2D): gradient-magnitude NCC of each key detail's patch, found within landmark_max",
+  "plate_period_tol": "assumed (E-D 2D): plate period by FFT within this fraction of the reference's (E-B's measure, made a gate so plate size can fail)",
+  "region_min_px": "regions and colour classes with fewer observed pixels are not scored",
+  "hue_max_deg": "assumed (E-D 2D): hue angle difference of region means, classes with reference chroma >= 15",
+  "label_scale": "not a gate: labels are compared as the majority class within this fraction of body length, and region / coverage IoU count a pixel matched when the other map has it within the same distance (E-D 2D v001, v003)"
+ }
+}

@@ -35,17 +35,61 @@
   "crupper_ornament": "an ornament on the crupper strap over the tail"
  },
  "classes": {
-  "scale": [200, 205, 215],
-  "cloth": [170, 30, 40],
-  "trim": [235, 190, 40],
-  "chanfron": [120, 200, 255],
-  "leather": [140, 80, 30],
-  "coat": [60, 40, 30],
-  "leg": [110, 70, 160],
-  "tail": [30, 160, 90],
-  "plume": [255, 80, 160],
-  "unclassified": [255, 255, 255],
-  "excluded": [70, 70, 70]
+  "scale": [
+   200,
+   205,
+   215
+  ],
+  "cloth": [
+   170,
+   30,
+   40
+  ],
+  "trim": [
+   235,
+   190,
+   40
+  ],
+  "chanfron": [
+   120,
+   200,
+   255
+  ],
+  "leather": [
+   140,
+   80,
+   30
+  ],
+  "coat": [
+   60,
+   40,
+   30
+  ],
+  "leg": [
+   110,
+   70,
+   160
+  ],
+  "tail": [
+   30,
+   160,
+   90
+  ],
+  "plume": [
+   255,
+   80,
+   160
+  ],
+  "unclassified": [
+   255,
+   255,
+   255
+  ],
+  "excluded": [
+   70,
+   70,
+   70
+  ]
  },
  "class_notes": {
   "scale": "metal plates (scale, lamellar)",
@@ -59,5 +103,25 @@
   "plume": "a plume or tuft (red inside the plume zone)",
   "unclassified": "no colour rule matched and no labelled pixel near: shown, not guessed",
   "excluded": "inside a never_use region: invented or overruled pixels that later stages must not use"
- }
+ },
+ "regions": {
+  "head": [
+   "chanfron",
+   "plume"
+  ],
+  "legs": [
+   "leg"
+  ],
+  "tail": [
+   "tail"
+  ],
+  "cloth": [
+   "cloth",
+   "trim"
+  ],
+  "armour": [
+   "scale"
+  ]
+ },
+ "region_notes": "M5 metric regions: groups of label classes scored by silhouette IoU on observed pixels"
 }

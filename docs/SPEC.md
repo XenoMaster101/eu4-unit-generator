@@ -2065,6 +2065,36 @@ The full cataphract build starts only after the spikes pass **and** the user exp
   - **Segment vote:** inside each segment, ambiguous pixels (leather or unmatched) take the majority class of the segment's confident pixels when those are at least 30% of it; a mostly-leather segment (a strap) keeps its colours. Coat abstains (keeps its zone pixels, never votes or spreads): in v005 a segment joining the tail and haunch voted the haunch into coat. A `saddle` zone in L turns scale into leather (seed 88's grey-leather saddle reads as metal by colour).
   - v006 (approved at H1): L scale 25%, cloth 28%, trim 16%, leather 12%, chanfron 9%, leg 9%; R cloth 24%, tail 23%, scale 21%, trim 18%, leather 6%, leg 9%; unclassified 0 on both. By segment vote: 27% (L) and 11% (R); by neighbour: 15% and 10%. Left: a few leather specks in L's shaded lower caparison; the saddle zone's straight edge (on inpainted pixels).
 
+#### M13. Spike E-D in 2D (2026-10-20): passed
+- **Method** (`ref3d/ed2d.py`; AI jobs `ref3d_ed2d`, metric library `_ref3d_metrics.py`, the M5 suite's 2D part, reused for the 3D rerun):
+  - The cleaned H1 references stand in for a perfect master's render.
+  - **5 unbroken variants per view** (seeded): camera residual ±1% of body length plus a ±0.3° roll, a smooth warp of 2.5 px, a lighting field ±12% with ±8% gain, blur 0.8 px, noise, and annotation jitter of 0.3%.
+  - **5 breaks**, each made on the reference and then given unbroken_0's perturbation: trim removed (inpainted), caparison 10% shorter, plates ×1.3, head turned 5° nose-down about the poll, cloth hue +15°.
+- **Body length:** view L, `chest_front` to `hem_rear` along x (502 px). View R (rear 3/4, length foreshortened) is L's length scaled by the ratio of the horse's heights.
+- **Metric changes E-D forced** (the thresholds of M5 are unchanged):
+  1. **Labels compared at a scale:** each map is reduced to its majority class within 1% of body length, and region and coverage IoU count a pixel as matched when the other map has the class within that distance. Pixel-exact IoU failed every unbroken variant: rivets and shaded gaps carry their own labels, and a leg is ~30 px wide, so the allowed camera residual alone cost ~20% IoU.
+  2. **Colour:** region-core means (borders eroded) and CIEDE2000 with kL = 2 (textile weighting). New gate: **hue angle ≤ 6°** on chromatic classes (C* ≥ 15). A 15° red shift stayed at ΔE ≤ 5, under lighting differences up to 7.
+  3. **Plate period:** autocorrelation averaged over every scale tile, read on the axis with the more prominent peak; the candidate's peak is searched at 0.6–1.7× the reference lag. Per-tile FFT peaks jumped between harmonics under blur (unbroken read 1.4×). New gate: **plate period within ±15%**.
+  4. **Key details:** gradient-magnitude NCC ≥ 0.5 of each detail's patch, found within the landmark tolerance (8 details in L, 4 in R, in the subject config).
+- **Result (v004):** every unbroken variant passes every gate; every break fails at least one.
+
+  | Gate (limit) | Unbroken worst L / R | Breaks that fail it |
+  |---|---|---|
+  | region IoU (≥ 0.85) | 0.987 / 0.987 | caparison 0.69 / 0.75 |
+  | landmarks (≤ 2.5%) | **2.4%** / 1.9% | caparison 15.7%; head 4.0% (chin) |
+  | coverage IoU (≥ 0.7) | 0.92 / 0.97 | trim 0.0; caparison 0.61; head 0.63 (coat) |
+  | ΔE2000 kL=2 (≤ 8) | 3.2 / 1.8 | none |
+  | hue (≤ 6°) | 2.4° / 0.4° | wrong red 15.1° / 14.6°; trim (L) 7.0° |
+  | key details (NCC ≥ 0.5) | 0.70 / **0.575** | trim, caparison, head; plates (L) |
+  | plate period (±15%) | 1.036 / 1.023 | plates 1.335 / 1.332; trim (R) 0.72 |
+
+- **Thin margins:**
+  - Landmarks: the 1% camera residual takes 2.4% of the 2.5% budget, so E-A's camera solve must reach ≤ 1% residual or the landmark gate cannot pass.
+  - R's rear hem band patch (0.575).
+  - Wrong red is caught by the hue gate alone; ΔE never catches it.
+- **Visual check:** the unbroken variant looks like the reference; each break is visibly wrong (the plate and head breaks only at full size).
+- **3D rerun after E-A:** the same breaks applied to the master, rendered through the solved cameras; adds the penetration gate and the camera residual.
+
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
 
