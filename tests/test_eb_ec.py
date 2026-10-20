@@ -41,7 +41,7 @@ def test_eb_correct_scales_plates_by_period_and_lifts_only_on_many_removals():
 
 def _ec_result(errs, inter=0, stretch=1.05):
     return {"metres_per_unit": 0.1, "intersections": {"over_limit": inter, "max_mm": 0.0},
-            "stretch": {"max": stretch}, "hem": {"L": {k: {"error": e, "dv_px": 10.0, "column": 0.0} for k, e in errs.items()}}}
+            "stretch": {"max": stretch, "p99": stretch, "p95": stretch}, "hem": {"L": {k: {"error": e, "dv_px": 10.0, "column": 0.0} for k, e in errs.items()}}}
 
 
 def test_ec_gates():
@@ -58,5 +58,5 @@ def test_ec_correct_drops_lengthens_near_the_landmark_only():
     a = {"views": {"L": {"camera": {"focal": 1000.0, "dist": 20.0}}}}
     ec.correct_drops(panel, _ec_result({"hem_side": 0.05}), a)  # 10 px low at column 0
     d = panel["drop_m"]
-    assert d[0] > 0.7 + 0.015  # 10 px / 50 px per unit * 0.1 m = 2 cm, mostly at the first control column
+    assert d[0] > 0.7 + 0.008  # half of 10 px / 50 px per unit * 0.1 m (damped), mostly at the first control column
     assert abs(d[-1] - 0.7) < 1e-9  # far columns untouched (weight under 0.2)

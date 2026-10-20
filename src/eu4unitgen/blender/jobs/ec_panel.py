@@ -74,6 +74,8 @@ def seam_and_extent(a, Vs, vpart, cam, bvh, cam_pos, mpu, n_st):
         raise RuntimeError(f"L shows only {len(zs)} cloth vertices on the barrel's near side")
     zs, ys = np.array(zs), np.array(ys)
     lo, hi = np.percentile(zs, 3), np.percentile(zs, 97)
+    ext = a["panel"].get("extend", 0.0) * (hi - lo)  # the panel runs past the labelled cloth's ends
+    lo, hi = lo - ext, hi + ext  # (E-C: the side hem landmark sat at the panel's front edge)
     st = np.linspace(lo, hi, n_st)
     width = (hi - lo) / (n_st - 1)
     top = []
@@ -82,10 +84,16 @@ def seam_and_extent(a, Vs, vpart, cam, bvh, cam_pos, mpu, n_st):
         top.append(np.percentile(ys[m], 95) if m.sum() >= 3 else np.nan)
     top = np.array(top)
     ok = ~np.isnan(top)
-    top = np.interp(st, st[ok], top[ok])
-    k = np.ones(5) / 5  # smooth the seam
-    top = np.convolve(np.pad(top, 2, mode="edge"), k, mode="valid")
-    return st, top
+    # a smooth seam: a quadratic along the body, refitted without the stations off it by over 2 MAD
+    # (E-C on pilot 12's body: the highest cloth label per station jumped round the gold trim, the
+    # ornaments and the saddle, and the panel's top came out a sawtooth)
+    c = np.polyfit(st[ok], top[ok], 2)
+    res = top[ok] - np.polyval(c, st[ok])
+    mad = np.median(np.abs(res - np.median(res))) + 1e-9
+    keep = np.abs(res) <= 2 * 1.4826 * mad
+    if keep.sum() >= 5:
+        c = np.polyfit(st[ok][keep], top[ok][keep], 2)
+    return st, np.polyval(c, st)
 
 
 def surface_x(bvh, y, z, x_out):
@@ -124,12 +132,15 @@ def build_panel(a, st, top, proxy_bvh, mpu):
             else:
                 p = to_scene(np.array([[x_out * 0 + 1.0, y, zc[c]]]))[0]
             V[r, c] = p
-    # the flat pattern: the seam's arc length across, the drop down
-    seam = V[0]
-    u = np.r_[0, np.cumsum(np.linalg.norm(np.diff(seam, axis=0), axis=1))]
+    # the flat pattern, flared: each row as wide as it starts draped over the body (E-C on pilot 12's
+    # body: a rectangle the seam's width stretched 10-25% round the barrel's bulge), centred on the
+    # middle column; the drop down
     P = np.zeros((rows + 1, cols, 2))
+    mid = cols // 2
+    for r in range(rows + 1):
+        u = np.r_[0, np.cumsum(np.linalg.norm(np.diff(V[r], axis=0), axis=1))]
+        P[r, :, 0] = u - u[mid]
     for c in range(cols):
-        P[:, c, 0] = u[c]
         P[:, c, 1] = -drops[c] * np.arange(rows + 1) / rows
     return V, P, drops
 
@@ -246,18 +257,45 @@ def texture(a, Vf, rows, cols, F, body_bvh_parts, mpu, res_px):
                 ev[yi, xi] = k
     seen = ev < 2
     base = push_pull(rgb, seen)
-    # detail: the observed high-pass of the same row (the caparison's design runs in bands), at
-    # seeded offsets, so the unseen part keeps the weave and gold flecks, not a flat colour
-    hp = rgb - blur(rgb, seen, 3)
-    rng = np.random.default_rng(0)
+    # detail: within each row (the caparison's design runs in bands), the observed texture mirrored
+    # across the nearest border, so colour and weave both continue there (E-C: detail from random
+    # places along the row put gold next to plain red, seam p95 8.5); beyond the mirrored width, the
+    # smooth continuation
     fill = base.copy()
     for yi in range(H):
-        src = np.nonzero(seen[yi])[0]
-        dst = np.nonzero(~seen[yi])[0]
-        if len(src) >= 8 and len(dst):
-            fill[yi, dst] += hp[yi, src[rng.integers(0, len(src), len(dst))]]
-    rgb = np.where(seen[..., None], rgb, fill)
+        obs = np.nonzero(seen[yi])[0]
+        if len(obs) < 4:
+            continue
+        for xi in np.nonzero(~seen[yi])[0]:
+            left, right = obs[obs < xi], obs[obs > xi]
+            cands = []
+            if len(left):
+                b = left[-1]
+                cands.append((xi - b, b - (xi - b)))
+            if len(right):
+                b = right[0]
+                cands.append((b - xi, b + (b - xi)))
+            d, src = min(cands)
+            if 0 <= src < W and seen[yi, src]:
+                fill[yi, xi] = rgb[yi, src]
+    # feather the border: observed texels within ``feather`` of the unseen part blend toward the
+    # continuation (E-C: the seam metric sat at the gate, 8.2)
+    fpx = 4
+    dist = np.full(seen.shape, fpx + 1.0)
+    edge = ~seen
+    for k in range(1, fpx + 1):
+        grown = _maxfilter_bool(edge, k)
+        dist[seen & grown & (dist > k)] = k
+    wgt = np.clip(dist / (fpx + 1.0), 0.0, 1.0)[..., None]
+    rgb = np.where(seen[..., None], wgt * rgb + (1 - wgt) * fill, fill)
     return np.clip(rgb, 0, 255).astype(np.uint8), ev
+
+
+def _maxfilter_bool(m, r):
+    from numpy.lib.stride_tricks import sliding_window_view as sw
+    k = 2 * r + 1
+    x = sw(np.pad(m, ((r, r), (0, 0))), k, axis=0).max(axis=-1)
+    return sw(np.pad(x, ((0, 0), (r, r))), k, axis=1).max(axis=-1)
 
 
 def blur(img, w, r):
@@ -345,7 +383,7 @@ def main():
     np.save(out / "panel_vertices.npy", Vf)
     (out / "panel_vertices.json").write_text(json.dumps(Vf.round(7).tolist()), encoding="utf-8")  # the app has no numpy
     res["panel"] = {"rows": rows, "cols": cols, "drops_m": (drops * mpu).tolist(), "verts": len(Vf), "tris": len(Fg),
-                    "width_m": float(Pat[0, -1, 0] * mpu)}
+                    "width_m": float((Pat[0, -1, 0] - Pat[0, 0, 0]) * mpu)}
 
     # ---- checks
     lim = a["penetration_limit_m"] / mpu
@@ -363,7 +401,13 @@ def main():
     e_now = np.r_[np.linalg.norm(np.diff(G, axis=0), axis=2).ravel(), np.linalg.norm(np.diff(G, axis=1), axis=2).ravel()]
     e_rest = np.r_[np.linalg.norm(np.diff(Pg, axis=0), axis=2).ravel(), np.linalg.norm(np.diff(Pg, axis=1), axis=2).ravel()]
     ratio = e_now / np.maximum(e_rest, 1e-9)
-    res["stretch"] = {"max": float(ratio.max()), "p95": float(np.percentile(ratio, 95)), "min": float(ratio.min())}
+    nv = rows * cols  # where the over-stretched edges are (vertical edges first, then horizontal)
+    rv = ratio[:nv].reshape(rows, cols)
+    rh = ratio[nv:].reshape(rows + 1, cols - 1)
+    res["stretch_where"] = {"vertical_by_row": (rv > 1.25).sum(axis=1).tolist(), "vertical_by_col": (rv > 1.25).sum(axis=0).tolist(),
+                            "horizontal_by_row": (rh > 1.25).sum(axis=1).tolist(), "horizontal_by_col": (rh > 1.25).sum(axis=0).tolist()}
+    res["stretch"] = {"max": float(ratio.max()), "p99": float(np.percentile(ratio, 99)), "p95": float(np.percentile(ratio, 95)),
+                      "min": float(ratio.min())}
     res["hem"] = {vn: hem_errors(a, Vf, rows, cols, vn) for vn in a["views"]}
     print("panel", res["panel"], res["intersections"], res["stretch"], flush=True)
     print("hem", json.dumps(res["hem"]), flush=True)
