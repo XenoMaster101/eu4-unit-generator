@@ -2102,6 +2102,31 @@ The full cataphract build starts only after the spikes pass **and** the user exp
   - The job checkpoints into `<out_dir>/checkpoints` on the project drive: every finished stage, restart, candidate and shell, plus a Powell stage's best point every 60 s.
   - `ea fit --resume vNNN` reruns into the same folder on its saved `args.json` and skips recorded work. A Powell stage resumes from its best point with the evaluations left, so a resumed run is close to an uninterrupted one but not bit-identical.
   - A watchdog reads the env's python every 5 s and every evaluation checks it. All libraries are imported before the run. On loss the job saves and exits with 75, and the runner raises `AIDriveLost`; the CLI prints the resume command.
+- **Fix (user, 2026-10-20):** SN580 firmware updated to **281070WD** (read back from the disk), PCIe Link State Power Management off on mains (the PC has no battery). After the reboot: the AI environment imports, all 8 weight tensor files (15.8 GB) open, the GPU runs. One NVMe controller event at boot (2 s after start), none since.
+
+#### M15. E-A rounds 8-9; E-B and E-C machinery (2026-10-20)
+- **E-A round 8 (pilot v008), changes:**
+  - per-view azimuth windows in the subject config (L 20..85: front-left; R -85..-15: rear-left). Pilot 7's R camera had fitted the mirrored front view (+55): R's landmarks are legs only, and fore/hind swap under that mirror;
+  - roll within ±8° (level ground; pilot 7 pinned L at -14);
+  - the camera solved as scale (px per unit) and perspective strength (10/dist), not focal and dist: pilot 7's L slid to the dist bound with focal following;
+  - head landmarks weighted ×3; evaluations per stage 400 / 4000 / 3000 / 5000 (pilot 7 ran out in every stage).
+- **Pilot 8 result (procedural; gates region IoU ≥ 0.85, landmarks ≤ 2.5%):** L legs 0.96 (was 0.85), head 0.79 (was 0.89), worst landmark 5.2% (eye; nostril 3.9, bit ring 3.4, ears 3.1). R legs 0.82 (was 0.68), worst 7.7% (far hind fetlock). R's camera sat at az -84, by its window's edge. b2: L legs 0.69, R 0.82. Fails; the leg fit is solved in L, the head is not.
+- **Why the head:** the reference's head turns toward the viewer; the anatomy's neck and head joints were sagittal only, so no parameter could turn it, and weighting its landmarks traded outline for landmarks.
+- **E-A round 9 (pilot v009):** `head_yaw` in the anatomy (`head_direction`; 0 by default, game horses unchanged) and a sideways neck bend at both neck joints in `_ref3d_body.pose` (`neck_yaw`, 0 by default), fitted per view (neck ±30°, head ±40°; `head_turn` in the E-A config). R's window widened to -115..-15.
+- **E-B machinery** (`ref3d/eb.py`, Blender job `eb_plates`, AI job `ref3d_eb_measure`):
+  - coverage per body vertex from L's labels through the solved camera with visibility; evidence observed / inferred (inpainted) / symmetry (mirror vertex) / prior (nearest known); straps, trim and plume over the armour are unknown;
+  - plates in rows round a neck-to-breast axis (rows at the plate pitch along the visible side, columns at a spacing round each ring, anchored on the top line; aligned columns, as the reference's lamellae: tall, round-bottomed, a rivet at the top, dark backing between columns);
+  - each plate: curved, 2 mm thick, hung from its top edge, tilted so its lower edge clears the next row; a dark backing under the plates; only the union's outer surface carries armour (the neck tube runs into the barrel);
+  - checks: plate-plate penetration (analytic, in each plate's frame: crossing plates count their full separation distance), plate-body by ray parity per tube, body visible between plates; per-plate tilt for plates in the body, then removal (counted) of what can't clear; a spacing rule thins rows that bunch on the inside of the neck-chest bend;
+  - renders in L's solved camera (the Blender camera matches ours to 0.00002 px; lens shift is a fraction of the width when the sensor fits horizontally), Workbench lit and flat ID, Cycles close-ups (the whole neck and chest; one plate obliquely from below its row: overlap, curvature, thickness), the evidence close-up; the live Geometry Nodes setup (plate points → instances, plate scale and extra tilt as inputs) plus the realised cache in `eb_master.blend`;
+  - corrections: pitch and column spacing by the measured period per axis; more tilt or standoff only if over 5% of plates had to be removed.
+  - **Dev runs on pilot 7's body** (not a result: that body fails E-A): after fixes, 0 penetrations over 1 mm (24 of 595 plates removed, 12 lifted), no body visible, coverage IoU 0.66; the plate period found no 64 px tile that is scale in both maps (pilot 7's neck is misplaced). Assumed master scale: withers 1.55 m.
+- **E-C machinery** (`ref3d/ec.py`, Blender job `ec_panel`, AI job `ref3d_ec_measure`):
+  - the near-side panel: seam and extent from L's cloth labels on the visible barrel; flat pattern as the rest shape key; seam pinned; collision with the body offset 2 cm (the scale armour under the cloth); Blender cloth in SI units (mass per vertex from a 1.5 kg panel);
+  - the hem: the panel's hem landmarks (L side, belly, rear; R side, rear; `hem_front` is the chest panel's) against the projected bottom row; the drop per control column corrected from them;
+  - texture in pattern UV: projected from L, then R, where visible on a clean panel-class pixel; the rest by push-pull continuation plus the same row's observed detail; seam metric CIEDE2000 (kL 2) across the border, p95 gated at 8;
+  - reruns in fresh Blender processes: dev runs were bit-identical (5 of 5).
+  - **Dev runs on pilot 7's body:** hem 22% off (the panel lands where pilot 7's body is, not the reference's), stretch 9× on a few edges snagged on pilot 7's legs; to be judged on a passing body.
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
