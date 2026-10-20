@@ -7,10 +7,12 @@ Steps (each a new version folder under ``<subject>/spikes/ea/``; nothing overwri
           one raw mesh per seed (``shells/vNNN``).
   fit:    the camera and pose per view and the anatomy shape, by least squares in the AI
           environment (job ref3d_ea_fit), for every candidate; all scored by the M5 gates in both
-          cameras; three restarts (``fit/vNNN``).
+          cameras; three restarts (``fit/vNNN``). The job checkpoints as it goes; a run stopped
+          (the AI drive dropped out, the PC restarted) continues with ``--resume vNNN``, on the
+          arguments saved in that folder.
 
 usage: python -m eu4unitgen.ref3d.ea shells <subject.json> --seeds 8
-       python -m eu4unitgen.ref3d.ea fit <subject.json> --ai-python <env python> [--shells vNNN]
+       python -m eu4unitgen.ref3d.ea fit <subject.json> --ai-python <env python> [--shells vNNN] [--resume vNNN]
 """
 from __future__ import annotations
 
@@ -167,7 +169,7 @@ def text_tile(text: str, size=(300, 360)):
     return s1.text_tile(text, size)
 
 
-def fit(subject_path: Path, ai_python: str, shells_version: str | None) -> dict:
+def fit(subject_path: Path, ai_python: str, shells_version: str | None, resume: str | None = None) -> dict:
     from eu4unitgen.ai.env import AIJobRunner
 
     s = s1.load_subject(subject_path)
@@ -176,13 +178,23 @@ def fit(subject_path: Path, ai_python: str, shells_version: str | None) -> dict:
     skeleton = root / "inputs" / "skeleton.json"
     if not skeleton.is_file():
         raise FileNotFoundError(f"{skeleton}: write the vanilla skeleton first (bones, seat; read from the install)")
-    out = s1.next_version(root / "fit")
     t0 = time.time()
-    args = fit_args(s, out, root / "shells" / shells_version if shells_version else None, skeleton)
+    if resume:
+        out = root / "fit" / resume
+        if (out / "manifest.json").is_file():
+            raise FileExistsError(f"{out} is finished (manifest.json); nothing to resume")
+        args = json.loads((out / "args.json").read_text(encoding="utf-8"))
+        shells_version = args.get("shells_version")
+    else:
+        out = s1.next_version(root / "fit")
+        args = fit_args(s, out, root / "shells" / shells_version if shells_version else None, skeleton)
+        args["shells_version"] = shells_version
+        (out / "args.json").write_text(json.dumps(args, indent=1), encoding="utf-8")
     res = AIJobRunner(ai_python, timeout=6 * 3600).run_job("ref3d_ea_fit", args).result
     sheet(res, s, out / "ea_sheet.png", out.name)
     manifest = {"stage": "E-A fit", "subject": s["name"], "version": out.name, "approved": s["approved"],
-                "shells_version": shells_version, "settings": {k: v for k, v in args.items() if k != "views"},
+                "shells_version": shells_version, "resumed": bool(resume),
+                "settings": {k: v for k, v in args.items() if k != "views"},
                 "verdict": verdict(res), "sheet": str(out / "ea_sheet.png"),
                 "result": res, "seconds": round(time.time() - t0, 1)}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=float), encoding="utf-8")
@@ -200,9 +212,18 @@ def main(argv=None):
     b.add_argument("subject", type=Path)
     b.add_argument("--ai-python", required=True)
     b.add_argument("--shells", help="shells version (vNNN) to align and use as the hybrid's prior")
+    b.add_argument("--resume", help="fit version (vNNN) of a stopped run: continue it from its checkpoints")
     args = p.parse_args(argv)
     if args.cmd == "fit":
-        m = fit(args.subject, args.ai_python, args.shells)
+        from eu4unitgen.ai.env import AIDriveLost
+        try:
+            m = fit(args.subject, args.ai_python, args.shells, args.resume)
+        except AIDriveLost as exc:
+            last = sorted((s1.load_subject(args.subject)["_root"] / "spikes" / "ea" / "fit").glob("v*"))[-1].name
+            print(f"{exc}\n\nProgress is saved. Once the drive is back, resume with:\n"
+                  f"  python -m eu4unitgen.ref3d.ea fit {args.subject} --ai-python {args.ai_python} --resume "
+                  f"{args.resume or last}", flush=True)
+            raise SystemExit(75)
         print(json.dumps({"version": m["version"], "seconds": m["seconds"]}, indent=1))
     elif args.cmd == "shells":
         m = shells(args.subject, [11 * (k + 1) for k in range(args.seeds)], args.python)

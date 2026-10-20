@@ -10,7 +10,9 @@ Candidates:
   hybrid:      as procedural, plus the best shell's barrel half-widths (shoulder, ribs, hip; minus
                an armour allowance) as a prior: TripoSG as the depth prior no single view gives.
 Each fitted candidate runs ``restarts`` times from seeded perturbed starts; the best is kept and the
-spread reported. Residuals (fractions of body length): body landmarks; the outline chamfer both ways
+spread reported. Every finished stage (and a stage's best point, each minute) is checkpointed in
+``<out_dir>/checkpoints``: rerun into the same out_dir, the job resumes there (_resilience). If the
+AI drive drops out, the job saves and exits with EXIT_DRIVE_LOST. Residuals (fractions of body length): body landmarks; the outline chamfer both ways
 inside each view's zones (legs; the head in L), where pixels of an occluding class (fringe,
 tassels, plume, straps) or inpainted ones are unknown, not scored; containment (the bare body
 inside the horse mask: armour and cloth lie over it); weak priors.
@@ -29,6 +31,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np  # noqa: E402
 
+import _resilience as R  # noqa: E402
+
+WATCH = None  # R.DriveWatch, set by main: every evaluation checks the AI drive is still there
+CKPT_EVERY = 60.0  # s: a Powell stage saves its best point this often
 SHAPE = ["barrel_depth", "withers_rise", "croup_rise", "rump_drop", "breast_ahead", "rump_behind", "breast_width",
          "shoulder_width", "rib_width", "hip_width", "buttock_width", "neck_base_depth", "neck_throat_depth",
          "neck_width", "crest", "head_length", "jowl_depth", "forehead_width", "muzzle_depth", "muzzle_width",
@@ -267,6 +273,8 @@ class Model:
     def blocks(self, x):
         """-> (smooth residuals: landmarks and priors, outline residuals)."""
         import _ref3d_body as RB
+        if WATCH:
+            WATCH.check()
         smooth, rend = [], []
         for vn, view in self.views.items():
             V, F, part, lm3, cam = self.geometry(x, vn)
@@ -280,6 +288,8 @@ class Model:
 
     def residuals(self, x, which=("lm", "render", "prior")):
         import _ref3d_body as RB
+        if WATCH:
+            WATCH.check()
         r = []
         for vn, view in self.views.items():
             V, F, part, lm3, cam = self.geometry(x, vn, mesh="render" in which)
@@ -338,29 +348,46 @@ class _Res:  # least_squares-like record for the history
         self.cost, self.nfev, self.njev, self.status, self.message = cost, nfev, 0, 0, message
 
 
-def powell(model, which, mask=None, maxfev=1500, f_scale=0.1):
+def powell(model, which, mask=None, maxfev=1500, f_scale=0.1, on_best=None):
     """Derivative-free polish of the outline terms (E-A pilot 3: least_squares stopped after a few
     evaluations on them, every step rejected on raster jitter). Powell's line searches, in the
     normalised variables. Landmarks and priors stay squared; only the outline terms get the soft-L1
     loss (outliers: occluders the labels missed). Pilot 5 put the landmarks under it too, and their
-    large residuals were discounted as outliers: B's worst landmark went from 9% to 24%."""
+    large residuals were discounted as outliers: B's worst landmark went from 9% to 24%.
+    ``on_best(x, nfev)`` gets the best point so far every CKPT_EVERY s, and when the drive drops out."""
     from scipy.optimize import minimize
     x = model.x0.copy()
     s = np.ones(len(x), bool) if mask is None else mask
     x0, sc = x[s].copy(), model.scale[s]
     lo, hi = (model.lo[s] - x0) / sc, (model.hi[s] - x0) / sc
+    best = {"f": np.inf, "x": x.copy(), "n": 0, "saved": time.time()}
 
-    def cost(z):
+    def full(z):
         xx = x.copy()
         xx[s] = x0 + np.clip(z, lo, hi) * sc
+        return xx
+
+    def cost(z):
+        xx = full(z)
         smooth, rend = model.blocks(xx)
         r = rend / f_scale
-        return float(0.5 * smooth @ smooth + f_scale ** 2 * np.sum(np.sqrt(1 + r * r) - 1))
+        f = float(0.5 * smooth @ smooth + f_scale ** 2 * np.sum(np.sqrt(1 + r * r) - 1))
+        best["n"] += 1
+        if f < best["f"]:
+            best["f"], best["x"] = f, xx
+        if on_best and time.time() - best["saved"] > CKPT_EVERY:
+            on_best(best["x"], best["n"])
+            best["saved"] = time.time()
+        return f
 
-    res = minimize(cost, np.zeros(len(x0)), method="Powell", bounds=list(zip(lo, hi)),
-                   options={"maxfev": maxfev, "xtol": 1e-3, "ftol": 1e-5})
-    x[s] = x0 + np.clip(res.x, lo, hi) * sc
-    model.x0 = x
+    try:
+        res = minimize(cost, np.zeros(len(x0)), method="Powell", bounds=list(zip(lo, hi)),
+                       options={"maxfev": maxfev, "xtol": 1e-3, "ftol": 1e-5})
+    except R.DriveLost:
+        if on_best and best["n"]:
+            on_best(best["x"], best["n"])
+        raise
+    model.x0 = full(res.x)
     return _Res(float(res.fun), int(res.nfev), str(res.message))
 
 
@@ -399,33 +426,75 @@ def _note(hist, log, stage, r):
 HEAD_STARTS = [(n, h) for n in (0.0, 25.0, 50.0) for h in (40.0, 65.0, 85.0)]
 
 
-def fit_candidate(sk, views, base_shape, free_shape, priors, seed, log):
+def restore(sk, views, free_shape, base_shape, priors, state):
+    """A Model at a checkpointed parameter vector."""
+    x = dict(zip(state["names"], state["x"]))
+    m = Model(sk, views, free_shape, base_shape, priors,
+              {"cam": {vn: {c: x[f"{vn}.cam.{c}"] for c in CAM} for vn in views}, "pose": {vn: {} for vn in views},
+               "shape": {}, "skel": {}})
+    if m.names != state["names"]:
+        raise ValueError("checkpoint doesn't match this candidate's parameters")
+    m.x0 = np.array(state["x"], float)
+    return m
+
+
+def fit_candidate(sk, views, base_shape, free_shape, priors, seed, log, ck=None, key=None):
     """1. cameras from the landmarks (rest pose); 2. landmarks only (smooth: E-A pilot's Jacobian
     check), camera + pose (+ proportions and shape when free), from 9 neck / head-pitch starts:
     the reference carries its head far higher than vanilla's rest; 3. outlines added: camera + pose,
     then shape, then everything, by Powell (derivative-free; rasterised outlines stay jittery at the
-    pixel). -> (model, history)."""
-    rng = np.random.default_rng(seed)
-    cams = init_cameras(sk, views, base_shape, seed)
-    for c in cams.values():  # restarts differ: perturbed starts
-        c["az"] += rng.normal(0, 4)
-        c["el"] += rng.normal(0, 3)
-    hist, best = [], None
-    for neck, pitch in HEAD_STARTS:
-        poses = {vn: {**{leg: list(rng.normal(0, 4, 4)) for leg in LEGS}, "neck": [neck, 0.0], "head_pitch": pitch}
-                 for vn in views}
-        m = Model(sk, views, free_shape, base_shape, priors, {"cam": cams, "pose": poses, "shape": {}, "skel": {}})
-        keys = [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views] + (["shape.", "skel."] if free_shape else [])
-        r = solve(m, ("lm", "prior"), sel(m, keys), max_nfev=200, diff_step=0.01)
-        if best is None or r.cost < best[0].cost:
-            best = (r, m, (neck, pitch))
-    r, m, start = best
-    _note(hist, log, f"landmarks (start neck {start[0]:.0f}, pitch {start[1]:.0f})", r)
+    pixel). With ``ck``, each finished stage is saved under ``key`` and a rerun resumes after the last
+    one (inside a Powell stage: from its saved best point, with the evaluations left). -> (model, history)."""
+    st = (ck.load(key) if ck else None) or {}
+    hist = st.get("hist", [])
+
+    def save(m, partial=None):
+        if ck:
+            ck.save(key, {"names": m.names, "x": m.x0, "hist": hist, "partial": partial, "done": False})
+
+    if "x" in st:
+        m = restore(sk, views, free_shape, base_shape, priors, st)
+        log(f"  resumed after: {hist[-1]['stage']}")
+    else:
+        rng = np.random.default_rng(seed)
+        cams = init_cameras(sk, views, base_shape, seed)
+        for c in cams.values():  # restarts differ: perturbed starts
+            c["az"] += rng.normal(0, 4)
+            c["el"] += rng.normal(0, 3)
+        best = None
+        for neck, pitch in HEAD_STARTS:
+            poses = {vn: {**{leg: list(rng.normal(0, 4, 4)) for leg in LEGS}, "neck": [neck, 0.0], "head_pitch": pitch}
+                     for vn in views}
+            m = Model(sk, views, free_shape, base_shape, priors, {"cam": cams, "pose": poses, "shape": {}, "skel": {}})
+            keys = [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views] + (["shape.", "skel."] if free_shape else [])
+            r = solve(m, ("lm", "prior"), sel(m, keys), max_nfev=200, diff_step=0.01)
+            if best is None or r.cost < best[0].cost:
+                best = (r, m, (neck, pitch))
+        r, m, start = best
+        _note(hist, log, f"landmarks (start neck {start[0]:.0f}, pitch {start[1]:.0f})", r)
+        save(m)
     vp = [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views]
-    _note(hist, log, "outlines: camera+pose", powell(m, ("lm", "render", "prior"), sel(m, vp), maxfev=1500))
+    stages = [("outlines: camera+pose", sel(m, vp), 1500)]
     if free_shape:
-        _note(hist, log, "outlines: shape", powell(m, ("lm", "render", "prior"), sel(m, ["shape.", "skel."]), maxfev=1500))
-        _note(hist, log, "outlines: joint", powell(m, ("lm", "render", "prior"), None, maxfev=2000))
+        stages += [("outlines: shape", sel(m, ["shape.", "skel."]), 1500), ("outlines: joint", None, 2000)]
+    done = {h["stage"].removesuffix(" (resumed)") for h in hist}
+    for stage, mask, fev in stages:
+        if stage in done:
+            continue
+        part = st.get("partial") if (st.get("partial") or {}).get("stage") == stage else None
+        used = 0
+        if part:
+            m.x0, used = np.array(part["x"], float), part["nfev"]
+            log(f"  {stage}: resumed at its best point after {used} evaluations")
+
+        def on_best(x, n, stage=stage, used=used, start=m.x0.copy()):
+            if ck:
+                ck.save(key, {"names": m.names, "x": start, "hist": hist, "done": False,
+                              "partial": {"stage": stage, "x": x, "nfev": used + n}})
+
+        r = powell(m, ("lm", "render", "prior"), mask, maxfev=max(fev - used, 50), on_best=on_best)
+        _note(hist, log, stage + (" (resumed)" if part else ""), r)
+        save(m)
     return m, hist
 
 
@@ -565,16 +634,36 @@ def shell_widths(X, B, H, allowance):
 
 # ---------------------------------------------------------------- main
 
+def preload(shells):
+    """Import every library the run will need now: one loaded lazily mid-run comes off the AI drive,
+    which may be gone by then."""
+    import cv2  # noqa: F401
+    import scipy.optimize  # noqa: F401
+    import scipy.spatial  # noqa: F401
+    import scipy.spatial.transform  # noqa: F401
+    from PIL import Image  # noqa: F401
+
+    import _ref3d_body  # noqa: F401
+    import _ref3d_metrics  # noqa: F401
+    import ref3d_ed2d  # noqa: F401
+    if shells:
+        import trimesh  # noqa: F401
+
+
 def main(args_path):
+    global WATCH
     import cv2
     from PIL import Image
 
     import _ref3d_body as RB
 
     a = json.loads(Path(args_path).read_text(encoding="utf-8"))
+    preload(a.get("shells"))
+    WATCH = R.DriveWatch()
     out = Path(a["out_dir"])
     out.mkdir(parents=True, exist_ok=True)
-    logf = open(out / "fit.log", "w", encoding="utf-8")
+    ck = R.Checkpoints(out)
+    logf = open(out / "fit.log", "a", encoding="utf-8")
 
     def log(msg):
         print(msg, flush=True)
@@ -616,17 +705,37 @@ def main(args_path):
         if extra:
             rec.update(extra)
         res["candidates"][name] = rec
+        ck.save(f"cand_{name}", rec)
         log(f"{name}: " + json.dumps({vn: {"regions": r["regions"], "lm_worst": r["gates"]["landmarks"]["worst"],
                                            "outside": r["outside_share"]} for vn, r in rec["views"].items()}))
+
+    def fitted(key, base_shape, free, priors, seed):
+        """One fit, or its finished checkpoint. -> (cost, model, history)."""
+        st = ck.load(key)
+        if st and st.get("done"):
+            log(f"{key}: done earlier (checkpoint)")
+            return st["cost"], restore(sk, views, free, base_shape, priors, st), st["hist"]
+        m, hist = fit_candidate(sk, views, base_shape, free, priors, seed, log, ck, key)
+        cost = float(m.residuals(m.x0).dot(m.residuals(m.x0)) / 2)
+        ck.save(key, {"names": m.names, "x": m.x0, "hist": hist, "cost": cost, "done": True})
+        return cost, m, hist
+
+    def candidate_done(name):
+        rec = ck.load(f"cand_{name}")
+        if rec:
+            res["candidates"][name] = rec
+            log(f"{name}: scored earlier (checkpoint)")
+        return rec is not None
 
     def run_fitted(name, base_shape, free, priors):
         runs = []
         for k in range(a["restarts"]):
             log(f"{name} restart {k}")
-            m, hist = fit_candidate(sk, views, base_shape, free, priors, a["seed"] + 101 * k, log)
-            runs.append((float(m.residuals(m.x0).dot(m.residuals(m.x0)) / 2), m, hist))
+            runs.append(fitted(f"{name}_r{k}", base_shape, free, priors, a["seed"] + 101 * k))
         runs.sort(key=lambda r: r[0])
         best = runs[0][1]
+        if candidate_done(name):
+            return best
         X = np.array([r[1].x0 for r in runs])
         spread = {n: float(np.ptp(X[:, i]) / max(s, 1e-9)) for i, (n, s) in enumerate(zip(best.names, best.scale))}
         finish(name, best, runs[0][2], {"restarts": [{"cost": r[0], "history": r[2]} for r in runs],
@@ -634,9 +743,9 @@ def main(args_path):
         return best
 
     b2 = {**defaults, **sk["b2_params"]}
-    if "b2" in a["candidates"]:
+    if "b2" in a["candidates"] and not candidate_done("b2"):
         log("b2 (round 5's B, shape frozen)")
-        m, hist = fit_candidate(sk, views, b2, False, {}, a["seed"], log)
+        _, m, hist = fitted("b2_r0", b2, False, {}, a["seed"])
         finish("b2", m, hist)
     proc = None
     if "procedural" in a["candidates"]:
@@ -650,6 +759,12 @@ def main(args_path):
         shells = {}
         for p in a["shells"]:
             nm = Path(p).stem
+            rec = ck.load(f"shell_{nm}")
+            if rec:
+                shells[nm] = rec
+                log(f"shell {nm}: placed earlier (checkpoint)")
+                continue
+            WATCH.check()
             Vs, Fs = load_shell(p)
             x, cost, R0 = fit_shell(Vs, Fs, views, cams, height)
             X = shell_place(Vs, x, R0)
@@ -663,6 +778,7 @@ def main(args_path):
                 rec["views"][vn]["render"] = str(out / f"shell_{nm}_{vn}.png")
             rec["widths"] = shell_widths(X, BL, H, a["armour_allowance"])
             shells[nm] = rec
+            ck.save(f"shell_{nm}", rec)
             log(f"shell {nm}: cost {cost:.4f} " + json.dumps({vn: {"horse": r["horse_iou"], "regions": r["regions"]} for vn, r in rec["views"].items()}))
         res["shells"] = shells
         best = min(shells, key=lambda n: shells[n]["cost"])
@@ -671,8 +787,10 @@ def main(args_path):
         res["hybrid_priors"] = {k: v[0] for k, v in priors.items()}
     if "hybrid" in a["candidates"] and priors:
         run_fitted("hybrid", defaults, True, priors)
-    res["seconds"] = round(time.time() - t0, 1)
-    Path(a["result_path"]).write_text(json.dumps(res, default=float), encoding="utf-8")
+    res["seconds"] = round(time.time() - t0, 1)  # this session's time only, when resumed
+    text = json.dumps(res, default=float)
+    (out / "result.json").write_text(text, encoding="utf-8")  # the project drive: kept if the AI drive goes now
+    Path(a["result_path"]).write_text(text, encoding="utf-8")
 
 
 def _write_obj(path, V, F):
@@ -683,4 +801,12 @@ def _write_obj(path, V, F):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    try:
+        main(sys.argv[1])
+    except Exception as exc:
+        # the drive can go between two checks: any failure while it's gone counts as the drive's
+        if isinstance(exc, R.DriveLost) or not R.drive_ok():
+            print(f"STOPPED: the AI drive dropped out ({exc!r}). Progress is checkpointed; rerun into the "
+                  "same out_dir to resume.", flush=True)
+            sys.exit(R.EXIT_DRIVE_LOST)
+        raise

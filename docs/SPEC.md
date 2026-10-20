@@ -2095,6 +2095,14 @@ The full cataphract build starts only after the spikes pass **and** the user exp
 - **Visual check:** the unbroken variant looks like the reference; each break is visibly wrong (the plate and head breaks only at full size).
 - **3D rerun after E-A:** the same breaks applied to the master, rendered through the solved cameras; adds the penetration gate and the camera residual.
 
+#### M14. The AI drive dropped out (2026-10-20); long runs now resume
+- **Incident:** D: (WD Blue SN580 NVMe, firmware 281010WD; it holds the AI environment, the weights and the EU4 install) reset and vanished mid-run at 11:24. Windows logged NVMe controller resets on 9 days since 2026-09-06, 4 of them on 10-16 to 10-20, each followed by failed writes to `$Mft`.
+- **After the restart:** chkdsk found no problems. All 36 weight files match their HF hashes and BiRefNet matches rembg's md5. 26,479 of 26,482 env files match their pip RECORDs; the other 3 are `cv2/` files that `opencv-python-headless` overwrote over `opencv-python` (they match headless's RECORD). The EU4 install (21,312 files, 9.6 GB) reads without errors. SMART: no media errors, spare 100%, 1% used.
+- **Resilience (`ai/jobs/_resilience.py`):**
+  - The job checkpoints into `<out_dir>/checkpoints` on the project drive: every finished stage, restart, candidate and shell, plus a Powell stage's best point every 60 s.
+  - `ea fit --resume vNNN` reruns into the same folder on its saved `args.json` and skips recorded work. A Powell stage resumes from its best point with the evaluations left, so a resumed run is close to an uninterrupted one but not bit-identical.
+  - A watchdog reads the env's python every 5 s and every evaluation checks it. All libraries are imported before the run. On loss the job saves and exits with 75, and the runner raises `AIDriveLost`; the CLI prints the resume command.
+
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
 
