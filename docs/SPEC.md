@@ -1644,6 +1644,39 @@ Goal: a **genuinely new** horse mesh from the reference, working in game on the 
     - **Open decision for the user:** a shallower barrel than the reference, or a shorter caparison than `hem_length` 0 allows, or both.
   - **Test 18** staged in `build/test18/stage`: tier 1 B, tier 2 A, tier 3 vanilla.
   - **For the generalization round:** flank width allowance, leg inflation, hem height and stirrup position must be derived automatically, not tuned per horse (v17/v20: flank 1.05, legs 1.25, hems from the reference limited to knee/hock + 0.4, stirrup tread from the posed rider's boot). Hem length becomes a user setting from game-readable (legs show) to reference-accurate (the reference's rear hem hangs to 1.3).
+- **Round 6 (user decision, 2026-10-19): readability wins by default.** A general, measured rule for every generated horse.
+  - **The rule:** at the game camera (58° down, map scale) the visible leg length is at least **80% of vanilla's**, measured the same way on both (`_horse_read.leg_visible`):
+    - samples every 0.25 in height along each leg's axis (ground to the Up bone);
+    - parallel rays from the camera at five azimuths (front, 45°, side, 135°, back);
+    - occluders: everything but the lower leg (body triangles nearest a leg segment below the Up bone and within 1.0 of it). Caparison, stirrups, chanfron and tail always occlude; legs don't hide legs;
+    - result: visible units per leg, averaged. Vanilla: 3.86.
+  - **What the app does to pass** (`fresh_horse` `readability`, mode `auto`, the default):
+    1. Make an anatomy barrel shallower in steps of 0.05× vanilla's depth, never under **1.05×** (heavy references still look heavier).
+    2. Then shorten the draped hem along `hem_length` 0 → −2 in steps of 0.25. Below 0 the hem goes up past the belly; −1 is 1.2 above it, −2 is a band round the barrel. A hem always stays 0.8 under the cloth's top.
+    3. The trial includes the stirrups and the tail; the trial cloth hangs on the body alone, as the real one does.
+  - **User settings kept:** `barding.hem_length` (1 reference-accurate … 0 game-readable … −2 band) and `readability.mode: "reference"` (keeps the reference's look, only reports). No GUI for them yet: horse builds are still job configs.
+  - **Outline check** (reported by `horse_proportions`, flagged when it fails):
+    - `outline`: the share of the head-and-neck axis left in view;
+    - `contrast`: CIE76 ΔE between the legs' and the body's mean texture colours, flagged under 12 (assumed; vanilla 12.8);
+    - `legs`: flagged under 0.8.
+  - **Rider clearance:** a shallower barrel is widest higher up and hid the rider's leg (0.90). Above the rider's knee (0.735 H) the barrel now stays inside a line narrowing to 1.58 at 0.89 H, calibrated on test 18's B: 1.12.
+  - **Result, the new B (b3):**
+    - **Steps:** depth 1.20 → 1.05 in four steps (legs 33% → 36%: the barrel wasn't the occluder), then the hem rose to −2 (81%). It passes only at the shortest setting: the body alone would show 90%.
+    - **Final numbers:**
+
+      | | Legs (vs vanilla) | Depth | Width | Rider's leg | Inside-out triangles idle / walk / attack |
+      |---|---|---|---|---|---|
+      | New B | 81% | 1.03 | 1.08 | 1.12 | 8 / 2 / 7 |
+      | Test 17's B | 49% | | | | |
+      | Test 18's B | 40% | | | | |
+      | Vanilla | | | | | 13 / 8 / 32 |
+
+      The depth is 1.03 after the remesh, a little under the floor, because the loop measures the tubes.
+  - **Critique** (`build/test19/critique.md`, sheet `build/test19/renders/sheet_before_after.png`):
+    - **Legs:** now show.
+    - **Map scale:** still "grey block, red saddle cloth, dark sticks". Two causes the rule doesn't touch: the breast is as deep as the girth (from the front 1.7 against vanilla's 3.1), and the flat grey mail. Breast depth is the next lever.
+  - **Test 19** staged in `build/test19/stage`: tier 1 the new B, tier 2 test 18's B, tier 3 vanilla.
+  - **After each round** the main render sheet is opened for the user automatically (user, round 6).
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
