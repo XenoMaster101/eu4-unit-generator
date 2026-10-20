@@ -96,11 +96,11 @@ def seam_and_extent(a, Vs, vpart, cam, bvh, cam_pos, mpu, n_st):
     return st, np.polyval(c, st)
 
 
-def surface_x(bvh, y, z, x_out):
-    """The proxy's near-side surface at (y, z) (scene frame): a ray from outside toward the midplane.
-    -> (point, normal) or None."""
-    o = Vector(to_scene(np.array([[x_out, y, z]]))[0])
-    d = Vector((1.0, 0.0, 0.0))  # scene +x = PDX -x: toward the midplane
+def surface_x(bvh, y, z, x_out, sign=1.0):
+    """The proxy's surface at (y, z) (scene frame) on the near side (``sign`` 1: PDX +x, the horse's
+    left) or the far side (-1): a ray from outside toward the midplane. -> (point, normal) or None."""
+    o = Vector(to_scene(np.array([[sign * x_out, y, z]]))[0])
+    d = Vector((sign, 0.0, 0.0))  # scene +x = PDX -x: toward the midplane from the near side
     loc, normal, fi, dist = bvh.ray_cast(o, d, 2 * x_out)
     if loc is None:
         return None
@@ -118,19 +118,20 @@ def build_panel(a, st, top, proxy_bvh, mpu):
     drops = np.interp(np.linspace(0, 1, cols), np.linspace(0, 1, len(ctrl)), ctrl)
     clear = pn["start_clear_m"] / mpu
     x_out = 50.0
+    sign = -1.0 if pn.get("side") == "right" else 1.0  # the far side: the near side's seam, mirrored
     V = np.zeros((rows + 1, cols, 3))
     for c in range(cols):
         last = None
         for r in range(rows + 1):
             y = yc[c] - drops[c] * r / rows
-            hit = surface_x(proxy_bvh, y, zc[c], x_out)
-            if hit is not None and hit[1][0] < -0.2:  # facing out (scene -x is PDX +x, the near side)
+            hit = surface_x(proxy_bvh, y, zc[c], x_out, sign)
+            if hit is not None and sign * hit[1][0] < -0.2:  # facing out (scene -x is PDX +x, the near side)
                 p = hit[0] + hit[1] * clear
                 last = p
             elif last is not None:
                 p = np.array([last[0], to_scene(np.array([[0, y, zc[c]]]))[0][1], last[2]])
             else:
-                p = to_scene(np.array([[x_out * 0 + 1.0, y, zc[c]]]))[0]
+                p = to_scene(np.array([[sign * 1.0, y, zc[c]]]))[0]
             V[r, c] = p
     # the flat pattern, flared: each row as wide as it starts draped over the body (E-C on pilot 12's
     # body: a rectangle the seam's width stretched 10-25% round the barrel's bulge), centred on the
@@ -419,15 +420,20 @@ def main():
         return
 
     # ---- texture with evidence
-    tex, ev = texture(a, Vf, rows, cols, Fg, (Vs, Fs), mpu, a["texture_px"])
+    if a.get("texture_from"):  # the far panel: the near panel's texture, by symmetry
+        tex = load_rgb(a["texture_from"])
+        ev = np.full(tex.shape[:2], 3, np.int8)
+    else:
+        tex, ev = texture(a, Vf, rows, cols, Fg, (Vs, Fs), mpu, a["texture_px"])
     save_png(out / "panel_texture.png", tex)
     evc = np.zeros(ev.shape + (3,), np.uint8)
     evc[ev == 0] = (60, 200, 80)
     evc[ev == 1] = (70, 120, 240)
     evc[ev == 2] = (230, 60, 60)
+    evc[ev == 3] = (150, 90, 230)  # symmetry (the far panel)
     save_png(out / "panel_evidence.png", evc)
     res["texture"] = {"path": str(out / "panel_texture.png"), "evidence": str(out / "panel_evidence.png"),
-                      "share": {k: float((ev == i).mean()) for i, k in enumerate(("observed_L", "observed_R", "prior"))}}
+                      "share": {k: float((ev == i).mean()) for i, k in enumerate(("observed_L", "observed_R", "prior", "symmetry"))}}
 
     # ---- scene for renders (units, not metres)
     bpy.data.objects.remove(proxy)
@@ -478,4 +484,5 @@ def main():
         json.dump(res, f, default=float)
 
 
-main()
+if __name__ == "__main__":  # the master build imports this module
+    main()

@@ -83,6 +83,23 @@ BARY = np.array([[1 / 3, 1 / 3, 1 / 3], [0.6, 0.2, 0.2], [0.2, 0.6, 0.2], [0.2, 
                  [0.45, 0.45, 0.1], [0.1, 0.45, 0.45], [0.45, 0.1, 0.45]])
 
 
+def poly_mask(shape, polys):
+    """Pixels inside any polygon (even-odd per polygon, row by row)."""
+    m = np.zeros(shape, bool)
+    for poly in polys or []:
+        P = np.array(poly, float)
+        ys = np.arange(shape[0]) + 0.5
+        for y in ys[(ys >= P[:, 1].min()) & (ys <= P[:, 1].max())]:
+            xs = []
+            for (x0, y0), (x1, y1) in zip(P, np.roll(P, -1, axis=0)):
+                if (y0 <= y < y1) or (y1 <= y < y0):
+                    xs.append(x0 + (y - y0) * (x1 - x0) / (y1 - y0))
+            xs.sort()
+            for x0, x1 in zip(xs[::2], xs[1::2]):
+                m[int(y), max(0, int(np.ceil(x0 - 0.5))):min(shape[1], int(np.floor(x1 - 0.5)) + 1)] = True
+    return m
+
+
 def coverage(a, Vs, Fs, part, Bp, cam, bvh, cam_pos, tubes):
     """Per triangle of E-B's region (the neck and the barrel in front of the saddle; only the union's
     outer surface, the head excepted): covered or not, and the evidence. Each triangle samples 7
@@ -95,10 +112,10 @@ def coverage(a, Vs, Fs, part, Bp, cam, bvh, cam_pos, tubes):
     -> (covered per face, evidence per face, region per face, region per vertex)."""
     classes = a["classes"]
     names = list(classes)
-    lab = decode(load_rgb(a["view"]["labels"]), classes)
-    inp = load_rgb(a["view"]["inpainted"])[..., 0] > 127
-    Hh, Ww = lab.shape
-    vreg = (part == 1) | ((part == 0) & (to_pdx(Vs)[:, 2] < Bp["Saddle_Node"][2]))
+    if a.get("region") == "all":  # the master's armour: the neck and the whole barrel
+        vreg = (part == 1) | (part == 0)
+    else:  # E-B: the neck and the barrel in front of the saddle
+        vreg = (part == 1) | ((part == 0) & (to_pdx(Vs)[:, 2] < Bp["Saddle_Node"][2]))
     body_tubes = {q: t for q, t in tubes.items() if q not in (2, 3, 4)}
     for i in np.nonzero(vreg)[0]:  # vertices buried in another tube aren't surface (the head excepted:
         if in_other_tube(Vs[i], part[i], body_tubes):  # E-A's head + chanfron swells over the neck)
@@ -108,12 +125,24 @@ def coverage(a, Vs, Fs, part, Bp, cam, bvh, cam_pos, tubes):
     unknown_cls = {names.index(c) for c in a["occluders"] if c in names}
     tol = a["label_tol_px"]
     vt = a["visibility_tol"]
-    # the armour region in L: scale, with the straps and trim lying inside it, closed (E-B on pilot 12's
-    # body: per-sample votes flipped between scale and the straps across it, and the plates fragmented)
-    r = a["close_px"]
-    occl = np.isin(lab, list(unknown_cls))
-    armour = closing(lab == scale_i, r) & ((lab == scale_i) | occl)
-    armour = closing(armour, r // 2)
+    # each view: its labels, the armour region (scale, with the straps and trim lying inside it, closed:
+    # E-B on pilot 12's body: per-sample votes flipped between scale and the straps across it), its camera.
+    # Views other than the first vote only on the parts they're trusted for (R: the barrel; the body
+    # stands in L's pose)
+    views = []
+    for k, v in enumerate(a.get("cover_views") or [{**a["view"], "camera": cam, "parts": None}]):
+        lab = decode(load_rgb(v["labels"]), classes)
+        never = poly_mask(lab.shape, v.get("never_use"))
+        lab[never] = -1
+        inp = load_rgb(v["inpainted"])[..., 0] > 127
+        r = v.get("close_px", a["close_px"])
+        occl = np.isin(lab, list(unknown_cls))
+        armour = closing(lab == scale_i, r) & ((lab == scale_i) | occl)
+        armour = closing(armour, r // 2)
+        Rv, tv = RB.camera_matrix(v["camera"])
+        views.append({"lab": lab, "inp": inp, "armour": armour, "cam": v["camera"], "pos": Vector(-Rv.T @ tv),
+                      "parts": set(v["parts"]) if v.get("parts") else None, "tol": v.get("label_tol_px", tol)})
+    fpart = part[Fs[:, 0]]
     fids = np.nonzero(freg)[0]
     state = np.full(len(Fs), -1)
     ev = np.full(len(Fs), 3)
@@ -121,28 +150,33 @@ def coverage(a, Vs, Fs, part, Bp, cam, bvh, cam_pos, tubes):
     for f in fids:
         tri = Vs[Fs[f]]
         pts = BARY @ tri
-        p2, _ = RB.project(to_pdx(pts), cam)
         yes = no = inpainted = 0
-        for x, (u, v) in zip(pts, p2):
-            if not (0 <= u < Ww and 0 <= v < Hh):
+        for V_ in views:
+            if V_["parts"] is not None and fpart[f] not in V_["parts"]:
                 continue
-            d = Vector(x) - cam_pos
-            hit = bvh.ray_cast(cam_pos, d.normalized(), d.length - 1e-3)
-            if hit[0] is not None and (hit[0] - Vector(x)).length > vt:
-                hidden += 1
-                continue
-            win = lab[int(max(v - tol, 0)):int(min(v + tol + 1, Hh)), int(max(u - tol, 0)):int(min(u + tol + 1, Ww))].ravel()
-            win = win[win >= 0]
-            if not len(win):
-                continue
-            c = np.bincount(win).argmax()
-            if armour[int(v), int(u)]:
-                yes += 1
-            elif c in unknown_cls:
-                continue
-            else:
-                no += 1
-            inpainted += bool(inp[int(v), int(u)])
+            lab, inp, armour, tol_ = V_["lab"], V_["inp"], V_["armour"], V_["tol"]
+            Hh, Ww = lab.shape
+            p2, _ = RB.project(to_pdx(pts), V_["cam"])
+            for x, (u, v) in zip(pts, p2):
+                if not (0 <= u < Ww and 0 <= v < Hh):
+                    continue
+                d = Vector(x) - V_["pos"]
+                hit = bvh.ray_cast(V_["pos"], d.normalized(), d.length - 1e-3)
+                if hit[0] is not None and (hit[0] - Vector(x)).length > vt:
+                    hidden += 1
+                    continue
+                win = lab[int(max(v - tol_, 0)):int(min(v + tol_ + 1, Hh)), int(max(u - tol_, 0)):int(min(u + tol_ + 1, Ww))].ravel()
+                win = win[win >= 0]
+                if not len(win):
+                    continue
+                c = np.bincount(win).argmax()
+                if armour[int(v), int(u)]:
+                    yes += 1
+                elif c in unknown_cls:
+                    continue
+                else:
+                    no += 1
+                inpainted += bool(inp[int(v), int(u)])
         if yes + no >= 2:
             state[f] = 1 if yes >= no else 0
             ev[f] = 1 if inpainted * 2 > yes + no else 0
@@ -330,7 +364,24 @@ def layout(a, bvh, Bp, Hs, cover_at, mpu, Vs, Fs, vn, fpart, tubes):
     return plates
 
 
-def layout_surface(a, Vs, Fs, vn, cov_f, fev, Bp, Hs, mpu):
+def barrel_frame(Bp, Hs, Vs, Fs, part, step):
+    """The barrel's row frame (the master's armour): a vertical axis through the barrel's middle, rows
+    round the body horizontally, plates hanging down; the anchor line at the rump, the seam at the
+    chest (the neck patch covers it). -> (s, C, T, A, Bd) in the scene frame."""
+    X = Vs[np.unique(Fs[part[Fs[:, 0]] == 0])]
+    zc = 0.5 * (X[:, 2].min() + X[:, 2].max())
+    y0, y1 = X[:, 1].max() + 0.1 * Hs, X[:, 1].min() - 0.1 * Hs
+    s = np.arange(0, y0 - y1, step)
+    C = np.stack([np.zeros_like(s), y0 - s, np.full_like(s, zc)], 1)
+    T = np.tile([0.0, -1.0, 0.0], (len(s), 1))
+    A = np.tile([0.0, 0.0, 1.0], (len(s), 1))  # +Z: the rump (the horse faces -Z)
+    Bd = np.cross(T, A)
+    if np.mean(Bd @ np.array([-1.0, 0.0, 0.0])) < 0:  # toward the horse's left (scene -x)
+        Bd = -Bd
+    return s, C, T, A, Bd
+
+
+def layout_surface(a, Vs, Fs, vn, cov_f, fev, Bp, Hs, mpu, frame=None):
     """Plate frames on the covered surface itself (E-B on pilot 10's body: rays from the axis slipped
     through the tubes' junctions or ended out of reach, and half the covered surface had no plate).
     Each covered vertex gets a row coordinate (arc length along the neck-to-breast axis) and a column
@@ -340,8 +391,11 @@ def layout_surface(a, Vs, Fs, vn, cov_f, fev, Bp, Hs, mpu):
     gradient of the row coordinate. -> plates (by row), as ``layout``."""
     pl = a["plate"]
     pitch, spacing = pl["pitch_m"] / mpu, pl["spacing_m"] / mpu
-    sa, C, T = axis_curve(Bp, Hs, pitch / 8)
-    A, Bd = ring_frames(T)
+    if frame is None:
+        sa, C, T = axis_curve(Bp, Hs, pitch / 8)
+        A, Bd = ring_frames(T)
+    else:
+        sa, C, T, A, Bd = frame
     vids = np.unique(Fs[cov_f])
     if not len(vids):
         return []
@@ -484,6 +538,55 @@ def ring_arc(s_v, th, R_v, ds, nth=72):
     a0 = np.array([np.interp(t, tb, arc[b]) for t, b in zip(th, b0)])
     a1 = np.array([np.interp(t, tb, arc[b]) for t, b in zip(th, b1)])
     return (1 - f) * a0 + f * a1
+
+
+def fill_holes(plates, Vs, Fs, vn, cov_f, fev, Vt, Ft, tilt, standoff, th, spacing, rng, n=4000):
+    """Plates where the lattice left holes (E-B / master: the lattice placed 55-75% of the plates the
+    covered area needs, and the backing showed through 50-60% of it): sample the covered surface (area
+    weighted), keep the spots no plate covers (a ray down the normal meets no plate), thin them to one
+    per 0.8 column spacing, and give each a plate: the surface normal, "down" from the nearest plate.
+    The penetration checks then remove any that cross. -> new plates."""
+    from mathutils.kdtree import KDTree as KD
+    if not plates:
+        return []
+    Ms = plate_matrices(plates, tilt, standoff)
+    P4 = np.c_[Vt, np.ones(len(Vt))]
+    PV = np.einsum("nij,kj->nki", Ms, P4)[..., :3].reshape(-1, 3)
+    PF = (Ft[None] + (np.arange(len(Ms)) * len(Vt))[:, None, None]).reshape(-1, 3)
+    bvh = BVHTree.FromPolygons([tuple(v) for v in PV], [tuple(int(i) for i in f) for f in PF])
+    fids = np.nonzero(cov_f)[0]
+    tri = Vs[Fs[fids]]
+    area = 0.5 * np.linalg.norm(np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]), axis=1)
+    pick = rng.choice(len(fids), n, p=area / area.sum())
+    u, v = rng.random((2, n))
+    flip = u + v > 1
+    u[flip], v[flip] = 1 - u[flip], 1 - v[flip]
+    lift = standoff + 6 * th
+    kd = KD(len(plates))
+    for i, q in enumerate(plates):
+        kd.insert(Vector(q["pos"]), i)
+    kd.balance()
+    new, taken = [], []
+    for k, (u_, v_) in enumerate(zip(u, v)):
+        f = fids[pick[k]]
+        a_, b_, c_ = Fs[f]
+        pos = (1 - u_ - v_) * Vs[a_] + u_ * Vs[b_] + v_ * Vs[c_]
+        z = (1 - u_ - v_) * vn[a_] + u_ * vn[b_] + v_ * vn[c_]
+        z /= np.linalg.norm(z)
+        hit = bvh.ray_cast(Vector(pos + z * lift), Vector(-z), lift + 2 * th)
+        if hit[0] is not None:
+            continue  # under a plate
+        if any(np.linalg.norm(pos - t) < 0.8 * spacing for t in taken):
+            continue
+        co, j, d = kd.find(Vector(pos))
+        y = plates[j]["y"] - (plates[j]["y"] @ z) * z
+        if np.linalg.norm(y) < 1e-9:
+            continue
+        y /= np.linalg.norm(y)
+        new.append({"pos": pos, "x": np.cross(y, z), "y": y, "z": z, "ev": int(fev[f]), "row": plates[j]["row"]})
+        taken.append(pos)
+    print("fill: holes found", len(new), flush=True)
+    return new
 
 
 def crowded(c, plates, pitch, spacing, w, h):
@@ -746,18 +849,37 @@ def main():
 
     pl = a["plate"]
     nrm = vertex_normals(Vs, Fs)
-    plates = layout_surface(a, Vs, Fs, nrm, cov_f, fev, Bp, Hs, mpu)
+    if a.get("region") == "all":  # the master: the neck and breast patch, then the barrel behind the shoulder
+        cen_z = to_pdx(Vs[Fs].mean(axis=1))[:, 2]
+        z_split = 0.5 * (Bp["HorseFrontLeftUp"][2] + Bp["HorseFrontRightUp"][2]) + 0.15 * Hs
+        front = (part == 1) | (cen_z < z_split)  # part: per triangle here
+        plates = layout_surface(a, Vs, Fs, nrm, cov_f & front, fev, Bp, Hs, mpu)
+        pitch_ = pl["pitch_m"] / mpu
+        back = layout_surface(a, Vs, Fs, nrm, cov_f & ~front, fev, Bp, Hs, mpu,
+                              frame=barrel_frame(Bp, Hs, Vs, Fs, vpart, pitch_ / 8))
+        rmax = max([q["row"] for q in plates] or [0]) + 1
+        for q in back:
+            q["row"] += rmax
+        plates += back
+    else:
+        plates = layout_surface(a, Vs, Fs, nrm, cov_f, fev, Bp, Hs, mpu)
     pitch, spacing = pl["pitch_m"] / mpu, pl["spacing_m"] / mpu
     w, h = pl["width_frac"] * spacing, pl["height_frac"] * pitch
     th, standoff = pl["thickness_m"] / mpu, pl["standoff_m"] / mpu
     tilt = math.atan(pl["tilt_clear"] * (th + pl["clearance_m"] / mpu) / pitch) + math.radians(pl["tilt_extra_deg"])
     kappa = 1.0 / (2 * pl["curve_radius_m"] / mpu)
     Vt, Ft, sdf = plate_template(w, h, th, kappa)
+    filled = 0
+    for _ in range(a.get("fill_passes", 2)):  # M6 'regenerate region': plates where the lattice left holes
+        add = fill_holes(plates, Vs, Fs, nrm, cov_f, fev, Vt, Ft, tilt, standoff, th, spacing, rng)
+        plates += add
+        filled += len(add)
     Ms = plate_matrices(plates, tilt, standoff)
     res["plates"] = {"count": len(plates), "pitch_units": pitch, "spacing_units": spacing, "width_units": w,
                      "height_units": h, "thickness_units": th, "standoff_units": standoff,
                      "tilt_deg": math.degrees(tilt), "kappa": kappa, "rows": int(max([p["row"] for p in plates] or [0]) + 1),
-                     "tris_per_plate": len(Ft), "tris": len(Ft) * len(plates)}
+                     "tris_per_plate": len(Ft), "verts_per_plate": len(Vt), "tris": len(Ft) * len(plates),
+                     "filled": filled}
     evc = np.bincount([p["ev"] for p in plates], minlength=4)
     res["evidence_share"] = {EVIDENCE[k]: float(evc[k] / max(len(plates), 1)) for k in range(4)}
     print("plates", res["plates"], res["evidence_share"], flush=True)
@@ -948,4 +1070,5 @@ def main():
         json.dump(res, f, default=float)
 
 
-main()
+if __name__ == "__main__":  # the master build imports this module
+    main()

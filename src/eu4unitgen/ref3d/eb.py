@@ -118,7 +118,9 @@ def correct(plate: dict, r: dict, m: dict, cfg: dict) -> list[str]:
 
 
 def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None = None,
-        candidate: str | None = None) -> dict:
+        candidate: str | None = None, out: Path | None = None, over: dict | None = None,
+        extra: dict | None = None) -> dict:
+    """E-B (or, from the master build: ``out`` its armour folder, ``over`` settings, ``extra`` job args)."""
     from eu4unitgen.ai.env import AIJobRunner
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.project import default_blender_path
@@ -130,12 +132,17 @@ def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None
     ea_manifest = json.loads((ea_dir / "manifest.json").read_text(encoding="utf-8"))
     cand = candidate or best_candidate(ea_manifest)
     cfg = json.loads(json.dumps(EB_DEFAULTS))
-    for k, v in (s.get("eb") or {}).items():
-        if isinstance(v, dict) and isinstance(cfg.get(k), dict):
-            cfg[k].update(v)
-        else:
-            cfg[k] = v
-    out = s1.next_version(root / "eb")
+    for src in (s.get("eb") or {}, over or {}):  # the subject's settings, then the caller's (the master)
+        for k, v in src.items():
+            if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+                cfg[k].update(v)
+            else:
+                cfg[k] = v
+    if out is None:
+        out = s1.next_version(root / "eb")
+    else:
+        check_writes({"out_dir": str(out)}, allowed_roots(ai_python), "E-B")
+        out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     br = BlenderRunner(blender or default_blender_path(), log_dir=out, timeout=3600)
     ai = AIJobRunner(ai_python, timeout=1800)
@@ -147,6 +154,7 @@ def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None
         d = out / f"round{k:02d}"
         d.mkdir()
         b, m = job_args(s, cfg, ea_dir, cand, d)
+        b.update(extra or {})
         b["closeups"] = False
         r = br.run_job("eb_plates", b).result
         mr = ai.run_job("ref3d_eb_measure", m).result
@@ -165,6 +173,7 @@ def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None
     d = out / "final"
     d.mkdir()
     b, m = job_args(s, cfg, ea_dir, cand, d)
+    b.update(extra or {})
     b["closeups"] = True
     r = br.run_job("eb_plates", b).result
     mr = ai.run_job("ref3d_eb_measure", m).result

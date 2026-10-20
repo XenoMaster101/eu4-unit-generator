@@ -72,7 +72,8 @@ def job_args(s: dict, cfg: dict, ea_dir: Path, cand: str, out: Path) -> dict:
 
 
 def hem_worst(r: dict, skip=()) -> float:
-    return max(x["error"] for vn, v in r["hem"].items() if vn not in skip for x in v.values())
+    """The worst hem landmark (0 when none is observed: the far panel)."""
+    return max([x["error"] for vn, v in r["hem"].items() if vn not in skip for x in v.values()], default=0.0)
 
 
 def correct_drops(panel: dict, r: dict, a: dict, skip=()) -> list[str]:
@@ -118,7 +119,10 @@ def gates(r: dict, cfg: dict, g: dict, reruns: dict | None, seam: dict | None) -
 
 
 def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None = None,
-        candidate: str | None = None) -> dict:
+        candidate: str | None = None, out: Path | None = None, over: dict | None = None,
+        extra: dict | None = None) -> dict:
+    """E-C (or, from the master build: ``out`` the panel's folder, ``over`` settings, ``extra`` job args;
+    with ``rounds`` 0 the pattern is built as given: the far panel, from the near one's)."""
     from eu4unitgen.ai.env import AIJobRunner
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.project import default_blender_path
@@ -130,13 +134,18 @@ def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None
     ea_dir = root / "ea" / "fit" / ea_version
     cand = candidate or best_candidate(json.loads((ea_dir / "manifest.json").read_text(encoding="utf-8")))
     cfg = json.loads(json.dumps(EC_DEFAULTS))
-    for k, v in (s.get("ec") or {}).items():
-        if isinstance(v, dict) and isinstance(cfg.get(k), dict):
-            cfg[k].update(v)
-        else:
-            cfg[k] = v
+    for src in (s.get("ec") or {}, over or {}):  # the subject's settings, then the caller's (the master)
+        for k, v in src.items():
+            if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+                cfg[k].update(v)
+            else:
+                cfg[k] = v
     g = json.loads((ea_dir / "args.json").read_text(encoding="utf-8"))["gates"]
-    out = s1.next_version(root / "ec")
+    if out is None:
+        out = s1.next_version(root / "ec")
+    else:
+        check_writes({"out_dir": str(out)}, allowed_roots(ai_python), "E-C")
+        out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     br = BlenderRunner(blender or default_blender_path(), log_dir=out, timeout=3600)
     rounds = []
@@ -144,6 +153,7 @@ def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None
         d = out / f"round{k:02d}"
         d.mkdir()
         a = job_args(s, cfg, ea_dir, cand, d)
+        a.update(extra or {})
         a["finish"] = False
         r = br.run_job("ec_panel", a).result
         used = json.loads(json.dumps(cfg["panel"]))
@@ -154,12 +164,13 @@ def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None
               f"intersections {r['intersections']['over_limit']}, stretch p99 {r['stretch']['p99']:.3f}" + (f"; next: {'; '.join(did)}" if did else ""), flush=True)
         if not did:
             break
-    if rounds[-1]["corrections"]:  # ran out of rounds: build the best pattern simulated
+    if rounds and rounds[-1]["corrections"]:  # ran out of rounds: build the best pattern simulated
         lc = tuple(cfg.get("low_confidence", ()))
         cfg["panel"] = min(rounds, key=lambda q: hem_worst(q["result"], lc))["panel"]
     d = out / "final"
     d.mkdir()
     a = job_args(s, cfg, ea_dir, cand, d)
+    a.update(extra or {})
     r = br.run_job("ec_panel", a).result
     base = json.loads((d / "panel_vertices.json").read_text(encoding="utf-8"))
     diffs = []
@@ -167,6 +178,7 @@ def run(subject_path: Path, ea_version: str, ai_python: str, blender: str | None
         dd = out / f"rerun{k}"
         dd.mkdir()
         ar = job_args(s, cfg, ea_dir, cand, dd)
+        ar.update(extra or {})
         ar["finish"] = False
         br.run_job("ec_panel", ar)
         other = json.loads((dd / "panel_vertices.json").read_text(encoding="utf-8"))
