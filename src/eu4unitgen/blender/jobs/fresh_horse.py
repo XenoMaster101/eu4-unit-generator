@@ -1036,7 +1036,10 @@ def main():
         res["stages"]["imported"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
         keep_largest(obj)
         res["stages"]["largest_piece"] = {"tris": tri_count(obj)}
-        s, off = fit(obj, vanilla)
+        if a.get("fit", True):
+            s, off = fit(obj, vanilla)
+        else:  # already on the vanilla skeleton (Track M's game version): a box fit would move it off the bones
+            s, off = 1.0, [0.0, 0.0, 0.0]
         res["fit"] = {"scale": s, "offset": off}
         if a.get("reshape"):
             res["fit"]["height_scale"] = scale_height(obj, vanilla, van["bones"])

@@ -22,8 +22,8 @@ Game fix round (the user on test 20's gallery, 2026-10-21):
     rays against the posed barrel and neck, hanging straight down below them (test 20's stood out like wings);
   * the cloth clean: the panels' and chest drapes' albedo from their labels (``labels``: the panel's own label
     texture, the drapes' view-L labels through their projected UVs), cloth one red, trim one gold, both from the
-    reference's lit pixels (``clean``: view L's image and labels; cloth: the median above its median brightness,
-    trim: of its brightest quarter), so the crosses and borders read (test 20's was dark and mottled);
+    reference's pixels (``clean``: view L's image and labels; each class's brighter, more saturated half, lifted to
+    its highlights' brightness), so the crosses and borders read (test 20's was dark and mottled);
   * the ears and the plume as pieces of their own (part 1: fresh_horse pins them to HorseHead), lost in the voxel
     remesh before;
   * the tail left out of the solid: fresh_horse builds its own along vanilla's tail bones (test 20's stuck out).
@@ -128,11 +128,15 @@ def clean_palette(cl):
     img = np.array(load_png(cl["image"]), float)
     lab = np.array(load_png(cl["labels"]))
     out = {}
-    for c, q in (("cloth", 50), ("trim", 75)):
+    for c in ("cloth", "trim"):
         m = (lab[..., :3] == np.array(cl["classes"][c])).all(-1)
         px = img[m][:, :3]
-        lum = px.mean(axis=1)
-        out[c] = np.median(px[lum >= np.percentile(lum, q)], axis=0)
+        mx, mn = px.max(axis=1), px.min(axis=1)
+        sat, lum = (mx - mn) / np.maximum(mx, 1), px.mean(axis=1)
+        # the hue and saturation of its brighter, more saturated half, lifted to its highlights' brightness (the
+        # painting is dark: test 21's first cloth, the brighter half's median, came out brown, 72/35/27)
+        col = np.median(px[(sat >= np.median(sat)) & (lum >= np.median(lum))], axis=0)
+        out[c] = np.clip(col * np.percentile(mx, 90) / max(col.max(), 1.0), 0, 255)
     return out
 
 

@@ -31,8 +31,10 @@ GAME_DEFAULTS = {
     # fresh_horse (test 15's settings for its TripoSG horse, the rider cut and lump off: there is no rider)
     # (test 21: the tail is fresh_horse's own, along vanilla's tail bones; 1,650 body triangles leave room for the
     # slabs (~720), ears (~220) and plume (~320) under 3,000)
-    "fresh": {"hem_y": 4.6, "leg_radius": 0.65, "tail_gap": 0.35, "voxel": 0.3, "relax": 4, "target_tris": 1650,
-              "quads": 1650, "smooth": 12, "influences": 3, "chain_weights": True, "tail": {"build": True, "cut": 0.8}},
+    # fit off: the master is already on the vanilla skeleton (test 21's first build: without the master's tail the
+    # nose-to-tail box fit scaled the horse off vanilla's leg bones and the skirt trim cut its legs)
+    "fresh": {"fit": False, "hem_y": 4.6, "leg_radius": 0.65, "tail_gap": 0.35, "voxel": 0.3, "relax": 4, "target_tris": 1550,
+              "quads": 1550, "smooth": 12, "influences": 3, "chain_weights": True, "tail": {"build": True, "cut": 0.8}},
     "bake": {"size": 512, "cage": 0.4, "distance": 0.8},
     # the cloth as slabs (game_master): the body ~2,000 triangles and four slabs ~180 each stay under the
     # validator's 3,000 (test 20's first stage: 4,224 with 2,800 and 7 x 12 slabs)
