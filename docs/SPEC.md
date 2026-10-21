@@ -2327,6 +2327,33 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
     - 84 s, against about 40 min with E-B and E-C.
     - Gates: colour and hue pass; regions, landmarks and coverage fail on the tail and throat. The cause is step 3's fit: its camera for this true side view is turned 31° and rolled 6°, which step 5's refit addresses.
     - The lit render shows a white band under the belly; it is the sky lighting the underside, not the texture (the albedo is brown).
+- **Step 3: automatic landmarks.**
+  - **Keypoint models checked (2026-10-21); none is clearly licence-clean, so none was installed:**
+    - **DeepLabCut SuperAnimal-Quadruped (horses included):** the TensorFlow model card says academic, non-commercial use only. One PyTorch card revision carries an Apache-2.0 tag that its own text contradicts ("all rights reserved"; commercial licences through EPFL-TTO).
+    - **RTMPose / ViTPose trained on AP-10K:** the AP-10K data is for non-commercial use only (MMPose docs). The weights' own terms aren't stated and derive from that data.
+    - **Horse-10 (DLC):** its licence isn't confirmed by an authoritative source; mirrors list it as non-commercial.
+    - **X-Pose (formerly UniPose, IDEA Research):** licence terms not confirmed; trained on mixed datasets that include AP-10K.
+    - **A licence-clean route, if wanted later (on the user's OK):** DINOv2 (Apache-2.0) feature correspondence, carrying landmarks over from an annotated reference the user owns.
+  - **Done instead: landmarks from the silhouette** (`_ref3d_silhouette.landmarks`, written by the parts job as `<view>_landmarks.json` and drawn on the labels overlay):
+    - **Head:** muzzle (front-most), the ears (the two highest peaks of the top outline, from pixels that can be an ear: not cloth, trim, plume or tail), the poll (under the rear ear, at the notch between them), the chin (lowest point of the head's front half), the throat (top of the lower outline behind the jaw).
+    - **Trunk**, from the horse without its hanging cloth: chest_front, buttock, croup.
+    - **Feet:** the columns that reach the ground, in runs; the lower foot of a pair is the near leg. The fetlocks sit 0.09 × (ground − back) above the hooves.
+    - **Tail:** its top and tip.
+    - **Not found:** the eye, nostril and bit ring (no outline shows them). E-A fits with the landmarks present, and the fitted body places those three.
+  - **Scored against the hand landmarks** (error as a share of the body length):
+
+    | View | Median | Worst |
+    |---|---|---|
+    | Horse 2 L | 1.1% | tail tip 5.1%, croup 4.9%, chest 4.3%: points the hand placed loosely |
+    | Cataphract S | 1.4% | buttock 9.7% (the hand placed it under the tail, on the armour), chest 6.0%, an ear 5.9% (next to the plume) |
+    | Cataphract L (front three-quarter on a rock) | — | hind feet 16–18% |
+
+    The silhouette method is for side views.
+  - **Fixes on the way:**
+    - the tail closed and grown before the buttock is read (the buttock was the tail's edge, 11%);
+    - the chest read below the breast collar;
+    - the poll at the ears' notch (a dip search reached the mane);
+    - ears scored as an unordered pair, as E-A matches them.
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.

@@ -79,6 +79,9 @@ def analyse(fg, mats, rgb, st):
     tail = _largest(hair & rear)
     if tail.sum() < st["tail_min"] * F.sum():
         tail = np.zeros_like(F)
+    else:  # closed and grown a little: the buttock found on its holes was the tail's edge (horse 2: 11%)
+        tail = cv2.morphologyEx(tail.astype(np.uint8), cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4 * r + 1, 4 * r + 1)))
+        tail = cv2.dilate(tail, k).astype(bool) & F
     body = opened & ~tail
 
     def longest_run(row):
@@ -97,7 +100,7 @@ def analyse(fg, mats, rgb, st):
     mid = slice(x0 + int(0.4 * w), x0 + int(0.6 * w))
     cols = body[:, mid].any(axis=1)
     back = int(np.nonzero(cols)[0].min())
-    lo, hi = back + int(0.55 * (belly - back)), belly - int(0.05 * (belly - back))
+    lo, hi = back + int(0.7 * (belly - back)), belly - int(0.05 * (belly - back))  # below the breast collar
     xs_front = [np.nonzero(body[y])[0].min() for y in range(lo, hi) if body[y].any()]
     chest = int(min(xs_front)) if xs_front else x0
     lo2, hi2 = back + int(0.2 * (belly - back)), back + int(0.7 * (belly - back))
@@ -224,12 +227,16 @@ def analyse(fg, mats, rgb, st):
                "open_px": r}
     if hb:
         summary["head_box"] = [X(hb[0]), hb[1], X(hb[2]), hb[3]] if left else [X(hb[2] - 1), hb[1], X(hb[0]) + 1, hb[3]]
-    lms = landmarks(F & ~plume, opened, body, tail, head, belly, back, chest, buttock, (x0, y0, x1, y1), st)  # a plume is no ear
+    # the ears from what can be an ear (not cloth, trim, plume or tail): cataphract S's plume, partly cloth, read as
+    # ears; the trunk's landmarks from the horse without its hanging cloth (its chest and buttock were the caparison's)
+    ear_px = F & ~np.isin(cls, ("cloth", "trim", "plume", "tail"))  # (coat only lost horse 2's ear under the bridle)
+    bare = cv2.morphologyEx((F & ~np.isin(cls, ("cloth", "trim", "tail", "plume"))).astype(np.uint8), cv2.MORPH_OPEN, k).astype(bool) & ~tail
+    lms = landmarks(F & ~plume, ear_px, bare, tail, head, belly, back, chest, buttock, (x0, y0, x1, y1), st)
     summary["landmarks"] = {k: [X(x), int(y)] for k, (x, y) in lms.items()}
     return cls, zones, parts, summary
 
 
-def landmarks(F, opened, body, tail, head, belly, back, chest, buttock, box, st):
+def landmarks(F, ear_px, body, tail, head, belly, back, chest, buttock, box, st):
     """The template's landmarks a silhouette shows (head on the left; image px): the head's outline (muzzle,
     ears, poll, chin, throat), the trunk's (chest_front, buttock, croup), the feet (hooves on the ground, the
     lower foot of a pair the near leg; fetlocks ``fetlock_up`` x (ground - back) above), the tail's top and
@@ -241,7 +248,7 @@ def landmarks(F, opened, body, tail, head, belly, back, chest, buttock, box, st)
     # head: the muzzle (front-most), ears (the two highest peaks of the top outline), poll (the dip behind them)
     hcols = np.nonzero(head.any(axis=0))[0]
     if len(hcols):
-        top = np.array([ys(F, x).min() if F[:, x].any() else F.shape[0] for x in hcols])  # ears stand above the opened head
+        top = np.array([ys(ear_px, x).min() if ear_px[:, x].any() else F.shape[0] for x in hcols])  # ears stand above the opened head
         xm = int(hcols.min())
         yfront = np.nonzero(head[:, xm])[0]
         out["muzzle_front"] = (xm, int(yfront.mean()))
@@ -257,12 +264,12 @@ def landmarks(F, opened, body, tail, head, belly, back, chest, buttock, box, st)
             ea = (int(hcols[peaks[0]]), int(top[peaks[0]]))
             eb = (int(hcols[peaks[1]]), int(top[peaks[1]])) if len(peaks) > 1 and top[peaks[1]] < top[peaks[0]] + 0.06 * w else ea
             out["ear_tip_a"], out["ear_tip_b"] = ea, eb
-            xr = max(ea[0], eb[0])
-            k = np.searchsorted(hcols, xr)
-            seg = slice(k, min(len(hcols), k + int(0.05 * w)))
-            if seg.stop > seg.start:
-                j = seg.start + int(np.argmax(top[seg]))  # the dip behind the ears
-                out["poll"] = (int(hcols[j]), int(top[j]))
+            # the poll: under the rear ear, as low as the notch between the ears (a dip search behind them reached
+            # the mane: horse 2, 8%; the top just behind the ear was the ear's own base)
+            lo_, hi_ = sorted((ea[0], eb[0]))
+            notch = top[(hcols >= lo_) & (hcols <= hi_)]
+            ny = int(notch.max()) if len(notch) and hi_ - lo_ > sep else int(top[peaks[0]] + 0.04 * w)
+            out["poll"] = (int(hi_), ny)
         # chin: the lowest point of the head's front half; throat: where the lower outline turns to the neck
         bot = np.array([ys(F & head, x).max() if (F[:, x] & head[:, x]).any() else -1 for x in hcols])
         half = hcols < hcols.min() + 0.5 * (hcols.max() - hcols.min())
@@ -274,7 +281,7 @@ def landmarks(F, opened, body, tail, head, belly, back, chest, buttock, box, st)
                 j = int(np.argmin(np.where(rest, bot, 1e9)))  # the highest point of the lower outline behind the jaw
                 out["throat"] = (int(hcols[j]), int(bot[j]))
     # trunk
-    band = range(back + int(0.55 * (belly - back)), belly - int(0.05 * (belly - back)))
+    band = range(back + int(0.7 * (belly - back)), belly - int(0.05 * (belly - back)))
     fr = [(int(np.nonzero(body[y])[0].min()), y) for y in band if body[y].any()]
     if fr:
         out["chest_front"] = min(fr)

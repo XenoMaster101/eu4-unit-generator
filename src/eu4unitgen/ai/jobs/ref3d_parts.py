@@ -243,8 +243,13 @@ def main(args_path):
         if v.get("landmarks_ref"):  # the hand landmarks (crop px): each found one's error, of the body length
             ref = v["landmarks_ref"]
             bl = abs(ref["chest_front"][0] - ref["buttock"][0]) if "chest_front" in ref and "buttock" in ref else max(fg.shape)
-            res[name]["landmark_error"] = {k: round(float(np.hypot(*(np.array(p_) - np.array(ref[k])))) / bl, 4)
-                                           for k, p_ in lay["landmarks"].items() if k in ref}
+            err = lambda a_, b_: float(np.hypot(*(np.array(a_) - np.array(b_)))) / bl  # noqa: E731
+            le = {k: round(err(p_, ref[k]), 4) for k, p_ in lay["landmarks"].items() if k in ref}
+            ea_, eb_ = lay["landmarks"].get("ear_tip_a"), lay["landmarks"].get("ear_tip_b")
+            if ea_ and eb_ and "ear_tip_a" in ref and "ear_tip_b" in ref:  # the ears: an unordered pair (as E-A matches them)
+                if err(ea_, ref["ear_tip_b"]) + err(eb_, ref["ear_tip_a"]) < le["ear_tip_a"] + le["ear_tip_b"]:
+                    le["ear_tip_a"], le["ear_tip_b"] = round(err(ea_, ref["ear_tip_b"]), 4), round(err(eb_, ref["ear_tip_a"]), 4)
+            res[name]["landmark_error"] = le
             print(name, "landmark error", res[name]["landmark_error"], flush=True)
         if v.get("compare"):
             res[name]["agreement"] = agreement(cls, np.array(Image.open(v["compare"]).convert("RGB")), fg, colours)
