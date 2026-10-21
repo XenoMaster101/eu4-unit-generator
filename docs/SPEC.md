@@ -2370,6 +2370,36 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
   - **Horse 2 as `horse2_auto`:** 112 s with no manual input, against the hand config of finish line step 3 (25 landmarks and the zones by hand). It found: saddle cloth, saddle, bridle, bare coat, tail; 19 landmarks; a side view.
   - **`auto run <subject.json> --ai-python ... [--test testNN]`** chains shells, fit, refine, master and game untouched. It records each step in `auto_run.json`, so a stopped run continues where it stopped.
   - **What a human still gives:** the image, a name and the rights declaration (rule 8: a statement only the user can make).
+- **Step 5 done: horse 2 rerun completely untouched** (`horse2_auto`: `auto new`, then `auto run`). Sheet: `assets_in/horse2_auto/final_sheet.png`.
+  - **First attempt:** Claude Code stopped it (the PC was low on memory) after 5 of the 8 TripoSG seeds.
+  - **Lighter, safer runs (the user's request):**
+    - **Shells:** each seed is kept as it lands, and a stopped run reuses every whole GLB (glTF magic and the declared length); the 5 were reused.
+    - **One heavy job at a time;** each TripoSG seed runs in its own process, so its memory is freed when it ends.
+    - **A free-RAM check before each step** (`ref3d/memory.py`): shells 10 GB, fit 8.5 GB, the rest 8 GB. Below that, the run stops and says so.
+    - **The fit's processes follow the free RAM:** (free − 6 GB reserve) / 2.5 GB, at most 6. That gave 4.
+  - **A bug on the way:** the generated config's `ea.refine` block put a plain fit into refine mode (KeyError 'candidate'). `fit_args` now leaves it out. The failed folder is kept as `fit/v001_failed_refine_key`.
+  - **RAM (31.9 GB machine; 14.3 GB free at the start, with EU4, Firefox, Discord, Steam and CurseForge open):**
+
+    | Step | Time | Lowest free RAM |
+    |---|---|---|
+    | Shells | 503 s | 9.6 GB |
+    | Fit | 7,018 s | 6.6 GB |
+    | Refine | 694 s | 16.0 GB |
+    | Master | 107 s | 14.6 GB |
+    | Game | 97 s | 14.6 GB |
+
+    - A fit worker measured about 0.2 GB of resident RAM. The 2.5 GB assumption is conservative, and the rule could allow more workers.
+  - **Results:**
+    - **Fit v001:** procedural is best; the restarts converge (15.5 / 15.6 / 16.6; step 3's did not: 5.3 / 18.5 / 25.1); region overlap 0.92; worst landmark 8.4% (the 2.5% gate fails, as in step 3).
+    - **Refine v002.**
+    - **Master v001:** a bay horse with bridle, saddle, the blue saddle cloth and its trim, dark legs, a hanging tail; no armour, caparison, chest panel, chanfron or plume. Colour and hue pass. The tail's region (IoU 0.36) and one landmark (near hind fetlock 6.8%; head 3.7%) fail.
+    - **Game v001:** 2,030 triangles. It reads as horse 2. Its tail is thin and short from the side (fresh_horse's own tail, built along vanilla's bones).
+  - **What still needed a human:** the image, the name and the rights declaration, nothing else. No annotation, no colour rules, no view naming, no copied files, no environment variables, no worker count.
+  - **What is still weak:**
+    - the tail's shape (master and game);
+    - E-A's landmark gate on a single painted view (8.4%; no allowance set for this subject);
+    - the silhouette landmarks are for side views;
+    - the parts classifier agrees 55% with the cataphract's three-quarter view L.
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
