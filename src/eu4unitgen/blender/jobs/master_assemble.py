@@ -52,7 +52,7 @@ def srgb_to_linear(c):
     return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
 
 
-METALS = ("scale", "chanfron", "trim")
+METALS = ("scale",)  # the silver; the gold (chanfron, trim) keeps its median: its highlights read white (master v009)
 
 
 def palettes(a):
