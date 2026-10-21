@@ -309,7 +309,7 @@ class Model:
                 for j, k in enumerate(("leg_f", "leg_b")):
                     add(f"{vn}.nuis.{k}", init["pose"][vn].get("leg_scale", [1.0, 1.0])[j], 0.03, 0.7, 1.0)
                 # and its trunk's length (round 13b: S's leg bases sit closer than L's trunk puts them)
-                add(f"{vn}.nuis.body", init["pose"][vn].get("body_scale", 1.0), 0.03, 0.8, 1.2)
+                add(f"{vn}.nuis.body", init["pose"][vn].get("body_scale", 1.0), 0.03, 0.6, 1.2)
             if HEAD_TURN:  # E-A round 9: the reference's head turns to the viewer; sagittal joints can't
                 for j in range(2):
                     add(f"{vn}.pose.neck_yaw.{j}", init["pose"][vn].get("neck_yaw", [0, 0])[j], 5, -30, 30)
@@ -612,7 +612,7 @@ def score_view(view, sil, lm2, gates):
         out["regions"][z] = M.tol_iou(sil & Z["known"], Z["target"], view.tol)
     if lm2 is not None:
         for k in view.lm:
-            if k in lm2:
+            if k in lm2 and (k not in TRUNK_LM or view.name in TRUNK_VIEWS):
                 out["landmarks"][k] = float(np.hypot(*(lm2[k] - view.lm[k])) / view.bl)
         for a_, b_ in (("ear_tip_a", "ear_tip_b"),):
             if a_ in out["landmarks"] and b_ in out["landmarks"]:
@@ -1077,8 +1077,24 @@ def refine(a, sk, views, ck, log, defaults):
             _, _, c, p_ = m.unpack(m.x0)
             cams[vn], poses[vn] = c[vn], p_[vn]
         ck.save("refine_new_views", {"cams": cams, "poses": poses, "hist": hist, "done": True})
-    skel = rec["skeleton"]
+    skel = dict(rec["skeleton"])
     full = Model(sk, views, True, base, {}, {"cam": cams, "pose": poses, "shape": shape, "skel": skel, "hp": None})
+
+    def blend():
+        """The user (round 13): proportions not from S alone, blended with the original. The master's trunk
+        length becomes the geometric mean of the original's (the earlier fit) and S's (its factor x it); S's
+        factor is set so S keeps the length it fitted."""
+        bv = rf.get("blend_body_view")
+        name = f"{bv}.nuis.body"
+        if not bv or name not in full.names:
+            return None
+        i, j = full.names.index("skel.body"), full.names.index(name)
+        b_l, f_s = full.x0[i], full.x0[j]
+        b = float(b_l * f_s ** 0.5)
+        full.x0[i], full.x0[j] = b, f_s * b_l / b
+        log(f"refine blend: trunk length {b_l:.3f} (original) x S's {f_s:.3f} -> master {b:.3f}")
+        return {"original": float(b_l), "s_factor": float(f_s), "master": b}
+
     for stage, vns, keys in (
             ("head", rf["head_views"], ["hp."] + [f"shape.{p}" for p in HEAD_PARAMS]
              + [f"{vn}.pose.{k}" for vn in rf["head_views"] for k in ("neck", "head_pitch", "head_yaw")]
@@ -1088,6 +1104,8 @@ def refine(a, sk, views, ck, log, defaults):
             ("polish", list(views), [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views]
              + [f"{vn}.nuis." for vn in views])):
         key = f"refine_{stage}"
+        if stage == "polish" and not ck.load("refine_blend"):
+            ck.save("refine_blend", {"blend": blend(), "done": True})
         st = ck.load(key)
         if st and st.get("done"):
             d = dict(zip(st["names"], st["x"]))
@@ -1095,8 +1113,9 @@ def refine(a, sk, views, ck, log, defaults):
             hist += st["hist"]
             log(f"refine {stage}: done earlier (checkpoint)")
             continue
+        _, skel_now, _, _ = full.unpack(full.x0)
         m = Model(sk, {vn: views[vn] for vn in vns}, True, base, {}, {"cam": cams, "pose": poses, "shape": shape,
-                                                                      "skel": skel, "hp": None})
+                                                                      "skel": skel_now, "hp": None})
         transfer(full, m)
         h = []
         r = powell(m, ("lm", "render", "prior"), sel(m, keys), maxfev=rf["stages"][stage])

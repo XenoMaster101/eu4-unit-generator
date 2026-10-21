@@ -48,9 +48,16 @@ def srgb_to_linear(c):
     return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
 
 
+METALS = ("scale", "chanfron", "trim")
+
+
 def palettes(a):
-    """Median sRGB colour per class over the references' observed pixels (L, then R where L has none)."""
+    """Median sRGB colour per class over the references' observed pixels (L, then R where L has none). With
+    ``metal_quantile`` (round 14), a metal class takes the median of its brightest pixels instead: a metal
+    shows as what it reflects, and the painting's median of the scale class was a dark brown (85, 65, 57)
+    that rendered the plates as brown piles; its brightest quarter is silver (171, 156, 151)."""
     out = {}
+    mq = a.get("metal_quantile")
     for vn, v in a["views"].items():
         img = load_rgb(v["image"])
         lab = decode(load_rgb(v["labels"]), a["classes"])
@@ -61,7 +68,11 @@ def palettes(a):
                 continue
             m = (lab == i) & ~inp & ~never
             if m.sum() >= 200:
-                out[c] = np.median(img[m], axis=0)
+                px = img[m].astype(float)
+                if mq and c in METALS:
+                    lum = px.mean(axis=1)
+                    px = px[lum >= np.percentile(lum, 100 * mq)]
+                out[c] = np.median(px, axis=0)
     return out
 
 
@@ -298,9 +309,10 @@ def main():
         P3 = pv.reshape(-1, k, 3)
         c3 = P3.mean(axis=1, keepdims=True)
         pv = (c3 + 1.3 * (P3 - c3)).reshape(-1, 3)
-    add("plates", to_scene(pv), pf[:, ::-1], "scale", principled("plates", lin("scale"), 0.85, 0.35))
+    pm = a.get("plate_material") or {"metallic": 0.85, "roughness": 0.35, "backing": [0.03, 0.02, 0.015]}
+    add("plates", to_scene(pv), pf[:, ::-1], "scale", principled("plates", lin("scale"), pm["metallic"], pm["roughness"]))
     bv, bf = read_obj(arm / "backing.obj")
-    add("backing", to_scene(bv), bf[:, ::-1], "scale", principled("backing", (0.03, 0.02, 0.015), 0.0, 0.8))
+    add("backing", to_scene(bv), bf[:, ::-1], "scale", principled("backing", tuple(pm["backing"]), 0.0, 0.8))
     res["parts"]["armour"] = {"plates_tris": int(len(pf)), "backing_tris": int(len(bf))}
 
     # ---- S6 by projection: straps, saddle (leather) and gold bands (trim) on the neck and barrel

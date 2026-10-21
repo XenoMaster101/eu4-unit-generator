@@ -69,8 +69,8 @@ DEFAULTS = {
 # the muzzle, the forehead's and muzzle's half-widths; leg sections' half-extents (module doc)
 ANATOMY2 = {
     "anatomy": 2, "head_length": 0.36, "jowl_depth": 0.21, "muzzle_depth": 0.108, "forehead_width": 0.061,
-    "muzzle_width": 0.032, "ear_length": 0.095, "upper_arm": 0.085, "forearm": 0.055, "knee": 0.04,
-    "stifle": 0.08, "gaskin": 0.05, "hock": 0.036, "cannon": 0.026, "fetlock": 0.036, "pastern": 0.024,
+    "muzzle_width": 0.032, "ear_length": 0.095, "upper_arm": 0.055, "forearm": 0.055, "knee": 0.04,
+    "stifle": 0.065, "gaskin": 0.05, "hock": 0.036, "cannon": 0.026, "fetlock": 0.036, "pastern": 0.024,
     "hoof_top": 0.03, "hoof_bottom": 0.04, "hoof_height": 0.045, "pastern_ahead": 0.035,
 }
 GROUPS = {  # which parameters each fitted measurement scales

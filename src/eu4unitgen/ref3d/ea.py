@@ -106,6 +106,8 @@ REFINE_DEFAULTS = {
     # round 13c: the leg sections stay style 2's (fitted, they collapsed onto the feathering and occluders:
     # cannons half a horse's); the trunk landmarks steer S only; S's legs stand square
     "fit_leg_shape": False, "trunk_views": ["S"], "straight_legs": ["S"],
+    # round 13d: the master's trunk length blended between the original's and S's (the user's rule)
+    "blend_body_view": "S",
     # Powell evaluations per stage (each evaluation renders the stage's views)
     "stages": {"camera": 1500, "head": 2000, "legs": 2000, "polish": 1000},
 }
