@@ -12,7 +12,9 @@ From a master (``<subject>/master/vNNN``) into ``<subject>/game/vNNN`` (nothing 
   stage    a test-mod spec (one tag, tier 1 the new horse, tier 2 the vanilla horse for comparison), written
            to ``build/<test>/`` and staged with ``eu4unitgen.cli test-mod --spec``.
 
-usage: python -m eu4unitgen.ref3d.game build <subject.json> --master vNNN --test testNN (a new name)
+usage: python -m eu4unitgen.ref3d.game build <subject.json> --master vNNN [--test testNN (a new name)]
+       python -m eu4unitgen.ref3d.game stage --test testNN <subject.json>:vNNN [<subject.json>:vNNN ...]
+         (several game versions in one test: tier 1, 2, ... in order; the next tier is the vanilla horse)
 """
 from __future__ import annotations
 
@@ -55,12 +57,12 @@ def eu4_path() -> Path:
     return Path(p)
 
 
-def build(subject_path: Path, master_version: str, test: str, blender: str | None = None) -> dict:
+def build(subject_path: Path, master_version: str, test: str | None, blender: str | None = None) -> dict:
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.fresh_mesh import base_arrays
     from eu4unitgen.core.project import default_blender_path
 
-    if (Path("build") / test).exists():  # a test's folder is never written into twice (test 16's spec was lost so)
+    if test and (Path("build") / test).exists():  # a test's folder is never written into twice (test 16's spec was lost so)
         raise SystemExit(f"build/{test} exists: pick a new test name")
     s = s1.load_subject(subject_path)
     cfg = {**GAME_DEFAULTS, **(s.get("game") or {})}
@@ -116,18 +118,12 @@ def build(subject_path: Path, master_version: str, test: str, blender: str | Non
     note(f"normal: {json.dumps({k: nb.get(k) for k in ('tilt', 'found', 'match')}, default=str)[:300]}")
     tex = {"diffuse": (nb.get("paths") or {}).get("diffuse") or nb.get("diffuse") or bc["diffuse"], "specular": bc["specular"],
            "normal": (nb.get("paths") or {}).get("normal") or str(out / f"{name}b_normal.png")}
-    spec = test_spec(s, cfg, out / "low_geometry.json", tex, test)
-    stage = Path("build") / test
-    stage.mkdir(parents=True, exist_ok=True)
-    (stage / f"{test}.json").write_text(json.dumps(spec, indent=1), encoding="utf-8")
-    cmd = [sys.executable, "-m", "eu4unitgen.cli", "test-mod", "--spec", str(stage / f"{test}.json"),
-           "--stage-dir", str(stage / "stage")]
-    st = subprocess.run(cmd, capture_output=True, text=True)
-    (stage / "log.txt").write_text(st.stdout + st.stderr, encoding="utf-8")
-    note(f"stage: exit {st.returncode}; {stage / 'stage'}")
+    st = stage_test(test, [horse_entry(s, out / "low_geometry.json", tex)], cfg) if test else None
+    if st:
+        note(f"stage: exit {st['exit']}; {st['stage']}")
     manifest = {"stage": "game version", "subject": s["name"], "version": out.name, "master": master_version,
                 "settings": cfg, "repose": rp, "low": fr, "colour": bc, "normal": nb, "textures": tex,
-                "test": {"spec": str(stage / f"{test}.json"), "stage": str(stage / "stage"), "exit": st.returncode},
+                "geometry": str(out / "low_geometry.json"), "test": st,
                 "log": log, "seconds": round(time.time() - t0, 1)}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str), encoding="utf-8")
     return manifest
@@ -145,17 +141,35 @@ def fit_obj(src: Path, dst: Path, fit: dict):
                 g.write(line)
 
 
-def test_spec(s: dict, cfg: dict, geometry: Path, tex: dict, test: str) -> dict:
+def horse_entry(s: dict, geometry: Path, tex: dict) -> dict:
+    """A loadout horse (core.loadout) for one game version."""
+    views = ", ".join(s["views"])
+    return {"base": "cavalry_horse", "geometry": str(Path(geometry).resolve()),
+            "textures": {k: str(Path(v).resolve()) for k, v in tex.items()}, "rights": s.get("rights", "user"),
+            "source": f"Track M master of {s['name']} (assets_in/{s['name']}; views {views})", "_name": s["name"]}
+
+
+def stage_test(test: str, horses: list, cfg: dict) -> dict:
+    """A test-mod spec with ``horses`` at tiers 1, 2, ... (the next tier: the vanilla horse), written to
+    ``build/<test>/`` and staged there (refused if that folder exists)."""
+    folder = Path("build") / test
+    if folder.exists():
+        raise SystemExit(f"build/{test} exists: pick a new test name")
     t = cfg["test"]
-    return {"schema": 1, "name": f"{test}: the {s['name']} game horse (tier 1), the vanilla horse at tier 2 for comparison",
+    names = ", ".join(f"tier {i + 1} {h['_name']}" for i, h in enumerate(horses))
+    spec = {"schema": 1, "name": f"{test}: game horses ({names}); the vanilla horse at tier {len(horses) + 1} for comparison",
             "set": {"tags": [t["tag"]], "gfx": t["gfx"], "set_name": t["set_name"], "base_gfx": t["base_gfx"],
                     "unit_colours": {t["tag"]: t["unit_colours"]}},
-            "loadout": {"schema": 1, "horses": {"1": {
-                "base": "cavalry_horse", "geometry": str(geometry.resolve()),
-                "textures": {k: str(Path(v).resolve()) for k, v in tex.items()},
-                "rights": s.get("rights", "user"),
-                "source": f"Track M master of {s['name']} (assets_in/{s['name']}; references L, R, S)"}}},
+            "loadout": {"schema": 1, "horses": {str(i + 1): {k: v for k, v in h.items() if not k.startswith("_")}
+                                                for i, h in enumerate(horses)}},
             "test": {"sprite_techs": t["sprite_techs"]}}
+    folder.mkdir(parents=True)
+    (folder / f"{test}.json").write_text(json.dumps(spec, indent=1), encoding="utf-8")
+    cmd = [sys.executable, "-m", "eu4unitgen.cli", "test-mod", "--spec", str(folder / f"{test}.json"),
+           "--stage-dir", str(folder / "stage")]
+    st = subprocess.run(cmd, capture_output=True, text=True)
+    (folder / "log.txt").write_text(st.stdout + st.stderr, encoding="utf-8")
+    return {"spec": str(folder / f"{test}.json"), "stage": str(folder / "stage"), "exit": st.returncode}
 
 
 def main(argv=None):
@@ -164,9 +178,21 @@ def main(argv=None):
     b = sub.add_parser("build")
     b.add_argument("subject", type=Path)
     b.add_argument("--master", required=True)
-    b.add_argument("--test", required=True, help="a new build/<test> folder (refused if it exists)")
+    b.add_argument("--test", help="stage it alone in a new build/<test> folder (refused if it exists)")
     b.add_argument("--blender")
+    c = sub.add_parser("stage")
+    c.add_argument("--test", required=True)
+    c.add_argument("horses", nargs="+", help="<subject.json>:vNNN (a game version), tier 1 first")
     a = p.parse_args(argv)
+    if a.cmd == "stage":
+        horses = []
+        for h in a.horses:
+            subj, ver = h.rsplit(":", 1)
+            s = s1.load_subject(Path(subj))
+            m = json.loads((s["_root"] / "game" / ver / "manifest.json").read_text(encoding="utf-8"))
+            horses.append(horse_entry(s, Path(m.get("geometry") or s["_root"] / "game" / ver / "low_geometry.json"), m["textures"]))
+        print(json.dumps(stage_test(a.test, horses, GAME_DEFAULTS), indent=1))
+        return
     m = build(a.subject, a.master, a.test, a.blender)
     print(json.dumps({"version": m["version"], "test": m["test"], "seconds": m["seconds"]}, indent=1))
 
