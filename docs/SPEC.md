@@ -2169,6 +2169,30 @@ The full cataphract build starts only after the spikes pass **and** the user exp
     - legs from shaped sections (elbow, knee block, the cannon's tendons, fetlock bulge, point of the hock), a pastern sloping forward and a hoof (toe ahead of the coronet, upright heels, flat sole).
   - E-A `refine` (no long search): the current body (v013 hybrid) refitted in place. Its proportions, barrel and neck stay. S gets a camera from its landmarks and outlines. Then the head (style 2's head and the free profile) against L and S, the leg sections against L and S, and a camera and pose polish in all three views. Each stage has a fixed evaluation budget (1500/2000/2000/1000).
   - The master's tail comes from S's tail outline (sections down from the tail bone).
+  - **Refine runs (v014-v021):**
+    - v014: S scored on its head and legs only; its camera shrank the trunk, the hind legs bent to reach the hooves, the head grew to its 2x bound. Fixes:
+      - trunk landmarks on the model (chest front, buttock, croup over the armour; S only: L's chest_front marks the armour, far ahead of the body);
+      - style 2's head sizes held at 0.8-1.3x a horse's.
+    - v015: S's camera slid to the closest distance. Fix: S near-orthographic (perspective at most 0.03, roll ±3°), like L.
+    - v016: the S-only start model carried the vanilla skeleton (bug: fixed-shape models dropped the body's proportions).
+    - v017: the leg sections, fitted, collapsed onto the feathering and occluders (cannons half a horse's), and the free head profile made the head blocky. Fixes: the leg sections stay style 2's; the head profile bounded tighter.
+    - v018-v020: S's knees folded in every run. Fix: S's knee and fetlock joints held firmly straight (S stands square).
+    - **v021 (round 1's body):**
+      - S legs 0.90, head 0.96; L legs 0.84 (v013: 0.95), head 0.81; R legs 0.76.
+      - Landmarks: L body 4.7%, head 9.2% (over the 5% allowance: L's head under the chanfron turns towards the viewer; S's side view now decides the head's shape); S body 10.4% (its forelegs' fetlocks; S only).
+  - **Proportions (the user's blend rule):**
+    - S is far stockier than a horse (its legs ~37% of the withers height, a horse's 50-55%).
+    - In the fit, S has its own leg factors (0.7-1.0) and trunk-length factor (0.6-1.2), which never reach the master.
+    - The master's trunk length is the geometric mean of the original's (1.31) and S's (1.31 x 0.77): 1.15. The legs keep the original's length.
+  - **Master v008** (on v021; about 7 minutes):
+    - the far caparison panel is the near one mirrored: simulated alone, it caught on the far foreleg that L's pose lifts onto the rock and flew forward as a slab (v007);
+    - the tail is built from S's outline;
+    - the evaluation uses three views, with S's trunk landmarks scored in S only.
+    - The master stands in L's pose, so its S render doesn't line up with S's pose; the anatomy check is the body fit in each view's own pose (sheet `master/v008/round1_anatomy_sheet.png`).
+  - Left for round 2 (or listed as known gaps):
+    - the neck meets the head with a visible step;
+    - the upper legs show as columns beside the narrow barrel (under the armour on the master);
+    - S's forelegs reach too far at the fetlock (S only).
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
