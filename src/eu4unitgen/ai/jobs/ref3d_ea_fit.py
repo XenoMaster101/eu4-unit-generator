@@ -1042,7 +1042,9 @@ def refine(a, sk, views, ck, log, defaults):
     neck stay; the head (style 2's head and Track M's free profile), the leg sections and every view's
     camera and pose are refitted, each stage against the views that show it best (``refine.stages``).
     -> (model over every view, history)."""
-    rf = a["refine"]
+    rf = dict(a["refine"])
+    for k in ("head_views", "leg_views"):  # only the subject's own views (a subject may have view L only)
+        rf[k] = [vn for vn in rf[k] if vn in views] or ["L"]
     rec = json.loads(Path(rf["from"]).read_text(encoding="utf-8"))["candidates"][rf["candidate"]]
     shape = {k: v for k, v in rec["shape"].items() if k != "head_profile"}
     import _ref3d_body as RB

@@ -289,6 +289,8 @@ def texture(a, Vf, rows, cols, F, body_bvh_parts, mpu, res_px):
     allF = np.vstack([body_bvh_parts[1], F + len(body_bvh_parts[0])])
     bvh = BVHTree.FromPolygons([tuple(p) for p in allV], [tuple(int(i) for i in f) for f in allF])
     for k, vn in enumerate(("L", "R")):
+        if vn not in a["views"]:  # a subject with view L only
+            continue
         v = a["views"][vn]
         img = load_rgb(v["image"]).astype(np.float32)
         lab = decode(load_rgb(v["labels"]), a["classes"])

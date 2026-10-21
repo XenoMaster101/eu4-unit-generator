@@ -126,9 +126,11 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     views = view_info(s, ea_args, rec, out)
     tol = {vn: max(1, round(ea_args["label_scale"] * v["body_length"])) for vn, v in views.items()}
     # ---- armour: every scale area L or R shows
-    cover = [{**{k: views["L"][k] for k in ("labels", "inpainted", "never_use", "camera")}, "parts": None},
-             {**{k: views["R"][k] for k in ("labels", "inpainted", "never_use", "camera")}, "parts": [0],
-              "label_tol_px": tol["R"], "close_px": max(2, round(0.02 * views["R"]["body_length"]))}]
+    # (generality, finish line step 3: a subject may have only view L)
+    cover = [{**{k: views["L"][k] for k in ("labels", "inpainted", "never_use", "camera")}, "parts": None}]
+    if "R" in views:
+        cover.append({**{k: views["R"][k] for k in ("labels", "inpainted", "never_use", "camera")}, "parts": [0],
+                      "label_tol_px": tol["R"], "close_px": max(2, round(0.02 * views["R"]["body_length"]))})
     m_arm = eb.run(subject_path, ea_version, ai_python, blender, cand, out=out / "armour",
                    extra={"region": "all", "cover_views": cover, "front_scale": cfg["front_scale"]})
     note(f"armour: {m_arm['verdict']}")
