@@ -103,6 +103,9 @@ REFINE_DEFAULTS = {
     # the user (round 13): S is the main evidence for the head and legs (unoccluded), L for the head too;
     # leg length and proportions are not taken from S (its legs are shorter: its own factor, NUIS)
     "head_views": ["L", "S"], "leg_views": ["L", "S"], "nuisance_legs": ["S"],
+    # round 13c: the leg sections stay style 2's (fitted, they collapsed onto the feathering and occluders:
+    # cannons half a horse's); the trunk landmarks steer S only; S's legs stand square
+    "fit_leg_shape": False, "trunk_views": ["S"], "straight_legs": ["S"],
     # Powell evaluations per stage (each evaluation renders the stage's views)
     "stages": {"camera": 1500, "head": 2000, "legs": 2000, "polish": 1000},
 }

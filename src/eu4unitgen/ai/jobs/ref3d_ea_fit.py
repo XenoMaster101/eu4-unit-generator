@@ -154,7 +154,8 @@ class View:
 def lm_residuals(view, lm2):
     import _ref3d_body as RB
     r, order = [], []
-    names = [k for k in RB.BODY_LANDMARKS if k in view.lm and k in lm2]
+    names = [k for k in RB.BODY_LANDMARKS if k in view.lm and k in lm2
+             and (k not in TRUNK_LM or view.name in TRUNK_VIEWS)]
     pairs = {a: b for a, b in RB.UNORDERED}
     done = set()
     for k in names:
@@ -191,6 +192,12 @@ LM_WEIGHT = {}  # landmark -> weight, from args["landmark_weights"] (pilot 7: th
 # views whose leg lengths get their own factor (round 13: the side view S is stockier than the original;
 # the master keeps the original's legs: the factor only shortens, and never reaches the master)
 NUIS_LEGS = set()
+# the trunk landmarks steer only these views (round 13c: L's chest_front marks the armour's front, far
+# ahead of the body: in L's fit it pulled the camera and legs off, 21%)
+TRUNK_LM = {"chest_front", "buttock", "croup"}
+TRUNK_VIEWS = set()
+# views whose legs stand square (round 13c: S's search bent the knees forward): a firmer pull to straight
+STRAIGHT_LEGS = set()
 LEG_PARAMS = ["upper_arm", "forearm", "knee", "stifle", "gaskin", "hock", "cannon", "fetlock", "pastern",
               "hoof_top", "hoof_bottom", "hoof_height", "pastern_ahead"]
 
@@ -251,6 +258,7 @@ class Model:
     def __init__(self, sk, views, free_shape, base_shape, priors, init):
         self.sk, self.views, self.free_shape = sk, views, free_shape
         self.base = dict(base_shape)
+        self.fixed_skel = dict(init.get("skel") or {}) if not free_shape else {}  # proportions held (refine)
         self.priors = priors
         self.names, self.x0, self.scale, self.lo, self.hi = [], [], [], [], []
 
@@ -283,6 +291,8 @@ class Model:
             # depth, and the fit widened the head into a bulb that only matched L's outline)
             for i in range(3 * K):  # depth multipliers, width multipliers, vertical offsets
                 lo, hi, sc_ = ((0.7, 1.5, 0.08) if i < K else (0.85, 1.2, 0.05) if i < 2 * K else (-0.06, 0.06, 0.01))
+                if base_shape.get("anatomy", 1) == 2:  # style 2 is a horse's head already: the profile only adjusts
+                    lo, hi, sc_ = ((0.85, 1.2, 0.04) if i < 2 * K else (-0.03, 0.03, 0.005))
                 add(f"hp.{i}", hp0[i], sc_, lo, hi)
         for vn in views:
             ci = cam_internal(init["cam"][vn])
@@ -298,6 +308,8 @@ class Model:
             if vn in NUIS_LEGS:
                 for j, k in enumerate(("leg_f", "leg_b")):
                     add(f"{vn}.nuis.{k}", init["pose"][vn].get("leg_scale", [1.0, 1.0])[j], 0.03, 0.7, 1.0)
+                # and its trunk's length (round 13b: S's leg bases sit closer than L's trunk puts them)
+                add(f"{vn}.nuis.body", init["pose"][vn].get("body_scale", 1.0), 0.03, 0.8, 1.2)
             if HEAD_TURN:  # E-A round 9: the reference's head turns to the viewer; sagittal joints can't
                 for j in range(2):
                     add(f"{vn}.pose.neck_yaw.{j}", init["pose"][vn].get("neck_yaw", [0, 0])[j], 5, -30, 30)
@@ -309,7 +321,7 @@ class Model:
     def unpack(self, x):
         d = dict(zip(self.names, x))
         shape = dict(self.base)
-        skel = {}
+        skel = dict(self.fixed_skel)
         hp = []
         for k, v in d.items():
             if k.startswith("shape."):
@@ -331,6 +343,7 @@ class Model:
                 poses[vn]["head_yaw"] = d[f"{vn}.pose.head_yaw"]
             if vn in NUIS_LEGS:
                 poses[vn]["leg_scale"] = [d[f"{vn}.nuis.leg_f"], d[f"{vn}.nuis.leg_b"]]
+                poses[vn]["body_scale"] = d[f"{vn}.nuis.body"]
         return shape, skel, cams, poses
 
     def geometry(self, x, vn, mesh=True):
@@ -338,7 +351,8 @@ class Model:
         shape, skel, cams, poses = self.unpack(x)
         ls = poses[vn].get("leg_scale")
         if ls:  # this view's own leg lengths (NUIS_LEGS)
-            skel = {**skel, "leg_f": skel.get("leg_f", 1.0) * ls[0], "leg_b": skel.get("leg_b", 1.0) * ls[1]}
+            skel = {**skel, "leg_f": skel.get("leg_f", 1.0) * ls[0], "leg_b": skel.get("leg_b", 1.0) * ls[1],
+                    "body": skel.get("body", 1.0) * poses[vn].get("body_scale", 1.0)}
         B, H = RB.skeleton(self.sk["bones"], self.sk["seat"], skel)
         P = {**shape, "head_pitch": poses[vn]["head_pitch"], "head_yaw": poses[vn].get("head_yaw", 0.0)}
         Bp = RB.pose(B, H, P, poses[vn])
@@ -396,7 +410,8 @@ class Model:
                 ref = 0.0 if k >= 2 * HEAD_FIT.get("stations", 0) else 1.0
                 out.append(0.02 * (v - ref) / (0.05 if ref == 0.0 else 0.3))
             elif kind == "pose":
-                out.append(0.004 * v / 30.0 if not name.endswith("head_pitch") else 0.0)  # yaws too: a weak pull to straight
+                w = 0.03 if name.split(".")[0] in STRAIGHT_LEGS and name.split(".")[2] in LEGS else 0.004
+                out.append(w * v / 30.0 if not name.endswith("head_pitch") else 0.0)  # yaws too: a weak pull to straight
         return np.array(out)
 
 
@@ -949,6 +964,8 @@ def main(args_path):
 
     if a.get("refine"):
         NUIS_LEGS.update(a["refine"].get("nuisance_legs") or ())
+        TRUNK_VIEWS.update(a["refine"].get("trunk_views") or ())
+        STRAIGHT_LEGS.update(a["refine"].get("straight_legs") or ())
         rf = a["refine"]
         if not candidate_done(rf["candidate"]):
             m, hist = refine(a, sk, views, ck, log, defaults)
@@ -1046,8 +1063,8 @@ def refine(a, sk, views, ck, log, defaults):
             rng = np.random.default_rng(a["seed"])
             for neck, pitch in HEAD_STARTS:
                 m = Model(sk, {vn: views[vn]}, False, base, {}, {"cam": {vn: c0}, "pose": {vn: {
-                    **{leg: list(rng.normal(0, 4, 4)) for leg in LEGS}, "neck": [neck, 0.0], "head_pitch": pitch}},
-                    "shape": {}, "skel": {}})
+                    **{leg: [0.0] * 4 for leg in LEGS}, "neck": [neck, 0.0], "head_pitch": pitch}},  # standing
+                    "shape": {}, "skel": rec["skeleton"]})
                 r = solve(m, ("lm", "prior"), sel(m, [f"{vn}.cam.", f"{vn}.pose.", f"{vn}.nuis."]),
                           max_nfev=EVALS["landmarks"], diff_step=0.01)
                 if best is None or r.cost < best[0].cost:
@@ -1066,7 +1083,7 @@ def refine(a, sk, views, ck, log, defaults):
             ("head", rf["head_views"], ["hp."] + [f"shape.{p}" for p in HEAD_PARAMS]
              + [f"{vn}.pose.{k}" for vn in rf["head_views"] for k in ("neck", "head_pitch", "head_yaw")]
              + [f"{vn}.cam." for vn in rf["head_views"] if vn in new]),
-            ("legs", rf["leg_views"], [f"shape.{p}" for p in LEG_PARAMS]
+            ("legs", rf["leg_views"], ([f"shape.{p}" for p in LEG_PARAMS] if rf.get("fit_leg_shape") else [])
              + [f"{vn}.pose.{leg}" for vn in rf["leg_views"] for leg in LEGS] + [f"{vn}.nuis." for vn in rf["leg_views"]]),
             ("polish", list(views), [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views]
              + [f"{vn}.nuis." for vn in views])):
