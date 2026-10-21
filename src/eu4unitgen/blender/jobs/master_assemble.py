@@ -10,8 +10,8 @@ Parts (scene: the mirrored frame of _ref3d_scene; outputs mirrored back to PDX s
   cloth     the caparison panels of the cloth runs: their grid, pattern UV and texture; their class
             map (cloth / trim) read from the texture's colours (gold = trim).
   chest     (round 14) the chest panel split at the legs: two static drapes from the lower breast to below
-            the knees, each half hanging straight down and pushed out wherever the body or a foreleg stands in
-            its way (a one-piece simulated cloth tangled round the stepping foreleg); textured by projecting
+            the knees, each half hanging straight down, pushed out only by the breast and neck (the legs pass
+            behind or through it) (a one-piece simulated cloth tangled round the stepping foreleg); textured by projecting
             view L through its solved camera (its labels likewise: the class map), the right half mirrored.
   tail      from the side view's tail outline (``tail_profile``, round 13): sections down from the tail bone,
             front-back as the view shows, a little narrower side to side; without one, a tapered tube
@@ -283,7 +283,7 @@ def chest_drape(bvh, Vs_body, vpart, Bp, Hs, mpu, half, cfg):
             hit = bvh.ray_cast(Vector(P + D[k] * 40.0), Vector(-D[k]), 80.0)
             if hit[0] is not None:
                 h = np.array(hit[0])
-                if (h - P) @ D[k] > -clear:  # the body or a foreleg stands in the way: hang over it
+                if (h - P) @ D[k] > -clear:  # the breast or neck stands in the way: hang over it
                     P = h + D[k] * clear
             G[r, k] = P
     for _ in range(3):  # a cloth hangs smoothly over what it meets
@@ -483,8 +483,11 @@ def main():
         id_img = image_from_array("chest_id", (np.array([a["classes"][c] for c in names])[lab]).astype(np.float64))
         uvs0 = None
         rows_c = cc.get("rows", 16)
+        # the drape clears the trunk and neck only: pushed over L's forward-stepping foreleg it stood out as a
+        # flat tent (master v009-v010), which the game's rest pose kept; the reference's skirt hangs straight
+        trunk_bvh = BVHTree.FromPolygons([tuple(v) for v in Vs], [tuple(int(i) for i in f) for f in Fs[np.isin(part, [0, 1])]])
         for half, nm in ((1, "chest_left"), (-1, "chest_right")):
-            Vc, cols_c = chest_drape(body_bvh, Vs, vpart, Bp, Hs, mpu, half, cc)
+            Vc, cols_c = chest_drape(trunk_bvh, Vs, vpart, Bp, Hs, mpu, half, cc)
             if Vc is None:
                 res["parts"][nm] = {"built": False}
                 continue
