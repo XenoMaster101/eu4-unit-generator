@@ -33,4 +33,4 @@ Desktop GUI app that generates complete Europa Universalis IV **land unit** sets
 - When you run or suggest terminal commands, explain in plain language what each one does, and mention the GUI equivalent when one exists.
 
 ## Current phase
-Phase 3 (asset generation: Blender mesh jobs). Phases 0, 1 and 2 are done; Track F (the prompt front end: Home and Result screens) is done through F12; see docs/SPEC.md §10. Track M (reference-to-3D master pipeline): two fix rounds done after H3 (master v010, SPEC M17); the EU4 game version staged as in-game test 20 (finish line step 2), waiting for the user. Update this line as phases complete.
+Phase 3 (asset generation: Blender mesh jobs). Phases 0, 1 and 2 are done; Track F (the prompt front end: Home and Result screens) is done through F12; see docs/SPEC.md §10. Track M (reference-to-3D master pipeline): two fix rounds done after H3 (master v010, SPEC M17); the finish line run: in-game tests 21 (the cataphract) and 22 (with a second horse, the pipeline untouched) staged, waiting for the user (SPEC M17). Update this line as phases complete.

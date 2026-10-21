@@ -2244,7 +2244,38 @@ The full cataphract build starts only after the spikes pass **and** the user exp
     - fresh_horse's box fit is off for a model already on the vanilla skeleton (without the master's tail it scaled the horse off the leg bones, and the skirt trim cut the legs);
     - body 1,550 triangles.
   - **Test 21 STAGED** (`build/test21`; game v014): 2,974 triangles, validator 0 errors, 0 warnings. Deformation, stretch p05-p95 / max / flips: idle 0.90-1.07 / 3.0 / 6, walk 0.94-1.06 / 3.0 / 6, attack 0.83-1.10 / 3.2 / 10 (inside vanilla's). Seen: the gold reads as patches, not crisp crosses (coarse panel labels); the plume is a spiky tuft.
-  - **Next:** the user's in-game check of test 20; then step 3 (the pipeline untouched on a new horse reference from the user).
+  - **Next:** the user runs test 21 once in game, then test 22 (tier 1 the cataphract, tier 2 the second horse, tier 3 vanilla).
+- **Finish line step 3: the pipeline untouched on a second horse (2026-10-21)**
+  - **Reference:** `assets_in/new_refs/horse2_light_cavalry.png` (1536x1024). **Rule 8:** generated with ChatGPT; the user owns the output (declared 2026-10-21; recorded in the subject's `rights`). An unarmoured bay horse in a clean side view: bridle, saddle, blue saddle cloth; no rider, no armour, no caparison.
+  - **Run:** S1 `--add-view` (2.7 min), 8 TripoSG shells (17 min), the full E-A fit (85 min, 6 worker processes), the E-A refine to anatomy style 2 (13 min), the master (5.5 min), the game version (1 min), staged as tier 2 of **in-game test 22** (`build/test22`: tier 1 the cataphract of test 21, tier 3 vanilla).
+    - Validator: 0 errors, 0 warnings.
+    - Tier 2 deformation: idle 0.89-1.08 / 2.9 / 5, walk 0.95-1.05 / 2.2 / 0, attack 0.83-1.08 / 1.9 / 4.
+  - **Worked automatically:**
+    - the horse mask, the SAM 2 segments;
+    - the body fit, a good one: procedural, legs 0.92, head 0.91, worst landmark 4.7%; after the refine, legs 0.89, head 0.85;
+    - the head, ears, legs and hooves of anatomy style 2 on a different horse;
+    - the repose onto the vanilla skeleton, the remesh, the weights (deformation inside vanilla's), the bakes, the writer and the staging.
+  - **Failed (the pipeline isn't general yet):**
+    - **Colour rules are per subject.** The cataphract's HSV rules, copied unchanged, labelled the bay coat cloth and trim, the coat's grey highlights scale, and the head chanfron. Every later stage trusted the labels: E-B laid 628 plates on the neck, E-C hung a brown caparison panel, the master drew a chest panel, and the coat rendered grey with a pale head.
+    - **The master's defaults are the cataphract's:** armour, side panels and the split chest panel are built for every horse. Nothing asks whether the reference shows them.
+    - **E-A gates:** the fit fails its own gates (landmarks 4.7% against 2.5%: no head allowance for this subject) and its restarts don't converge (costs 5.3, 18.5, 25.1). The pipeline carried on, as it does.
+    - **E-B** fails coverage and plate period (there's no scale to match); **E-C** fails stretch.
+  - **Needed a decision or a hand step:**
+    - the subject config: the view's landmarks (25) and zones (head, legs, tail, coat, saddle), by hand: the pipeline has no automatic annotation;
+    - the view named L (the code's primary view);
+    - `spikes/ea/inputs/skeleton.json`: no command writes it (copied from the cataphract: vanilla's bones and seat, not image-specific);
+    - TripoSG's folders through environment variables;
+    - 6 parallel workers for the fit (a machine setting).
+  - **Code fixed on the way** (generality, not tuning for this image):
+    - the master, E-C's texture and the E-A refine assumed views L and R (or S); they now take a subject with view L only;
+    - the refine starts from the source fit's best candidate (it assumed hybrid; this horse's best was procedural);
+    - staging is split from the game build (several horses in one test).
+  - **To make the pipeline general (proposed, not done):**
+    - classes from a model (or a palette fitted per image) instead of hand HSV rules;
+    - the master's parts (armour, panels, chest panel) built only where the labels show them;
+    - landmarks detected, not annotated;
+    - the skeleton input written by a command;
+    - per-subject gate allowances set from the view types.
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
