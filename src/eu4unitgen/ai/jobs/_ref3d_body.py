@@ -82,9 +82,11 @@ def pose(bones, seat, P, a):
     reference's neck turns to the viewer) bends it sideways, positive to the horse's left."""
     B = {n: np.array(v, dtype=np.float64) for n, v in bones.items()}
     hoof_h = P["hoof_height"] * seat
+    ahead = P.get("pastern_ahead", 0.0) * seat  # anatomy style 2: the pastern slopes forward
     for leg in LEGS:
         heel = B[f"Horse{leg}Heel"]
-        pts = [B[f"Horse{leg}{j}"] for j in JOINTS] + [np.array([heel[0], hoof_h, heel[2]]), np.array([heel[0], 0.0, heel[2]])]
+        pts = [B[f"Horse{leg}{j}"] for j in JOINTS] + [np.array([heel[0], hoof_h, heel[2] - ahead]),
+                                                         np.array([heel[0], 0.0, heel[2] - ahead])]
         ang = list(a.get(leg, [0, 0, 0, 0]))
         for i, deg in enumerate(ang):  # joint i turns everything after it
             if not deg:
@@ -144,6 +146,8 @@ def _head_point(B, H, P, t, side, up):
 
 def landmarks(B, H, P):
     """The template's body landmarks (names as in templates/horse.json; near = the horse's left)."""
+    if P.get("anatomy", 1) == 2:
+        return _landmarks2(B, H, P)
     hd, u, v = _head_frame(P)
     L = P["head_length"] * H
     out = {"poll": B["HorseHead"] + v * 0.03 * H,
@@ -158,6 +162,25 @@ def landmarks(B, H, P):
         base = B["HorseHead"] + u * side * 0.5 * P["forehead_width"] * H + v * 0.05 * H
         ears.append(base + (v * 0.9 - hd * 0.45) * P["ear_length"] * H)
     out["ear_tip_a"], out["ear_tip_b"] = ears  # matched as an unordered pair
+    for leg, name in (("FrontLeft", "fore_near"), ("FrontRight", "fore_far"), ("BackLeft", "hind_near"), ("BackRight", "hind_far")):
+        out[f"{name}_fetlock"] = B[f"Horse{leg}Heel"]
+        out[f"{name}_hoof"] = B[f"Horse{leg}Sole"]
+    return out
+
+
+def _landmarks2(B, H, P):
+    """Style 2's landmarks: on its head's surface (ha.head2_point) and its ears."""
+    poll = B["HorseHead"]
+    L = P["head_length"] * H
+
+    def hp(t, side, q):
+        return ha.head2_point(P, poll, H, t, side, q)
+
+    out = {"poll": hp(0.0, 0.0, 1.0), "eye": hp(0.30, 0.95, 0.5), "nostril": hp(0.935, 0.9, 0.3),
+           "muzzle_front": hp(1.0, 0.0, 0.2) + ha.head_direction(P) * 0.012 * L,
+           "bit_ring": hp(0.84, 1.15, -0.4), "chin": hp(0.90, 0.0, -1.0), "throat": hp(0.05, 0.0, -1.0)}
+    (_, _, ta), (_, _, tb) = ha.ear2_tips(P, poll, H)
+    out["ear_tip_a"], out["ear_tip_b"] = ta, tb
     for leg, name in (("FrontLeft", "fore_near"), ("FrontRight", "fore_far"), ("BackLeft", "hind_near"), ("BackRight", "hind_far")):
         out[f"{name}_fetlock"] = B[f"Horse{leg}Heel"]
         out[f"{name}_hoof"] = B[f"Horse{leg}Sole"]
