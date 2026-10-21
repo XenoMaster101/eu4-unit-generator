@@ -112,9 +112,18 @@ def crop_views(s: dict, out: Path, names=None) -> dict:
         if names is not None and name not in names:
             continue
         p = out / f"{name}.png"
-        Image.open(view_source(s, v)).convert("RGB").crop(tuple(v["crop"])).save(p)
+        im = Image.open(view_source(s, v)).convert("RGB").crop(tuple(v["crop"]))
+        if v.get("mirror"):  # a horse facing right, mirrored to show a left side (M18); coordinates are the mirrored crop's
+            im = im.transpose(Image.FLIP_LEFT_RIGHT)
+        im.save(p)
         paths[name] = p
     return paths
+
+
+def main_view(s: dict) -> str:
+    """The subject's main view (M18: views are named by the config, none fixed): ``main_view``, else "L"
+    when there is one (the configs before M18), else the first view. The master stands in its pose."""
+    return s.get("main_view") or ("L" if "L" in s["views"] else next(iter(s["views"])))
 
 
 def view_dirs(s: dict, name: str) -> tuple[Path, Path]:

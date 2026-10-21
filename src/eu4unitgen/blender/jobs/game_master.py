@@ -236,8 +236,9 @@ def main():
     bpy.ops.wm.open_mainfile(filepath=a["master_blend"])
     sk = json.loads(Path(a["skeleton"]).read_text(encoding="utf-8"))
     body = a["body"]
-    rp = Repose(sk, body, "L")
-    _, _, _, V, F, part = body_in_view({"body": body, "view_name": "L"}, sk)
+    mv_ = a.get("main_view") or "L"  # the master stands in the main view's pose (M18)
+    rp = Repose(sk, body, mv_)
+    _, _, _, V, F, part = body_in_view({"body": body, "view_name": mv_}, sk)
     vpart = vertex_part(F, part, len(V))
     vmode = np.array([PART_MODE.get(int(p), "trunk") for p in vpart])
     # what isn't the body follows the body part it lies on (never a leg: panels hang over the legs, they

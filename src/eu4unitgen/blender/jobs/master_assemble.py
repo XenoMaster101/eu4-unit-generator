@@ -209,7 +209,7 @@ def label_faces(a, Vs, Fs, fpart, want, cand_parts, bvh):
         R, t = RB.camera_matrix(v["camera"])
         cpos = Vector(-R.T @ t)
         for f in fids:
-            if vn != "L" and fpart[f] != 0:
+            if vn != a["view_name"] and fpart[f] != 0:
                 continue
             pts = BARY7 @ Vs[Fs[f]]
             p2, _ = RB.project(to_pdx(pts), v["camera"])
@@ -413,11 +413,11 @@ def main():
     def lin(c):
         return tuple(srgb_to_linear(pal.get(c, [128, 128, 128])))
 
-    a["view_name"] = "L"
+    a["view_name"] = a.get("main_view") or "L"  # the master stands in the main view's pose
     body = a["body"]
     if brk == "head_5deg":  # E-D's head break: 5 deg nose-down
         body = json.loads(json.dumps(body))
-        body["poses"]["L"]["head_pitch"] += 5.0
+        body["poses"][a["view_name"]]["head_pitch"] += 5.0
         a["body"] = body
     Bp, Hs, P, V, F, part = body_in_view(a, sk)
     Vs = to_scene(V)
@@ -584,7 +584,7 @@ def main():
     chest_hems = []
     cc = a.get("chest_panel")
     if cc:
-        vL = a["views"]["L"]
+        vL = a["views"][a["view_name"]]
         img = load_rgb(vL["image"]).astype(np.float64)
         lab = decode(load_rgb(vL["labels"]), a["classes"])
         ci, ti = names.index("cloth"), names.index("trim")

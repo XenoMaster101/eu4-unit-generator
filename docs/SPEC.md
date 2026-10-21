@@ -2354,6 +2354,22 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
     - the chest read below the breast collar;
     - the poll at the ears' notch (a dip search reached the mane);
     - ears scored as an unordered pair, as E-A matches them.
+- **Step 4 done: `python -m eu4unitgen.ref3d.auto new <image> --name <subject> --rights "<declaration>" --ai-python <env python>`** writes the subject from the image alone:
+  - **The view:** the whole image and its horse mask. A horse facing right is mirrored to show a left side (`mirror`; the template's near legs are the horse's left). Tested on horse 2's image flipped: it was detected, mirrored back, and gave the same parts, with landmarks within 19 px.
+  - **Parts, labels, zones and landmarks:** from the parts job (steps 1 and 3), approved as read.
+  - **The config:** zones (head, legs, tail), landmarks, body length (chest to buttock), the head's pivot (poll), `details: []` (the eye is in the projected texture; E-A now takes a view with an empty details list).
+    - E-A's side-view camera window, when all four feet show apart.
+    - The trunk landmarks steering the main view in the refine.
+    - Workers: half the cores, at most 6.
+  - **The skeleton input** from the install's cavalry_horse.mesh: bones, seat (the back's surface at Saddle_Node, by ray in plain Python), vanilla positions and triangles, round 5's B parameters (now a constant, `auto.B2_PARAMS`). It is identical to the hand-copied file (seat within 3e-6).
+  - **AI folders follow from the AI python:** `<AI root>/rembg_models`, `weights/sam2.1-hiera-large`, `weights/siglip2-so400m-patch14-384`, `TripoSG`, `weights/TripoSG`. The environment variables still override.
+  - **No fixed view names:** the config's `main_view` (`s1.main_view`; "L" for the configs before M18) replaces "L" in:
+    - E-A: the independent fit's main body, the refine's head and leg views, the b2 pose;
+    - shells, E-B, the master and its assembly, the game version and its repose;
+    - E-C's panel job: its driver renames the main view to the job's internal "L".
+  - **Horse 2 as `horse2_auto`:** 112 s with no manual input, against the hand config of finish line step 3 (25 landmarks and the zones by hand). It found: saddle cloth, saddle, bridle, bare coat, tail; 19 landmarks; a side view.
+  - **`auto run <subject.json> --ai-python ... [--test testNN]`** chains shells, fit, refine, master and game untouched. It records each step in `auto_run.json`, so a stopped run continues where it stopped.
+  - **What a human still gives:** the image, a name and the rights declaration (rule 8: a statement only the user can make).
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.

@@ -156,6 +156,7 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
 
     views = view_info(s, ea_args, rec, out)
     tol = {vn: max(1, round(ea_args["label_scale"] * v["body_length"])) for vn, v in views.items()}
+    mvn = s1.main_view(s)  # the main view (M18: no fixed names; "L" before)
     found = subject_parts(s, views)
     has = (lambda k: True) if found is None else (lambda k: found.get(k, False))  # noqa: E731
     build_parts = {"armour": has("armour"), "chanfron": has("chanfron"), "plume": has("plume"), "tail": has("tail"),
@@ -165,7 +166,7 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     # (generality, finish line step 3: a subject may have only view L)
     m_arm = arm_res = None
     if build_parts["armour"]:
-        cover = [{**{k: views["L"][k] for k in ("labels", "inpainted", "never_use", "camera")}, "parts": None}]
+        cover = [{**{k: views[mvn][k] for k in ("labels", "inpainted", "never_use", "camera")}, "parts": None}]
         if "R" in views:
             cover.append({**{k: views["R"][k] for k in ("labels", "inpainted", "never_use", "camera")}, "parts": [0],
                           "label_tol_px": tol["R"], "close_px": max(2, round(0.02 * views["R"]["body_length"]))})
@@ -200,15 +201,15 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     else:
         note("caparison: none shown, no panels" + (" (a saddle cloth instead)" if build_parts["saddle_cloth"] else ""))
     decals = [{"name": d["name"], "view": vn, "xy": d["xy"], "size": d["size"], "class": DECAL_CLASS[d["name"]]}
-              for vn, v in views.items() if vn in DECAL_VIEWS for d in v["details"] if d["name"] in DECAL_CLASS]
+              for vn, v in views.items() if vn in DECAL_VIEWS + (mvn,) for d in v["details"] if d["name"] in DECAL_CLASS]
     base_args = {"skeleton": ea_args["skeleton"], "body": {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")},
                  "classes": ea_args["classes"], "views": views,
                  "armour_dir": str(Path(arm_res["files"]["lit"]).parent) if arm_res else None,
                  "verts_per_plate": arm_res["plates"]["verts_per_plate"] if arm_res else None, "panels": panels,
-                 "decals": decals, "cloth_seam_y": seam, "tail_profile": tail_profile(s, views, "S" if "S" in views else "L"),
+                 "decals": decals, "cloth_seam_y": seam, "tail_profile": tail_profile(s, views, "S" if "S" in views else mvn), "main_view": mvn,
                  **cfg, "build": build_parts,
                  # a self-read subject (M18): the main view projected on the body; the saddle cloth's box in it
-                 "project_body": found is not None and "texture" in views["L"], "saddle_cloth_box": parts_box(s, "L", "saddle_cloth")}
+                 "project_body": found is not None and "texture" in views[mvn], "saddle_cloth_box": parts_box(s, mvn, "saddle_cloth")}
     if not has("caparison"):
         base_args["chest_panel"] = None
     br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=7200)
@@ -233,7 +234,7 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     # by the measured (signed) difference and the master is assembled and scored again (twice at most)
     hue_log = []
     for k in range(2):
-        mv = ev["sets"]["master"]["views"]["L"]
+        mv = ev["sets"]["master"]["views"][mvn]
         g = mv["gates"]["hue_deg"]
         dh = (mv.get("hue_signed") or {}).get("cloth")
         if g["pass"] or dh is None or not panels:

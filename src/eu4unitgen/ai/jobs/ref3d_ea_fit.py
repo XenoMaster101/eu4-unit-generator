@@ -901,6 +901,9 @@ def main(args_path):
             for key in ex.map(_worker_fit, todo):
                 log(f"  {key}: done (parallel; its log: fit_{key}.log)")
 
+    # the main view (M18: no fixed view names; "L" in the configs before it): its pose is the master's
+    MAIN = a.get("main_view") or ("L" if "L" in views else next(iter(views)))
+
     def run_independent(name, base_shape, priors):
         """SPEC S3's fallback (E-A round 10): each view fitted on its own (shape, camera, pose); the
         master body is L's, with R's rump (M10: L for head, neck, chest and forelegs, R for the
@@ -918,7 +921,7 @@ def main(args_path):
             if not candidate_done(f"{name}_{vn}"):
                 finish(f"{name}_{vn}", best[1], best[2], {"restarts": [{"cost": r[0], "history": r[2]} for r in runs]})
         bests = {vn: min(r, key=lambda q: q[0]) for vn, r in per.items()}
-        mL = bests["L"][1]
+        mL = bests[MAIN][1]
         shape, skel, cams, poses = mL.unpack(mL.x0)
         if "R" in bests:
             sR, _, cR, pR = bests["R"][1].unpack(bests["R"][1].x0)
@@ -943,9 +946,9 @@ def main(args_path):
                 ck.save(key, {"names": m.names, "x": m.x0, "hist": hist_c, "done": True})
         n = min(len(r) for r in per.values())
         costs = [sum(per[vn][k][0] for vn in per) for k in range(n)]
-        finish(name, m, bests["L"][2] + (bests["R"][2] if "R" in bests else []) + hist_c,
+        finish(name, m, bests[MAIN][2] + (bests["R"][2] if "R" in bests else []) + hist_c,
                {"restarts": [{"cost": c} for c in costs], "independent": True,
-                "parts": {"L": "everything but the rump", "R": RUMP}})
+                "parts": {MAIN: "everything but the rump", "R": RUMP}})
         return m
 
     def run_fitted(name, base_shape, free, priors):
@@ -991,7 +994,7 @@ def main(args_path):
     if a.get("shells") and proc is not None:
         shape, skel, cams, poses = proc.unpack(proc.x0)
         B, H = RB.skeleton(sk["bones"], sk["seat"], skel)
-        BL = RB.pose(B, H, shape, poses["L"])
+        BL = RB.pose(B, H, shape, poses[MAIN])
         height = float(BL["HorseHead"][1] + 1.5)
         shells = {}
         for p in a["shells"]:
@@ -1043,8 +1046,10 @@ def refine(a, sk, views, ck, log, defaults):
     camera and pose are refitted, each stage against the views that show it best (``refine.stages``).
     -> (model over every view, history)."""
     rf = dict(a["refine"])
-    for k in ("head_views", "leg_views"):  # only the subject's own views (a subject may have view L only)
-        rf[k] = [vn for vn in rf[k] if vn in views] or ["L"]
+    main = a.get("main_view") or ("L" if "L" in views else next(iter(views)))
+    for k in ("head_views", "leg_views"):  # only the subject's own views (a subject may have one view only)
+        rf[k] = [main if vn == "L" else vn for vn in rf[k]]  # "L": the main view (M18)
+        rf[k] = [vn for vn in dict.fromkeys(rf[k]) if vn in views] or [main]
     rec = json.loads(Path(rf["from"]).read_text(encoding="utf-8"))["candidates"][rf["candidate"]]
     shape = {k: v for k, v in rec["shape"].items() if k != "head_profile"}
     import _ref3d_body as RB

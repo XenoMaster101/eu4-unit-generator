@@ -62,7 +62,7 @@ def job_args(s: dict, cfg: dict, ea_dir: Path, cand: str, out: Path) -> tuple[di
     ea_args = json.loads((ea_dir / "args.json").read_text(encoding="utf-8"))
     res = json.loads((ea_dir / "result.json").read_text(encoding="utf-8"))
     rec = res["candidates"][cand]
-    vn = cfg["view"]
+    vn = s1.main_view(s) if cfg["view"] == "L" else cfg["view"]  # "L": the main view (M18)
     v = ed2d.build_args(s, out)["views"][vn]
     W, H = Image.open(v["image"]).size
     tol = max(1, round(ea_args["label_scale"] * v["body_length"]))

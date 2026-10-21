@@ -64,8 +64,15 @@ def job_args(s: dict, cfg: dict, ea_dir: Path, cand: str, out: Path) -> dict:
         W, H = Image.open(v["image"]).size
         views[vn] = {"image": v["image"], "labels": v["labels"], "inpainted": v["inpainted"], "size": [W, H],
                      "camera": rec["cameras"][vn], "body_length": v["body_length"],
-                     "hem_landmarks": {k: p for k, p in v["landmarks"].items() if k in cfg["hem_landmarks"].get(vn, [])}}
-    return {"skeleton": ea_args["skeleton"], "body": {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")},
+                     "hem_landmarks": {k: p for k, p in v["landmarks"].items()
+                                       if k in cfg["hem_landmarks"].get("L" if vn == s1.main_view(s) else vn, [])}}
+    body = {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")}
+    mv = s1.main_view(s)
+    if mv != "L":  # the panel job calls the main view "L" (M18: the config names its views): renamed for it
+        ren = lambda d: {("L" if k == mv else k): x for k, x in d.items()}  # noqa: E731
+        views = ren(views)
+        body = {**body, "cameras": ren(body["cameras"]), "poses": ren(body["poses"])}
+    return {"skeleton": ea_args["skeleton"], "body": body,
             "classes": ea_args["classes"], "views": views, "panel_classes": cfg["panel_classes"],
             "panel": cfg["panel"], "cloth": cfg["cloth"], "armour_m": cfg["armour_m"], "withers_m": cfg["withers_m"],
             "penetration_limit_m": cfg["penetration_limit_m"], "texture_px": cfg["texture_px"],

@@ -37,17 +37,17 @@ from eu4unitgen.ref3d.writeguard import allowed_roots, check_writes
 def shell_input(s: dict, out: Path) -> Path:
     """The approved cleaned view L, its background removed by the approved horse mask (RGBA),
     cropped to the horse with a margin: TripoSG's input."""
-    root, ap = s["_root"], s["approved"]
-    k = s["chosen"]["L"]
-    clean = root / "refs" / "clean" / ap["clean"]
-    rgb = Image.open(clean / f"L_seed{k}.png").convert("RGB")
-    alpha = Image.open(clean / f"L_seed{k}_fg.png").convert("L")
+    mv = s1.main_view(s)
+    k = s["chosen"][mv]
+    clean = s1.view_dirs(s, mv)[0]
+    rgb = Image.open(clean / f"{mv}_seed{k}.png").convert("RGB")
+    alpha = Image.open(clean / f"{mv}_seed{k}_fg.png").convert("L")
     rgba = rgb.copy()
     rgba.putalpha(alpha)
     x0, y0, x1, y1 = alpha.point(lambda v: 255 if v > 127 else 0).getbbox()
     m = int(0.05 * max(x1 - x0, y1 - y0))
     rgba = rgba.crop((max(0, x0 - m), max(0, y0 - m), min(rgb.width, x1 + m), min(rgb.height, y1 + m)))
-    p = out / "input_L.png"
+    p = out / f"input_{mv}.png"
     rgba.save(p)
     return p
 
@@ -131,7 +131,10 @@ def fit_args(s: dict, out: Path, shells_dir: Path | None, skeleton: Path) -> dic
         views[n] = {k: v[k] for k in ("image", "labels", "fg", "inpainted", "never_use", "landmarks", "body_length")}
         views[n]["zones"] = z
     shells = sorted(str(p) for p in shells_dir.glob("seed*.glb")) if shells_dir else []
-    return {"skeleton": str(skeleton), "views": views, "classes": base["classes"], "gates": gates,
+    mv = s1.main_view(s)
+    if cfg.get("head_fit", {}).get("view") == "L" and mv != "L":  # "L" in the defaults: the main view (M18)
+        cfg["head_fit"] = {**cfg["head_fit"], "view": mv}
+    return {"skeleton": str(skeleton), "main_view": mv, "views": views, "classes": base["classes"], "gates": gates,
             "label_scale": gates["label_scale"], "shells": shells, "out_dir": str(out), **cfg}
 
 

@@ -83,13 +83,15 @@ def build(subject_path: Path, master_version: str, test: str | None, blender: st
     grids = {k: [p["rows"], p["cols"]] for k, p in mm["assemble"]["parts"].items()
              if k.startswith(("panel_", "chest_")) and isinstance(p, dict) and "rows" in p and not k.endswith("_tassels")}
     from eu4unitgen.ref3d import ed2d
-    vL = ed2d.build_args(s, out)["views"]["L"]
+    mvn = s1.main_view(s)  # the main view (M18)
+    vL = ed2d.build_args(s, out)["views"][mvn]
     plab = sorted((mv / "cloth_left").glob("**/final/**/panel_labels.png")) or sorted((mv / "cloth_left").glob("**/panel_labels.png"))
     labels = {}
     if plab:
         labels.update({"panel_left": {"image": str(plab[-1]), "uv": "pattern"}, "panel_right": {"image": str(plab[-1]), "uv": "pattern"}})
     labels.update({"chest_left": {"image": vL["labels"], "uv": "projected_L"}, "chest_right": {"image": vL["labels"], "uv": "projected_L"}})
     rp = br.run_job("game_master", {"master_blend": str(mv / "assemble" / "master.blend"), "grids": grids, "labels": labels,
+                                    "main_view": mvn,
                                     "clean": {"image": vL["image"], "labels": vL["labels"], "classes": s["_template"]["classes"]},
                                     "skeleton": str(root / "spikes" / "ea" / "inputs" / "skeleton.json"),
                                     "body": {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")},

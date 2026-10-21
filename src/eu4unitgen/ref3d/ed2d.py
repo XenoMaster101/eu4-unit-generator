@@ -46,7 +46,8 @@ def fg_height(path: Path) -> int:
 
 
 def build_args(s: dict, out: Path) -> dict:
-    views = {n: k for n, k in s["chosen"].items() if s["views"][n].get("details")}
+    # the fitted views: those with key details (M18: or an empty list, a self-read view: the eye is in its texture)
+    views = {n: k for n, k in s["chosen"].items() if s["views"][n].get("details") is not None}
     dirs = {n: s1.view_dirs(s, n) for n in views}
     fgs = {n: dirs[n][0] / f"{n}_seed{k}_fg.png" for n, k in views.items()}
     bl = body_lengths({**s, "views": {n: s["views"][n] for n in views}}, {n: fg_height(p) for n, p in fgs.items()})
