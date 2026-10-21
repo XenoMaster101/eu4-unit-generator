@@ -50,6 +50,9 @@ EB_DEFAULTS = {
 
 def best_candidate(ea_manifest: dict) -> str:
     v = ea_manifest.get("verdict") or {}
+    rf = (ea_manifest.get("settings") or {}).get("refine")
+    if rf:  # an E-A refine has one candidate, the one it refitted
+        return rf["candidate"]
     return v.get("best") or "procedural"
 
 
