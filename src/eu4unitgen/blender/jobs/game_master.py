@@ -317,6 +317,10 @@ def main():
         G = G.reshape(rows + 1, cols, 3)
         if a.get("hug_clear") is not None:
             G = hug(G, tbvh, float(a["hug_clear"]))
+            # the master's panel moves there too: the colour bake's rays from the slab must meet it, not the
+            # plates under where it was (test 21's second build)
+            ob.data.vertices.foreach_set("co", to_scene(G.reshape(-1, 3)).astype(np.float32).ravel())
+            ob.data.update()
         V, Fp, anc = slab(G, bkd, a.get("piece_rows", 7), a.get("piece_cols", 12), a.get("piece_thick", 0.06))
         pieces.append({"name": name, "v": V.tolist(), "f": Fp.tolist(), "anchor": anc.tolist(), "hem": float(G[-cols:, 1].min())})
     # the ears (the body's parts 3 and 4) and the plume: pieces rigid with the head (part 1)
@@ -336,8 +340,13 @@ def main():
         pf = np.array([p_.vertices[:] for p_ in pl.data.polygons if len(p_.vertices) == 3])
         pieces.append({"name": "plume", "v": pv.tolist(), "f": outward(pv, pf).tolist(), "part": 1, "anchor": pv.tolist(), "hem": 0.0})
     (out / "pieces.json").write_text(json.dumps(pieces), encoding="utf-8")
-    res["pieces"] = {"path": str(out / "pieces.json"), "count": len(pieces), "tris": sum(len(q["f"]) for q in pieces)}
+    # the tassels hung from the master's hems: out of the game version (their panels moved; the gold hem band is in
+    # the clean texture)
+    for ob_ in [o_ for o_ in bpy.context.scene.objects if o_.name.endswith("_tassels")]:
+        bpy.data.objects.remove(ob_, do_unlink=True)
+    meshes = [ob_ for ob_ in bpy.context.scene.objects if ob_.type == "MESH"]
     bpy.ops.wm.save_as_mainfile(filepath=str(out / "reposed.blend"), compress=True)
+    res["pieces"] = {"path": str(out / "pieces.json"), "count": len(pieces), "tris": sum(len(q["f"]) for q in pieces)}
     # the high surface: every part but the decals (flat cards), modifiers applied, joined
     dg = bpy.context.evaluated_depsgraph_get()
     allV, allF, off = [], [], 0
