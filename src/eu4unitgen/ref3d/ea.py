@@ -52,18 +52,45 @@ def shell_input(s: dict, out: Path) -> Path:
     return p
 
 
-def shells(subject_path: Path, seeds: list[int], python: str | None = None) -> dict:
+def glb_ok(path: Path) -> bool:
+    """A finished GLB: the glTF magic and the length its header declares (a seed cut off mid-write fails)."""
+    try:
+        b = Path(path).read_bytes()
+    except OSError:
+        return False
+    return len(b) > 1024 and b[:4] == b"glTF" and int.from_bytes(b[8:12], "little") == len(b)
+
+
+def shells(subject_path: Path, seeds: list[int], python: str | None = None, resume: str | None = None) -> dict:
+    """One TripoSG mesh per seed, each in its own process (its memory freed when the seed ends). Every finished
+    seed is kept as it lands (``seedNN.glb`` and ``seedNN.json``); with ``resume`` (a shells version without a
+    manifest: a stopped run) the seeds whose GLB is whole are reused and only the rest generated."""
     from eu4unitgen.ai.triposg import TripoSGRunner
 
     s = s1.load_subject(subject_path)
     r = TripoSGRunner(python)
     check_writes({"out_dir": str(s["_root"] / "spikes")}, allowed_roots(r.python), "E-A shells")
-    out = s1.next_version(s["_root"] / "spikes" / "ea" / "shells")
+    if resume:
+        out = s["_root"] / "spikes" / "ea" / "shells" / resume
+        if (out / "manifest.json").is_file():
+            raise FileExistsError(f"{out} is finished (manifest.json); nothing to resume")
+    else:
+        out = s1.next_version(s["_root"] / "spikes" / "ea" / "shells")
     t0 = time.time()
-    img = shell_input(s, out)
+    img = out / f"input_{s1.main_view(s)}.png"
+    if not (resume and img.is_file()):  # a resumed run keeps the input its seeds were made from
+        img = shell_input(s, out)
     res = {}
     for seed in seeds:
-        res[str(seed)] = r.generate(img, out / f"seed{seed}.glb", seed=seed)
+        glb, side = out / f"seed{seed}.glb", out / f"seed{seed}.json"
+        if resume and glb_ok(glb):
+            res[str(seed)] = json.loads(side.read_text(encoding="utf-8")) if side.is_file() else \
+                {"path": str(glb), "note": "reused: finished before the run was stopped (its log lines hold the counts)"}
+            res[str(seed)]["reused"] = True
+            print("seed", seed, "reused", flush=True)
+            continue
+        res[str(seed)] = r.generate(img, glb, seed=seed)
+        side.write_text(json.dumps(res[str(seed)]), encoding="utf-8")
         print("seed", seed, {k: res[str(seed)][k] for k in ("faces", "components", "seconds_generate")}, flush=True)
     manifest = {"stage": "E-A shells", "subject": s["name"], "version": out.name, "approved": s["approved"],
                 "input": {"path": str(img), "sha256": s1.sha256(img)}, "seeds": res,
@@ -217,7 +244,8 @@ def text_tile(text: str, size=(300, 360)):
     return s1.text_tile(text, size)
 
 
-def fit(subject_path: Path, ai_python: str, shells_version: str | None, resume: str | None = None) -> dict:
+def fit(subject_path: Path, ai_python: str, shells_version: str | None, resume: str | None = None,
+        workers: int | None = None) -> dict:
     from eu4unitgen.ai.env import AIJobRunner
 
     s = s1.load_subject(subject_path)
@@ -237,6 +265,8 @@ def fit(subject_path: Path, ai_python: str, shells_version: str | None, resume: 
         out = s1.next_version(root / "fit")
         args = fit_args(s, out, root / "shells" / shells_version if shells_version else None, skeleton)
         args["shells_version"] = shells_version
+        if workers:  # the processes the free RAM allows (M18 step 5), not more than the config's
+            args["workers"] = min(workers, args.get("workers", workers))
         (out / "args.json").write_text(json.dumps(args, indent=1), encoding="utf-8")
     res = AIJobRunner(ai_python, timeout=6 * 3600).run_job("ref3d_ea_fit", args).result
     sheet(res, s, out / "ea_sheet.png", out.name)

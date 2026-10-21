@@ -12,7 +12,10 @@ hand setup.
              cavalry_horse.mesh: bone positions, the seat (the back's surface at Saddle_Node), the
              vanilla positions and triangles (for the vanilla-distance check), round 5's B parameters.
   run   the pipeline on it, untouched: TripoSG shells, the E-A fit, the refine, the master, the game
-        version (and a staged test with ``--test``).
+        version (and a staged test with ``--test``). One heavy job at a time; each step starts only with
+        enough free RAM (memory.STEP_MIN_GB; else it stops and says so), and the fit runs as many processes
+        as the free RAM holds (memory.fit_workers). A stopped run continues: finished steps are skipped,
+        and an unfinished shells version keeps its finished seeds. The lowest free RAM per step is logged.
 
 The only inputs are the image, a name, the rights declaration (rule 8: the user's statement, never
 inferred) and the AI environment's python; the model folders follow from it
@@ -186,19 +189,34 @@ def run(subject: Path, ai_python: str, test: str | None = None, blender: str | N
     log_path = folder / "auto_run.json"
     rep = json.loads(log_path.read_text(encoding="utf-8")) if log_path.is_file() else {"steps": {}}
 
+    from eu4unitgen.ref3d import memory
+
     def step(key, fn):
         if key in rep["steps"]:  # done in an earlier (stopped) run
             print(f"{key}: done earlier ({rep['steps'][key]['version']})", flush=True)
             return rep["steps"][key]
+        total, free = memory.ram_gb()
+        need = memory.STEP_MIN_GB.get(key, 8.0)
+        if free < need:
+            raise SystemExit(f"{key}: {free:.1f} GB of {total:.1f} GB RAM free, {need:.0f} GB wanted: close programs "
+                             f"and run again (finished steps are kept)")
         t = time.time()
-        m = fn()
-        rep["steps"][key] = {"version": m["version"], "seconds": round(time.time() - t, 1)}
+        with memory.LowWatermark() as wm:
+            m = fn()
+        rep["steps"][key] = {"version": m["version"], "seconds": round(time.time() - t, 1),
+                             "free_ram_gb": {"start": round(free, 1), "lowest": round(wm.low or free, 1)}}
         log_path.write_text(json.dumps(rep, indent=1), encoding="utf-8")
         print(f"{key}: {m['version']} ({rep['steps'][key]['seconds']} s)", flush=True)
         return rep["steps"][key]
 
-    sh = step("shells", lambda: ea.shells(subject, [11 * (k + 1) for k in range(8)], ai_python))
-    ft = step("fit", lambda: ea.fit(subject, ai_python, sh["version"]))
+    sdir = folder / "spikes" / "ea" / "shells"
+    open_ = sorted(p.name for p in sdir.glob("v*") if not (p / "manifest.json").is_file()) if sdir.is_dir() else []
+    sh = step("shells", lambda: ea.shells(subject, [11 * (k + 1) for k in range(8)], ai_python,
+                                          resume=open_[-1] if open_ else None))
+    workers = memory.fit_workers(memory.ram_gb()[1], 6)
+    rep["fit_workers"] = workers
+    print(f"fit: {workers} process(es) for the free RAM", flush=True)
+    ft = step("fit", lambda: ea.fit(subject, ai_python, sh["version"], workers=workers))
     rf = step("refine", lambda: ea.refine(subject, ai_python, ft["version"]))
     ms = step("master", lambda: master.build(subject, rf["version"], ai_python, blender))
     gm = step("game", lambda: game.build(subject, ms["version"], test, blender))
