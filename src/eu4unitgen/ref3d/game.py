@@ -29,12 +29,14 @@ from eu4unitgen.ref3d import s1
 GAME_DEFAULTS = {
     "voxel_solid": 0.1,
     # fresh_horse (test 15's settings for its TripoSG horse, the rider cut and lump off: there is no rider)
-    "fresh": {"hem_y": 4.6, "leg_radius": 0.65, "tail_gap": 0.35, "voxel": 0.3, "relax": 4, "target_tris": 2000,
-              "quads": 2000, "smooth": 12, "influences": 3, "chain_weights": True, "tail": {"build": "auto", "cut": 0.8}},
+    # (test 21: the tail is fresh_horse's own, along vanilla's tail bones; 1,650 body triangles leave room for the
+    # slabs (~720), ears (~220) and plume (~320) under 3,000)
+    "fresh": {"hem_y": 4.6, "leg_radius": 0.65, "tail_gap": 0.35, "voxel": 0.3, "relax": 4, "target_tris": 1650,
+              "quads": 1650, "smooth": 12, "influences": 3, "chain_weights": True, "tail": {"build": True, "cut": 0.8}},
     "bake": {"size": 512, "cage": 0.4, "distance": 0.8},
     # the cloth as slabs (game_master): the body ~2,000 triangles and four slabs ~180 each stay under the
     # validator's 3,000 (test 20's first stage: 4,224 with 2,800 and 7 x 12 slabs)
-    "pieces": {"piece_rows": 5, "piece_cols": 9, "piece_thick": 0.06},
+    "pieces": {"piece_rows": 5, "piece_cols": 9, "piece_thick": 0.06, "hug_clear": 0.06},
     "normal": {"cage": 0.1, "distance": 0.35, "high_smooth": 0, "strength": 0.6, "samples": 32, "ao_strength": 0.35},
     "test": {"tag": "HDA", "gfx": "hellenicgfx", "set_name": "cataphract_test", "base_gfx": "westerngfx",
              "sprite_techs": [2, 3, 4],
@@ -76,7 +78,15 @@ def build(subject_path: Path, master_version: str, test: str, blender: str | Non
 
     grids = {k: [p["rows"], p["cols"]] for k, p in mm["assemble"]["parts"].items()
              if k.startswith(("panel_", "chest_")) and isinstance(p, dict) and "rows" in p and not k.endswith("_tassels")}
-    rp = br.run_job("game_master", {"master_blend": str(mv / "assemble" / "master.blend"), "grids": grids,
+    from eu4unitgen.ref3d import ed2d
+    vL = ed2d.build_args(s, out)["views"]["L"]
+    plab = sorted((mv / "cloth_left").glob("**/final/**/panel_labels.png")) or sorted((mv / "cloth_left").glob("**/panel_labels.png"))
+    labels = {}
+    if plab:
+        labels.update({"panel_left": {"image": str(plab[-1]), "uv": "pattern"}, "panel_right": {"image": str(plab[-1]), "uv": "pattern"}})
+    labels.update({"chest_left": {"image": vL["labels"], "uv": "projected_L"}, "chest_right": {"image": vL["labels"], "uv": "projected_L"}})
+    rp = br.run_job("game_master", {"master_blend": str(mv / "assemble" / "master.blend"), "grids": grids, "labels": labels,
+                                    "clean": {"image": vL["image"], "labels": vL["labels"], "classes": s["_template"]["classes"]},
                                     "skeleton": str(root / "spikes" / "ea" / "inputs" / "skeleton.json"),
                                     "body": {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")},
                                     "voxel": cfg["voxel_solid"], **cfg["pieces"], "out_dir": str(out / "repose")}).result

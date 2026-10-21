@@ -1140,8 +1140,8 @@ def main():
         for q in json.loads(open(a["pieces"], encoding="utf-8").read()):
             v = np.array(q["v"]) * s_ + off_
             f = np.array(q["f"], dtype=np.int64)
-            join_piece(obj, q["name"], {"v": v, "f": f, "part": [hb.CLOTH_PANEL] * len(f), "hem": [q["hem"] * s_ + off_[1]] * len(f),
-                                        "anchor": np.array(q["anchor"]) * s_ + off_})
+            join_piece(obj, q["name"], {"v": v, "f": f, "part": [q.get("part", hb.CLOTH_PANEL)] * len(f),
+                                        "hem": [q["hem"] * s_ + off_[1]] * len(f), "anchor": np.array(q["anchor"]) * s_ + off_})
             res["pieces"][q["name"]] = {"tris": int(len(f))}
     if build_tail:  # found on the body alone, before the panels join it
         root, offset = tail_anchor(obj, van["bones"])
@@ -1165,6 +1165,8 @@ def main():
     res["weights"] = wstats
     if a.get("chanfron"):
         res["chanfron"]["pinned_vertices"] = pin_chanfron(obj)
+    elif a.get("pieces") and any(q.get("part") == 1 for q in json.loads(open(a["pieces"], encoding="utf-8").read())):
+        res["head_pieces_pinned"] = pin_chanfron(obj)  # the ears and plume: rigid with the head
     if a.get("barding") or a.get("pieces") or build_tail:  # panels, stirrups and the tail: their own weights
         res.setdefault("barding", {})["pinned_vertices"] = pin_barding(obj, van["bones"])
     if a.get("paint"):

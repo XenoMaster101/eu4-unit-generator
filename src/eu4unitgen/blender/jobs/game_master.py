@@ -17,8 +17,20 @@ on, never a leg), and writes:
   check.png      a side view of the posed master (Workbench).
 OBJs in preview axes (file (x, y, -z) of PDX space, as fresh_horse and bake_horse read them).
 
+Game fix round (the user on test 20's gallery, 2026-10-21):
+  * the slabs hug the body: each column laid back onto the trunk's surface (``hug_clear`` off it) by horizontal
+    rays against the posed barrel and neck, hanging straight down below them (test 20's stood out like wings);
+  * the cloth clean: the panels' and chest drapes' albedo from their labels (``labels``: the panel's own label
+    texture, the drapes' view-L labels through their projected UVs), cloth one red, trim one gold, both from the
+    reference's lit pixels (``clean``: view L's image and labels; cloth: the median above its median brightness,
+    trim: of its brightest quarter), so the crosses and borders read (test 20's was dark and mottled);
+  * the ears and the plume as pieces of their own (part 1: fresh_horse pins them to HorseHead), lost in the voxel
+    remesh before;
+  * the tail left out of the solid: fresh_horse builds its own along vanilla's tail bones (test 20's stuck out).
+
 args: {"master_blend", "skeleton", "body": {"shape", "skeleton", "cameras", "poses"}, "voxel",
-       "grids": {panel object: [rows, cols]}, "piece_rows", "piece_cols", "piece_thick", "out_dir", "result_path"}
+       "grids": {panel object: [rows, cols]}, "piece_rows", "piece_cols", "piece_thick", "hug_clear",
+       "labels": {object: {"image", "uv"}}, "clean": {"image", "labels", "classes"}, "out_dir", "result_path"}
 """
 import json
 import math
@@ -78,6 +90,92 @@ def albedo_of(ob):
             else:
                 em.inputs["Color"].default_value = tuple(bc.default_value)
     return m
+
+
+def hug(G, bvh, clear):
+    """Each column of a grid (R x C x 3, PDX) laid back onto the trunk: a horizontal ray towards the body from
+    outside each point (along the grid's outward normal, levelled) puts it ``clear`` off the surface it meets;
+    where no ray meets the trunk (below the belly) the point hangs straight under the one above."""
+    from mathutils import Vector
+    du, dv = np.gradient(G, axis=1), np.gradient(G, axis=0)
+    n = np.cross(du, dv)
+    out = G.copy()
+    for c in range(G.shape[1]):
+        last = None
+        for r in range(G.shape[0]):
+            p = G[r, c]
+            d = np.array([n[r, c, 0], 0.0, n[r, c, 2]])
+            if np.linalg.norm(d) < 1e-9:
+                d = np.array([np.sign(p[0]) or 1.0, 0.0, 0.0])
+            d /= np.linalg.norm(d)
+            hit = bvh.ray_cast(Vector(p + d * 30.0), Vector(-d), 60.0)
+            if hit[0] is not None:
+                h = np.array(hit[0])
+                if (p - h) @ d < 0:  # the normal pointed into the body: face the other way
+                    d = -d
+                    hit = bvh.ray_cast(Vector(p + d * 30.0), Vector(-d), 60.0)
+                    h = np.array(hit[0]) if hit[0] is not None else h
+                q = h + d * clear
+                out[r, c] = (q[0], p[1], q[2])
+                last = out[r, c]
+            elif last is not None:
+                out[r, c] = (last[0], p[1], last[2])
+    return out
+
+
+def clean_palette(cl):
+    """(cloth, trim) sRGB from the reference's lit pixels of those classes (module doc)."""
+    img = np.array(load_png(cl["image"]), float)
+    lab = np.array(load_png(cl["labels"]))
+    out = {}
+    for c, q in (("cloth", 50), ("trim", 75)):
+        m = (lab[..., :3] == np.array(cl["classes"][c])).all(-1)
+        px = img[m][:, :3]
+        lum = px.mean(axis=1)
+        out[c] = np.median(px[lum >= np.percentile(lum, q)], axis=0)
+    return out
+
+
+def load_png(path):
+    """An image's pixels, top row first, 0-255 (Blender's loader)."""
+    im = bpy.data.images.load(str(path), check_existing=False)
+    w, h = im.size
+    a = np.empty(w * h * 4, np.float32)
+    im.pixels.foreach_get(a)
+    bpy.data.images.remove(im)
+    return (a.reshape(h, w, 4)[::-1] * 255).round()
+
+
+def clean_material(name, lab_path, classes, pal):
+    """An emission of the labels as clean colours: cloth one red, trim one gold (anything else reads as cloth)."""
+    lab = load_png(lab_path)[..., :3]
+    trim = (lab == np.array(classes["trim"])).all(-1)
+    rgb = np.where(trim[..., None], pal["trim"], pal["cloth"]) / 255.0
+    h, w = rgb.shape[:2]
+    img = bpy.data.images.new(f"{name}_clean", w, h)
+    rgba = np.ones((h, w, 4), np.float32)
+    rgba[..., :3] = rgb
+    img.pixels.foreach_set(rgba[::-1].ravel())
+    img.pack()
+    m = bpy.data.materials.new(f"{name}_clean")
+    m.use_nodes = True
+    nt = m.node_tree
+    for nd in list(nt.nodes):
+        nt.nodes.remove(nd)
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    em = nt.nodes.new("ShaderNodeEmission")
+    tx = nt.nodes.new("ShaderNodeTexImage")
+    tx.image, tx.interpolation = img, "Closest"
+    nt.links.new(tx.outputs["Color"], em.inputs["Color"])
+    nt.links.new(em.outputs[0], out.inputs["Surface"])
+    return m
+
+
+def outward(V, F):
+    """``F`` wound so most faces point away from the piece's centre (each ear and plume cone is near convex)."""
+    t = V[F]
+    n = np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0])
+    return F if np.sum(np.einsum("ij,ij->i", n, t.mean(axis=1) - V.mean(axis=0)) > 0) >= len(F) / 2 else F[:, ::-1]
 
 
 def slab(G, body_kd, rows, cols, thick):
@@ -162,7 +260,16 @@ def main():
         res["parts"][ob.name] = {"vertices": len(X), "by": how, "modes": ms}
         # its albedo for the colour bake: an emission of its lit material's base colour or image (master.blend
         # keeps only the lit materials: the albedo ones had no users when it was saved)
-        alb = albedo_of(ob)
+        lb = (a.get("labels") or {}).get(ob.name)
+        if lb and a.get("clean"):
+            pal = res.setdefault("_pal", clean_palette(a["clean"]))
+            alb = clean_material(ob.name, lb["image"], a["clean"]["classes"], pal)
+            if lb.get("uv") and ob.data.uv_layers.get(lb["uv"]) is not None:
+                ob.data.uv_layers.active = ob.data.uv_layers[lb["uv"]]
+                ob.data.uv_layers[lb["uv"]].active_render = True  # what the image node samples
+            res["parts"][ob.name]["albedo"] = "clean (labels)"
+        else:
+            alb = albedo_of(ob)
         ob.data.materials.clear()
         ob.data.materials.append(alb)
     for m in bpy.data.materials:
@@ -174,6 +281,12 @@ def main():
         bkd.insert(tuple(p), i)
     bkd.balance()
     pieces = []
+    if "_pal" in res:
+        res["clean_palette"] = {k: [float(x) for x in v] for k, v in res.pop("_pal").items()}
+    # the trunk (barrel and neck), posed: what the slabs hug
+    from mathutils.bvhtree import BVHTree
+    tF = F[np.isin(part, [0, 1])]
+    tbvh = BVHTree.FromPolygons([tuple(p) for p in bco], [tuple(int(i) for i in f) for f in tF])
     for name, (rows, cols) in (a.get("grids") or {}).items():
         ob = bpy.data.objects.get(name)
         if ob is None:
@@ -182,9 +295,27 @@ def main():
         if len(G) != (rows + 1) * cols:
             res.setdefault("pieces_skipped", []).append(name)
             continue
-        V, Fp, anc = slab(G.reshape(rows + 1, cols, 3), bkd, a.get("piece_rows", 7), a.get("piece_cols", 12),
-                          a.get("piece_thick", 0.06))
+        G = G.reshape(rows + 1, cols, 3)
+        if a.get("hug_clear") is not None:
+            G = hug(G, tbvh, float(a["hug_clear"]))
+        V, Fp, anc = slab(G, bkd, a.get("piece_rows", 7), a.get("piece_cols", 12), a.get("piece_thick", 0.06))
         pieces.append({"name": name, "v": V.tolist(), "f": Fp.tolist(), "anchor": anc.tolist(), "hem": float(G[-cols:, 1].min())})
+    # the ears (the body's parts 3 and 4) and the plume: pieces rigid with the head (part 1)
+    eF = F[np.isin(part, [3, 4])]
+    if len(eF):
+        used = np.unique(eF)
+        remap = -np.ones(len(bco), int)
+        remap[used] = np.arange(len(used))
+        ev = bco[used]
+        ef = remap[eF]
+        ef = np.vstack([outward(ev, ef[np.isin(part[np.isin(part, [3, 4])], [k])]) for k in (3, 4)])
+        pieces.append({"name": "ears", "v": ev.tolist(), "f": ef.tolist(), "part": 1,
+                       "anchor": bco[used].tolist(), "hem": 0.0})
+    pl = bpy.data.objects.get("plume")
+    if pl is not None:
+        pv = to_pdx(np.array([v.co[:] for v in pl.data.vertices]))
+        pf = np.array([p_.vertices[:] for p_ in pl.data.polygons if len(p_.vertices) == 3])
+        pieces.append({"name": "plume", "v": pv.tolist(), "f": outward(pv, pf).tolist(), "part": 1, "anchor": pv.tolist(), "hem": 0.0})
     (out / "pieces.json").write_text(json.dumps(pieces), encoding="utf-8")
     res["pieces"] = {"path": str(out / "pieces.json"), "count": len(pieces), "tris": sum(len(q["f"]) for q in pieces)}
     bpy.ops.wm.save_as_mainfile(filepath=str(out / "reposed.blend"), compress=True)
@@ -206,7 +337,8 @@ def main():
             continue
         allV.append(to_pdx(vv @ np.array(ob.matrix_world)[:3, :3].T + np.array(ob.matrix_world)[:3, 3]))
         allF.append(tt + off)
-        clothF.append(np.full(len(tt), ob.name.startswith(("panel_", "chest_"))))
+        # left out of the solid: the cloth (slabs), the tail (fresh_horse's own), the plume (a piece)
+        clothF.append(np.full(len(tt), ob.name.startswith(("panel_", "chest_")) or ob.name in ("tail", "plume")))
         off += len(vv)
     HV, HF = np.vstack(allV), np.vstack(allF)
     me = bpy.data.meshes.new("high")
