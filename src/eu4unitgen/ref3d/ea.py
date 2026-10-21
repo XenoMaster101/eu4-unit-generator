@@ -262,6 +262,10 @@ def refine(subject_path: Path, ai_python: str, from_version: str, resume: str | 
         src = root / "fit" / from_version
         args = fit_args(s, out, None, root / "inputs" / "skeleton.json")
         rf = {**REFINE_DEFAULTS, **((s.get("ea") or {}).get("refine") or {})}
+        if not ((s.get("ea") or {}).get("refine") or {}).get("candidate"):  # the source fit's own best
+            src_m = src / "manifest.json"
+            if src_m.is_file():
+                rf["candidate"] = (json.loads(src_m.read_text(encoding="utf-8")).get("verdict") or {}).get("best") or rf["candidate"]
         rf["stages"] = {**REFINE_DEFAULTS["stages"], **rf.get("stages", {})}
         args["refine"] = {**rf, "from": str(src / "result.json"), "from_version": from_version, "anatomy_style": 2}
         args["candidates"] = [rf["candidate"]]
