@@ -307,9 +307,9 @@ class Model:
             add(f"{vn}.pose.head_pitch", init["pose"][vn].get("head_pitch", base_shape["head_pitch"]), 8, 0, 95)
             if vn in NUIS_LEGS:
                 for j, k in enumerate(("leg_f", "leg_b")):
-                    add(f"{vn}.nuis.{k}", init["pose"][vn].get("leg_scale", [1.0, 1.0])[j], 0.03, 0.5, 1.0)
+                    add(f"{vn}.nuis.{k}", init["pose"][vn].get("leg_scale", [1.0, 1.0])[j], 0.03, 0.7, 1.0)
                 # and its trunk's length (round 13b: S's leg bases sit closer than L's trunk puts them)
-                add(f"{vn}.nuis.body", init["pose"][vn].get("body_scale", 1.0), 0.03, 0.5, 1.2)
+                add(f"{vn}.nuis.body", init["pose"][vn].get("body_scale", 1.0), 0.03, 0.6, 1.2)
             if HEAD_TURN:  # E-A round 9: the reference's head turns to the viewer; sagittal joints can't
                 for j in range(2):
                     add(f"{vn}.pose.neck_yaw.{j}", init["pose"][vn].get("neck_yaw", [0, 0])[j], 5, -30, 30)
@@ -410,7 +410,10 @@ class Model:
                 ref = 0.0 if k >= 2 * HEAD_FIT.get("stations", 0) else 1.0
                 out.append(0.02 * (v - ref) / (0.05 if ref == 0.0 else 0.3))
             elif kind == "pose":
-                w = 0.03 if name.split(".")[0] in STRAIGHT_LEGS and name.split(".")[2] in LEGS else 0.004
+                parts = name.split(".")
+                w = 0.004
+                if parts[0] in STRAIGHT_LEGS and parts[2] in LEGS:  # knee and fetlock held firmly, shoulder and hip swing
+                    w = 0.3 if parts[3] in ("2", "3") else 0.03
                 out.append(w * v / 30.0 if not name.endswith("head_pitch") else 0.0)  # yaws too: a weak pull to straight
         return np.array(out)
 
