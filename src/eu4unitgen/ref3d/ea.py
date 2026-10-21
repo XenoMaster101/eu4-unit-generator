@@ -144,7 +144,9 @@ def fit_args(s: dict, out: Path, shells_dir: Path | None, skeleton: Path) -> dic
     """The ref3d_ea_fit job's arguments from the subject config and the approved H1 outputs."""
     from eu4unitgen.ref3d import ed2d
     base = ed2d.build_args(s, out)
-    cfg = {**EA_DEFAULTS, **(s.get("ea") or {})}
+    # the config's "refine" block is the refine's own settings (refine() reads it): never a fit's (horse2_auto's
+    # first fit took it for refine mode)
+    cfg = {**EA_DEFAULTS, **{k: v for k, v in (s.get("ea") or {}).items() if k != "refine"}}
     gates = dict(base["gates"])
     if cfg.get("head_landmark_max"):  # the user's head allowance (painted reference; SPEC M15)
         gates["landmark_max_head"] = cfg["head_landmark_max"]
