@@ -2277,6 +2277,41 @@ The full cataphract build starts only after the spikes pass **and** the user exp
     - the skeleton input written by a command;
     - per-subject gate allowances set from the view types.
 
+#### M18. The self-reading pipeline: a new horse with no hand setup (2026-10-21)
+The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the game side is proven"): make the pipeline read each reference by itself. Steps:
+1. parts detection per image (SAM 2 plus a classifier or local vision model, colours fitted per image, no hand colour rules);
+2. build only what the labels show (no armour or caparison on a horse without; a saddle cloth when there is one);
+3. automatic landmarks: a licence-clean keypoint model if one exists (options and licences listed, installed only on the user's OK), otherwise from the silhouette and the fitted body;
+4. a command that writes the subject config and the skeleton input; no fixed view names;
+5. horse 2 rerun completely untouched, its sheet next to its reference, and a report of what still needed a human.
+
+- **Step 1 done: `ref3d/parts.py` and the AI job `ref3d_parts`.**
+  - **Model:** SigLIP 2 (google/siglip2-so400m-patch14-384, Apache-2.0; weights in `<AI root>/weights/`, never in the repo) names every SAM 2 segment against plain material prompts: metal, gold, cloth, leather, coat, hair, plume. The prompts name no colours.
+  - **Colours per image:** a 12-colour palette (k-means in Lab). Each colour takes the material of the segments where it is a main colour. A colour that is a minority inside its segment keeps its own material when that is confident (gold embroidery on red cloth becomes trim). A segment covering most of the horse is split by the palette first.
+  - **Layout from the silhouette** (`_ref3d_silhouette`): facing, the opened mask (straps gone), the belly (a caparison's hem), back, chest, buttock, the head end, legs and tail. This gives the template's classes: metal on the head is chanfron; coat (or lit-grey "metal") below the belly is leg; hair at the rear is tail, elsewhere mane (coat); a plume only on top of the head. It writes the zones (head, legs, tail, trunk, plume) the hand configs carried.
+  - **Parts present**, each with share, box and fitted colours: armour, chanfron, caparison, saddle cloth (cloth not reaching the belly and shorter than 0.6 of the trunk), saddle, bridle, plume, bare coat, tail.
+  - **Trials:**
+
+    | Version | Change | Cataphract S | Cataphract L | Horse 2 |
+    |---|---|---|---|---|
+    | v008 | — | 61% | 48% | coat speckled with leather (v002–v003) |
+    | v009 | each palette colour named alone | 33% | 49% | — |
+    | v010 | colours named by segment votes | 65% | 55% | armour invented (v005) |
+    | v011 | whole-horse segment split by palette | 65% | 55% | correct (v006) |
+    | v013 | crops 0.15/0.15 | 68% | 55% | correct (v007) |
+    | v015 | lit-grey legs fixed | 70% (legs 0.93, chanfron 0.98, tail 0.79) | 55% | correct (v009) |
+
+    Cataphract figures are pixel agreement with the hand-approved labels (S v007, L v006). The fixes behind the other rows:
+    - "a horse's head" left the coat prompts after v008: the armoured head went to coat;
+    - v013's crop setting: 0.3/0.35 let the armour around a leg name it metal; 0.0 (v014) invented armour and a plume on horse 2;
+    - v015: the legs below the belly were lit grey and read as metal.
+  - **Parts found:**
+    - **Cataphract S:** armour, chanfron, caparison, saddle, bridle, plume, tail; no bare coat.
+    - **Cataphract L** (front three-quarter): armour, chanfron, caparison, plume. It misses the saddle and bridle, which are grey-green there.
+    - **Horse 2:** saddle cloth (blue, with its trim), saddle, bridle, bare coat, tail; no armour, chanfron, caparison or plume.
+  - L's 55% is mostly the hand labels' gold speckle and the saddle; S is the main evidence for the head, legs and tail.
+  - About 25 s per view.
+
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
 
