@@ -645,8 +645,10 @@ def main():
         W, H = v["size"]
         R, t = RB.camera_matrix(v["camera"])
         cob = camera(f"cam_{vn}", R, t, v["camera"]["focal"], v["camera"]["cx"], v["camera"]["cy"], W, H)
-        for kind in (("id", "albedo") if brk else ("lit", "albedo", "id")):
+        for kind in ("lit", "albedo", "id"):  # breaks too: the metals' colour is scored on the lit render
             set_pass(kind)
+            if brk and kind == "lit":
+                sc.cycles.samples = min(sc.cycles.samples, 32)  # a break's lit render feeds the metal colour only
             render(sc, cob, out / f"{vn}_{kind}.png", W, H, "RGBA" if kind != "lit" else "RGB")
             files[f"{vn}_{kind}"] = str(out / f"{vn}_{kind}.png")
     if not brk:

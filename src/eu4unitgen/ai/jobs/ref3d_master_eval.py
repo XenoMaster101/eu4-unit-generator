@@ -20,7 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np  # noqa: E402
 
 
-TRUNK = {"chest_front", "buttock", "croup"}  # E-A round 13: they steer (and are scored in) the trunk views only
+TRUNK = {"chest_front", "buttock", "croup"}
+METALS = ("scale", "chanfron")  # the armour's metals: colour scored on the lit render (SPEC M17)  # E-A round 13: they steer (and are scored in) the trunk views only
 
 
 def main(args_path):
@@ -65,6 +66,25 @@ def main(args_path):
             cfg = {"classes": classes, "regions": a["regions"], "body_length": v["body_length"],
                    "details": v["details"], "gates": g}
             mets, gates = M.evaluate(refs[vn], cand, cfg)
+            # metals on the lit render (the user, 2026-10-21): a metal's look is what it reflects, so the flat
+            # albedo of silver plates can't match a painting's median pixel; the lit render, composited over the
+            # reference's background like the albedo, is compared with the reference instead
+            lit_p = st["files"].get(f"{vn}_lit")
+            if lit_p and METALS:
+                lit = np.array(Image.open(lit_p).convert("RGB"))
+                lit_img = np.where(fgc[..., None], lit, refs[vn]["image"]).astype(np.uint8)
+                rr = g["label_scale"] * v["body_length"]
+                rc, cc = M.coarse(refs[vn]["cls"], len(classes), rr), M.coarse(ccls, len(classes), rr)
+                de_l, dh_l, _ = M.colour(refs[vn]["image"], lit_img, rc, cc, refs[vn]["obs"], classes, g["region_min_px"])
+                for c in METALS:
+                    if c in de_l:
+                        mets["colour"][c] = de_l[c]
+                    if c in dh_l:
+                        mets["hue"][c] = dh_l[c]
+                    elif c in mets["hue"]:
+                        del mets["hue"][c]
+                mets["metals_on_lit"] = [c for c in METALS if c in de_l]
+                gates = M.gates(mets, g)
             # the signed hue difference per chromatic class (candidate minus reference, degrees; round 14: the
             # master corrects its cloth's hue by it), on the classes' cores as M5's colour metric takes them
             from scipy import ndimage as ndi
