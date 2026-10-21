@@ -2234,6 +2234,16 @@ The full cataphract build starts only after the spikes pass **and** the user exp
     - Validator: 0 errors, 0 warnings, 2,800 triangles.
     - Deformation, stretch p05-p95 / max / flips (vanilla in brackets): idle 0.87-1.11 / 3.2 / 15 (0.89-1.20 / 3.9 / 13); walk 0.92-1.09 / 3.6 / 5 (0.91-1.14 / 3.2 / 8); attack 0.78-1.14 / 3.7 / 18 (0.76-1.26 / 3.5 / 32).
     - Seen before the test: at the game's close zoom the panels stand out like wings and the cloth texture is dark and mottled (the master's panel texture is 61% prior fill); the ears and the plume are lost in the voxel remesh; the tail sticks out backwards.
+- **The user (2026-10-21) on the known gaps and test 20:**
+  - **Gate change (the user's decision):** the colour gate scores the armour's metals (scale, chanfron) on the lit render against the reference, not their flat albedo against the painting's median pixel (`ref3d_master_eval`, METALS; the breaks render lit too). The other classes stay on albedo.
+  - **The game version's fix round (from test 20's gallery) -> in-game test 21:**
+    - the panels hug the armoured trunk (slab columns laid onto the barrel, neck, plates and backing by horizontal rays, 0.06 off; hanging straight below), and the master's panels move there too, so the colour bake meets them;
+    - clean cloth: the panels' and drapes' albedo from their labels (one red, one gold: each the brighter, saturated half of the reference's pixels of that class, lifted to its highlights; the gold kept by a majority over a 1% window);
+    - the ears and the plume are pieces pinned to HorseHead;
+    - the tail is fresh_horse's own, along vanilla's tail bones; the master's tail and plume are out of the solid; tassels are out of the game version;
+    - fresh_horse's box fit is off for a model already on the vanilla skeleton (without the master's tail it scaled the horse off the leg bones, and the skirt trim cut the legs);
+    - body 1,550 triangles.
+  - **Test 21 STAGED** (`build/test21`; game v014): 2,974 triangles, validator 0 errors, 0 warnings. Deformation, stretch p05-p95 / max / flips: idle 0.90-1.07 / 3.0 / 6, walk 0.94-1.06 / 3.0 / 6, attack 0.83-1.10 / 3.2 / 10 (inside vanilla's). Seen: the gold reads as patches, not crisp crosses (coarse panel labels); the plume is a spiky tuft.
   - **Next:** the user's in-game check of test 20; then step 3 (the pipeline untouched on a new horse reference from the user).
 
 ### Phase 4: Test loop
