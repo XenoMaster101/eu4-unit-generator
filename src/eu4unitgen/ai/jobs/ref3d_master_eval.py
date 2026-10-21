@@ -65,6 +65,21 @@ def main(args_path):
             cfg = {"classes": classes, "regions": a["regions"], "body_length": v["body_length"],
                    "details": v["details"], "gates": g}
             mets, gates = M.evaluate(refs[vn], cand, cfg)
+            # the signed hue difference per chromatic class (candidate minus reference, degrees; round 14: the
+            # master corrects its cloth's hue by it), on the classes' cores as M5's colour metric takes them
+            from scipy import ndimage as ndi
+            from skimage.color import rgb2lab
+            la, lb = rgb2lab(refs[vn]["image"] / 255.0), rgb2lab(cand["image"] / 255.0)
+            signed = {}
+            for i, c in enumerate(classes):
+                ra = ndi.binary_erosion((refs[vn]["cls"] == i) & refs[vn]["obs"], iterations=2)
+                cb = ndi.binary_erosion((ccls == i) & refs[vn]["obs"], iterations=2)
+                if ra.sum() < 200 or cb.sum() < 200:
+                    continue
+                ma, mb = la[ra].mean(axis=0), lb[cb].mean(axis=0)
+                if np.hypot(ma[1], ma[2]) >= 15.0:
+                    d = np.degrees(np.arctan2(mb[2], mb[1]) - np.arctan2(ma[2], ma[1]))
+                    signed[c] = float((d + 180) % 360 - 180)
             # the head allowance: each landmark against its own limit
             lms = mets["landmarks"]
             lim = {k: g.get("landmark_max_head", g["landmark_max"]) if k in head else g["landmark_max"] for k in lms}
@@ -79,7 +94,7 @@ def main(args_path):
                 if x.get("value") is None and k != "landmarks":
                     x["pass"], x["not_measured"] = False, True
             unmatched = sorted(set(refs[vn]["landmarks"]) - set(cand["landmarks"]))
-            out[vn] = {"metrics": mets, "gates": gates, "failed": [k for k, x in gates.items() if not x["pass"]],
+            out[vn] = {"metrics": mets, "gates": gates, "failed": [k for k, x in gates.items() if not x["pass"]], "hue_signed": signed,
                        "landmarks_not_built": unmatched, "low_confidence": vn in lc}
             print(sn, vn, "failed:", out[vn]["failed"], flush=True)
         decisive = [vn for vn in out if vn not in lc]

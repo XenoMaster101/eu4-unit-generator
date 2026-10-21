@@ -32,7 +32,18 @@ DECAL_CLASS = {"eye": "chanfron", "bit_rosette": "trim", "breast_medallion": "tr
 # ornament comes from the original's views (the user, round 13: S confirms and fills gaps, the original has priority)
 DECAL_VIEWS = ("L", "R")
 HEAD_LM = ["poll", "eye", "muzzle_front", "nostril", "bit_ring", "chin", "throat", "ear_tip_a", "ear_tip_b"]
-MASTER_DEFAULTS = {"withers_m": 1.55, "tail_drop": 0.78, "tassel_step_m": 0.09, "tassel_len_m": 0.08, "samples": 128}
+MASTER_DEFAULTS = {"withers_m": 1.55, "tail_drop": 0.78, "tassel_step_m": 0.09, "tassel_len_m": 0.08, "samples": 128,
+                   # round 14 (the user at H3: "bright silver lamellae"): metals coloured by their brightest quarter
+                   # (the painting's median scale pixel is a dark brown), fully metallic, a dark grey backing
+                   "metal_quantile": 0.75, "plate_material": {"metallic": 1.0, "roughness": 0.3, "backing": [0.05, 0.05, 0.055]},
+                   # the neck and breast's plates at 0.6 of the barrel's (S: neck rows ~14 px apart, rump ~23 px)
+                   "front_scale": 0.6,
+                   # the chest panel split at the legs (round 14): static drapes from the lower breast (top_frac of
+                   # the breast's depth up from its bottom) to below_knee x H under the knees, round to side_reach x H
+                   # behind the shoulder; L's image projected on them (my calls: S's front skirt hangs from ~0.3 up
+                   # the breast to just under the knees)
+                   "chest_panel": {"top_frac": 0.3, "below_knee": 0.04, "side_reach": 0.25, "gap_deg": 4.0,
+                                   "clear_m": 0.03, "flare": 0.03, "rows": 16, "cols": 20}}
 
 
 def seat_rise(bones: dict, k: dict) -> float:
@@ -119,7 +130,7 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
              {**{k: views["R"][k] for k in ("labels", "inpainted", "never_use", "camera")}, "parts": [0],
               "label_tol_px": tol["R"], "close_px": max(2, round(0.02 * views["R"]["body_length"]))}]
     m_arm = eb.run(subject_path, ea_version, ai_python, blender, cand, out=out / "armour",
-                   extra={"region": "all", "cover_views": cover})
+                   extra={"region": "all", "cover_views": cover, "front_scale": cfg["front_scale"]})
     note(f"armour: {m_arm['verdict']}")
     arm_res = m_arm["final"]["blender"]
     # ---- cloth: the near panel, then the far one by symmetry
@@ -134,8 +145,8 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     vr = [[-x, y, z] for x, y, z in json.loads((dl / "panel_vertices.json").read_text(encoding="utf-8"))]
     (out / "cloth_right" / "panel_vertices.json").write_text(json.dumps(vr), encoding="utf-8")
     note("cloth right: the left panel mirrored (symmetry)")
-    # the chest panel isn't built: the near foreleg steps through it and a one-piece cloth tangles round
-    # the forelegs (master dev run, E-C front mode); it needs a pattern split at the legs (listed at H3)
+    # the chest panel: not simulated (a one-piece cloth tangled round the stepping foreleg); master_assemble
+    # drapes it, split at the legs (round 14)
     panels = []
     for name, d, ev in (("panel_left", dl, "observed L / R, prior"), ("panel_right", out / "cloth_right", "symmetry")):
         lab_p = Path(rl["texture"].get("labels") or (dl / "panel_labels.png"))
@@ -160,10 +171,33 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
         note(f"break {b}: rendered")
     template = s["_template"]
     gates = dict(ea_args["gates"])
-    ev = AIJobRunner(ai_python, timeout=3600).run_job("ref3d_master_eval", {
-        "classes": ea_args["classes"], "regions": template["regions"], "gates": gates, "views": views, "sets": sets,
-        "low_confidence": ea_args.get("low_confidence") or [], "head_landmarks": HEAD_LM,
-        "trunk_views": (ea_args.get("refine") or {}).get("trunk_views") or []}).result
+    ev_args = {"classes": ea_args["classes"], "regions": template["regions"], "gates": gates, "views": views,
+               "low_confidence": ea_args.get("low_confidence") or [], "head_landmarks": HEAD_LM,
+               "trunk_views": (ea_args.get("refine") or {}).get("trunk_views") or []}
+    ev = AIJobRunner(ai_python, timeout=3600).run_job("ref3d_master_eval", {**ev_args, "sets": sets}).result
+    # step 4 (round 14): the cloth's hue. While L's cloth misses the hue gate, the panels' cloth texels turn back
+    # by the measured (signed) difference and the master is assembled and scored again (twice at most)
+    hue_log = []
+    for k in range(2):
+        mv = ev["sets"]["master"]["views"]["L"]
+        g = mv["gates"]["hue_deg"]
+        dh = (mv.get("hue_signed") or {}).get("cloth")
+        if g["pass"] or dh is None:
+            break
+        for pn in panels:
+            if pn["name"] == "panel_right":
+                continue  # it shares the left panel's texture
+            src = Path(pn["texture"])
+            dst = out / "hue" / f"{pn['name']}_r{k + 1}.png"
+            hue_rotate(src, Path(pn["labels"]) if pn.get("labels") else None, -dh, s["_template"]["classes"]["cloth"], dst)
+            for q in panels:
+                if q["texture"] == str(src):
+                    q["texture"] = str(dst)
+        hue_log.append({"round": k + 1, "measured_deg": dh, "turned_deg": -dh})
+        note(f"hue: cloth {dh:+.1f} deg in L; the panels' cloth turned by {-dh:+.1f} deg")
+        asm = br.run_job("master_assemble", {**base_args, "panels": panels, "out_dir": str(out / "assemble")}).result
+        sets["master"] = {"files": asm["files"], "landmarks": asm["landmarks"]}
+        ev = AIJobRunner(ai_python, timeout=3600).run_job("ref3d_master_eval", {**ev_args, "sets": sets}).result
     master_ev = ev["sets"]["master"]
     e_d = {b: {"caught": bool(ev["sets"][b]["failed_any_view"]), "failed": ev["sets"][b]["failed_any_view"]}
            for b in BREAKS}
@@ -175,10 +209,29 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     h3_sheet(s, views, asm, master_ev, verdict, m_arm, m_cl, sheet_path, out.name, ea_version, cand)
     manifest = {"stage": "master build", "subject": s["name"], "version": out.name, "approved": s["approved"],
                 "ea": {"version": ea_version, "candidate": cand}, "settings": cfg, "assemble": asm,
-                "evaluation": ev, "verdict": verdict, "log": log, "sheet": str(sheet_path),
+                "evaluation": ev, "verdict": verdict, "hue_correction": hue_log, "log": log, "sheet": str(sheet_path),
                 "seconds": round(time.time() - t0, 1)}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=float), encoding="utf-8")
     return manifest
+
+
+def hue_rotate(src: Path, labels: Path | None, deg: float, cloth_rgb, dst: Path):
+    """The texture with its cloth texels' hue turned by ``deg`` (its labels say which are cloth; all when none)."""
+    im = Image.open(src).convert("RGB")
+    h, s_, v = im.convert("HSV").split()
+    shift = int(round(deg / 360.0 * 256)) % 256
+    h2 = h.point(lambda x: (x + shift) % 256)
+    turned = Image.merge("HSV", (h2, s_, v)).convert("RGB")
+    if labels is not None and Path(labels).is_file():
+        lab = Image.open(labels).convert("RGB").resize(im.size, Image.NEAREST)
+        r, g, b = lab.split()
+        tr, tg, tb = cloth_rgb
+        mask = Image.merge("RGB", (r.point(lambda x: 255 if x == tr else 0), g.point(lambda x: 255 if x == tg else 0),
+                                   b.point(lambda x: 255 if x == tb else 0))).convert("L").point(lambda x: 255 if x == 255 else 0)
+        turned = Image.composite(turned, im, mask)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    turned.save(dst)
+    return dst
 
 
 def _fit(im: Image.Image, size) -> Image.Image:
@@ -211,7 +264,7 @@ def h3_sheet(s, views, asm, mev, verdict, m_arm, m_cl, path, version, ea_version
     if arm_detail:
         tiles.append(("plates: overlap, curvature, thickness", Image.open(arm_detail), False))
     tiles += [("unseen right side (symmetry and prior)", Image.open(f["unseen_right"]), False),
-              ("front (the chest panel isn't built)", Image.open(f["front"]), False)]
+              ("front (the chest panel split at the legs)", Image.open(f["front"]), False)]
     rows.append(("close-ups", tiles))
     return s1.grid_sheet(rows, f"H3: master {version} next to the reference ({s['name']}; body E-A {ea_version} {cand})",
                          path, tile=(420, 460))

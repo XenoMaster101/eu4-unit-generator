@@ -43,7 +43,8 @@ EC_DEFAULTS = {
     "panel_classes": ["cloth", "trim"],
     "texture_px": 512,
     "samples": 64,
-    "panel": {"cols": 48, "rows": 24, "drop_m": [0.75] * 7, "start_clear_m": 0.01, "extend_front": 0.0, "extend_rear": 0.08},
+    "panel": {"cols": 48, "rows": 24, "drop_m": [0.75] * 7, "start_clear_m": 0.01, "extend_front": 0.0, "extend_rear": 0.08,
+              "front_back": 0.1},  # round 14: the front edge further back off the foreleg (my call)
     # a heavy wool caparison (Blender cloth, SI units)
     # the panel's own hem landmarks (hem_front is the chest panel's)
     "hem_landmarks": {"L": ["hem_side", "hem_belly", "hem_rear"], "R": ["hem_side", "hem_rear"]},

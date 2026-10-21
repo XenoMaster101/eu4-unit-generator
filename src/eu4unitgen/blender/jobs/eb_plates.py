@@ -671,7 +671,7 @@ def plate_matrices(plates, tilt, standoff):
     for p in plates:
         R = np.stack([p["x"], p["y"], p["z"]], 1) @ Rt
         M = np.eye(4)
-        M[:3, :3] = R
+        M[:3, :3] = R * p.get("scale", 1.0)  # a patch's plates may be smaller (front_scale)
         M[:3, 3] = p["pos"] + p["z"] * standoff
         Ms.append(M)
     return np.array(Ms)
@@ -853,7 +853,13 @@ def main():
         cen_z = to_pdx(Vs[Fs].mean(axis=1))[:, 2]
         z_split = 0.5 * (Bp["HorseFrontLeftUp"][2] + Bp["HorseFrontRightUp"][2]) + 0.15 * Hs
         front = (part == 1) | (cen_z < z_split)  # part: per triangle here
-        plates = layout_surface(a, Vs, Fs, nrm, cov_f & front, fev, Bp, Hs, mpu)
+        # the neck and breast take smaller plates (round 14, the user at H3: the neck's rows were twice the
+        # reference's; in S the neck's rows run ~0.6 of the rump's)
+        fs = float(a.get("front_scale", 1.0))
+        a_front = {**a, "plate": {**pl, "pitch_m": pl["pitch_m"] * fs, "spacing_m": pl["spacing_m"] * fs}}
+        plates = layout_surface(a_front, Vs, Fs, nrm, cov_f & front, fev, Bp, Hs, mpu)
+        for q in plates:
+            q["scale"] = fs
         pitch_ = pl["pitch_m"] / mpu
         back = layout_surface(a, Vs, Fs, nrm, cov_f & ~front, fev, Bp, Hs, mpu,
                               frame=barrel_frame(Bp, Hs, Vs, Fs, vpart, pitch_ / 8))
@@ -870,8 +876,15 @@ def main():
     kappa = 1.0 / (2 * pl["curve_radius_m"] / mpu)
     Vt, Ft, sdf = plate_template(w, h, th, kappa)
     filled = 0
-    for _ in range(a.get("fill_passes", 2)):  # M6 'regenerate region': plates where the lattice left holes
+    for _ in range(a.get("fill_passes", 3)):  # M6 'regenerate region': plates where the lattice left holes
         add = fill_holes(plates, Vs, Fs, nrm, cov_f, fev, Vt, Ft, tilt, standoff, th, spacing, rng)
+        if add and any("scale" in q for q in plates):  # a filled plate takes its nearest neighbour's size
+            kd_s = KDTree(len(plates))
+            for i_, q in enumerate(plates):
+                kd_s.insert(Vector(q["pos"]), i_)
+            kd_s.balance()
+            for q in add:
+                q["scale"] = plates[kd_s.find(Vector(q["pos"]))[1]].get("scale", 1.0)
         plates += add
         filled += len(add)
     Ms = plate_matrices(plates, tilt, standoff)

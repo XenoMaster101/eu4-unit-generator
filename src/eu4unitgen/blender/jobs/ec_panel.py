@@ -430,8 +430,11 @@ def main():
                              0.5 * (Bp["HorseFrontLeftUp"][1] + Bp["HorseFrontRightUp"][1]))
         a["_chest_front_z"] = float(V[vpart == 0, 2].min())
     else:
+        # the side panel's front edge a further ``front_back`` x H behind the patch line (round 14, the user at
+        # H3: the near panel hung too far forward over the foreleg; the chest panel covers the forearm's top)
+        fz = front_z + a["panel"].get("front_back", 0.0) * Hs
         st, top = seam_and_extent(a, Vs, vpart, camL, bvh, Vector(-R.T @ t), mpu, 24,
-                                  front_z if a["panel"].get("behind_shoulder", True) else None)
+                                  fz if a["panel"].get("behind_shoulder", True) else None)
     res["seam"] = {"z": st.tolist(), "y": top.tolist()}
 
     # the collision proxy: the body offset by the armour under the cloth

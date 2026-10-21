@@ -9,6 +9,10 @@ Parts (scene: the mirrored frame of _ref3d_scene; outputs mirrored back to PDX s
   armour    the plates and backing of the master's armour run (E-B's generator over every scale area).
   cloth     the caparison panels of the cloth runs: their grid, pattern UV and texture; their class
             map (cloth / trim) read from the texture's colours (gold = trim).
+  chest     (round 14) the chest panel split at the legs: two static drapes from the lower breast to below
+            the knees, each half hanging straight down and pushed out wherever the body or a foreleg stands in
+            its way (a one-piece simulated cloth tangled round the stepping foreleg); textured by projecting
+            view L through its solved camera (its labels likewise: the class map), the right half mirrored.
   tail      from the side view's tail outline (``tail_profile``, round 13): sections down from the tail bone,
             front-back as the view shows, a little narrower side to side; without one, a tapered tube
             hanging to ``tail_drop`` of the seat height.
@@ -236,6 +240,67 @@ def label_faces(a, Vs, Fs, fpart, want, cand_parts, bvh):
     return out, ev
 
 
+def chest_drape(bvh, Vs_body, vpart, Bp, Hs, mpu, half, cfg):
+    """One half of the split chest panel (module doc), scene frame. half +1: the horse's left (scene -x).
+    -> (vertices (rows + 1) x cols, cols)."""
+    X = to_pdx(Vs_body)
+    bar = X[vpart == 0]
+    zc = float(bar[:, 2].min())
+    near = bar[bar[:, 2] < zc + 0.3 * Hs]
+    ylo, yhi = float(near[:, 1].min()), float(near[:, 1].max())
+    y_top = ylo + cfg.get("top_frac", 0.3) * (yhi - ylo)
+    y_hem = 0.5 * (Bp["HorseFrontLeftKnee"][1] + Bp["HorseFrontRightKnee"][1]) - cfg.get("below_knee", 0.04) * Hs
+    z_side = 0.5 * (Bp["HorseFrontLeftUp"][2] + Bp["HorseFrontRightUp"][2]) + cfg.get("side_reach", 0.25) * Hs
+    clear = cfg.get("clear_m", 0.03) / mpu
+    sx = -half  # the horse's left is scene -x
+    c = to_scene(np.array([[0.0, y_top, zc + 0.35 * Hs]]))[0]
+    cols, rows = cfg.get("cols", 20), cfg.get("rows", 16)
+    tops, dirs = [], []
+    for th in np.linspace(np.radians(cfg.get("gap_deg", 4.0)), np.radians(100.0), 60):
+        d = np.array([sx * np.sin(th), 0.0, -np.cos(th)])
+        hit = bvh.ray_cast(Vector(c + d * 40.0), Vector(-d), 80.0)
+        if hit[0] is None:
+            continue
+        q = np.array(hit[0])
+        if to_pdx(q[None])[0][2] > z_side:
+            break
+        tops.append(q + d * clear)
+        dirs.append(d)
+    if len(tops) < 4:
+        return None, 0
+    tops, dirs = np.array(tops), np.array(dirs)
+    seg = np.r_[0, np.cumsum(np.linalg.norm(np.diff(tops, axis=0), axis=1))]
+    u = np.linspace(0, seg[-1], cols)
+    T = np.stack([np.interp(u, seg, tops[:, k]) for k in range(3)], 1)
+    D = np.stack([np.interp(u, seg, dirs[:, k]) for k in range(3)], 1)
+    D /= np.linalg.norm(D, axis=1, keepdims=True)
+    G = np.zeros((rows + 1, cols, 3))
+    for r in range(rows + 1):
+        t = r / rows
+        y = y_top + (y_hem - y_top) * t
+        for k in range(cols):
+            P = T[k] + np.array([0.0, y - y_top, 0.0]) + D[k] * cfg.get("flare", 0.03) * Hs * t
+            hit = bvh.ray_cast(Vector(P + D[k] * 40.0), Vector(-D[k]), 80.0)
+            if hit[0] is not None:
+                h = np.array(hit[0])
+                if (h - P) @ D[k] > -clear:  # the body or a foreleg stands in the way: hang over it
+                    P = h + D[k] * clear
+            G[r, k] = P
+    for _ in range(3):  # a cloth hangs smoothly over what it meets
+        G[1:-1] = 0.25 * G[:-2] + 0.5 * G[1:-1] + 0.25 * G[2:]
+        G[:, 1:-1] = 0.25 * G[:, :-2] + 0.5 * G[:, 1:-1] + 0.25 * G[:, 2:]
+    return G.reshape(-1, 3), cols
+
+
+def grid_faces(rows, cols):
+    F = []
+    for r in range(rows):
+        for c in range(cols - 1):
+            a0, a1, b0, b1 = r * cols + c, r * cols + c + 1, (r + 1) * cols + c, (r + 1) * cols + c + 1
+            F += [(a0, b0, b1), (a0, b1, a1)]
+    return np.array(F)
+
+
 def shell(Vs, Fs, sel, nrm, offset):
     """The selected faces of the body, offset along the vertex normals (their own copy). -> (V, F)."""
     used = np.unique(Fs[sel])
@@ -336,6 +401,18 @@ def main():
         so.thickness = thick / mpu
         res["parts"]["label_shells"][c] = {"faces": int(sel.sum()), "symmetry": int((sel & (fev_lab == "symmetry")).sum())}
 
+    def hem_tassels(name, hem):
+        seg = np.r_[0, np.cumsum(np.linalg.norm(np.diff(hem, axis=0), axis=1))]
+        TV, TF = [], []
+        for s_ in np.arange(0.5 * a["tassel_step_m"] / mpu, seg[-1], a["tassel_step_m"] / mpu):
+            p = np.array([np.interp(s_, seg, hem[:, k]) for k in range(3)])
+            path = np.array([p, p + np.array([0, -0.5, 0]) * a["tassel_len_m"] / mpu, p + np.array([0, -1.0, 0]) * a["tassel_len_m"] / mpu])
+            tv, tf = tube(path, np.array([0.006, 0.012, 0.004]) / mpu, 6)
+            TF.append(tf + sum(len(x) for x in TV))
+            TV.append(tv)
+        if TV:
+            add(f"{name}_tassels", np.vstack(TV), np.vstack(TF), "trim", principled(f"{name}_tas", lin("trim"), 0.6, 0.4))
+
     # ---- cloth panels
     names = list(a["classes"])
     for pn in a["panels"]:
@@ -381,18 +458,58 @@ def main():
         sol.thickness = 0.004 / mpu
         # tassels along the hem (none when the trim is removed: they're trim)
         if brk != "trim_removed":
-            hem = Vf.reshape(rows + 1, cols, 3)[-1]
-            seg = np.r_[0, np.cumsum(np.linalg.norm(np.diff(hem, axis=0), axis=1))]
-            TV, TF = [], []
-            for s_ in np.arange(0.5 * a["tassel_step_m"] / mpu, seg[-1], a["tassel_step_m"] / mpu):
-                p = np.array([np.interp(s_, seg, hem[:, k]) for k in range(3)])
-                path = np.array([p, p + np.array([0, -0.5, 0]) * a["tassel_len_m"] / mpu, p + np.array([0, -1.0, 0]) * a["tassel_len_m"] / mpu])
-                tv, tf = tube(path, np.array([0.006, 0.012, 0.004]) / mpu, 6)
-                TF.append(tf + sum(len(x) for x in TV))
-                TV.append(tv)
-            if TV:
-                add(f"{pn['name']}_tassels", np.vstack(TV), np.vstack(TF), "trim", principled(f"{pn['name']}_tas", lin("trim"), 0.6, 0.4))
+            hem_tassels(pn["name"], Vf.reshape(rows + 1, cols, 3)[-1])
         res["parts"][pn["name"]] = {"rows": rows, "cols": cols, "evidence": pn.get("evidence")}
+
+    # ---- the chest panel, split at the legs (round 14): two static drapes, L's image projected on them
+    chest_hems = []
+    cc = a.get("chest_panel")
+    if cc:
+        vL = a["views"]["L"]
+        img = load_rgb(vL["image"]).astype(np.float64)
+        lab = decode(load_rgb(vL["labels"]), a["classes"])
+        ci, ti = names.index("cloth"), names.index("trim")
+        lab = np.where(np.isin(lab, [ci, ti]), lab, ci)  # what covers the panel in L (a leg, straps) reads as cloth
+        if brk == "wrong_red":
+            cl = lab == ci
+            hsv = np.array([colorsys.rgb_to_hsv(*(c / 255.0)) for c in img[cl]])
+            hsv[:, 0] = (hsv[:, 0] + 15 / 360.0) % 1.0
+            img[cl] = np.array([colorsys.hsv_to_rgb(*h) for h in hsv]) * 255
+        if brk == "trim_removed":
+            img[lab == ti] = pal.get("cloth", [140, 30, 40])
+            lab[:] = ci
+        Hh, Ww = lab.shape
+        timg = image_from_array("chest_tex", img)
+        id_img = image_from_array("chest_id", (np.array([a["classes"][c] for c in names])[lab]).astype(np.float64))
+        uvs0 = None
+        rows_c = cc.get("rows", 16)
+        for half, nm in ((1, "chest_left"), (-1, "chest_right")):
+            Vc, cols_c = chest_drape(body_bvh, Vs, vpart, Bp, Hs, mpu, half, cc)
+            if Vc is None:
+                res["parts"][nm] = {"built": False}
+                continue
+            if brk == "caparison_short":
+                keep = int(round(rows_c * 0.9))
+                Vc = Vc.reshape(rows_c + 1, cols_c, 3)[:keep + 1].reshape(-1, 3)
+            nr = len(Vc) // cols_c - 1
+            Fc = grid_faces(nr, cols_c)
+            if half == 1:  # L sees the left half: its image through L's camera; the right half mirrors it
+                p2, _ = RB.project(to_pdx(Vc), vL["camera"])
+                uvs0 = np.c_[np.clip(p2[:, 0] / Ww, 0, 1), 1 - np.clip(p2[:, 1] / Hh, 0, 1)]
+            uvs = uvs0[:len(Vc)] if uvs0 is not None else np.zeros((len(Vc), 2))
+            ob = add(nm, Vc, Fc if half == 1 else Fc[:, ::-1], "cloth",
+                     principled(f"{nm}_lit", lin("cloth"), 0.0, 0.85, timg),
+                     emission_material(f"{nm}_alb", image=timg), emission_material(f"{nm}_idm", image=id_img, closest=True))
+            uv = ob.data.uv_layers.new(name="projected_L")
+            uv.data.foreach_set("uv", uvs[np.array([lp.vertex_index for lp in ob.data.loops])].astype(np.float32).ravel())
+            sol = ob.modifiers.new("thickness", "SOLIDIFY")
+            sol.thickness = 0.004 / mpu
+            hem = Vc.reshape(nr + 1, cols_c, 3)[-1]
+            chest_hems.append(hem)
+            if brk != "trim_removed":
+                hem_tassels(nm, hem)
+            res["parts"][nm] = {"rows": nr, "cols": cols_c, "evidence": "projected L" if half == 1 else "symmetry"}
+            write_obj(out / f"{nm}_grid.obj", to_pdx(Vc), Fc[:, ::-1], f"Track M master {nm} (generated; PDX mesh space)")
 
     # ---- tail: from the tail bone down and a little back
     tt = to_scene(np.array([Bp["HorseTailTop"]]))[0]
@@ -556,7 +673,7 @@ def main():
     # the master's landmarks per view (body landmarks; the hem landmarks: the panels' nearest hem point)
     lm3 = RB.landmarks(Bp, Hs, P)
     hems = [np.array(json.loads(Path(pn["vertices"]).read_text(encoding="utf-8"))).reshape(pn["rows"] + 1, pn["cols"], 3)[-1]
-            for pn in a["panels"]]
+            for pn in a["panels"]] + chest_hems
     res["landmarks"] = {}
     for vn, v in a["views"].items():
         names_ = [k for k in lm3 if k in v["landmarks"]]
