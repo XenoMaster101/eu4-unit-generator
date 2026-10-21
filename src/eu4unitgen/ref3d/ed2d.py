@@ -46,10 +46,9 @@ def fg_height(path: Path) -> int:
 
 
 def build_args(s: dict, out: Path) -> dict:
-    root, ap = s["_root"], s["approved"]
-    clean, labels = root / "refs" / "clean" / ap["clean"], root / "refs" / "clean" / ap["labels"]
     views = {n: k for n, k in s["chosen"].items() if s["views"][n].get("details")}
-    fgs = {n: clean / f"{n}_seed{k}_fg.png" for n, k in views.items()}
+    dirs = {n: s1.view_dirs(s, n) for n in views}
+    fgs = {n: dirs[n][0] / f"{n}_seed{k}_fg.png" for n, k in views.items()}
     bl = body_lengths({**s, "views": {n: s["views"][n] for n in views}}, {n: fg_height(p) for n, p in fgs.items()})
     t = s["_template"]
     a = {"views": {}, "classes": {c: rgb for c, rgb in t["classes"].items() if c not in ("unclassified", "excluded")},
@@ -57,6 +56,7 @@ def build_args(s: dict, out: Path) -> dict:
          "out_dir": str(out), **s["ed2d"]}
     for n, k in views.items():
         v = s["views"][n]
+        clean, labels = dirs[n]
         crop = lambda p: s1.to_crop([p], v["crop"])[0]
         head = v.get("head")
         a["views"][n] = {
@@ -104,7 +104,7 @@ def sheet(res: dict, s: dict, path: Path, version: str):
     rows = []
     for n, vr in res["views"].items():
         k = s["chosen"][n]
-        clean = s["_root"] / "refs" / "clean" / s["approved"]["clean"]
+        clean = s1.view_dirs(s, n)[0]
         tiles = [("reference (cleaned)", Image.open(clean / f"{n}_seed{k}.png"), False)]
         for vn, r in vr.items():
             if vn.startswith("unbroken") and vn != "unbroken_0":

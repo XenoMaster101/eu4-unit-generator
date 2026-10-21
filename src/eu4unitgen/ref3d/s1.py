@@ -22,6 +22,12 @@ usage: python -m eu4unitgen.ref3d.s1 <subject.json> --ai-python <env python> --s
        --u2net <rembg model dir>
        python -m eu4unitgen.ref3d.s1 <subject.json> --ai-python <env python> --labels-from vNNN
          [--sam2 <weights dir>]  (labels only, on that version's ``chosen`` seeds, into a new version)
+       python -m eu4unitgen.ref3d.s1 <subject.json> --ai-python <env python> --u2net <dir> --add-view S
+         [--sam2 <weights dir>]  (one more view with nothing to remove: horse mask and labels only)
+
+A view may come from its own image (``source``, relative to the subject folder) instead of the
+original sheet; its coordinates are then that image's pixels. ``approved["views"]`` names the
+version holding a view added later (its cleaned image and labels).
 """
 from __future__ import annotations
 
@@ -95,14 +101,28 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def crop_views(s: dict, out: Path) -> dict:
-    sheet = Image.open(s["_root"] / s["original"]).convert("RGB")
+def view_source(s: dict, v: dict) -> Path:
+    """The image a view is cropped from: its own ``source`` or the original sheet."""
+    return s["_root"] / v.get("source", s["original"])
+
+
+def crop_views(s: dict, out: Path, names=None) -> dict:
     paths = {}
     for name, v in s["views"].items():
+        if names is not None and name not in names:
+            continue
         p = out / f"{name}.png"
-        sheet.crop(tuple(v["crop"])).save(p)
+        Image.open(view_source(s, v)).convert("RGB").crop(tuple(v["crop"])).save(p)
         paths[name] = p
     return paths
+
+
+def view_dirs(s: dict, name: str) -> tuple[Path, Path]:
+    """(cleaned images, labels) folders of the approved version of a view."""
+    ap = s["approved"]
+    own = (ap.get("views") or {}).get(name)
+    base = s["_root"] / "refs" / "clean"
+    return base / (own or ap["clean"]), base / (own or ap["labels"])
 
 
 def removal_masks(s: dict, crops: dict, out: Path) -> dict:
@@ -304,6 +324,39 @@ def relabel(subject_path: Path, from_version: str, ai_python: str, sam2: str | N
     return manifest
 
 
+def add_view(subject_path: Path, view: str, ai_python: str, u2net: str, sam2: str | None = None) -> dict:
+    """A view with nothing to remove (a clean reference: no rider, plain background): its crop as the
+    'seed 0' image, an empty inpainting mask, the horse mask and the proposed labels, into a new
+    version. The config's ``chosen`` seed for the view must be "0"."""
+    from eu4unitgen.ai.env import AIJobRunner
+
+    s = load_subject(subject_path)
+    v = s["views"][view]
+    if v.get("remove"):
+        raise ValueError(f"view {view} has regions to remove: run the full stage")
+    if str((s.get("chosen") or {}).get(view)) != "0":
+        raise ValueError(f"set chosen[{view!r}] = \"0\" in the config first")
+    root = s["_root"]
+    out = next_version(root / "refs" / "clean")
+    h1 = root / "h1" / out.name
+    h1.mkdir(parents=True)
+    t0 = time.time()
+    img = out / f"{view}_seed0.png"
+    crop_views(s, out, [view])[view].replace(img)
+    Image.new("L", Image.open(img).size, 0).save(out / f"{view}_mask_used.png")
+    ai = AIJobRunner(ai_python, env={"U2NET_HOME": u2net})
+    fg = ai.run_job("ref3d_mask", {"images": {f"{view}_seed0": str(img)}, "out_dir": str(out)}).result
+    lab = label_views(s, ai, {view: (img, Path(fg[f"{view}_seed0"]["path"]), out / f"{view}_mask_used.png")}, out, sam2)
+    labels_sheet(s, {view: (img, "0 (nothing removed)")}, lab, h1 / "h1_labels.png", out.name)
+    manifest = {"stage": "S1 add view", "subject": s["name"], "version": out.name, "view": view,
+                "inputs": {"subject": {"path": str(subject_path), "sha256": sha256(subject_path)},
+                           "source": {"path": str(view_source(s, v)), "sha256": sha256(view_source(s, v))}},
+                "colour_classes": s["colour_classes"], "masks": fg, "labels": lab,
+                "sheets": {"labels": str(h1 / "h1_labels.png")}, "seconds": round(time.time() - t0, 1)}
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    return manifest
+
+
 # ---- the stage ----
 
 def run(subject_path: Path, ai_python: str, sdxl: str, u2net: str) -> dict:
@@ -392,8 +445,13 @@ def main(argv=None):
     p.add_argument("--u2net")
     p.add_argument("--labels-from", metavar="vNNN", help="rerun only the labelling on this version's chosen seeds")
     p.add_argument("--sam2", help="SAM 2.1 weights folder: segment the views and use the segment vote")
+    p.add_argument("--add-view", metavar="NAME", help="add this view (nothing to remove): horse mask and labels only")
     a = p.parse_args(argv)
-    if a.labels_from:
+    if a.add_view:
+        if not a.u2net:
+            p.error("--add-view needs --u2net")
+        m = add_view(a.subject, a.add_view, a.ai_python, a.u2net, a.sam2)
+    elif a.labels_from:
         m = relabel(a.subject, a.labels_from, a.ai_python, a.sam2)
     elif not (a.sdxl and a.u2net):
         p.error("a full run needs --sdxl and --u2net")
