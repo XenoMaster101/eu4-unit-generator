@@ -41,6 +41,7 @@ def export_obj(ob, path):
     prev.data = ob.data.copy()
     bpy.context.scene.collection.objects.link(prev)
     prev.data.transform(PREVIEW)
+    prev.data.flip_normals()  # the axis swap is a mirror: without this the faces come out inside out (game v006)
     for o in bpy.context.view_layer.objects:
         o.select_set(False)
     prev.select_set(True)

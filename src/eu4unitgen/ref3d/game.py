@@ -92,7 +92,8 @@ def build(subject_path: Path, master_version: str, test: str = "test16", blender
                                    "size": cfg["bake"]["size"], **cfg["normal"], "preview": True, "out_dir": str(out),
                                    "name": f"{name}b"}).result
     note(f"normal: {json.dumps({k: nb.get(k) for k in ('tilt', 'found', 'match')}, default=str)[:300]}")
-    tex = {"diffuse": nb.get("diffuse") or bc["diffuse"], "specular": bc["specular"], "normal": nb["normal"]}
+    tex = {"diffuse": (nb.get("paths") or {}).get("diffuse") or nb.get("diffuse") or bc["diffuse"], "specular": bc["specular"],
+           "normal": (nb.get("paths") or {}).get("normal") or str(out / f"{name}b_normal.png")}
     spec = test_spec(s, cfg, out / "low_geometry.json", tex, test)
     stage = Path("build") / test
     stage.mkdir(parents=True, exist_ok=True)

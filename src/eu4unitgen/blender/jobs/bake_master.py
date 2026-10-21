@@ -28,6 +28,9 @@ from mathutils import Matrix  # noqa: E402 - Blender module
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _horse_paint as hp  # noqa: E402
 
+TARGET = np.array([0.0, 7.0, 0.0])  # _ref3d_scene's frame: PDX minus the target, mirrored in x
+MIRROR = np.array([-1.0, 1.0, 1.0])
+
 GLOSS = {"coat": hp.GLOSS[hp.COAT], "leg": hp.GLOSS[hp.COAT], "scale": hp.GLOSS[hp.SCALE], "cloth": hp.GLOSS[hp.CLOTH],
          "trim": hp.GLOSS[hp.TRIM], "chanfron": hp.GLOSS[hp.CHANFRON], "leather": hp.GLOSS[hp.LEATHER],
          "tail": hp.GLOSS[hp.HAIR], "plume": hp.GLOSS[hp.CLOTH]}
@@ -121,15 +124,17 @@ def main():
     bpy.ops.wm.open_mainfile(filepath=a["reposed_blend"])
     sc = bpy.context.scene
     parts = [ob for ob in sc.objects if ob.type == "MESH"]
-    # fresh_horse's fit of the source model (PDX: x *= s, then + offset), in the scene's mirrored frame
-    s, off = a["fit"]["scale"], a["fit"]["offset"]
-    M = Matrix.Translation((-off[0], off[1], off[2])) @ Matrix.Scale(s, 4)
+    # fresh_horse's fit of the source model (PDX: X s + offset), in the scene's frame ((X - TARGET) mirrored):
+    # Xs' = s Xs + ((s - 1) TARGET + offset) mirrored
+    s, off = a["fit"]["scale"], np.array(a["fit"]["offset"], float)
+    t = ((s - 1) * TARGET + off) * MIRROR
+    M = Matrix.Translation(tuple(t)) @ Matrix.Scale(s, 4)
     for ob in parts:
         ob.data.transform(M)
         ob.data.update()
     # the low mesh, mirrored into the scene's frame
     geo = json.loads(Path(a["low"]).read_text(encoding="utf-8"))
-    co = np.array(geo["p"], dtype=np.float64).reshape(-1, 3) * np.array([-1.0, 1.0, 1.0])
+    co = (np.array(geo["p"], dtype=np.float64).reshape(-1, 3) - TARGET) * MIRROR
     tris = np.array(geo["tri"], dtype=np.int64).reshape(-1, 3)[:, ::-1]
     me = bpy.data.meshes.new("low")
     me.from_pydata(co.tolist(), [], tris.tolist())
@@ -141,7 +146,7 @@ def main():
     u0 = np.array(geo["u0"], dtype=np.float64).reshape(-1, 2)
     loops = np.array([lp.vertex_index for lp in me.loops])
     uv.data.foreach_set("uv", np.stack([u0[loops, 0], 1.0 - u0[loops, 1]], axis=1).ravel())
-    n = np.array(geo["n"], dtype=np.float64).reshape(-1, 3) * np.array([-1.0, 1.0, 1.0])
+    n = np.array(geo["n"], dtype=np.float64).reshape(-1, 3) * MIRROR
     me.normals_split_custom_set_from_vertices([tuple(v / max(np.linalg.norm(v), 1e-9)) for v in n])
     sc.render.engine = "CYCLES"
     sc.cycles.samples = 4
