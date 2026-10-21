@@ -107,17 +107,18 @@ def facing_left(fg: Image.Image) -> bool:
     return top(x0, x0 + w // 5) <= top(x1 - w // 5, x1)
 
 
-def new(image: Path, name: str, rights: str, ai_python: str, eu4: Path) -> dict:
+def new(image: Path, name: str, rights: str, ai_python: str, eu4: Path, root: Path = Path("assets_in")) -> dict:
     from eu4unitgen.ai.env import AIJobRunner
     from eu4unitgen.ref3d import parts
 
     image = Path(image).resolve()
-    folder = Path("assets_in") / name
-    if folder.exists():
+    folder = Path(root) / name
+    # an app run's own files (ref3d.job: its status and log) may be there already; anything else is another subject
+    if folder.exists() and any(p.name not in ("status.json", "job.log") for p in folder.iterdir()):
         raise SystemExit(f"{folder} exists: pick a new name")
     paths = ai_paths(ai_python)
     t0 = time.time()
-    folder.mkdir(parents=True)
+    folder.mkdir(parents=True, exist_ok=True)
     W, H = Image.open(image).size
     # 1. the view, its mask, which way the horse faces
     out = s1.next_version(folder / "refs" / "clean")
@@ -178,8 +179,10 @@ def new(image: Path, name: str, rights: str, ai_python: str, eu4: Path) -> dict:
     return rep
 
 
-def run(subject: Path, ai_python: str, test: str | None = None, blender: str | None = None) -> dict:
-    """The whole pipeline on a subject ``new`` wrote, untouched: shells, fit, refine, master, game (test)."""
+def run(subject: Path, ai_python: str, test: str | None = None, blender: str | None = None, progress=None) -> dict:
+    """The whole pipeline on a subject ``new`` wrote, untouched: shells, fit, refine, master, game (test).
+    ``progress(step, state, **info)``, if given, hears each step start ("running") and end ("done")."""
+    progress = progress or (lambda *a, **k: None)
     from eu4unitgen.ref3d import ea, game, master
     paths = ai_paths(ai_python)
     os.environ.setdefault("EU4UNITGEN_TRIPOSG_PYTHON", ai_python)
@@ -194,19 +197,23 @@ def run(subject: Path, ai_python: str, test: str | None = None, blender: str | N
     def step(key, fn):
         if key in rep["steps"]:  # done in an earlier (stopped) run
             print(f"{key}: done earlier ({rep['steps'][key]['version']})", flush=True)
+            progress(key, "done", **rep["steps"][key])
             return rep["steps"][key]
         total, free = memory.ram_gb()
         need = memory.STEP_MIN_GB.get(key, 8.0)
         if free < need:
+            progress(key, "low_ram", free_gb=round(free, 1), need_gb=need)
             raise SystemExit(f"{key}: {free:.1f} GB of {total:.1f} GB RAM free, {need:.0f} GB wanted: close programs "
                              f"and run again (finished steps are kept)")
         t = time.time()
+        progress(key, "running")
         with memory.LowWatermark() as wm:
             m = fn()
         rep["steps"][key] = {"version": m["version"], "seconds": round(time.time() - t, 1),
                              "free_ram_gb": {"start": round(free, 1), "lowest": round(wm.low or free, 1)}}
         log_path.write_text(json.dumps(rep, indent=1), encoding="utf-8")
         print(f"{key}: {m['version']} ({rep['steps'][key]['seconds']} s)", flush=True)
+        progress(key, "done", **rep["steps"][key])
         return rep["steps"][key]
 
     sdir = folder / "spikes" / "ea" / "shells"
@@ -216,6 +223,7 @@ def run(subject: Path, ai_python: str, test: str | None = None, blender: str | N
     workers = memory.fit_workers(memory.ram_gb()[1], 6)
     rep["fit_workers"] = workers
     print(f"fit: {workers} process(es) for the free RAM", flush=True)
+    progress("fit", "waiting", workers=workers)
     ft = step("fit", lambda: ea.fit(subject, ai_python, sh["version"], workers=workers))
     rf = step("refine", lambda: ea.refine(subject, ai_python, ft["version"]))
     ms = step("master", lambda: master.build(subject, rf["version"], ai_python, blender))

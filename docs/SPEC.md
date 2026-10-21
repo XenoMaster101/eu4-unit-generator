@@ -2411,6 +2411,24 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
 
 ---
 
+#### M19. A horse in the app, and a faster 3D backend (2026-10-21)
+- **Step 1 done: the Horse screen** (`gui/horse_page.py`, Home → "Horse from image"; the work in `ref3d/job.py`).
+  - **Inputs:** drop in an image, give a name and the rights statement (rule 8, required), and the AI environment's python (remembered). The EU4 install comes from Settings.
+  - **Before starting, warnings to confirm** (`job.precheck`, Pillow only):
+    - **Background not clean:** under 75% of the border is plain. Clean AI renders score 89%, the cataphract reference sheet 31%.
+    - **Not a side view:** the subject is less than 1.1 times as wide as it is tall (the three-quarter crop is 0.80).
+    - **Cropped:** the subject touches 2 or more edges.
+    - **Low RAM:** under the shells' 10 GB. The warning names the 5 programs using the most RAM.
+  - **The run outlives the window:** `job.start` runs `job go` detached. Its `status.json` holds:
+    - each stage's state and time;
+    - a heartbeat every 15 s (a run silent for 4 beats counts as stopped);
+    - any error, the parts found and the sheet.
+  - **Resume:** finished steps are kept by `auto run`. A half-read subject is read again. A step without enough RAM shows "close programs, Resume".
+  - **Progress:** stages with "x of about y". The estimates are the median of earlier runs under the workspace (the fit per process), else horse 2's times.
+  - **Results:** the final sheet (`job.final_sheet`: the reference, what was read, the master, the game version side and three-quarter).
+  - **"Add to mod":** `job stage` stages the newest game version at tier 1 of a new `build/<name>_NN` test mod, with the vanilla horse at tier 2.
+- **Step 2 dropped (the user, 2026-10-21):** "Speed is now the priority". The hand-built path (TripoSG shells + the 2-hour E-A fit) stays only as a fallback, with no more polish. Next: a bake-off of tools that make a textured mesh directly (TRELLIS.2, Hunyuan3D 2.1, a cloud option); the winner becomes the default backend in front of the proven steps (the vanilla skeleton, weights, game version, writer).
+
 ## 11. References
 - EU4 wiki, Model modding: https://eu4.paradoxwikis.com/Model_modding
 - EU4 wiki, Unit modding: https://eu4.paradoxwikis.com/Unit_modding
