@@ -2311,6 +2311,22 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
     - **Horse 2:** saddle cloth (blue, with its trim), saddle, bridle, bare coat, tail; no armour, chanfron, caparison or plume.
   - L's 55% is mostly the hand labels' gold speckle and the saddle; S is the main evidence for the head, legs and tail.
   - About 25 s per view.
+- **Step 2 done: the master builds only what the labels show** (`master.subject_parts`: a part is present when any view's parts file shows it; labels without parts files, such as the cataphract's hand labels, build everything as before):
+  - **No armour:** no E-B run, no plates, no plates_bigger break.
+  - **No caparison:** no E-C run, no side panels, no chest panel, no tassels, no caparison_short break, no hue loop.
+  - **No chanfron:** the head is coat. **No plume:** none.
+  - **Saddle cloth (new):** a sheet cast from its box in the main view onto the body (rays through a 10 × 16 grid), 15 mm off it, carried over the back along the body's top; the far side is the near side's mirror, with the view's image projected on it. The E-D colour breaks reach it.
+  - **A self-read subject's body carries the main view's image projected** (the near side as seen, the far side its mirror; the labels projected likewise as its classes). The bridle, straps, saddle, markings and dark legs are texture. The first build (v002) used label shells: cut from the body's large triangles, they stood out as jagged strips.
+  - **The parts job writes the view as a texture:** the background is filled with the nearest horse pixel, from the horse eroded by 0.5% and leaving out pixels within ΔE 15 of the backdrop.
+    - v004: a 400 px fill left the far background grey on the far legs.
+    - v010: the mask's anti-aliased edge spread grey.
+  - The tail outline comes from S when there is one, else from the main view.
+  - **Horse 2, master v006** (body: step 3's fit v002; labels: parts v012):
+    - Built: saddle cloth, the projected bay coat, tack and dark legs.
+    - Not built: armour, panels, chest panel, plume, chanfron.
+    - 84 s, against about 40 min with E-B and E-C.
+    - Gates: colour and hue pass; regions, landmarks and coverage fail on the tail and throat. The cause is step 3's fit: its camera for this true side view is turned 31° and rolled 6°, which step 5's refit addresses.
+    - The lit render shows a white band under the belly; it is the sky lighting the underside, not the texture (the albedo is brown).
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.

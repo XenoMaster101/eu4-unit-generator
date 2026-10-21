@@ -54,6 +54,12 @@ PARTS_DEFAULTS = {
     # parts: present when at least this much shows
     "chanfron_min": 0.15, "armour_min": 0.05, "cloth_min": 0.005, "hem_reach": 0.08, "capar_span": 0.6,
     "saddle_min": 0.004, "bridle_min": 0.01, "plume_min": 0.0008, "bare_min": 0.25,
+    # landmarks (step 3): a foot's columns reach within foot_band x (ground - back) of the ground; the
+    # fetlock fetlock_up x (ground - back) above the hoof (horse 2's hand landmarks: 65 px of 725)
+    "foot_band": 0.03, "fetlock_up": 0.09,
+    # the view as a texture: filled from the horse eroded by this share of the long side (v010: the mask's
+    # anti-aliased edge spread grey over the far legs), leaving out pixels within backdrop_de (Lab) of the backdrop
+    "texture_erode": 0.005, "backdrop_de": 15.0,
 }
 
 
@@ -91,6 +97,10 @@ def run(subject_path: Path, ai_python: str, siglip: str, sam2: str | None = None
             ref = s1.view_dirs(s, n)[1] if compare == "approved" else root / "refs" / "clean" / compare
             if (ref / f"{n}_labels.png").is_file():
                 inputs[n]["compare"] = str(ref / f"{n}_labels.png")
+    for n in names:  # hand landmarks, when the config has them: the silhouette's scored against them
+        v = s["views"][n]
+        if v.get("landmarks"):
+            inputs[n]["landmarks_ref"] = {k: s1.to_crop([p], v["crop"])[0] for k, p in v["landmarks"].items()}
     settings = {**PARTS_DEFAULTS, **(s.get("parts") or {}), **(overrides or {})}
     lab = ai.run_job("ref3d_parts", {"views": inputs, "weights": siglip, "materials": MATERIALS,
                                      "colours": s["_template"]["classes"], "settings": settings, "out_dir": str(out)},
@@ -117,6 +127,10 @@ def sheet(s, inputs, lab, scores, path, version, compare):
         for k in present:
             p = L["parts"][k]
             info.append(f"{k}: {p['share'] * 100:.1f}% " + " ".join(f"{c}{tuple(rgb)}" for c, rgb in list(p["colours"].items())[:2]))
+        if L.get("landmark_error"):
+            le = L["landmark_error"]
+            info += ["", f"landmarks found {len(L['layout']['landmarks'])}; vs the hand ones (of the body length):",
+                     s1._wrap(", ".join(f"{k} {x * 100:.1f}%" for k, x in sorted(le.items(), key=lambda kv: -kv[1])), 44)]
         if n in scores:
             sc = scores[n]
             info += ["", f"agreement with {compare}: {sc['overall'] * 100:.0f}%",

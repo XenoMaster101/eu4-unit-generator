@@ -3,7 +3,8 @@ reference view, read from the image itself: no hand-written colour rules and no 
 Runs ONLY in the AI environment (torch, transformers, OpenCV, SciPy).
 
 args: {"views": {name: {"image", "fg" (horse mask), "segments" (SAM 2 ids, .npy), "inpainted" | null,
-       "compare": a labels PNG to score against (optional)}},
+       "compare": a labels PNG to score against (optional), "landmarks_ref": {name: [x, y]} hand landmarks to
+       score against (optional)}},
        "weights": a SigLIP 2 folder (google/siglip2-so400m-patch14-384, Apache-2.0),
        "materials": {material: [prompt, ...]}, "colours": {class: [r, g, b]} (the template's),
        "settings": {...} (PARTS_DEFAULTS in ref3d/parts.py), "out_dir", "result_path"}
@@ -21,7 +22,9 @@ Steps per view:
   4. the parts present (armour, chanfron, caparison, saddle cloth, saddle, bridle, plume, bare coat,
      tail), each with its pixel share, box and fitted colours: ``<name>_parts.json``.
 Writes ``<name>_labels.png``, ``<name>_labels_overlay.png``, ``<name>_materials.png`` (the SigLIP
-prior per segment), ``<name>_segments_used.npy`` and ``<name>_segment_priors.json`` (the segments as
+prior per segment), ``<name>_landmarks.json`` (the silhouette's landmarks, _ref3d_silhouette.landmarks),
+``<name>_texture.png`` and ``<name>_texture_labels.png`` (the view and its labels, the background filled
+with the nearest horse pixel: what the master projects), ``<name>_segments_used.npy`` and ``<name>_segment_priors.json`` (the segments as
 scored and their priors), ``<name>_zones.json`` (the zones in crop px). Result per view: as ref3d_labels'
 (shares, palette, labels, overlay) plus "parts", "zones", "layout", "seconds", and with ``compare``
 "agreement": the pixel agreement on the horse, overall, per reference class (recall) and per new
@@ -202,13 +205,29 @@ def main(args_path):
         for z, polys in zones.items():
             for p in polys:
                 cv2.polylines(over, [np.array(p, np.int32)], True, (255, 255, 255), 2)
+        for k_, (x_, y_) in lay["landmarks"].items():
+            cv2.circle(over, (int(x_), int(y_)), 6, (255, 255, 0), 2)
+            cv2.putText(over, k_, (int(x_) + 8, int(y_) - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1, cv2.LINE_AA)
         Image.fromarray(over).save(out / f"{name}_labels_overlay.png")
+        (out / f"{name}_landmarks.json").write_text(json.dumps(lay["landmarks"], indent=1), encoding="utf-8")
         mpal = rng.integers(60, 255, (len(mats), 3)).astype(np.uint8)
         mimg = np.zeros_like(rgb)
         for i in range(len(mats)):
             mimg[mat == i] = mpal[i]
         Image.fromarray(mimg).save(out / f"{name}_materials.png")
         (out / f"{name}_zones.json").write_text(json.dumps(zones), encoding="utf-8")
+        # the view as a texture (M18 step 2): the background filled with the nearest horse pixel, image and labels
+        # (from the horse eroded by ``texture_erode`` of the long side: the mask's edge is anti-aliased backdrop)
+        from scipy.ndimage import binary_erosion, distance_transform_edt
+        src = binary_erosion(fg & (cls != "unclassified"), iterations=max(1, int(st["texture_erode"] * max(fg.shape))))
+        # and not the backdrop seen through gaps (reins, tail hair): pixels near its colour (its median outside the mask)
+        L0 = lab_of(rgb).reshape(fg.shape + (3,))
+        if (~fg).any():
+            bd = np.median(L0[~fg], axis=0)
+            src &= np.linalg.norm(L0 - bd, axis=-1) > st["backdrop_de"]
+        _, (iy, ix) = distance_transform_edt(~src, return_indices=True)
+        Image.fromarray(rgb[iy, ix]).save(out / f"{name}_texture.png")
+        Image.fromarray(labimg[iy, ix]).save(out / f"{name}_texture_labels.png")
         np.save(out / f"{name}_segments_used.npy", seg)
         (out / f"{name}_segment_priors.json").write_text(json.dumps(
             {int(s_): {m: round(float(x), 3) for m, x in zip(mats, prior[k_])} for k_, s_ in enumerate(ids)}), encoding="utf-8")
@@ -221,6 +240,12 @@ def main(args_path):
                      "palette": cm,
                      "segments_scored": int(len(ids)), "zones": str(out / f"{name}_zones.json"),
                      "parts": parts, "layout": lay, "seconds": round(time.time() - t0, 1)}
+        if v.get("landmarks_ref"):  # the hand landmarks (crop px): each found one's error, of the body length
+            ref = v["landmarks_ref"]
+            bl = abs(ref["chest_front"][0] - ref["buttock"][0]) if "chest_front" in ref and "buttock" in ref else max(fg.shape)
+            res[name]["landmark_error"] = {k: round(float(np.hypot(*(np.array(p_) - np.array(ref[k])))) / bl, 4)
+                                           for k, p_ in lay["landmarks"].items() if k in ref}
+            print(name, "landmark error", res[name]["landmark_error"], flush=True)
         if v.get("compare"):
             res[name]["agreement"] = agreement(cls, np.array(Image.open(v["compare"]).convert("RGB")), fg, colours)
             print(name, "agreement", res[name]["agreement"], flush=True)

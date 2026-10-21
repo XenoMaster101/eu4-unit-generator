@@ -17,6 +17,14 @@ Parts (scene: the mirrored frame of _ref3d_scene; outputs mirrored back to PDX s
             front-back as the view shows, a little narrower side to side; without one, a tapered tube
             hanging to ``tail_drop`` of the seat height.
   plume     a red tuft at the poll.
+  saddle cloth (M18) a sheet: the saddle cloth's box in the main view cast onto the body (``clear`` off it),
+            carried over the back along the body's top, the far side its mirror; the view's image projected.
+With ``project_body`` (M18, a self-read subject), the body carries the main view's image and labels
+projected (the near side as seen, the far side its mirror): the bridle, straps, saddle and markings are
+texture, not label shells (cut from the body's large triangles they stood out as jagged strips).
+``build`` (M18, the parts the labels show; every one on when absent): {"armour", "chanfron", "plume",
+"tail", "saddle_cloth"}: armour off leaves out the plates (``armour_dir`` null), chanfron off makes the head
+coat, saddle_cloth on adds the cloth shell.
   tassels   along every panel's hem, every ``tassel_step_m``.
   decals    key details that lie on the body, not on a panel: each detail's reference pixel shot through
             its view's solved camera onto the master; a disc there carrying that patch of the reference
@@ -309,6 +317,85 @@ def shell(Vs, Fs, sel, nrm, offset):
     return Vs[used] + nrm[used] * offset, remap[Fs[sel]]
 
 
+def view_textures(v, brk, names, classes, pal):
+    """The view's image and its labels (class colours) as texture arrays: the parts job's filled texture (the
+    background is the nearest horse pixel: a vertex off the silhouette samples the horse, not the backdrop;
+    master v004's 400 px fill left the far background grey), with E-D's colour breaks."""
+    img = load_rgb(v["texture"]).astype(np.float64)
+    lab_rgb = load_rgb(v["texture_labels"]).astype(np.float64)
+    lab = decode(lab_rgb.astype(np.uint8), classes)
+    ci, ti = names.index("cloth"), names.index("trim")
+    if brk == "wrong_red":
+        cl = lab == ci
+        hsv = np.array([colorsys.rgb_to_hsv(*(c_ / 255.0)) for c_ in img[cl]])
+        if len(hsv):
+            hsv[:, 0] = (hsv[:, 0] + 15 / 360.0) % 1.0
+            img[cl] = np.array([colorsys.hsv_to_rgb(*h) for h in hsv]) * 255
+    if brk == "trim_removed":
+        img[lab == ti] = pal.get("cloth", [140, 30, 40])
+        lab_rgb[lab == ti] = classes["cloth"]
+    return img, lab_rgb
+
+
+def projected_uv(Vsc, cam, W, H):
+    """UVs on a view's image: each vertex through the view's camera, or its mirror when that is nearer the
+    camera (the far side shows as the near side does)."""
+    P0 = to_pdx(Vsc)
+    pa, da = RB.project(P0, cam)
+    pb, db = RB.project(P0 * np.array([-1.0, 1.0, 1.0]), cam)
+    p2 = np.where((da <= db)[:, None], pa, pb)
+    return np.c_[np.clip(p2[:, 0] / W, 0, 1), 1 - np.clip(p2[:, 1] / H, 0, 1)]
+
+
+def textured(add, name, Vsc, Fsc, cls, img, lab_rgb, uvs, metallic, rough):
+    timg = image_from_array(f"{name}_tex", img)
+    id_img = image_from_array(f"{name}_id", lab_rgb)
+    ob = add(name, Vsc, Fsc, cls, principled(f"{name}_lit", (0.5, 0.5, 0.5), metallic, rough, timg),
+             emission_material(f"{name}_alb", image=timg), emission_material(f"{name}_idm", image=id_img, closest=True))
+    uv = ob.data.uv_layers.new(name="projected")
+    uv.data.foreach_set("uv", uvs[np.array([lp.vertex_index for lp in ob.data.loops])].astype(np.float32).ravel())
+    return ob
+
+
+def cloth_sheet(bvh, cam, box, grid, clear):
+    """A saddle cloth (scene frame): rays through a rows x cols grid of its ``box`` (view px) onto the body,
+    ``clear`` out along the surface normal; each column carried from its top hit over the back (rays down onto
+    the body's top) to its mirror, and down the far side as the near side's mirror. -> (rows', cols, 3) or None."""
+    rows, cols = grid
+    x0, y0, x1, y1 = box
+    R, t = RB.camera_matrix(cam)
+    cpos = -R.T @ t
+    up = np.array([0.0, 1.0, 0.0])
+    near = []
+    for c in range(cols):
+        u = x0 + (x1 - x0) * (c + 0.5) / cols
+        col = []
+        for r in range(rows + 1):
+            v = y0 + (y1 - y0) * r / rows
+            ray = R.T @ np.array([(u - cam["cx"]) / cam["focal"], -(v - cam["cy"]) / cam["focal"], 1.0])
+            loc, nrm, _, _ = bvh.ray_cast(Vector(cpos), Vector(ray / np.linalg.norm(ray)))
+            col.append(None if loc is None else np.array(loc) + np.array(nrm) * clear)
+        near.append(col)
+    hits = [[p for p in col if p is not None] for col in near]
+    if sum(len(h) for h in hits) < 0.5 * cols * (rows + 1):
+        return None
+    k = max(len(h) for h in hits)
+    cols_out = []
+    for h in hits:
+        if not h:
+            continue
+        h = h + [h[-1]] * (k - len(h))  # a short column keeps its lowest point
+        top = h[0]
+        bridge = []
+        for s_ in np.linspace(0, 1, 7)[1:-1]:
+            q = top * np.array([1 - 2 * s_, 1.0, 1.0])  # across to the mirror
+            loc, nrm, _, _ = bvh.ray_cast(Vector(q + up * 50.0), Vector(-up), 100.0)
+            bridge.append(np.array(loc) + up * clear if loc is not None else q)
+        far = [p * np.array([-1.0, 1.0, 1.0]) for p in h]
+        cols_out.append(h[::-1] + bridge + far)  # near bottom -> top, over the back, far top -> bottom
+    return np.array(cols_out).transpose(1, 0, 2)
+
+
 def main():
     t0 = time.time()
     a = json.loads(open(sys.argv[sys.argv.index("--") + 1], encoding="utf-8").read())
@@ -352,33 +439,49 @@ def main():
             poly.use_smooth = True
         return ob
 
-    # ---- body by class: legs below the barrel's bottom, head and ears chanfron, the rest coat
+    bld = {"armour": True, "chanfron": True, "plume": True, "tail": True, "saddle_cloth": False, **(a.get("build") or {})}
+    res["build"] = bld
+    # ---- body by class: legs below the barrel's bottom, head and ears chanfron (when there is one), the rest coat
     barrel_bottom = float(V[vpart == 0, 1].min())
     fcls = np.full(len(Fs), "coat", object)
     cen = V[F].mean(axis=1)
     fcls[(part >= 5) & (cen[:, 1] < barrel_bottom)] = "leg"
-    fcls[np.isin(part, [2, 3, 4])] = "chanfron"
-    for c, mat in (("coat", principled("coat", lin("coat"), 0.0, 0.55)),
-                   ("leg", principled("leg", lin("leg"), 0.0, 0.5)),
-                   ("chanfron", principled("chanfron", lin("chanfron"), 0.9, 0.3))):
-        sel = fcls == c
-        if sel.any():
-            add(f"body_{c}", Vs, Fs[sel], c, mat)
-    res["parts"]["body"] = {"tris": int(len(Fs))}
+    if bld["chanfron"]:
+        fcls[np.isin(part, [2, 3, 4])] = "chanfron"
+    names = list(a["classes"])
+    vP = a["views"][a["view_name"]]
+    project = bool(a.get("project_body"))
+    if project:
+        pimg, plab_rgb = view_textures(vP, brk, names, a["classes"], pal)
+        Hh, Ww = pimg.shape[:2]
+        uvs = projected_uv(Vs, vP["camera"], Ww, Hh)
+        textured(add, "body_coat", Vs, Fs, "coat", pimg, plab_rgb, uvs, 0.0, 0.55)
+        res["parts"]["body"] = {"tris": int(len(Fs)), "texture": f"view {a['view_name']} projected (far side mirrored)"}
+    else:
+        for c, mat in (("coat", principled("coat", lin("coat"), 0.0, 0.55)),
+                       ("leg", principled("leg", lin("leg"), 0.0, 0.5)),
+                       ("chanfron", principled("chanfron", lin("chanfron"), 0.9, 0.3))):
+            sel = fcls == c
+            if sel.any():
+                add(f"body_{c}", Vs, Fs[sel], c, mat)
+        res["parts"]["body"] = {"tris": int(len(Fs))}
 
     # ---- armour
-    arm = Path(a["armour_dir"])
-    pv, pf = read_obj(arm / "plates.obj")
-    if brk == "plates_bigger":  # E-D: plates x1.3, each about its own centre
+    arm = Path(a["armour_dir"]) if a.get("armour_dir") else None
+    pv, pf = read_obj(arm / "plates.obj") if arm else (np.zeros((0, 3)), np.zeros((0, 3), int))
+    if brk == "plates_bigger" and arm:  # E-D: plates x1.3, each about its own centre
         k = a["verts_per_plate"]
         P3 = pv.reshape(-1, k, 3)
         c3 = P3.mean(axis=1, keepdims=True)
         pv = (c3 + 1.3 * (P3 - c3)).reshape(-1, 3)
     pm = a.get("plate_material") or {"metallic": 0.85, "roughness": 0.35, "backing": [0.03, 0.02, 0.015]}
-    add("plates", to_scene(pv), pf[:, ::-1], "scale", principled("plates", lin("scale"), pm["metallic"], pm["roughness"]))
-    bv, bf = read_obj(arm / "backing.obj")
-    add("backing", to_scene(bv), bf[:, ::-1], "scale", principled("backing", tuple(pm["backing"]), 0.0, 0.8))
-    res["parts"]["armour"] = {"plates_tris": int(len(pf)), "backing_tris": int(len(bf))}
+    if arm:
+        add("plates", to_scene(pv), pf[:, ::-1], "scale", principled("plates", lin("scale"), pm["metallic"], pm["roughness"]))
+        bv, bf = read_obj(arm / "backing.obj")
+        add("backing", to_scene(bv), bf[:, ::-1], "scale", principled("backing", tuple(pm["backing"]), 0.0, 0.8))
+        res["parts"]["armour"] = {"plates_tris": int(len(pf)), "backing_tris": int(len(bf))}
+    else:
+        res["parts"]["armour"] = {"built": False}
 
     # ---- S6 by projection: straps, saddle (leather) and gold bands (trim) on the neck and barrel
     from _ref3d_scene import vertex_normals
@@ -387,7 +490,24 @@ def main():
     nrm_b = vertex_normals(Vs, Fs)
     seam_y = a.get("cloth_seam_y")  # below the caparison's seam, trim belongs to the panels
     res["parts"]["label_shells"] = {}
+    # the saddle cloth (M18): a sheet cast from its box in the main view, over the back; the view projected on it
+    if bld["saddle_cloth"] and a.get("saddle_cloth_box"):
+        G = cloth_sheet(body_bvh, vP["camera"], a["saddle_cloth_box"], a.get("saddle_cloth_grid", [10, 16]),
+                        a.get("saddle_cloth_clear_m", 0.015) / mpu)
+        if G is not None:
+            nr, nc = G.shape[0] - 1, G.shape[1]
+            sv = G.reshape(-1, 3)
+            simg, slab_rgb = view_textures(vP, brk, names, a["classes"], pal)
+            ob = textured(add, "saddle_cloth", sv, grid_faces(nr, nc), "cloth", simg, slab_rgb,
+                          projected_uv(sv, vP["camera"], simg.shape[1], simg.shape[0]), 0.0, 0.85)
+            so = ob.modifiers.new("thickness", "SOLIDIFY")
+            so.thickness = 0.006 / mpu
+            res["parts"]["saddle_cloth"] = {"rows": nr, "cols": nc, "evidence": f"projected {a['view_name']}, far side mirrored"}
+        else:
+            res["parts"]["saddle_cloth"] = {"built": False, "why": "its box missed the body"}
     for c, off, thick, metal in (("leather", 0.02, 0.006, 0.0), ("trim", 0.02, 0.004, 0.8)):
+        if project:
+            break  # straps, saddle and trim are in the projected texture
         sel = fcls_lab == c
         if c == "trim" and seam_y is not None:
             sel &= cen[:, 1] > seam_y
@@ -414,7 +534,6 @@ def main():
             add(f"{name}_tassels", np.vstack(TV), np.vstack(TF), "trim", principled(f"{name}_tas", lin("trim"), 0.6, 0.4))
 
     # ---- cloth panels
-    names = list(a["classes"])
     for pn in a["panels"]:
         Vf = np.array(json.loads(Path(pn["vertices"]).read_text(encoding="utf-8")))
         rows, cols = pn["rows"], pn["cols"]
@@ -539,7 +658,8 @@ def main():
         path = np.array([tt + np.array([0, -t * drop, 0.12 * Hs * math.sin(t * 1.4)]) for t in np.linspace(0, 1, 12)])
         rad = np.interp(np.linspace(0, 1, 12), [0, 0.15, 1], [0.05, 0.075, 0.035]) * Hs
         tv, tf = tube(path, rad, 12)
-    add("tail", tv, tf, "tail", principled("tail", lin("tail"), 0.0, 0.7))
+    if bld["tail"]:
+        add("tail", tv, tf, "tail", principled("tail", lin("tail"), 0.0, 0.7))
     # ---- plume: a tuft of cones up and back from the poll
     poll = to_scene(np.array([Bp["HorseHead"]]))[0]
     PV, PF = [], []
@@ -549,7 +669,8 @@ def main():
         tv, tf = tube(np.array([base, 0.5 * (base + tip), tip]), np.array([0.025, 0.02, 0.003]) * Hs, 8)
         PF.append(tf + sum(len(x) for x in PV))
         PV.append(tv)
-    add("plume", np.vstack(PV), np.vstack(PF), "plume", principled("plume", lin("plume"), 0.0, 0.8))
+    if bld["plume"]:
+        add("plume", np.vstack(PV), np.vstack(PF), "plume", principled("plume", lin("plume"), 0.0, 0.8))
 
     # ---- decals: key details on the body, projected from their view
     allV, allF = [], []
@@ -654,7 +775,8 @@ def main():
     if not brk:
         set_pass("lit")
         sc.render.image_settings.color_mode = "RGB"
-        pts = np.vstack([objs["plates"][0].data.vertices[i].co[:] for i in range(0, len(objs["plates"][0].data.vertices), 37)])
+        near_ob = (objs.get("plates") or objs.get("body_coat"))[0]  # the plates, or the coat without armour
+        pts = np.vstack([near_ob.data.vertices[i].co[:] for i in range(0, len(near_ob.data.vertices), 37)])
         centre = pts.mean(axis=0)
         rad = float(np.percentile(np.linalg.norm(pts - centre, axis=1), 90))
         allp = np.vstack([np.array([vt.co[:] for vt in ob.data.vertices]) for ob, *_r in objs.values()])

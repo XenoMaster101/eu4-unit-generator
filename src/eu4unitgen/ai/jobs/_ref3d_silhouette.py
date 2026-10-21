@@ -224,7 +224,114 @@ def analyse(fg, mats, rgb, st):
                "open_px": r}
     if hb:
         summary["head_box"] = [X(hb[0]), hb[1], X(hb[2]), hb[3]] if left else [X(hb[2] - 1), hb[1], X(hb[0]) + 1, hb[3]]
+    lms = landmarks(F & ~plume, opened, body, tail, head, belly, back, chest, buttock, (x0, y0, x1, y1), st)  # a plume is no ear
+    summary["landmarks"] = {k: [X(x), int(y)] for k, (x, y) in lms.items()}
     return cls, zones, parts, summary
+
+
+def landmarks(F, opened, body, tail, head, belly, back, chest, buttock, box, st):
+    """The template's landmarks a silhouette shows (head on the left; image px): the head's outline (muzzle,
+    ears, poll, chin, throat), the trunk's (chest_front, buttock, croup), the feet (hooves on the ground, the
+    lower foot of a pair the near leg; fetlocks ``fetlock_up`` x (ground - back) above), the tail's top and
+    tip. Not the eye, nostril or bit ring: no outline shows them (the fitted body gives those)."""
+    x0, y0, x1, y1 = box
+    w = x1 - x0
+    out = {}
+    ys = lambda m, x: np.nonzero(m[:, x])[0]  # noqa: E731
+    # head: the muzzle (front-most), ears (the two highest peaks of the top outline), poll (the dip behind them)
+    hcols = np.nonzero(head.any(axis=0))[0]
+    if len(hcols):
+        top = np.array([ys(F, x).min() if F[:, x].any() else F.shape[0] for x in hcols])  # ears stand above the opened head
+        xm = int(hcols.min())
+        yfront = np.nonzero(head[:, xm])[0]
+        out["muzzle_front"] = (xm, int(yfront.mean()))
+        sep = max(3, int(0.012 * w))
+        order = np.argsort(top)
+        peaks = []
+        for i in order:
+            if all(abs(hcols[i] - hcols[j]) > sep for j in peaks):
+                peaks.append(i)
+            if len(peaks) == 2:
+                break
+        if peaks and top[peaks[0]] < out["muzzle_front"][1]:
+            ea = (int(hcols[peaks[0]]), int(top[peaks[0]]))
+            eb = (int(hcols[peaks[1]]), int(top[peaks[1]])) if len(peaks) > 1 and top[peaks[1]] < top[peaks[0]] + 0.06 * w else ea
+            out["ear_tip_a"], out["ear_tip_b"] = ea, eb
+            xr = max(ea[0], eb[0])
+            k = np.searchsorted(hcols, xr)
+            seg = slice(k, min(len(hcols), k + int(0.05 * w)))
+            if seg.stop > seg.start:
+                j = seg.start + int(np.argmax(top[seg]))  # the dip behind the ears
+                out["poll"] = (int(hcols[j]), int(top[j]))
+        # chin: the lowest point of the head's front half; throat: where the lower outline turns to the neck
+        bot = np.array([ys(F & head, x).max() if (F[:, x] & head[:, x]).any() else -1 for x in hcols])
+        half = hcols < hcols.min() + 0.5 * (hcols.max() - hcols.min())
+        if half.any():
+            j = int(np.argmax(np.where(half, bot, -1)))
+            out["chin"] = (int(hcols[j]), int(bot[j]))
+            rest = ~half & (bot >= 0)
+            if rest.any():
+                j = int(np.argmin(np.where(rest, bot, 1e9)))  # the highest point of the lower outline behind the jaw
+                out["throat"] = (int(hcols[j]), int(bot[j]))
+    # trunk
+    band = range(back + int(0.55 * (belly - back)), belly - int(0.05 * (belly - back)))
+    fr = [(int(np.nonzero(body[y])[0].min()), y) for y in band if body[y].any()]
+    if fr:
+        out["chest_front"] = min(fr)
+    band = range(back + int(0.2 * (belly - back)), back + int(0.7 * (belly - back)))
+    rr = [(int(np.nonzero(body[y])[0].max()), y) for y in band if body[y].any()]
+    if rr:
+        x, y = max(rr)
+        out["buttock"] = (x, y)
+    xs = np.arange(int(buttock - 0.25 * (buttock - chest)), buttock)
+    tops = [(ys(body, x).min(), x) for x in xs if body[:, x].any()]
+    if tops:
+        y, x = min(tops)
+        out["croup"] = (int(x), int(y))
+    # feet: the columns whose bottom reaches the ground, in runs; per half (fore, hind) the two lowest runs
+    legs = F & ~tail
+    bottom = np.array([ys(legs, x).max() if legs[:, x].any() else -1 for x in range(F.shape[1])])
+    ground = int(bottom.max())
+    near_ground = bottom >= ground - st["foot_band"] * (ground - back)
+    xm = (chest + buttock) // 2
+    runs = []
+    x = 0
+    while x < F.shape[1]:
+        if near_ground[x]:
+            s_ = x
+            while x < F.shape[1] and near_ground[x]:
+                x += 1
+            runs.append((s_, x))
+        else:
+            x += 1
+    for name, sel in (("fore", lambda r: (r[0] + r[1]) / 2 < xm), ("hind", lambda r: (r[0] + r[1]) / 2 >= xm)):
+        rs = [r for r in runs if sel(r) and r[1] - r[0] >= 0.01 * w]
+        rs = sorted(rs, key=lambda r: -bottom[r[0]:r[1]].max())[:2]
+        if not rs:
+            continue
+        feet = []
+        for a_, b_ in rs:
+            yb = int(bottom[a_:b_].max())
+            feet.append(((a_ + b_) // 2, yb))
+        if len(feet) == 1:
+            feet.append(feet[0])  # one foot hides the other
+        for side, (fx, fy) in zip(("near", "far"), feet):
+            out[f"{name}_{side}_hoof"] = (int(fx), int(fy))
+            yf = int(fy - st["fetlock_up"] * (ground - back))
+            row = np.nonzero(legs[yf])[0]
+            if len(row):
+                # the leg's run at that height nearest the hoof
+                d = np.diff(np.r_[0, legs[yf].astype(np.int8), 0])
+                s0, e0 = np.nonzero(d == 1)[0], np.nonzero(d == -1)[0]
+                k = int(np.argmin(np.abs((s0 + e0) / 2 - fx)))
+                out[f"{name}_{side}_fetlock"] = (int((s0[k] + e0[k]) // 2), yf)
+    if tail.any():
+        ty, tx = np.nonzero(tail)
+        i = int(np.argmin(ty))
+        out["tail_top_visible"] = (int(tx[i]), int(ty[i]))
+        i = int(np.argmax(ty))
+        out["tail_tip"] = (int(tx[i]), int(ty[i]))
+    return out
 
 
 def _leg_rect(m, belly, y1, w):
