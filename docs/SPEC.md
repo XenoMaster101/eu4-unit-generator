@@ -2193,6 +2193,29 @@ The full cataphract build starts only after the spikes pass **and** the user exp
     - the neck meets the head with a visible step;
     - the upper legs show as columns beside the narrow barrel (under the armour on the master);
     - S's forelegs reach too far at the fetlock (S only).
+- **Round 14 (fix round 2: armour and cloth; master v010 on E-A v021, about 10 minutes):**
+  - **Plates:**
+    - Silver: the scale class takes the median of its brightest quarter (193/170/155; the painting's median was a dark brown that rendered the plates as brown piles), fully metallic, roughness 0.3, a dark grey backing. Gold (chanfron, trim) keeps its median: in v009 its highlights washed the chanfron out to white.
+    - The neck and breast's plates at 0.6 of the barrel's (S: the neck's rows run ~14 px apart, the rump's ~23).
+    - A third hole-filling pass; filled plates take their nearest neighbour's size.
+  - **Side panel:** its front edge 0.1 H further behind the armour's patch line (my call). The far panel is the near one mirrored (master v007: simulated alone, it caught on the far foreleg L's pose lifts and flew forward as a slab).
+  - **Chest panel, split at the legs:** two static drapes, not simulated (a one-piece cloth tangled twice). Each hangs from 0.3 up the lower breast to 0.04 H under the knees and round to 0.25 H behind the shoulder, pushed out wherever the body or a foreleg is in the way. L's image and labels are projected through L's camera; the right half mirrors it.
+  - **Cloth hue:** a measured correction. The evaluation reports the cloth's signed hue difference; while L misses the gate, the panels' cloth texels turn back by it and the master is reassembled (at most twice). One round: +11.7° measured, turned back: L 3.6°, R 3.1°, S pass (gate 6°).
+  - E-D in 3D: every break caught.
+- **Known gaps after the 2 fix rounds (the finish line: moved on, not fixed):**
+  - **Colour, scale:** dE2000 17.8 in L, 12.7 in R, 11.8 in S (gate 8). The gate compares the flat albedo with the painting's median scale pixel; silver plates (the user's ask) can't meet a dark median. **A conflict for the user:** keep the gate on albedo, or score metals on the lit render.
+  - **Region IoU:**
+    - armour: L 0.21, S 0.16 (gate 0.85): the plates sit where E-B's coverage put them, but the master stands in L's pose, so in S they don't line up;
+    - legs: L 0.58, S 0.18 (the master in L's pose; S's own fit is legs 0.90, head 0.96);
+    - R's tail 0.
+  - **Landmarks:** L hem_rear 13.8% (the rear hem isn't modelled as the reference's cloak); L head 9.2% (5% allowance); S fails on L's pose; R (lower confidence) 25%.
+  - **Coverage:** coat 0 in L (the coat patch at the muzzle reads as chanfron); leather 0.1 (straps and saddle are to be baked: not modelled, by the user's scope).
+  - **Key details:** the plume (small), the side fringe (skipped by the user's scope), R's cross.
+  - **Plate period:** not measurable in L; S 1.17 (gate ±15%).
+  - **E-B:** gaps 3.7% (my 1% threshold). **E-C:** the hem doesn't converge (best ~5-7%, gate 2.5%).
+  - **Anatomy:** the neck meets the head with a step; the upper legs show as columns beside the narrow barrel (under the armour); L's legs 0.84 (v013: 0.95).
+  - The master stands in L's pose: S renders compare a different pose, so S's master numbers mostly measure the pose. The game version is posed to the vanilla skeleton anyway.
+- **Next (the finish line, step 2):** the EU4 game version from master v010 through test 15's fresh-horse pipeline (reshape onto the vanilla skeleton, remesh to ~3,000 triangles, UVs, chain weights, colour and normal baked from the master), the mod written, one in-game test staged.
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
