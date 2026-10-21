@@ -29,12 +29,17 @@ from eu4unitgen.ref3d import s1
 GAME_DEFAULTS = {
     "voxel_solid": 0.1,
     # fresh_horse (test 15's settings for its TripoSG horse, the rider cut and lump off: there is no rider)
-    "fresh": {"hem_y": 4.6, "leg_radius": 0.65, "tail_gap": 0.35, "voxel": 0.3, "relax": 4, "target_tris": 2800,
-              "quads": 2800, "smooth": 12, "influences": 3, "chain_weights": True, "tail": {"build": "auto", "cut": 0.8}},
+    "fresh": {"hem_y": 4.6, "leg_radius": 0.65, "tail_gap": 0.35, "voxel": 0.3, "relax": 4, "target_tris": 2000,
+              "quads": 2000, "smooth": 12, "influences": 3, "chain_weights": True, "tail": {"build": "auto", "cut": 0.8}},
     "bake": {"size": 512, "cage": 0.4, "distance": 0.8},
+    # the cloth as slabs (game_master): the body ~2,000 triangles and four slabs ~180 each stay under the
+    # validator's 3,000 (test 20's first stage: 4,224 with 2,800 and 7 x 12 slabs)
+    "pieces": {"piece_rows": 5, "piece_cols": 9, "piece_thick": 0.06},
     "normal": {"cage": 0.1, "distance": 0.35, "high_smooth": 0, "strength": 0.6, "samples": 32, "ao_strength": 0.35},
     "test": {"tag": "HDA", "gfx": "hellenicgfx", "set_name": "cataphract_test", "base_gfx": "westerngfx",
-             "sprite_techs": [2, 3, 4]},
+             "sprite_techs": [2, 3, 4],
+             # test 15's unit colours for HDA (the engine's default otherwise)
+             "unit_colours": [[40, 60, 160], [220, 190, 40], [230, 225, 210]]},
 }
 
 
@@ -74,7 +79,7 @@ def build(subject_path: Path, master_version: str, test: str, blender: str | Non
     rp = br.run_job("game_master", {"master_blend": str(mv / "assemble" / "master.blend"), "grids": grids,
                                     "skeleton": str(root / "spikes" / "ea" / "inputs" / "skeleton.json"),
                                     "body": {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")},
-                                    "voxel": cfg["voxel_solid"], "out_dir": str(out / "repose")}).result
+                                    "voxel": cfg["voxel_solid"], **cfg["pieces"], "out_dir": str(out / "repose")}).result
     note(f"repose: high {rp['high']['tris']} tris, solid {rp['solid']['tris']} tris")
     base = (eu4_path() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes()
     (out / "debug").mkdir(exist_ok=True)
@@ -131,7 +136,8 @@ def fit_obj(src: Path, dst: Path, fit: dict):
 def test_spec(s: dict, cfg: dict, geometry: Path, tex: dict, test: str) -> dict:
     t = cfg["test"]
     return {"schema": 1, "name": f"{test}: the {s['name']} game horse (tier 1), the vanilla horse at tier 2 for comparison",
-            "set": {"tags": [t["tag"]], "gfx": t["gfx"], "set_name": t["set_name"], "base_gfx": t["base_gfx"]},
+            "set": {"tags": [t["tag"]], "gfx": t["gfx"], "set_name": t["set_name"], "base_gfx": t["base_gfx"],
+                    "unit_colours": {t["tag"]: t["unit_colours"]}},
             "loadout": {"schema": 1, "horses": {"1": {
                 "base": "cavalry_horse", "geometry": str(geometry.resolve()),
                 "textures": {k: str(Path(v).resolve()) for k, v in tex.items()},
