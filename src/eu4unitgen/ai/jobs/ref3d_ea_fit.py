@@ -307,9 +307,9 @@ class Model:
             add(f"{vn}.pose.head_pitch", init["pose"][vn].get("head_pitch", base_shape["head_pitch"]), 8, 0, 95)
             if vn in NUIS_LEGS:
                 for j, k in enumerate(("leg_f", "leg_b")):
-                    add(f"{vn}.nuis.{k}", init["pose"][vn].get("leg_scale", [1.0, 1.0])[j], 0.03, 0.7, 1.0)
+                    add(f"{vn}.nuis.{k}", init["pose"][vn].get("leg_scale", [1.0, 1.0])[j], 0.03, 0.5, 1.0)
                 # and its trunk's length (round 13b: S's leg bases sit closer than L's trunk puts them)
-                add(f"{vn}.nuis.body", init["pose"][vn].get("body_scale", 1.0), 0.03, 0.6, 1.2)
+                add(f"{vn}.nuis.body", init["pose"][vn].get("body_scale", 1.0), 0.03, 0.5, 1.2)
             if HEAD_TURN:  # E-A round 9: the reference's head turns to the viewer; sagittal joints can't
                 for j in range(2):
                     add(f"{vn}.pose.neck_yaw.{j}", init["pose"][vn].get("neck_yaw", [0, 0])[j], 5, -30, 30)
