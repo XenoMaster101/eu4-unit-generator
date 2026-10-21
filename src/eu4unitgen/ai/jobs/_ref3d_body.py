@@ -168,6 +168,24 @@ def landmarks(B, H, P):
     return out
 
 
+ARMOUR = 0.03  # the trunk landmarks lie on the armour and cloth over the barrel (fraction of H; E-A's allowance)
+
+
+def trunk_landmarks(B, H, P):
+    """The trunk's outline points as the anatomy builds the barrel (round 13: without them a side view's
+    camera shrank the trunk and the legs bent to reach the hooves): the chest's front-most point, the
+    buttock's rear-most and the croup's top, each with the armour over it."""
+    zF = B["HorseFrontLeftUp"][2] - P["breast_ahead"] * H
+    zB = B["HorseBackLeftUp"][2] + P["rump_behind"] * H
+    top_f = H + (P["withers_rise"] - 0.15) * H
+    bot_f = H + 0.01 * H - P["barrel_depth"] * H + 0.02 * H
+    top_b = H + (P["croup_rise"] - P["rump_drop"]) * H
+    bot_b = B["HorseBackLeftDown"][1] + 0.02 * H
+    return {"chest_front": np.array([0.0, 0.5 * (top_f + bot_f), zF - ARMOUR * H]),
+            "buttock": np.array([0.0, 0.5 * (top_b + bot_b), zB + ARMOUR * H]),
+            "croup": np.array([0.0, H + (P["croup_rise"] + ARMOUR) * H, B["HorseBackLeftUp"][2]])}
+
+
 def _landmarks2(B, H, P):
     """Style 2's landmarks: on its head's surface (ha.head2_point) and its ears."""
     poll = B["HorseHead"]
@@ -181,6 +199,7 @@ def _landmarks2(B, H, P):
            "bit_ring": hp(0.84, 1.15, -0.4), "chin": hp(0.90, 0.0, -1.0), "throat": hp(0.05, 0.0, -1.0)}
     (_, _, ta), (_, _, tb) = ha.ear2_tips(P, poll, H)
     out["ear_tip_a"], out["ear_tip_b"] = ta, tb
+    out.update(trunk_landmarks(B, H, P))
     for leg, name in (("FrontLeft", "fore_near"), ("FrontRight", "fore_far"), ("BackLeft", "hind_near"), ("BackRight", "hind_far")):
         out[f"{name}_fetlock"] = B[f"Horse{leg}Heel"]
         out[f"{name}_hoof"] = B[f"Horse{leg}Sole"]
@@ -190,7 +209,7 @@ def _landmarks2(B, H, P):
 UNORDERED = (("ear_tip_a", "ear_tip_b"),)
 BODY_LANDMARKS = ("poll", "eye", "muzzle_front", "nostril", "bit_ring", "chin", "throat", "ear_tip_a", "ear_tip_b",
                   "fore_near_fetlock", "fore_near_hoof", "fore_far_fetlock", "fore_far_hoof", "hind_near_fetlock",
-                  "hind_near_hoof", "hind_far_fetlock", "hind_far_hoof")
+                  "hind_near_hoof", "hind_far_fetlock", "hind_far_hoof", "chest_front", "buttock", "croup")
 
 
 # ---------------------------------------------------------------- camera

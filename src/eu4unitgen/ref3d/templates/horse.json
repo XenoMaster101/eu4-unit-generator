@@ -16,6 +16,7 @@
   "chest_front": "front-most point of the chest or its armour",
   "withers": "highest point of the back between the shoulders",
   "croup": "highest point of the hindquarters",
+  "buttock": "rear-most point of the hindquarters or their armour (under the tail)",
   "fore_near_fetlock": "near foreleg fetlock joint",
   "fore_near_hoof": "near foreleg hoof, ground contact",
   "fore_far_fetlock": "far foreleg fetlock joint",

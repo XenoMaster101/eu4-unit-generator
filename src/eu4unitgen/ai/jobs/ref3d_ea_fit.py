@@ -266,6 +266,11 @@ class Model:
                 v0 = init["shape"].get(p, base_shape[p])
                 if p in SIGNED:
                     add(f"shape.{p}", v0, 0.02, -0.15, 0.15)
+                elif base_shape.get("anatomy", 1) == 2 and p in HEAD_PARAMS:
+                    # style 2's head is a horse's: its sizes stay near a horse's (round 13: with 0.5-2x the
+                    # first refine grew it to the bound, length 0.51 H and jaw depth 2x, to fill the
+                    # chanfron and bridle)
+                    add(f"shape.{p}", v0, 0.05 * abs(base_shape[p]), 0.8 * base_shape[p], 1.3 * base_shape[p])
                 elif p in HEAD_WIDTHS:  # anatomy sanity: widths unseen in a side or 3/4 view
                     add(f"shape.{p}", v0, 0.05 * abs(base_shape[p]), 0.8 * base_shape[p], 1.25 * base_shape[p])
                 else:
