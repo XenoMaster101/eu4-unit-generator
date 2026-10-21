@@ -20,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np  # noqa: E402
 
 
+TRUNK = {"chest_front", "buttock", "croup"}  # E-A round 13: they steer (and are scored in) the trunk views only
+
+
 def main(args_path):
     from PIL import Image
 
@@ -49,7 +52,8 @@ def main(args_path):
             ccls = np.where(fgc, E.decode(idm[..., :3], a["classes"]), -1)
             # composite the albedo over the reference's background (colour is compared inside regions only)
             img = np.where(alb[..., 3:4] > 127, alb[..., :3], refs[vn]["image"])
-            clm = {k: tuple(p) for k, p in (st["landmarks"].get(vn) or {}).items()}
+            clm = {k: tuple(p) for k, p in (st["landmarks"].get(vn) or {}).items()
+                   if k not in TRUNK or vn in a.get("trunk_views", ())}  # the trunk's points only where they steer
             rlm = refs[vn]["landmarks"]
             for x_, y_ in (("ear_tip_a", "ear_tip_b"),):  # an unordered pair, as E-A matches it
                 if all(k in clm and k in rlm for k in (x_, y_)):

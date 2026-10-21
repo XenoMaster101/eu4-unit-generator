@@ -125,23 +125,23 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     # ---- cloth: the near panel, then the far one by symmetry
     m_cl = ec.run(subject_path, ea_version, ai_python, blender, cand, out=out / "cloth_left")
     note(f"cloth left: {m_cl['verdict']}")
-    left_panel = m_cl["settings"]["panel"]
-    m_cr = ec.run(subject_path, ea_version, ai_python, blender, cand, out=out / "cloth_right",
-                  over={"rounds": 0, "reruns": 1, "panel": {**left_panel, "side": "right"}, "hem_landmarks": {"L": [], "R": []}},
-                  extra={"texture_from": m_cl["final"]["result"]["texture"]["path"]})
-    note("cloth right: built from the left panel (symmetry)")
+    # the far panel: the near one mirrored across the centre plane (master v007: simulated on its own, it
+    # caught on the far foreleg L's pose lifts onto the rock and was dragged forward into a flat slab; its
+    # texture was symmetry anyway)
+    rl = m_cl["final"]["result"]
+    dl = Path(rl["texture"]["path"]).parent
+    (out / "cloth_right").mkdir(parents=True, exist_ok=True)
+    vr = [[-x, y, z] for x, y, z in json.loads((dl / "panel_vertices.json").read_text(encoding="utf-8"))]
+    (out / "cloth_right" / "panel_vertices.json").write_text(json.dumps(vr), encoding="utf-8")
+    note("cloth right: the left panel mirrored (symmetry)")
     # the chest panel isn't built: the near foreleg steps through it and a one-piece cloth tangles round
     # the forelegs (master dev run, E-C front mode); it needs a pattern split at the legs (listed at H3)
     panels = []
-    for name, m, ev in (("panel_left", m_cl, "observed L / R, prior"), ("panel_right", m_cr, "symmetry")):
-        r = m["final"]["result"]
-        d = Path(r["texture"]["path"]).parent
-        lab_p = Path(m["final"]["result"]["texture"].get("labels") or (Path(r["texture"]["path"]).parent / "panel_labels.png"))
-        if name == "panel_right":  # the far panel's texture is the near one's: so are its labels
-            lab_p = Path(m_cl["final"]["result"]["texture"]["path"]).parent / "panel_labels.png"
-        panels.append({"name": name, "vertices": str(d / "panel_vertices.json"), "texture": r["texture"]["path"],
+    for name, d, ev in (("panel_left", dl, "observed L / R, prior"), ("panel_right", out / "cloth_right", "symmetry")):
+        lab_p = Path(rl["texture"].get("labels") or (dl / "panel_labels.png"))
+        panels.append({"name": name, "vertices": str(d / "panel_vertices.json"), "texture": rl["texture"]["path"],
                        "labels": str(lab_p) if lab_p.is_file() else None,
-                       "rows": r["panel"]["rows"], "cols": r["panel"]["cols"], "evidence": ev})
+                       "rows": rl["panel"]["rows"], "cols": rl["panel"]["cols"], "evidence": ev})
     decals = [{"name": d["name"], "view": vn, "xy": d["xy"], "size": d["size"], "class": DECAL_CLASS[d["name"]]}
               for vn, v in views.items() if vn in DECAL_VIEWS for d in v["details"] if d["name"] in DECAL_CLASS]
     base_args = {"skeleton": ea_args["skeleton"], "body": {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")},
@@ -162,7 +162,8 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     gates = dict(ea_args["gates"])
     ev = AIJobRunner(ai_python, timeout=3600).run_job("ref3d_master_eval", {
         "classes": ea_args["classes"], "regions": template["regions"], "gates": gates, "views": views, "sets": sets,
-        "low_confidence": ea_args.get("low_confidence") or [], "head_landmarks": HEAD_LM}).result
+        "low_confidence": ea_args.get("low_confidence") or [], "head_landmarks": HEAD_LM,
+        "trunk_views": (ea_args.get("refine") or {}).get("trunk_views") or []}).result
     master_ev = ev["sets"]["master"]
     e_d = {b: {"caught": bool(ev["sets"][b]["failed_any_view"]), "failed": ev["sets"][b]["failed_any_view"]}
            for b in BREAKS}
