@@ -18,8 +18,9 @@ on, never a leg), and writes:
 OBJs in preview axes (file (x, y, -z) of PDX space, as fresh_horse and bake_horse read them).
 
 Game fix round (the user on test 20's gallery, 2026-10-21):
-  * the slabs hug the body: each column laid back onto the trunk's surface (``hug_clear`` off it) by horizontal
-    rays against the posed barrel and neck, hanging straight down below them (test 20's stood out like wings);
+  * the slabs hug the body: each column laid back onto the armoured trunk's surface (barrel, neck, plates and
+    backing; ``hug_clear`` off it) by horizontal rays, hanging straight down below them (test 20's stood out like
+    wings);
   * the cloth clean: the panels' and chest drapes' albedo from their labels (``labels``: the panel's own label
     texture, the drapes' view-L labels through their projected UVs), cloth one red, trim one gold, both from the
     reference's pixels (``clean``: view L's image and labels; each class's brighter, more saturated half, lifted to
@@ -289,8 +290,22 @@ def main():
         res["clean_palette"] = {k: [float(x) for x in v] for k, v in res.pop("_pal").items()}
     # the trunk (barrel and neck), posed: what the slabs hug
     from mathutils.bvhtree import BVHTree
-    tF = F[np.isin(part, [0, 1])]
-    tbvh = BVHTree.FromPolygons([tuple(p) for p in bco], [tuple(int(i) for i in f) for f in tF])
+    # the armoured trunk: barrel and neck with the plates and their backing (test 21's first build hugged the bare
+    # trunk and its plates covered the cloth: in the master the cloth lies over the armour)
+    tV, tFs = [bco], [F[np.isin(part, [0, 1])]]
+    off_ = len(bco)
+    for nm in ("plates", "backing"):
+        ob_ = bpy.data.objects.get(nm)
+        if ob_ is None:
+            continue
+        vv = to_pdx(np.array([v.co[:] for v in ob_.data.vertices]))
+        ff = [p_.vertices[:] for p_ in ob_.data.polygons]
+        tri = np.array([(f_[0], f_[k], f_[k + 1]) for f_ in ff for k in range(1, len(f_) - 1)], dtype=np.int64)
+        tV.append(vv)
+        tFs.append(tri + off_)
+        off_ += len(vv)
+    tV, tF = np.vstack(tV), np.vstack(tFs)
+    tbvh = BVHTree.FromPolygons([tuple(p) for p in tV], [tuple(int(i) for i in f) for f in tF])
     for name, (rows, cols) in (a.get("grids") or {}).items():
         ob = bpy.data.objects.get(name)
         if ob is None:
