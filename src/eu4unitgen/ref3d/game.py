@@ -40,9 +40,8 @@ GAME_DEFAULTS = {
 
 def eu4_path() -> Path:
     """The EU4 install (the base horse is read from it at run time, never copied: rule 1)."""
-    from eu4unitgen.core.project import Project
-    p = Project().eu4_path
-    if p is None:
+    p = os.environ.get("EU4_PATH")
+    if not p:
         raise SystemExit("set EU4_PATH to the EU4 install")
     return Path(p)
 
