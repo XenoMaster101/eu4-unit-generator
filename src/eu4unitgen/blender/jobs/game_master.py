@@ -155,6 +155,14 @@ def clean_material(name, lab_path, classes, pal):
     """An emission of the labels as clean colours: cloth one red, trim one gold (anything else reads as cloth)."""
     lab = load_png(lab_path)[..., :3]
     trim = (lab == np.array(classes["trim"])).all(-1)
+    # a majority over a window (a 1% of the image's width box): the borders and crosses stay, the speckle of the
+    # per-pixel labels goes (test 21's third build: the gold read as noise)
+    r = max(1, int(round(0.01 * trim.shape[1])))
+    c = np.pad(trim.astype(np.float64), r, mode="edge").cumsum(0).cumsum(1)
+    c = np.pad(c, ((1, 0), (1, 0)))
+    k = 2 * r + 1
+    box = (c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]) / (k * k)
+    trim = box[:trim.shape[0], :trim.shape[1]] > 0.5
     rgb = np.where(trim[..., None], pal["trim"], pal["cloth"]) / 255.0
     h, w = rgb.shape[:2]
     img = bpy.data.images.new(f"{name}_clean", w, h)
