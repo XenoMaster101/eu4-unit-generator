@@ -9,12 +9,16 @@ on, never a leg), and writes:
   reposed.blend  the scene posed, each part's albedo material assigned (its class-ID material kept by name):
                  what the colour bake reads;
   high.obj       every part (modifiers applied, decals left out) joined: the normal bake's high surface;
-  solid.obj      that surface as one closed piece (a voxel remesh, ``voxel``): fresh_horse's source model;
+  solid.obj      that surface but the cloth (panels, chest drapes, tassels) as one closed piece (a voxel remesh,
+                 ``voxel``): fresh_horse's source model;
+  pieces.json    the panels and chest drapes as low closed slabs (``piece_rows`` x ``piece_cols``, ``piece_thick``
+                 thick; each vertex's anchor at its column's top): fresh_horse joins them after its remesh (a
+                 voxel remesh erases 4 mm cloth: game v007 had no caparison);
   check.png      a side view of the posed master (Workbench).
 OBJs in preview axes (file (x, y, -z) of PDX space, as fresh_horse and bake_horse read them).
 
-args: {"master_blend", "skeleton", "body": {"shape", "skeleton", "cameras", "poses"}, "voxel", "out_dir",
-       "result_path"}
+args: {"master_blend", "skeleton", "body": {"shape", "skeleton", "cameras", "poses"}, "voxel",
+       "grids": {panel object: [rows, cols]}, "piece_rows", "piece_cols", "piece_thick", "out_dir", "result_path"}
 """
 import json
 import math
@@ -76,6 +80,43 @@ def albedo_of(ob):
     return m
 
 
+def slab(G, body_kd, rows, cols, thick):
+    """A grid (R x C x 3, PDX) as a closed slab: ``rows`` x ``cols`` samples, a back sheet ``thick`` towards the
+    body, the borders closed. -> (vertices, faces, anchors)."""
+    R, C = G.shape[:2]
+    ri = np.unique(np.linspace(0, R - 1, rows).round().astype(int))
+    ci = np.unique(np.linspace(0, C - 1, cols).round().astype(int))
+    S = G[np.ix_(ri, ci)]
+    r, c = S.shape[:2]
+    du = np.gradient(S, axis=1)
+    dv = np.gradient(S, axis=0)
+    n = np.cross(du, dv)
+    n /= np.maximum(np.linalg.norm(n, axis=2, keepdims=True), 1e-9)
+    near = np.array([body_kd.find(tuple(p))[0] for p in S.reshape(-1, 3)]).reshape(S.shape)
+    if np.sum(n * (S - near)) < 0:  # the normals face away from the body
+        n = -n
+    front, back = S.reshape(-1, 3), (S - n * thick).reshape(-1, 3)
+    V = np.vstack([front, back])
+    k = r * c
+    F = []
+    for i in range(r - 1):
+        for j in range(c - 1):
+            a, b, d, e = i * c + j, i * c + j + 1, (i + 1) * c + j, (i + 1) * c + j + 1
+            F += [(a, d, e), (a, e, b), (k + a, k + e, k + d), (k + a, k + b, k + e)]
+    ring = [(0, j) for j in range(c)] + [(i, c - 1) for i in range(1, r)] + [(r - 1, j) for j in range(c - 2, -1, -1)] + \
+           [(i, 0) for i in range(r - 2, 0, -1)]
+    for (i0, j0), (i1, j1) in zip(ring, ring[1:] + ring[:1]):
+        a, b = i0 * c + j0, i1 * c + j1
+        F += [(a, b, k + b), (a, k + b, k + a)]
+    F = np.array(F)
+    # the faces' winding: outward along n on the front sheet (checked on the first triangle)
+    t = V[F[0]]
+    if np.cross(t[1] - t[0], t[2] - t[0]) @ n[0, 0] < 0:
+        F = F[:, ::-1]
+    top = np.tile(S[0], (r, 1, 1)).reshape(-1, 3)
+    return V, F, np.vstack([top, top])
+
+
 def main():
     t0 = time.time()
     a = json.loads(open(sys.argv[sys.argv.index("--") + 1], encoding="utf-8").read())
@@ -126,10 +167,32 @@ def main():
         ob.data.materials.append(alb)
     for m in bpy.data.materials:
         m.use_fake_user = True
+    # the cloth as low slabs for fresh_horse (PDX, posed)
+    bco = to_pdx(np.array([v.co[:] for v in bpy.data.objects["body_coat"].data.vertices]))
+    bkd = KDTree(len(bco))
+    for i, p in enumerate(bco):
+        bkd.insert(tuple(p), i)
+    bkd.balance()
+    pieces = []
+    for name, (rows, cols) in (a.get("grids") or {}).items():
+        ob = bpy.data.objects.get(name)
+        if ob is None:
+            continue
+        G = to_pdx(np.array([v.co[:] for v in ob.data.vertices]))
+        if len(G) != (rows + 1) * cols:
+            res.setdefault("pieces_skipped", []).append(name)
+            continue
+        V, Fp, anc = slab(G.reshape(rows + 1, cols, 3), bkd, a.get("piece_rows", 7), a.get("piece_cols", 12),
+                          a.get("piece_thick", 0.06))
+        pieces.append({"name": name, "v": V.tolist(), "f": Fp.tolist(), "anchor": anc.tolist(), "hem": float(G[-cols:, 1].min())})
+    (out / "pieces.json").write_text(json.dumps(pieces), encoding="utf-8")
+    res["pieces"] = {"path": str(out / "pieces.json"), "count": len(pieces), "tris": sum(len(q["f"]) for q in pieces)}
     bpy.ops.wm.save_as_mainfile(filepath=str(out / "reposed.blend"), compress=True)
     # the high surface: every part but the decals (flat cards), modifiers applied, joined
     dg = bpy.context.evaluated_depsgraph_get()
     allV, allF, off = [], [], 0
+    cloth = np.zeros(0, bool)
+    clothF = []
     for ob in meshes:
         if ob.name.startswith("decal_"):
             continue
@@ -143,6 +206,7 @@ def main():
             continue
         allV.append(to_pdx(vv @ np.array(ob.matrix_world)[:3, :3].T + np.array(ob.matrix_world)[:3, 3]))
         allF.append(tt + off)
+        clothF.append(np.full(len(tt), ob.name.startswith(("panel_", "chest_"))))
         off += len(vv)
     HV, HF = np.vstack(allV), np.vstack(allF)
     me = bpy.data.meshes.new("high")
@@ -152,10 +216,12 @@ def main():
     bpy.context.scene.collection.objects.link(high)
     export_obj(high, out / "high.obj")
     res["high"] = {"path": str(out / "high.obj"), "tris": int(len(HF))}
-    # one closed piece for fresh_horse
-    solid = high.copy()
-    solid.data = high.data.copy()
-    solid.name = "solid"
+    # one closed piece for fresh_horse: everything but the cloth (joined later as slabs)
+    keepF = HF[~np.concatenate(clothF)]
+    me2 = bpy.data.meshes.new("solid_src")
+    me2.from_pydata(HV.tolist(), [], keepF.tolist())
+    me2.update()
+    solid = bpy.data.objects.new("solid", me2)
     bpy.context.scene.collection.objects.link(solid)
     for o in bpy.context.view_layer.objects:
         o.select_set(False)

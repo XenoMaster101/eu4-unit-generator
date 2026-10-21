@@ -1134,6 +1134,15 @@ def main():
                          "saddle_node_y": van["bones"]["Saddle_Node"][1]}
     if a.get("chanfron"):
         res["chanfron"] = {"tris": add_chanfron(obj, van["bones"], **a["chanfron"])}
+    if a.get("pieces"):  # Track M: the master's cloth as closed low slabs, fitted like the source model
+        s_, off_ = res["fit"]["scale"], np.array(res["fit"]["offset"])
+        res["pieces"] = {}
+        for q in json.loads(open(a["pieces"], encoding="utf-8").read()):
+            v = np.array(q["v"]) * s_ + off_
+            f = np.array(q["f"], dtype=np.int64)
+            join_piece(obj, q["name"], {"v": v, "f": f, "part": [hb.CLOTH_PANEL] * len(f), "hem": [q["hem"] * s_ + off_[1]] * len(f),
+                                        "anchor": np.array(q["anchor"]) * s_ + off_})
+            res["pieces"][q["name"]] = {"tris": int(len(f))}
     if build_tail:  # found on the body alone, before the panels join it
         root, offset = tail_anchor(obj, van["bones"])
         b = hb.tail(van["bones"], root, offset=offset,
@@ -1156,7 +1165,7 @@ def main():
     res["weights"] = wstats
     if a.get("chanfron"):
         res["chanfron"]["pinned_vertices"] = pin_chanfron(obj)
-    if a.get("barding") or build_tail:  # panels, stirrups and the tail: their own weights
+    if a.get("barding") or a.get("pieces") or build_tail:  # panels, stirrups and the tail: their own weights
         res.setdefault("barding", {})["pinned_vertices"] = pin_barding(obj, van["bones"])
     if a.get("paint"):
         pt = a["paint"]

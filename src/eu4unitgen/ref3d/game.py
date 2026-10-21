@@ -12,7 +12,7 @@ From a master (``<subject>/master/vNNN``) into ``<subject>/game/vNNN`` (nothing 
   stage    a test-mod spec (one tag, tier 1 the new horse, tier 2 the vanilla horse for comparison), written
            to ``build/<test>/`` and staged with ``eu4unitgen.cli test-mod --spec``.
 
-usage: python -m eu4unitgen.ref3d.game build <subject.json> --master vNNN [--test test16]
+usage: python -m eu4unitgen.ref3d.game build <subject.json> --master vNNN --test testNN (a new name)
 """
 from __future__ import annotations
 
@@ -46,11 +46,13 @@ def eu4_path() -> Path:
     return Path(p)
 
 
-def build(subject_path: Path, master_version: str, test: str = "test16", blender: str | None = None) -> dict:
+def build(subject_path: Path, master_version: str, test: str, blender: str | None = None) -> dict:
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.fresh_mesh import base_arrays
     from eu4unitgen.core.project import default_blender_path
 
+    if (Path("build") / test).exists():  # a test's folder is never written into twice (test 16's spec was lost so)
+        raise SystemExit(f"build/{test} exists: pick a new test name")
     s = s1.load_subject(subject_path)
     cfg = {**GAME_DEFAULTS, **(s.get("game") or {})}
     root = s["_root"]
@@ -67,7 +69,9 @@ def build(subject_path: Path, master_version: str, test: str = "test16", blender
         log.append(msg)
         print(msg, flush=True)
 
-    rp = br.run_job("game_master", {"master_blend": str(mv / "assemble" / "master.blend"),
+    grids = {k: [p["rows"], p["cols"]] for k, p in mm["assemble"]["parts"].items()
+             if k.startswith(("panel_", "chest_")) and isinstance(p, dict) and "rows" in p and not k.endswith("_tassels")}
+    rp = br.run_job("game_master", {"master_blend": str(mv / "assemble" / "master.blend"), "grids": grids,
                                     "skeleton": str(root / "spikes" / "ea" / "inputs" / "skeleton.json"),
                                     "body": {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")},
                                     "voxel": cfg["voxel_solid"], "out_dir": str(out / "repose")}).result
@@ -75,6 +79,7 @@ def build(subject_path: Path, master_version: str, test: str = "test16", blender
     base = (eu4_path() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes()
     (out / "debug").mkdir(exist_ok=True)
     fr = br.run_job("fresh_horse", {**cfg["fresh"], "source": {"kind": "model", "path": rp["solid"]["path"]},
+                                    "pieces": rp["pieces"]["path"],
                                     "vanilla": base_arrays(base), "geometry_out": str(out / "low_geometry.json"),
                                     "preview_out": str(out / "low.obj"), "bake_source_out": str(out / "low_source.obj"),
                                     "debug_dir": str(out / "debug")}).result
@@ -141,7 +146,7 @@ def main(argv=None):
     b = sub.add_parser("build")
     b.add_argument("subject", type=Path)
     b.add_argument("--master", required=True)
-    b.add_argument("--test", default="test16")
+    b.add_argument("--test", required=True, help="a new build/<test> folder (refused if it exists)")
     b.add_argument("--blender")
     a = p.parse_args(argv)
     m = build(a.subject, a.master, a.test, a.blender)
