@@ -2216,6 +2216,25 @@ The full cataphract build starts only after the spikes pass **and** the user exp
   - **Anatomy:** the neck meets the head with a step; the upper legs show as columns beside the narrow barrel (under the armour); L's legs 0.84 (v013: 0.95).
   - The master stands in L's pose: S renders compare a different pose, so S's master numbers mostly measure the pose. The game version is posed to the vanilla skeleton anyway.
 - **Next (the finish line, step 2):** the EU4 game version from master v010 through test 15's fresh-horse pipeline (reshape onto the vanilla skeleton, remesh to ~3,000 triangles, UVs, chain weights, colour and normal baked from the master), the mod written, one in-game test staged.
+- **Finish line step 2, the game version (2026-10-21):**
+  - **Code:**
+    - `ai/jobs/_ref3d_repose.py`: moves the master from its skeleton and L's pose onto the vanilla skeleton at rest. The trunk by the exact inverse of the proportions; the neck and legs along their bones (blended at the joints and into the trunk at their roots); the head rigidly. Parts that aren't body follow the body part they lie on; the panels, chest drapes, tassels and tail follow the trunk.
+    - Blender job `game_master`: the scene posed, each part's albedo rebuilt from its lit material (master.blend kept only those); `high.obj`; `solid.obj` (everything but the cloth, voxel 0.1); `pieces.json` (the side panels and chest drapes as closed low slabs, 5 x 9, 0.06 thick).
+    - Blender job `bake_master`: colour, class map and specular (gloss per class) baked from the posed master.
+    - `fresh_horse` `pieces`: the slabs joined after the remesh, weighted from their anchors like test 15's panels.
+    - `ref3d/game.py`: repose -> fresh_horse (vanilla's box fit; skirts trimmed under 4.6 except round the legs; voxel 0.3; 2,000 triangles; chain weights) -> colour bake -> bake_horse (normal and AO) -> test spec -> `test-mod --spec`. It refuses an existing `build/<test>` folder.
+  - **Fixes on the way:**
+    - the chest drape now clears only the trunk and neck: pushed over L's stepping foreleg, it stood out as a tent that the rest pose kept (master v011);
+    - OBJ windings: game_master's axis swap is a mirror, so the faces came out inside out and the voxel remesh kept a fragment;
+    - the colour bake works in the scene's frame (the target offset);
+    - a voxel remesh erases 4 mm cloth: the game mesh had no caparison until the cloth became slabs;
+    - budget: 2,800 body triangles plus 7 x 12 slabs came to 4,224; now 2,000 plus 5 x 9 slabs = 2,800.
+  - **My mistake:** the first game build wrote `build/test16/test16.json` and `log.txt` (in-game test 16, 2026-10-19). They're not in git, so they can't be recovered. The spec was rebuilt from test15.json and this SPEC's record (horse v20, maps v20b_*) and marked as a reconstruction; the log has a note. Its stage, checklist and README were untouched.
+  - **In-game test 20 STAGED:** HDA / `cataphract_test`; tier 1 the game horse from master v011 (game v009), tier 2 the vanilla horse. Stage `build/test20/stage`, run sheet `build/test20/README.txt`, gallery `build/test20/gallery/sheet.png`.
+    - Validator: 0 errors, 0 warnings, 2,800 triangles.
+    - Deformation, stretch p05-p95 / max / flips (vanilla in brackets): idle 0.87-1.11 / 3.2 / 15 (0.89-1.20 / 3.9 / 13); walk 0.92-1.09 / 3.6 / 5 (0.91-1.14 / 3.2 / 8); attack 0.78-1.14 / 3.7 / 18 (0.76-1.26 / 3.5 / 32).
+    - Seen before the test: at the game's close zoom the panels stand out like wings and the cloth texture is dark and mottled (the master's panel texture is 61% prior fill); the ears and the plume are lost in the voxel remesh; the tail sticks out backwards.
+  - **Next:** the user's in-game check of test 20; then step 3 (the pipeline untouched on a new horse reference from the user).
 
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
