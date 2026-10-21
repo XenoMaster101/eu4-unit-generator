@@ -73,6 +73,7 @@ def build(subject_path: Path, master_version: str, test: str = "test16", blender
                                     "voxel": cfg["voxel_solid"], "out_dir": str(out / "repose")}).result
     note(f"repose: high {rp['high']['tris']} tris, solid {rp['solid']['tris']} tris")
     base = (eu4_path() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes()
+    (out / "debug").mkdir(exist_ok=True)
     fr = br.run_job("fresh_horse", {**cfg["fresh"], "source": {"kind": "model", "path": rp["solid"]["path"]},
                                     "vanilla": base_arrays(base), "geometry_out": str(out / "low_geometry.json"),
                                     "preview_out": str(out / "low.obj"), "bake_source_out": str(out / "low_source.obj"),
