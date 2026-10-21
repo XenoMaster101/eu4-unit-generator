@@ -29,20 +29,63 @@ from eu4unitgen.ref3d.writeguard import allowed_roots, check_writes
 BREAKS = ["trim_removed", "caparison_short", "plates_bigger", "head_5deg", "wrong_red"]
 DECAL_CLASS = {"eye": "chanfron", "bit_rosette": "trim", "breast_medallion": "trim", "crupper_rosette": "trim",
                "tail_tassel": "trim"}  # details on the body; the crosses, fringe and hem band are in the panels' textures
+# ornament comes from the original's views (the user, round 13: S confirms and fills gaps, the original has priority)
+DECAL_VIEWS = ("L", "R")
 HEAD_LM = ["poll", "eye", "muzzle_front", "nostril", "bit_ring", "chin", "throat", "ear_tip_a", "ear_tip_b"]
 MASTER_DEFAULTS = {"withers_m": 1.55, "tail_drop": 0.78, "tassel_step_m": 0.09, "tassel_len_m": 0.08, "samples": 128}
 
 
+def seat_rise(bones: dict, k: dict) -> float:
+    """How far the seat rises with the leg factors ``k`` (as _ref3d_body.skeleton proportions it)."""
+    zf, zb = bones["HorseFrontLeftUp"][2], bones["HorseBackLeftUp"][2]
+    w = min(max((bones["Saddle_Node"][2] - zf) / (zb - zf), 0.0), 1.0)
+    return ((k.get("leg_f", 1.0) - 1) * bones["HorseFrontLeftUp"][1] * (1 - w)
+            + (k.get("leg_b", 1.0) - 1) * bones["HorseBackLeftUp"][1] * w)
+
+
 def view_info(s: dict, ea_args: dict, rec: dict, out: Path) -> dict:
+    """The views with their solved cameras. A view fitted with its own (shorter) legs (round 13: S) sees the
+    master's trunk higher by the seat's difference: its camera is moved up by that much, so the trunk, neck
+    and head line up and the master's longer legs reach below that view's ground."""
     from eu4unitgen.ref3d import ed2d
     base = ed2d.build_args(s, out)["views"]
+    bones = json.loads(Path(ea_args["skeleton"]).read_text(encoding="utf-8"))["bones"]
     views = {}
     for vn, v in base.items():
         W, H = Image.open(v["image"]).size
+        cam = dict(rec["cameras"][vn])
+        ls = (rec["poses"].get(vn) or {}).get("leg_scale")
+        if ls:
+            sk = rec["skeleton"]
+            d = seat_rise(bones, sk) - seat_rise(bones, {"leg_f": sk.get("leg_f", 1.0) * ls[0], "leg_b": sk.get("leg_b", 1.0) * ls[1]})
+            cam["cy"] += d * cam["focal"] / cam["dist"]
         views[vn] = {"image": v["image"], "labels": v["labels"], "fg": v["fg"], "inpainted": v["inpainted"],
                      "never_use": v["never_use"], "landmarks": v["landmarks"], "body_length": v["body_length"],
-                     "details": v["details"], "size": [W, H], "camera": rec["cameras"][vn]}
+                     "details": v["details"], "size": [W, H], "camera": cam, "leg_scale": ls}
     return views
+
+
+def tail_profile(s: dict, views: dict, view: str = "S", n: int = 12) -> list | None:
+    """The tail from a side view (round 13: S is the main evidence for the tail): per station from the
+    top of the visible hair to its tip, (drop below the top, centre behind the top, front-back half-width),
+    in scene units (the view's px per unit at the target). None without that view or its tail landmarks."""
+    v = views.get(view)
+    if not v or not all(k in v["landmarks"] for k in ("tail_top_visible", "tail_tip")):
+        return None
+    tail = tuple(s["_template"]["classes"]["tail"])
+    lab = Image.open(v["labels"]).convert("RGB")
+    px = lab.load()
+    ppu = v["camera"]["focal"] / v["camera"]["dist"]
+    (x0, y0), (x1, y1) = v["landmarks"]["tail_top_visible"], v["landmarks"]["tail_tip"]
+    out = []
+    for k in range(n):
+        y = int(round(y0 + (y1 - y0) * (k + 0.5) / n))
+        xs = [x for x in range(max(0, int(x0) - 250), min(lab.size[0], int(x1) + 250)) if px[x, y] == tail]
+        if len(xs) < 3:
+            continue
+        lo, hi = min(xs), max(xs)
+        out.append([(y - y0) / ppu, (0.5 * (lo + hi) - x0) / ppu, 0.5 * (hi - lo) / ppu])
+    return out or None
 
 
 def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | None = None,
@@ -100,11 +143,12 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
                        "labels": str(lab_p) if lab_p.is_file() else None,
                        "rows": r["panel"]["rows"], "cols": r["panel"]["cols"], "evidence": ev})
     decals = [{"name": d["name"], "view": vn, "xy": d["xy"], "size": d["size"], "class": DECAL_CLASS[d["name"]]}
-              for vn, v in views.items() for d in v["details"] if d["name"] in DECAL_CLASS]
+              for vn, v in views.items() if vn in DECAL_VIEWS for d in v["details"] if d["name"] in DECAL_CLASS]
     base_args = {"skeleton": ea_args["skeleton"], "body": {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")},
                  "classes": ea_args["classes"], "views": views, "armour_dir": str(Path(arm_res["files"]["lit"]).parent),
                  "verts_per_plate": arm_res["plates"]["verts_per_plate"], "panels": panels, "decals": decals,
-                 "cloth_seam_y": min(m_cl["final"]["result"]["seam"]["y"]), **cfg}
+                 "cloth_seam_y": min(m_cl["final"]["result"]["seam"]["y"]), "tail_profile": tail_profile(s, views),
+                 **cfg}
     br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=7200)
     sets = {}
     asm = br.run_job("master_assemble", {**base_args, "out_dir": str(out / "assemble")}).result

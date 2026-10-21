@@ -188,6 +188,11 @@ HEAD_PARAMS = ["head_length", "jowl_depth", "forehead_width", "muzzle_depth", "m
 HEAD_LM = {"poll", "eye", "muzzle_front", "nostril", "bit_ring", "chin", "throat", "ear_tip_a", "ear_tip_b"}
 RUMP = ["croup_rise", "rump_drop", "rump_behind", "hip_width", "buttock_width"]  # R's part of the master (M10)
 LM_WEIGHT = {}  # landmark -> weight, from args["landmark_weights"] (pilot 7: the head's landmarks lost to the outlines)
+# views whose leg lengths get their own factor (round 13: the side view S is stockier than the original;
+# the master keeps the original's legs: the factor only shortens, and never reaches the master)
+NUIS_LEGS = set()
+LEG_PARAMS = ["upper_arm", "forearm", "knee", "stifle", "gaskin", "hock", "cannon", "fetlock", "pastern",
+              "hoof_top", "hoof_bottom", "hoof_height", "pastern_ahead"]
 
 
 def cells(m, c=CELL):
@@ -285,6 +290,9 @@ class Model:
             for j in range(2):
                 add(f"{vn}.pose.neck.{j}", init["pose"][vn].get("neck", [0, 0])[j], 8, -45, 45)
             add(f"{vn}.pose.head_pitch", init["pose"][vn].get("head_pitch", base_shape["head_pitch"]), 8, 0, 95)
+            if vn in NUIS_LEGS:
+                for j, k in enumerate(("leg_f", "leg_b")):
+                    add(f"{vn}.nuis.{k}", init["pose"][vn].get("leg_scale", [1.0, 1.0])[j], 0.03, 0.7, 1.0)
             if HEAD_TURN:  # E-A round 9: the reference's head turns to the viewer; sagittal joints can't
                 for j in range(2):
                     add(f"{vn}.pose.neck_yaw.{j}", init["pose"][vn].get("neck_yaw", [0, 0])[j], 5, -30, 30)
@@ -316,11 +324,16 @@ class Model:
             if HEAD_TURN:
                 poses[vn]["neck_yaw"] = [d[f"{vn}.pose.neck_yaw.{j}"] for j in range(2)]
                 poses[vn]["head_yaw"] = d[f"{vn}.pose.head_yaw"]
+            if vn in NUIS_LEGS:
+                poses[vn]["leg_scale"] = [d[f"{vn}.nuis.leg_f"], d[f"{vn}.nuis.leg_b"]]
         return shape, skel, cams, poses
 
     def geometry(self, x, vn, mesh=True):
         import _ref3d_body as RB
         shape, skel, cams, poses = self.unpack(x)
+        ls = poses[vn].get("leg_scale")
+        if ls:  # this view's own leg lengths (NUIS_LEGS)
+            skel = {**skel, "leg_f": skel.get("leg_f", 1.0) * ls[0], "leg_b": skel.get("leg_b", 1.0) * ls[1]}
         B, H = RB.skeleton(self.sk["bones"], self.sk["seat"], skel)
         P = {**shape, "head_pitch": poses[vn]["head_pitch"], "head_yaw": poses[vn].get("head_yaw", 0.0)}
         Bp = RB.pose(B, H, P, poses[vn])
@@ -929,6 +942,18 @@ def main(args_path):
                                          "spread_in_scales": {k: round(v, 2) for k, v in sorted(spread.items(), key=lambda kv: -kv[1])[:15]}})
         return best
 
+    if a.get("refine"):
+        NUIS_LEGS.update(a["refine"].get("nuisance_legs") or ())
+        rf = a["refine"]
+        if not candidate_done(rf["candidate"]):
+            m, hist = refine(a, sk, views, ck, log, defaults)
+            finish(rf["candidate"], m, hist, {"refined_from": rf["from"], "anatomy_style": rf.get("anatomy_style"),
+                                              "independent": False, "restarts": []})
+        res["seconds"] = round(time.time() - t0, 1)
+        text = json.dumps(res, default=float)
+        (out / "result.json").write_text(text, encoding="utf-8")
+        Path(a["result_path"]).write_text(text, encoding="utf-8")
+        return
     b2 = {**defaults, **sk["b2_params"]}
     if "b2" in a["candidates"] and not candidate_done("b2"):
         log("b2 (round 5's B, shape frozen)")
@@ -978,6 +1003,86 @@ def main(args_path):
     text = json.dumps(res, default=float)
     (out / "result.json").write_text(text, encoding="utf-8")  # the project drive: kept if the AI drive goes now
     Path(a["result_path"]).write_text(text, encoding="utf-8")
+
+
+def transfer(src, dst):
+    """Copy the parameters ``dst`` shares with ``src`` (by name) into ``dst``."""
+    d = dict(zip(src.names, src.x0))
+    dst.x0 = np.clip(np.array([d.get(n, x) for n, x in zip(dst.names, dst.x0)], float), dst.lo + 1e-9, dst.hi - 1e-9)
+
+
+def refine(a, sk, views, ck, log, defaults):
+    """Round 13 (the user's H3, no long searches): the current body (``refine.from``: an earlier fit's
+    candidate) refitted in place with anatomy style 2 and a new view. The body's proportions, barrel and
+    neck stay; the head (style 2's head and Track M's free profile), the leg sections and every view's
+    camera and pose are refitted, each stage against the views that show it best (``refine.stages``).
+    -> (model over every view, history)."""
+    rf = a["refine"]
+    rec = json.loads(Path(rf["from"]).read_text(encoding="utf-8"))["candidates"][rf["candidate"]]
+    shape = {k: v for k, v in rec["shape"].items() if k != "head_profile"}
+    import _ref3d_body as RB
+    if rf.get("anatomy_style") == 2:  # style 2's head and leg defaults replace the earlier fit's (another shape)
+        shape.update(RB.ha.ANATOMY2)
+    base = {**defaults, **shape}
+    cams = {vn: c for vn, c in rec["cameras"].items() if vn in views}
+    poses = {vn: dict(p) for vn, p in rec["poses"].items() if vn in views}
+    new = [vn for vn in views if vn not in cams]
+    hist = []
+    st = ck.load("refine_new_views")
+    if st and st.get("done"):
+        cams.update(st["cams"])
+        poses.update(st["poses"])
+        hist += st["hist"]
+        log("refine: new views' cameras done earlier (checkpoint)")
+    elif new:
+        for vn in new:  # its camera from the landmarks, then camera and pose from the head starts
+            c0 = init_cameras(sk, {vn: views[vn]}, base, a["seed"])[vn]
+            best = None
+            rng = np.random.default_rng(a["seed"])
+            for neck, pitch in HEAD_STARTS:
+                m = Model(sk, {vn: views[vn]}, False, base, {}, {"cam": {vn: c0}, "pose": {vn: {
+                    **{leg: list(rng.normal(0, 4, 4)) for leg in LEGS}, "neck": [neck, 0.0], "head_pitch": pitch}},
+                    "shape": {}, "skel": {}})
+                r = solve(m, ("lm", "prior"), sel(m, [f"{vn}.cam.", f"{vn}.pose.", f"{vn}.nuis."]),
+                          max_nfev=EVALS["landmarks"], diff_step=0.01)
+                if best is None or r.cost < best[0].cost:
+                    best = (r, m)
+            r, m = best
+            _note(hist, log, f"refine {vn}: landmarks", r)
+            r = powell(m, ("lm", "render", "prior"), sel(m, [f"{vn}.cam.", f"{vn}.pose.", f"{vn}.nuis."]),
+                       maxfev=rf["stages"]["camera"])
+            _note(hist, log, f"refine {vn}: camera+pose (outlines)", r)
+            _, _, c, p_ = m.unpack(m.x0)
+            cams[vn], poses[vn] = c[vn], p_[vn]
+        ck.save("refine_new_views", {"cams": cams, "poses": poses, "hist": hist, "done": True})
+    skel = rec["skeleton"]
+    full = Model(sk, views, True, base, {}, {"cam": cams, "pose": poses, "shape": shape, "skel": skel, "hp": None})
+    for stage, vns, keys in (
+            ("head", rf["head_views"], ["hp."] + [f"shape.{p}" for p in HEAD_PARAMS]
+             + [f"{vn}.pose.{k}" for vn in rf["head_views"] for k in ("neck", "head_pitch", "head_yaw")]
+             + [f"{vn}.cam." for vn in rf["head_views"] if vn in new]),
+            ("legs", rf["leg_views"], [f"shape.{p}" for p in LEG_PARAMS]
+             + [f"{vn}.pose.{leg}" for vn in rf["leg_views"] for leg in LEGS] + [f"{vn}.nuis." for vn in rf["leg_views"]]),
+            ("polish", list(views), [f"{vn}.cam." for vn in views] + [f"{vn}.pose." for vn in views]
+             + [f"{vn}.nuis." for vn in views])):
+        key = f"refine_{stage}"
+        st = ck.load(key)
+        if st and st.get("done"):
+            d = dict(zip(st["names"], st["x"]))
+            full.x0 = np.clip(np.array([d.get(n, x) for n, x in zip(full.names, full.x0)], float), full.lo + 1e-9, full.hi - 1e-9)
+            hist += st["hist"]
+            log(f"refine {stage}: done earlier (checkpoint)")
+            continue
+        m = Model(sk, {vn: views[vn] for vn in vns}, True, base, {}, {"cam": cams, "pose": poses, "shape": shape,
+                                                                      "skel": skel, "hp": None})
+        transfer(full, m)
+        h = []
+        r = powell(m, ("lm", "render", "prior"), sel(m, keys), maxfev=rf["stages"][stage])
+        _note(h, log, f"refine {stage} ({', '.join(vns)})", r)
+        transfer(m, full)
+        hist += h
+        ck.save(key, {"names": m.names, "x": m.x0, "hist": h, "done": True})
+    return full, hist
 
 
 def _write_obj(path, V, F):

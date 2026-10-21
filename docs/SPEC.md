@@ -2143,6 +2143,33 @@ The full cataphract build starts only after the spikes pass **and** the user exp
 - **E-B and E-C on the final body:** E-B gaps 3.4% (my 1% threshold; penetrations, period 1.04, coverage 0.88 pass), ~450 plates removed per round for crossing or touching the body; E-C's hem doesn't converge (best 4.5%, gate 2.5%; rounds swing 4.5-41%: the cloth catches on the legs differently from run to run: M9's cloth-reliability risk).
 - **H3 (master v006, E-A v013 hybrid):** L: colour dE2000 1.8-3.2 on all classes (pass); body landmarks pass except hem_front 18% (no chest panel); head landmarks 3.1% (allowance); cloth hue 8.5 deg (gate 6); armour region 0.37, legs 0.38 (gate 0.85); coverage coat 0, leather 0.05; key details 6 of 8 found (plume, side fringe not); plate period not measurable in L. R lower confidence. E-D in 3D: every break caught, but the unbroken master fails too, so it proves nothing yet. Evidence: plates 51% observed, 34% symmetry, 11% prior, 3% inferred; the right caparison panel all symmetry. **Stopped at H3 for the user.**
 
+#### M17. H3 feedback: a game master, the side view S, the finish line for the horse (2026-10-20)
+- **The user at H3 (master v006):** not approved. The biggest problem is the horse itself, not the detail: the head reads like a dog or donkey (long round snout, no horse jaw or cheek), the legs are smooth tubes (no knees, fetlocks or proper hooves).
+- **New reference, view S** (`assets_in/new_refs/cataphract_side_clean.png`, 1536×1024): a clean true side view from the horse's left (no rider, plain background, head, chanfron and all four legs visible). **Rule 8:** generated with ChatGPT from the user's original; the user owns the output and authorises it as a reference (declared 2026-10-20; recorded in the subject's `rights`). Cleaned (nothing removed) and labelled like the other views (S1 `--add-view`: horse mask, SAM 2 segments, colour labels; refs v007), added as a third camera.
+- **What each view decides (the user's priorities):**
+  - S is the main evidence for the head's shape, jaw, chanfron shape, ears, legs (knees, fetlocks, hooves) and tail: it is unoccluded.
+  - Leg length and overall proportions are not taken from S alone. S is stockier than the original (short legs): blended with the original, the legs at least as long as the original suggests. In the fit, S's legs get their own factor (0.7-1.0 of the master's, never longer). It never reaches the master; the master's S renders are moved up by the seat's difference, so trunk, neck and head line up.
+  - Colours, armour layout, plate look and caparison details: the original (L, R) stays priority; S confirms and fills gaps (chest and hindquarter scale armour, the panels). Decals come from L and R only.
+- **Scope change: a "game master", not a showpiece.** Detailed enough to bake a good EU4 model from: correct anatomy and silhouette, correct colours, armour that reads as silver scale. Straps, buckles, fringe and small trim can be texture and normal-map detail, not modelled geometry.
+- **Order:**
+  1. Horse anatomy: a real horse head with the chanfron shaped over it, legs with knees, fetlocks and hooves; checked against the outlines of all three views.
+  2. Plates: bright silver lamellae, the neck's row spacing, gaps filled.
+  3. The side panel back off the foreleg; a chest panel split at the legs.
+  4. Cloth hue within 6°.
+  - Skipped for now: modelled straps, bridle and saddle (baked), the side fringe, a dedicated R camera attempt (the mirror stays).
+  - Rebuild on the current body after each fix (about 6 min); no long searches without the user's agreement. The sheet after 1, then after 2-4; commit after each step.
+- **Finish line for this horse:**
+  1. Master: at most 2 fix rounds (anatomy, then armour and cloth). After round 2, move on even if some gates still fail, and list what's left as known gaps.
+  2. Then the EU4 game version from the master (retopology; plates, straps and trim baked into textures and the normal map; rig; the mod written) and one staged in-game test.
+  3. Then the whole pipeline, untouched, on one new horse reference from the user, and a report on how it does.
+  - After that the horse is done and the rider becomes the next track.
+- **Round 13 (fix round 1, anatomy):**
+  - Anatomy style 2 (`_horse_anatomy.ANATOMY2`, `anatomy: 2`; the game's horses stay on style 1):
+    - the head from a horse's side and top profiles (flat face, deep round jaw, the jaw line rising to a narrow muzzle, chin, nostrils, eye orbits, facial crest, cheek, mouth line) and cupped ears;
+    - legs from shaped sections (elbow, knee block, the cannon's tendons, fetlock bulge, point of the hock), a pastern sloping forward and a hoof (toe ahead of the coronet, upright heels, flat sole).
+  - E-A `refine` (no long search): the current body (v013 hybrid) refitted in place. Its proportions, barrel and neck stay. S gets a camera from its landmarks and outlines. Then the head (style 2's head and the free profile) against L and S, the leg sections against L and S, and a camera and pose polish in all three views. Each stage has a fixed evaluation budget (1500/2000/2000/1000).
+  - The master's tail comes from S's tail outline (sections down from the tail bone).
+
 ### Phase 4: Test loop
 - "Launch & check": run EU4 with the mod, parse error.log, map errors back to generated files in the GUI.
 

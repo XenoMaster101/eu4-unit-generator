@@ -9,7 +9,9 @@ Parts (scene: the mirrored frame of _ref3d_scene; outputs mirrored back to PDX s
   armour    the plates and backing of the master's armour run (E-B's generator over every scale area).
   cloth     the caparison panels of the cloth runs: their grid, pattern UV and texture; their class
             map (cloth / trim) read from the texture's colours (gold = trim).
-  tail      a tapered hair tube from the tail bone, hanging to ``tail_drop`` of the seat height.
+  tail      from the side view's tail outline (``tail_profile``, round 13): sections down from the tail bone,
+            front-back as the view shows, a little narrower side to side; without one, a tapered tube
+            hanging to ``tail_drop`` of the seat height.
   plume     a red tuft at the poll.
   tassels   along every panel's hem, every ``tassel_step_m``.
   decals    key details that lie on the body, not on a panel: each detail's reference pixel shot through
@@ -382,10 +384,29 @@ def main():
 
     # ---- tail: from the tail bone down and a little back
     tt = to_scene(np.array([Bp["HorseTailTop"]]))[0]
-    drop = a["tail_drop"] * Hs
-    path = np.array([tt + np.array([0, -t * drop, 0.12 * Hs * math.sin(t * 1.4)]) for t in np.linspace(0, 1, 12)])
-    rad = np.interp(np.linspace(0, 1, 12), [0, 0.15, 1], [0.05, 0.075, 0.035]) * Hs
-    tv, tf = tube(path, rad, 12)
+    prof = a.get("tail_profile")
+    if prof:
+        # the dock (the tail bone) to the visible top, then the view's stations; to the side 0.6 of front-back
+        pr = np.array([[0.0, 0.0, 0.05 * Hs]] + [list(x) for x in prof])
+        ground = float(V[:, 1].min())
+        pr[:, 0] = np.minimum(pr[:, 0], tt[1] - ground - 0.04 * Hs)  # the tip stays above the ground
+        path = tt + np.c_[np.zeros(len(pr)), -pr[:, 0], pr[:, 1]]
+        TV, TF = [], []
+        n = 16
+        for i, (p_, hw) in enumerate(zip(path, pr[:, 2])):
+            ang = 2 * np.pi * np.arange(n) / n
+            TV.append(p_ + np.c_[0.6 * hw * np.cos(ang), np.zeros(n), hw * np.sin(ang)])
+        tv = np.vstack(TV + [path[:1], path[-1:]])
+        k = len(path)
+        tf = [(i * n + j, (i + 1) * n + j, (i + 1) * n + (j + 1) % n) for i in range(k - 1) for j in range(n)]
+        tf += [(i * n + j, (i + 1) * n + (j + 1) % n, i * n + (j + 1) % n) for i in range(k - 1) for j in range(n)]
+        tf += [(k * n, (j + 1) % n, j) for j in range(n)] + [(k * n + 1, (k - 1) * n + j, (k - 1) * n + (j + 1) % n) for j in range(n)]
+        tf = np.array(tf)
+    else:
+        drop = a["tail_drop"] * Hs
+        path = np.array([tt + np.array([0, -t * drop, 0.12 * Hs * math.sin(t * 1.4)]) for t in np.linspace(0, 1, 12)])
+        rad = np.interp(np.linspace(0, 1, 12), [0, 0.15, 1], [0.05, 0.075, 0.035]) * Hs
+        tv, tf = tube(path, rad, 12)
     add("tail", tv, tf, "tail", principled("tail", lin("tail"), 0.0, 0.7))
     # ---- plume: a tuft of cones up and back from the poll
     poll = to_scene(np.array([Bp["HorseHead"]]))[0]

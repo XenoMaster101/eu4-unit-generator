@@ -11,8 +11,14 @@ Steps (each a new version folder under ``<subject>/spikes/ea/``; nothing overwri
           (the AI drive dropped out, the PC restarted) continues with ``--resume vNNN``, on the
           arguments saved in that folder.
 
+  refine: round 13 (the user's H3; no long searches): an earlier fit's candidate refitted in place with
+          anatomy style 2 and every current view (a view the earlier fit didn't have gets its camera
+          first); the head, the leg sections, the cameras and poses; the proportions stay
+          (``fit/vNNN``, the candidate under the same name).
+
 usage: python -m eu4unitgen.ref3d.ea shells <subject.json> --seeds 8
        python -m eu4unitgen.ref3d.ea fit <subject.json> --ai-python <env python> [--shells vNNN] [--resume vNNN]
+       python -m eu4unitgen.ref3d.ea refine <subject.json> --ai-python <env python> --from vNNN [--resume vNNN]
 """
 from __future__ import annotations
 
@@ -89,6 +95,16 @@ EA_DEFAULTS = {
     "head_fit": {"view": "L", "stations": 8, "evals": 3000},
     # SPEC S3's fallback: each view fitted on its own; the master is L's body with R's rump (M10)
     "independent": True,
+}
+
+
+REFINE_DEFAULTS = {
+    "candidate": "hybrid",
+    # the user (round 13): S is the main evidence for the head and legs (unoccluded), L for the head too;
+    # leg length and proportions are not taken from S (its legs are shorter: its own factor, NUIS)
+    "head_views": ["L", "S"], "leg_views": ["L", "S"], "nuisance_legs": ["S"],
+    # Powell evaluations per stage (each evaluation renders the stage's views)
+    "stages": {"camera": 1500, "head": 2000, "legs": 2000, "polish": 1000},
 }
 
 
@@ -225,6 +241,40 @@ def fit(subject_path: Path, ai_python: str, shells_version: str | None, resume: 
     return manifest
 
 
+def refine(subject_path: Path, ai_python: str, from_version: str, resume: str | None = None) -> dict:
+    """Round 13's refit of an earlier fit's candidate (module doc) into a new fit version."""
+    from eu4unitgen.ai.env import AIJobRunner
+
+    s = s1.load_subject(subject_path)
+    root = s["_root"] / "spikes" / "ea"
+    check_writes({"out_dir": str(root)}, allowed_roots(ai_python), "E-A refine")
+    t0 = time.time()
+    if resume:
+        out = root / "fit" / resume
+        args = json.loads((out / "args.json").read_text(encoding="utf-8"))
+    else:
+        out = s1.next_version(root / "fit")
+        src = root / "fit" / from_version
+        args = fit_args(s, out, None, root / "inputs" / "skeleton.json")
+        rf = {**REFINE_DEFAULTS, **((s.get("ea") or {}).get("refine") or {})}
+        rf["stages"] = {**REFINE_DEFAULTS["stages"], **rf.get("stages", {})}
+        args["refine"] = {**rf, "from": str(src / "result.json"), "from_version": from_version, "anatomy_style": 2}
+        args["candidates"] = [rf["candidate"]]
+        (out / "args.json").write_text(json.dumps(args, indent=1), encoding="utf-8")
+    res = AIJobRunner(ai_python, timeout=6 * 3600).run_job("ref3d_ea_fit", args).result
+    sheet(res, s, out / "ea_sheet.png", out.name)
+    rec = res["candidates"][args["refine"]["candidate"]]
+    lc = tuple(args.get("low_confidence") or ())
+    manifest = {"stage": "E-A refine", "subject": s["name"], "version": out.name, "approved": s["approved"],
+                "refined_from": args["refine"]["from_version"], "settings": {k: v for k, v in args.items() if k != "views"},
+                "gates": {vn: {k: g["pass"] for k, g in r["gates"].items()} for vn, r in rec["views"].items()},
+                "gates_pass": all(g["pass"] for vn, r in rec["views"].items() if vn not in lc for g in r["gates"].values()),
+                "low_confidence": list(lc), "sheet": str(out / "ea_sheet.png"), "result": res,
+                "seconds": round(time.time() - t0, 1)}
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=float), encoding="utf-8")
+    return manifest
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -237,7 +287,16 @@ def main(argv=None):
     b.add_argument("--ai-python", required=True)
     b.add_argument("--shells", help="shells version (vNNN) to align and use as the hybrid's prior")
     b.add_argument("--resume", help="fit version (vNNN) of a stopped run: continue it from its checkpoints")
+    c = sub.add_parser("refine")
+    c.add_argument("subject", type=Path)
+    c.add_argument("--ai-python", required=True)
+    c.add_argument("--from", dest="from_version", required=True, help="the fit version (vNNN) whose candidate is refitted")
+    c.add_argument("--resume", help="refine version (vNNN) of a stopped run")
     args = p.parse_args(argv)
+    if args.cmd == "refine":
+        m = refine(args.subject, args.ai_python, args.from_version, args.resume)
+        print(json.dumps({"version": m["version"], "gates": m["gates"], "seconds": m["seconds"]}, indent=1))
+        return
     if args.cmd == "fit":
         from eu4unitgen.ai.env import AIDriveLost
         try:
