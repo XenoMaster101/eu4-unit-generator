@@ -29,6 +29,7 @@ args: {"low": geometry .json, "high": [.obj (preview axes, as fresh_horse's debu
        "high_smooth": iterations (the high surface smoothed before baking), "strength": the tangent
        normals' x and y scaled by it (towards flat) and renormalised, "outlier": degrees (steeper
        texels are rays that hit the wrong surface: flat),
+       "preview_only": bool (M19: only the preview renders, from the given "diffuse" and "normal"; "high" unused),
        "mismatch": gap (default 0.3: about the coarse voxel, below it the reduction's own error) over which a low face is flagged, "mismatch_flatten": bool,
        "out_dir", "name", "result_path"}
 """
@@ -267,6 +268,9 @@ def main():
     size = int(a.get("size", 512))
     geo = json.loads(open(a["low"], encoding="utf-8").read())
     low, lco, ltri = low_object(geo)
+    if a.get("preview_only"):  # M19: renders only, with given maps ("diffuse", "normal"): nothing baked
+        _pdx.write_result(a, {"preview": preview(low, a["diffuse"], a["normal"], a["out_dir"], a["name"])})
+        return
     parts = np.array(geo.get("part") or [0] * len(ltri))
     hco, htri = [], []
     for path in a["high"]:
