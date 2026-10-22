@@ -2429,6 +2429,36 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
   - **"Add to mod":** `job stage` stages the newest game version at tier 1 of a new `build/<name>_NN` test mod, with the vanilla horse at tier 2.
 - **Step 2 dropped (the user, 2026-10-21):** "Speed is now the priority". The hand-built path (TripoSG shells + the 2-hour E-A fit) stays only as a fallback, with no more polish. Next: a bake-off of tools that make a textured mesh directly (TRELLIS.2, Hunyuan3D 2.1, a cloud option); the winner becomes the default backend in front of the proven steps (the vanilla skeleton, weights, game version, writer).
 
+#### M20. The simpler pipeline: body, cloak, projected colour (2026-10-21)
+- **The user's change of approach (after test 23):** drop the high-detail master path (modelled plates, cloth simulation, precision fitting): too slow, and test 23's tier 2 looked bad. The new pipeline:
+  1. a normal horse body, built from the image as horse 2's was;
+  2. armour and cloth as a cloak: a thin layer over the body that keeps the horse's outline, only where parts detection finds them;
+  3. colour projected from the reference; unseen areas filled from matching visible ones, never stretched;
+  4. the game model by the existing steps, with the head droop fixed.
+  - The TRELLIS.2 bake-off is on hold.
+- **Quick proof (test 24 tier 1; `assets_in/proof_t24`):** test 15's horse v10 with textures projected from `cataphract_side_clean.png` (`ai/jobs/ref3d_project_texture.py`).
+  - **Fit:** the mesh's side silhouette is fitted to the mask (scale and offset per axis, IoU 0.74). A thin-plate spline then runs through the landmarks the mesh (from its skeleton weights) and the image share. With the fit alone, v10's raised head took the chest's colours.
+  - **The user's verdict:** the colours are right (silver scale, gold chanfron, red cloth and crosses). The shape is wrong: a llama neck, a sack body, thin legs, a bent hind leg, a smeared orange/red underside.
+- **Tier 2: the new pipeline (`cataphract_auto`; subject `"pipeline": "cloak"`, now the default from `ref3d.auto new`):**
+  - **Body:**
+    - a light fit: the procedural candidate only, 2 restarts, half the evaluations (`auto.FAST_FIT`), no TripoSG shells, no refine;
+    - the master is the body alone;
+    - `game_master` reposes it.
+  - **Head droop:** the repose turned the head from its fitted pitch onto the default 40° (horse 2: 25° to 40°) and laid the neck on vanilla's rest bones (horse 2's neck was raised 28°). Now it keeps the fitted pitch and half the neck's raise (`GAME_DEFAULTS["repose"]`).
+  - **Cloak:** `fresh_horse`'s drape, thin and continuous (offset 0.06, small folds, no slits, a readable hem; `GAME_DEFAULTS["cloak"]`), only when armour or a caparison is found.
+  - **Colour:** projected onto the low mesh (`game.project_colour`):
+    - body texels inside the cloak's outline and width are hidden, so they take the coat's colour from visible coat or leg texels;
+    - other unseen texels take the distance-weighted mean of the 48 nearest seen texels of their own part (body, cloak, other), mirrored across the centre plane;
+    - the hooves come from the body's geometry (the lowest point per quarter), not from weights (the cloak's hem won a foreleg's weights).
+  - **Legs never thinner than vanilla's** (`fresh` `leg_allow` 1.0). The fit made the hidden legs 0.14–0.4 units wide (horse 2: 0.7–1.3), and the remesh cut the near foreleg off at its knee (game v001).
+  - **Times:** read 187 s, fit 1,330 s (2 processes), master 112 s, game 48 s: **28 minutes from the image** (horse 2: 2 h 37 min). Game v002: 2,666 triangles, 66% of the texels seen directly.
+  - **Weak spots:** boxy cloak corners, a neck slimmer than the reference's, the skirts' red and gold on the upper legs, a flat tail.
+- **Test 24 staged** (`build/test24`; sheet `build/test24/sheet.png`):
+  - tier 1: the proof;
+  - tier 2: `cataphract_auto` game v002;
+  - tier 3: vanilla.
+  - Every unit is named "T24 ...", through the spec's `unit_names`. The validator found 0 errors and 0 warnings.
+
 ## 11. References
 - EU4 wiki, Model modding: https://eu4.paradoxwikis.com/Model_modding
 - EU4 wiki, Unit modding: https://eu4.paradoxwikis.com/Unit_modding

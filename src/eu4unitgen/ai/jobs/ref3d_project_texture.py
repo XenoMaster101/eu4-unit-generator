@@ -120,16 +120,19 @@ LANDMARKS = ("muzzle_front", "poll", "chin", "throat", "chest_front", "buttock",
              "fore_near_hoof", "hind_near_hoof")
 
 
-def mesh_landmarks(p, weights):
+def mesh_landmarks(p, weights, body=None):
     """The side-view landmarks on the mesh, (z, y) each, from its vanilla-skeleton weights: the head's
     front, top, bottom front and bottom back; the trunk's front, back and top; the tail's top; each
-    hoof's lowest point (near = the left legs, +X)."""
+    hoof's lowest point (near = the left legs, +X). ``body``: per vertex, on the body (not the cloak or other
+    added parts); the head and hooves come from the body alone (cataphract_auto: the cloak's hem won the
+    fore leg's weights and put the near fore hoof at knee height)."""
     dom = [max(w, key=w.get) if w else "" for w in weights]
     dom = np.array(dom)
-    def pts(*bones):
-        return p[np.isin(dom, bones)]
+    body = np.ones(len(p), dtype=bool) if body is None else body
+    def pts(*bones, only_body=False):
+        return p[np.isin(dom, bones) & (body if only_body else True)]
     out = {}
-    head = pts("HorseHead")
+    head = pts("HorseHead", only_body=True)
     if len(head):
         zc, yc = head[:, 2].mean(), head[:, 1].mean()
         f = head[head[:, 2] <= zc]
@@ -152,9 +155,12 @@ def mesh_landmarks(p, weights):
     tail = pts("HorseTailMiddle", "HorseTailTip")
     if len(tail):
         out["tail_top_visible"] = tail[tail[:, 1].argmax()]
-    for key, leg in (("fore_near_hoof", "FrontLeft"), ("hind_near_hoof", "BackLeft"),
-                     ("fore_far_hoof", "FrontRight"), ("hind_far_hoof", "BackRight")):
-        q = pts(*(f"Horse{leg}{b}" for b in ("Down", "Heel", "Knee")))
+    # hooves from the geometry: the body's lowest point in each quarter (front: -Z of the middle; near: +X)
+    B = p[body]
+    zm = 0.5 * (B[:, 2].min() + B[:, 2].max())
+    for key, front, near in (("fore_near_hoof", True, True), ("hind_near_hoof", False, True),
+                             ("fore_far_hoof", True, False), ("hind_far_hoof", False, False)):
+        q = B[((B[:, 2] < zm) == front) & ((B[:, 0] > 0) == near)]
         if len(q):
             out[key] = q[q[:, 1].argmin()]
     return {k: (float(v[2]), float(v[1])) for k, v in out.items()}
@@ -208,7 +214,9 @@ def main(args_path):
     N = (n[T] * B).sum(1)
     N /= np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-9)
     lm_img = a.get("landmarks") or {}
-    lm_mesh = mesh_landmarks(p, json.loads(Path(a["geometry"]).read_text(encoding="utf-8"))["weights"]) if lm_img else {}
+    on_body = np.zeros(len(p), dtype=bool)
+    on_body[np.unique(tri[part == 0])] = True
+    lm_mesh = mesh_landmarks(p, json.loads(Path(a["geometry"]).read_text(encoding="utf-8"))["weights"], on_body) if lm_img else {}
     to_img, used = warp((sz, oz, sy, oy), lm_mesh, lm_img)
     u, v = to_img(P[:, 2], P[:, 1])
     u, v = np.asarray(u), np.asarray(v)
@@ -297,6 +305,9 @@ def main(args_path):
            "mesh_landmarks": lm_mesh,
            "texels": int(cov.sum()), "seen_share": round(float(seen.mean()), 3), "class_share": shares,
            "covered_share": round(float(covered.mean()), 3),
+           "by_part": {int(k): {"texels": int((tpart == k).sum()), "inside": round(float(inside[tpart == k].mean()), 3),
+                                "facing": round(float((facing[tpart == k] >= float(a.get("min_facing", 0.35))).mean()), 3),
+                                "seen": round(float(seen[tpart == k].mean()), 3)} for k in np.unique(tpart)},
            "debug": {"seen": str(out / f"{name}_seen.png"), "fit": str(out / f"{name}_fit.png")}}
     Path(a["result_path"]).write_text(json.dumps(res, indent=1), encoding="utf-8")
     print(json.dumps(res), flush=True)

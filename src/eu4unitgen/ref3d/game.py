@@ -36,7 +36,10 @@ GAME_DEFAULTS = {
     # fit off: the master is already on the vanilla skeleton (test 21's first build: without the master's tail the
     # nose-to-tail box fit scaled the horse off vanilla's leg bones and the skirt trim cut its legs)
     "fresh": {"fit": False, "hem_y": 4.6, "leg_radius": 0.65, "tail_gap": 0.35, "voxel": 0.3, "relax": 4, "target_tris": 1550,
-              "quads": 1550, "smooth": 12, "influences": 3, "chain_weights": True, "tail": {"build": True, "cut": 0.8}},
+              "quads": 1550, "smooth": 12, "influences": 3, "chain_weights": True, "tail": {"build": True, "cut": 0.8},
+              # M20: legs never thinner than vanilla's (cataphract_auto: legs hidden by armour and tassels fitted
+              # 0.14-0.4 wide against horse 2's 0.7-1.3; the remesh cut the near foreleg off at its knee)
+              "leg_allow": 1.0},
     "bake": {"size": 512, "cage": 0.4, "distance": 0.8},
     # the cloth as slabs (game_master): the body ~2,000 triangles and four slabs ~180 each stay under the
     # validator's 3,000 (test 20's first stage: 4,224 with 2,800 and 7 x 12 slabs)
@@ -204,7 +207,8 @@ def stage_test(test: str, horses: list, cfg: dict) -> dict:
     names = ", ".join(f"tier {i + 1} {h['_name']}" for i, h in enumerate(horses))
     spec = {"schema": 1, "name": f"{test}: game horses ({names}); the vanilla horse at tier {len(horses) + 1} for comparison",
             "set": {"tags": [t["tag"]], "gfx": t["gfx"], "set_name": t["set_name"], "base_gfx": t["base_gfx"],
-                    "unit_colours": {t["tag"]: t["unit_colours"]}},
+                    "unit_colours": {t["tag"]: t["unit_colours"]},
+                    **({"unit_names": t["unit_names"]} if t.get("unit_names") else {})},
             "loadout": {"schema": 1, "horses": {str(i + 1): {k: v for k, v in h.items() if not k.startswith("_")}
                                                 for i, h in enumerate(horses)}},
             "test": {"sprite_techs": t["sprite_techs"]}}
