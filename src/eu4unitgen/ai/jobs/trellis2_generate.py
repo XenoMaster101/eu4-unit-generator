@@ -4,8 +4,8 @@ Runs in its own environment (Python 3.11, torch 2.7 cu128; ``<AI root>/trellis2_
   * the cut-out is ours (BiRefNet, ref3d_mask): the image comes in RGBA, so TRELLIS.2's own background
     remover (briaai/RMBG-2.0, non-commercial) is never loaded (a stand-in takes its place);
   * the pipeline config is rewritten to local folders: TRELLIS.2-4B, the sparse-structure decoder from
-    TRELLIS-image-large (MIT), DINOv3 ViT-L/16 (the DINOv3 License: commercial use allowed, "Built with
-    DINOv3"; gated, fetched by the user's own Hugging Face account);
+    TRELLIS-image-large (MIT), DINOv3 ViT-L/16 (the DINOv3 License: use and derivatives allowed, no attribution
+    needed for outputs, never redistributed by us; gated, fetched by the user's own Hugging Face account; SPEC M21);
   * low-VRAM mode (each stage's model moved to the GPU only while it runs) for a 12 GB card; on an
     out-of-memory error the next lower ``pipeline_type`` is tried.
 
