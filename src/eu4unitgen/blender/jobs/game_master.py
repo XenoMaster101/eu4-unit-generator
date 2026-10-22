@@ -237,7 +237,7 @@ def main():
     sk = json.loads(Path(a["skeleton"]).read_text(encoding="utf-8"))
     body = a["body"]
     mv_ = a.get("main_view") or "L"  # the master stands in the main view's pose (M18)
-    rp = Repose(sk, body, mv_)
+    rp = Repose(sk, body, mv_, keep_head_pitch=bool(a.get("keep_head_pitch")), neck_keep=float(a.get("neck_keep", 0.0)))
     _, _, _, V, F, part = body_in_view({"body": body, "view_name": mv_}, sk)
     vpart = vertex_part(F, part, len(V))
     vmode = np.array([PART_MODE.get(int(p), "trunk") for p in vpart])

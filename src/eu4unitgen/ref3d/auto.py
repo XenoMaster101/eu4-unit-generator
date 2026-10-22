@@ -50,6 +50,12 @@ B2_PARAMS = {"barrel_depth": 0.5283, "tuck_up": 0.06, "belly_sag": 0.015, "withe
              "knee": 0.046, "stifle": 0.1082, "gaskin": 0.0676, "hock": 0.046, "cannon": 0.0325, "fetlock": 0.0419,
              "pastern": 0.0325, "hoof_top": 0.0379, "hoof_bottom": 0.05, "hoof_height": 0.04, "leg_flat": 0.85,
              "rider_clear": 2.1}
+# M20, the simpler pipeline (the user, 2026-10-21: drop the modelled plates, cloth simulation and precision
+# fitting): a normal horse body from a light fit (horse 2's winning candidate, procedural; 2 restarts, half the
+# evaluations; no TripoSG shells, no refine), armour and cloth as the game version's cloak, colour projected
+FAST_FIT = {"candidates": ["procedural"], "restarts": 2,
+            "evals": {"landmarks": 200, "outlines: camera+pose": 2000, "outlines: shape": 1500, "outlines: joint": 2500},
+            "head_fit": {"view": MAIN, "stations": 8, "evals": 1500}}
 # a true side view's camera (the cataphract's S: a clean side reference)
 SIDE_CAMERA = {"az": [-25, 25], "el": [-5, 15], "roll": [-3, 3], "persp": [0.005, 0.03]}
 
@@ -139,14 +145,14 @@ def new(image: Path, name: str, rights: str, ai_python: str, eu4: Path, root: Pa
     s = {"schema": 1, "name": name, "template": "horse", "rights": rights, "original": rel,
          "coords": "the view's pixels (x right, y down)" + ("; the image mirrored (the horse faced right)" if mirror else ""),
          "written_by": "ref3d.auto new (M18: read from the image, no hand setup)",
-         "main_view": MAIN,
+         "main_view": MAIN, "pipeline": "cloak",
          "views": {MAIN: {"source": rel, "source_sha256": s1.sha256(image), "crop": [0, 0, W, H], "mirror": mirror,
                           "role": "the reference, read automatically (a side view)", "use_for": ["everything (the only view)"],
                           "landmarks": {}, "details": []}},
          "chosen": {MAIN: "0"}, "approved": {"clean": out.name, "labels": out.name, "note": "ref3d.auto: as read"},
          "ed2d": {"unbroken": 5, "seed": 100, "residual": 0.01, "warp_px": 2.5, "light": 0.12, "red_shift": 15},
-         "ea": {"workers": max(1, min(6, (os.cpu_count() or 2) // 2)),
-                "note": "workers: half the machine's cores (at most 6); the rest EA_DEFAULTS",
+         "ea": {"workers": max(1, min(6, (os.cpu_count() or 2) // 2)), **FAST_FIT,
+                "note": "workers: half the machine's cores (at most 6); FAST_FIT (M20); the rest EA_DEFAULTS",
                 "refine": {"trunk_views": [MAIN]}}}
     sp = folder / "subject.json"
     sp.write_text(json.dumps(s, indent=1), encoding="utf-8")
@@ -216,6 +222,16 @@ def run(subject: Path, ai_python: str, test: str | None = None, blender: str | N
         progress(key, "done", **rep["steps"][key])
         return rep["steps"][key]
 
+    cloak = json.loads(Path(subject).read_text(encoding="utf-8")).get("pipeline") == "cloak"
+    if cloak:  # M20: the light path (no shells, no refine; the master's body alone, the cloak in the game version)
+        for key in ("shells", "refine"):
+            progress(key, "skipped")
+        workers = memory.fit_workers(memory.ram_gb()[1], 6)
+        rep["fit_workers"] = workers
+        ft = step("fit", lambda: ea.fit(subject, ai_python, None, workers=workers))
+        ms = step("master", lambda: master.build(subject, ft["version"], ai_python, blender))
+        step("game", lambda: game.build(subject, ms["version"], test, blender, ai_python))
+        return rep
     sdir = folder / "spikes" / "ea" / "shells"
     open_ = sorted(p.name for p in sdir.glob("v*") if not (p / "manifest.json").is_file()) if sdir.is_dir() else []
     sh = step("shells", lambda: ea.shells(subject, [11 * (k + 1) for k in range(8)], ai_python,
@@ -227,7 +243,7 @@ def run(subject: Path, ai_python: str, test: str | None = None, blender: str | N
     ft = step("fit", lambda: ea.fit(subject, ai_python, sh["version"], workers=workers))
     rf = step("refine", lambda: ea.refine(subject, ai_python, ft["version"]))
     ms = step("master", lambda: master.build(subject, rf["version"], ai_python, blender))
-    gm = step("game", lambda: game.build(subject, ms["version"], test, blender))
+    step("game", lambda: game.build(subject, ms["version"], test, blender, ai_python))
     return rep
 
 

@@ -18,6 +18,7 @@ args: {"geometry": .json (with "weights": the mesh's landmarks), "image": png, "
        "labels": png | null, "landmarks": {name: [u, v]} | null (the image's; with 4 or more shared with the
        mesh, a thin-plate spline through them replaces the plain fit: a raised head or other legs line up),
        "classes": {name: [r, g, b]} (the template's label colours), "gloss": {name: value},
+       "cloak_parts": [part ids] (the cloak's triangles: the body under it is hidden, coat-coloured),
        "size": texture size, "min_facing" (default 0.35), "erode" (mask pixels, default 3), "fill_k" (default 48),
        "out_dir", "name", "result_path"}
 Result: the maps' paths, the fit (scale, offset per axis; silhouette IoU), the share of texels seen
@@ -39,7 +40,8 @@ def load_geo(path):
     n = np.array(g["n"], dtype=np.float64).reshape(-1, 3)
     uv = np.array(g["u0"], dtype=np.float64).reshape(-1, 2)
     tri = np.array(g["tri"], dtype=np.int64).reshape(-1, 3)
-    return p, n, uv, tri
+    part = np.array(g.get("part") or [0] * len(tri), dtype=np.int64)
+    return p, n, uv, tri, part
 
 
 def raster(pts2, tri, W, H, attrs=None):
@@ -190,15 +192,17 @@ def main(args_path):
     out = Path(a["out_dir"])
     out.mkdir(parents=True, exist_ok=True)
     name, size = a["name"], int(a.get("size", 1024))
-    p, n, uv, tri = load_geo(a["geometry"])
+    p, n, uv, tri, part = load_geo(a["geometry"])
     img = np.asarray(Image.open(a["image"]).convert("RGB")).astype(np.float64)
     mask = np.asarray(Image.open(a["mask"]).convert("L")) > 127
     H, W = mask.shape
-    (sz, oz, sy, oy), iou, placed, m_small = fit(p, tri, mask)
+    (sz, oz, sy, oy), iou, placed, m_small = fit(p, tri, mask)  # the whole mesh: the reference's outline has its cloak too
     # 2. texels -> surface points
     uvp = uv * size  # the JSON keeps the image convention (v down): its row
     cov, tid, bary = raster(uvp, tri, size, size)
     T = tri[tid[cov]]
+    tpart = part[tid[cov]]
+    cloak_parts = [int(k) for k in a.get("cloak_parts", [])]
     B = bary[cov][..., None]
     P = (p[T] * B).sum(1)
     N = (n[T] * B).sum(1)
@@ -220,18 +224,48 @@ def main(args_path):
     if a.get("labels"):
         L = np.asarray(Image.open(a["labels"]).convert("RGB")).astype(np.int64)
         lab = L[vi, ui]
-    # 3. the unseen take their nearest seen texel in 3D (mirrored: |x|, so either side's seen texels count)
+    # 3a. the body under the cloak (the user: never the cloth's colours stretched onto the belly): body texels
+    # inside the cloak's side outline and inside its width are hidden; they take the coat's colour
+    covered = np.zeros(len(P), dtype=bool)
+    coat_names = [k for k in ("coat", "leg") if k in a.get("classes", {})]
+    if cloak_parts and np.isin(part, cloak_parts).any():
+        cl = np.isin(part, cloak_parts)
+        lo, hi = p.min(0), p.max(0)
+        S = 40.0  # px per unit in the side outline
+        Wc, Hc = int((hi[2] - lo[2]) * S) + 2, int((hi[1] - lo[1]) * S) + 2
+        sil = side_silhouette(p, tri[cl], Wc, Hc, (lo[2], hi[1], S))
+        cp = p[np.unique(tri[cl])]
+        reach = np.abs(cp[:, 0]).max()
+        zi = np.clip(((P[:, 2] - lo[2]) * S).astype(int), 0, Wc - 1)
+        yi = np.clip(((hi[1] - P[:, 1]) * S).astype(int), 0, Hc - 1)
+        covered = (tpart == 0) & sil[yi, zi] & (np.abs(P[:, 0]) < reach)
+        seen &= ~covered
+    # 3b. the unseen take a soft colour from the seen texels of their own part nearest in 3D (mirrored: |x|,
+    # so either side counts): the mean of the ``fill_k`` nearest, weighted by distance, not one texel's
+    # content dragged over the gap; the label is the nearest one's
     Q = P * np.array([0.0, 1.0, 1.0]) + np.abs(P[:, :1]) * np.array([1.0, 0.0, 0.0])
-    # (the mean of the ``fill_k`` nearest, weighted by distance: a soft colour from the matching region, not
-    # one texel's content dragged over the gap; the label is the nearest one's)
-    tree = cKDTree(Q[seen])
     k = int(a.get("fill_k", 48))
-    dist, nn = tree.query(Q[~seen], k=k)
-    idx = np.nonzero(seen)[0]
-    w = 1.0 / (dist + 0.05)
-    col[~seen] = (col[idx[nn]] * w[..., None]).sum(1) / w.sum(1, keepdims=True)
-    if lab is not None:
-        lab[~seen] = lab[idx[nn[:, 0]]]
+    group = np.where(np.isin(tpart, cloak_parts), 1, np.where(tpart == 0, 0, 2))
+    if lab is not None and coat_names:  # the coat's own texels (labelled coat or leg, seen, on the body)
+        pal_c = np.array([a["classes"][c] for c in coat_names])
+        is_coat = (np.abs(lab[:, None, :] - pal_c[None]).sum(2).min(1) < 30) & seen & (tpart == 0)
+    else:
+        is_coat = np.zeros(len(P), dtype=bool)
+    for want, src_mask in ((covered, is_coat if is_coat.any() else seen & (group == 0)),
+                           *(((~seen & ~covered & (group == g)), seen & (group == g)) for g in (0, 1, 2))):
+        if not want.any():
+            continue
+        if not src_mask.any():
+            src_mask = seen
+        tree = cKDTree(Q[src_mask])
+        dist, nn = tree.query(Q[want], k=min(k, int(src_mask.sum())))
+        if nn.ndim == 1:
+            dist, nn = dist[:, None], nn[:, None]
+        idx = np.nonzero(src_mask)[0]
+        w = 1.0 / (dist + 0.05)
+        col[want] = (col[idx[nn]] * w[..., None]).sum(1) / w.sum(1, keepdims=True)
+        if lab is not None:
+            lab[want] = lab[idx[nn[:, 0]]]
     # 4. the maps
     diff = np.zeros((size, size, 3))
     diff[cov] = col
@@ -252,7 +286,7 @@ def main(args_path):
     spec[..., 3] = np.clip(gloss_img, 0, 255).astype(np.uint8)
     Image.fromarray(spec, "RGBA").save(out / f"{name}_specular.png")
     seen_img = np.zeros((size, size, 3), dtype=np.uint8)
-    seen_img[cov] = np.where(seen[:, None], [60, 200, 60], [220, 60, 60])
+    seen_img[cov] = np.where(seen[:, None], [60, 200, 60], np.where(covered[:, None], [60, 60, 220], [220, 60, 60]))
     Image.fromarray(seen_img).save(out / f"{name}_seen.png")
     over = np.zeros(placed.shape + (3,), dtype=np.uint8)
     over[m_small] = (0, 120, 255)
@@ -262,6 +296,7 @@ def main(args_path):
            "fit": {"sz": sz, "oz": oz, "sy": sy, "oy": oy, "iou": round(iou, 3)}, "warp_landmarks": used,
            "mesh_landmarks": lm_mesh,
            "texels": int(cov.sum()), "seen_share": round(float(seen.mean()), 3), "class_share": shares,
+           "covered_share": round(float(covered.mean()), 3),
            "debug": {"seen": str(out / f"{name}_seen.png"), "fit": str(out / f"{name}_fit.png")}}
     Path(a["result_path"]).write_text(json.dumps(res, indent=1), encoding="utf-8")
     print(json.dumps(res), flush=True)

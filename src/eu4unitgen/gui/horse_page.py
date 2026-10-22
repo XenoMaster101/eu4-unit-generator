@@ -345,6 +345,8 @@ QListWidget {{ background: {t['surface']}; color: {t['text']}; border: 1px solid
                 took = now - s.get("started", now)
                 text = f"running: {minutes(took)} of about {minutes(est[key])}"
                 left += max(0.0, est[key] - took)
+            elif state == "skipped":
+                text = "not needed (the light path)"
             elif state == "low_ram":
                 text = f"stopped: {s.get('free_gb')} GB RAM free, {s.get('need_gb'):.0f} GB needed; close programs, Resume"
             else:

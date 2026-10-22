@@ -24,8 +24,13 @@ CHAIN = ("Up", "Down", "Knee", "Heel", "HoofTop", "Sole")
 
 
 class Repose:
-    def __init__(self, sk, body, view="L"):
-        """``sk``: the skeleton JSON (bones, seat); ``body``: an E-A candidate's shape, skeleton and poses."""
+    def __init__(self, sk, body, view="L", keep_head_pitch=False, neck_keep=0.0):
+        """``sk``: the skeleton JSON (bones, seat); ``body``: an E-A candidate's shape, skeleton and poses.
+        M20 (the user: the game head droops, long and thin): ``keep_head_pitch`` keeps the fitted head's
+        pitch (else the anatomy's default, 40 deg: horse 2's 25 deg head turned 15 deg nose-down);
+        ``neck_keep`` keeps that share of the fitted neck's raise (0: vanilla's rest neck; horse 2's neck
+        was raised 28 deg at its middle). The geometry then sits off the vanilla neck bones by that share
+        of the raise, and still moves rigidly with them."""
         ha = RB.ha
         self.k = dict(body["skeleton"])
         shape = {**ha.DEFAULTS, **body["shape"]}
@@ -37,8 +42,10 @@ class Repose:
         B0 = {n: np.array(v, dtype=np.float64) for n, v in sk["bones"].items()}
         self.B0raw = B0
         self.H0 = float(sk["seat"])
-        self.P0 = {**shape, "head_pitch": ha.DEFAULTS["head_pitch"], "head_yaw": 0.0}
-        self.Br = RB.pose(B0, self.H0, self.P0, {})
+        self.P0 = {**shape, "head_pitch": pose["head_pitch"] if keep_head_pitch else ha.DEFAULTS["head_pitch"],
+                   "head_yaw": 0.0}
+        nb, nm = pose.get("neck", [0.0, 0.0])
+        self.Br = RB.pose(B0, self.H0, self.P0, {"neck": [nb * neck_keep, nm * neck_keep]} if neck_keep else {})
         self.zf, self.zb = B0["HorseFrontLeftUp"][2], B0["HorseBackLeftUp"][2]
         self.dyf = (self.k.get("leg_f", 1.0) - 1) * B0["HorseFrontLeftUp"][1]
         self.dyb = (self.k.get("leg_b", 1.0) - 1) * B0["HorseBackLeftUp"][1]

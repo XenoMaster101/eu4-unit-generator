@@ -42,6 +42,14 @@ GAME_DEFAULTS = {
     # validator's 3,000 (test 20's first stage: 4,224 with 2,800 and 7 x 12 slabs)
     "pieces": {"piece_rows": 5, "piece_cols": 9, "piece_thick": 0.06, "hug_clear": 0.06},
     "normal": {"cage": 0.1, "distance": 0.35, "high_smooth": 0, "strength": 0.6, "samples": 32, "ao_strength": 0.35},
+    # M20 (the user: the game head droops, long and thin): the fitted head pitch kept, half the neck's raise
+    "repose": {"keep_head_pitch": True, "neck_keep": 0.5},
+    # M20, the simpler pipeline (subject "pipeline": "cloak"): colour projected from the reference onto the low
+    # mesh (ai/jobs/ref3d_project_texture) instead of baked from the master; armour and cloth as a cloak, a thin
+    # continuous drape over the body (test 15's barding read well; test 16's separate slabs read as a tarp),
+    # only where the parts show armour or a caparison
+    "cloak": {"style": "drape", "offset": 0.06, "flare": 0.02, "fold": 0.05, "slits": [], "hem_length": 0.0,
+              "readable": 0.7, "leg_lift": 1.2, "leg_clear": 0.4, "rider_cut": [7.6, 2.0]},
     "test": {"tag": "HDA", "gfx": "hellenicgfx", "set_name": "cataphract_test", "base_gfx": "westerngfx",
              "sprite_techs": [2, 3, 4],
              # test 15's unit colours for HDA (the engine's default otherwise)
@@ -57,7 +65,8 @@ def eu4_path() -> Path:
     return Path(p)
 
 
-def build(subject_path: Path, master_version: str, test: str | None, blender: str | None = None) -> dict:
+def build(subject_path: Path, master_version: str, test: str | None, blender: str | None = None,
+          ai_python: str | None = None) -> dict:
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.fresh_mesh import base_arrays
     from eu4unitgen.core.project import default_blender_path
@@ -91,7 +100,7 @@ def build(subject_path: Path, master_version: str, test: str | None, blender: st
         labels.update({"panel_left": {"image": str(plab[-1]), "uv": "pattern"}, "panel_right": {"image": str(plab[-1]), "uv": "pattern"}})
     labels.update({"chest_left": {"image": vL["labels"], "uv": "projected_L"}, "chest_right": {"image": vL["labels"], "uv": "projected_L"}})
     rp = br.run_job("game_master", {"master_blend": str(mv / "assemble" / "master.blend"), "grids": grids, "labels": labels,
-                                    "main_view": mvn,
+                                    "main_view": mvn, **cfg["repose"],
                                     "clean": {"image": vL["image"], "labels": vL["labels"], "classes": s["_template"]["classes"]},
                                     "skeleton": str(root / "spikes" / "ea" / "inputs" / "skeleton.json"),
                                     "body": {k: rec[k] for k in ("shape", "skeleton", "cameras", "poses")},
@@ -99,7 +108,13 @@ def build(subject_path: Path, master_version: str, test: str | None, blender: st
     note(f"repose: high {rp['high']['tris']} tris, solid {rp['solid']['tris']} tris")
     base = (eu4_path() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes()
     (out / "debug").mkdir(exist_ok=True)
-    fr = br.run_job("fresh_horse", {**cfg["fresh"], "source": {"kind": "model", "path": rp["solid"]["path"]},
+    cloak_mode = s.get("pipeline") == "cloak"
+    found = s.get("parts_found") or {}
+    cloak = cfg["cloak"] if cloak_mode and (found.get("armour") or found.get("caparison")) else None
+    if cloak_mode:
+        note("cloak: " + ("armour/cloth shown: a drape over the body" if cloak else "none (no armour or caparison shown)"))
+    fr = br.run_job("fresh_horse", {**cfg["fresh"], **({"barding": cloak} if cloak else {}),
+                                    "source": {"kind": "model", "path": rp["solid"]["path"]},
                                     "pieces": rp["pieces"]["path"],
                                     "vanilla": base_arrays(base), "geometry_out": str(out / "low_geometry.json"),
                                     "preview_out": str(out / "low.obj"), "bake_source_out": str(out / "low_source.obj"),
@@ -107,10 +122,17 @@ def build(subject_path: Path, master_version: str, test: str | None, blender: st
     note(f"low: {fr['final']['tris']} tris, {fr['final']['vertices']} vertices, {fr['final']['pieces']} piece(s); "
          f"fit x{fr['fit']['scale']:.3f}")
     name = "horse"
-    bc = br.run_job("bake_master", {"reposed_blend": str(out / "repose" / "reposed.blend"), "low": str(out / "low_geometry.json"),
+    if cloak_mode:  # the colour projected from the reference (M20)
+        bc = project_colour(s, mvn, vL, out, name, cfg, ai_python, cloak)
+        note(f"colour: projected; {bc['seen_share'] * 100:.0f}% of the texels seen, {bc['covered_share'] * 100:.0f}% "
+             f"under the cloak (coat); warp landmarks {len(bc['warp_landmarks'])}")
+    else:
+        bc = None
+    bc = bc or br.run_job("bake_master", {"reposed_blend": str(out / "repose" / "reposed.blend"), "low": str(out / "low_geometry.json"),
                                     "fit": fr["fit"], **cfg["bake"], "classes": s["_template"]["classes"],
                                     "out_dir": str(out), "name": name}).result
-    note(f"colour: {bc['reached'] * 100:.0f}% of the texels reached; classes {bc['class_share']}")
+    if not cloak_mode:
+        note(f"colour: {bc['reached'] * 100:.0f}% of the texels reached; classes {bc['class_share']}")
     # the normal map from the high surface (the master's parts, fitted like the low mesh); AO into the colour
     hi = out / "high_fitted.obj"
     fit_obj(Path(rp["high"]["path"]), hi, fr["fit"])
@@ -129,6 +151,27 @@ def build(subject_path: Path, master_version: str, test: str | None, blender: st
                 "log": log, "seconds": round(time.time() - t0, 1)}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str), encoding="utf-8")
     return manifest
+
+
+def project_colour(s: dict, mvn: str, vL: dict, out: Path, name: str, cfg: dict, ai_python: str | None, cloak) -> dict:
+    """The low mesh's colour and gloss projected from the main view (ai/jobs/ref3d_project_texture): the
+    landmarks' thin-plate warp, the body under the cloak coat-coloured, unseen texels from their own part."""
+    from eu4unitgen.ai.env import AIJobRunner
+    sv = s["views"][mvn]
+    fg = Path(vL["image"]).with_name(Path(vL["image"]).stem + "_fg.png")
+    r = AIJobRunner(ai_python).run_job("ref3d_project_texture", {
+        "geometry": str((out / "low_geometry.json").resolve()), "image": vL["image"], "mask": str(fg),
+        "labels": vL["labels"], "landmarks": sv.get("landmarks") or {}, "classes": s["_template"]["classes"],
+        "gloss": GLOSS_BY_CLASS, "cloak_parts": CLOAK_PARTS if cloak else [], "size": cfg["bake"]["size"],
+        "out_dir": str(out.resolve()), "name": name}).result
+    return {**r, "diffuse": r["diffuse"], "specular": r["specular"]}
+
+
+# fresh_horse's drape barding: its panel parts (_horse_barding: 2 cloth panel, 3 scale panel)
+CLOAK_PARTS = [2, 3]
+# gloss per label class (bake_master's: _horse_paint.GLOSS)
+GLOSS_BY_CLASS = {"coat": 5, "leg": 5, "scale": 14, "cloth": 4, "trim": 12, "chanfron": 16, "leather": 6, "tail": 7,
+                  "plume": 4}
 
 
 def fit_obj(src: Path, dst: Path, fit: dict):

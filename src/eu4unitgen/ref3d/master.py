@@ -158,6 +158,8 @@ def build(subject_path: Path, ea_version: str, ai_python: str, blender: str | No
     tol = {vn: max(1, round(ea_args["label_scale"] * v["body_length"])) for vn, v in views.items()}
     mvn = s1.main_view(s)  # the main view (M18: no fixed names; "L" before)
     found = subject_parts(s, views)
+    if s.get("pipeline") == "cloak" and found is not None:  # M20: the body alone; armour and cloth become the game
+        found = {k: (v if k in ("tail", "bare_coat") else False) for k, v in found.items()}  # version's cloak
     has = (lambda k: True) if found is None else (lambda k: found.get(k, False))  # noqa: E731
     build_parts = {"armour": has("armour"), "chanfron": has("chanfron"), "plume": has("plume"), "tail": has("tail"),
                    "saddle_cloth": found is not None and has("saddle_cloth") and not has("caparison")}
