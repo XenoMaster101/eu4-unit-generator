@@ -127,6 +127,16 @@ def colour_transfer(px, mask, render, strength=(0.5, 1.0, 1.0), sd_cap=1.1):
             "texture_lab_sd": sd_t.round(1).tolist(), "render_lab_sd": sd_r.round(1).tolist()}
 
 
+def silver_mask(px, cov, chroma_max=0.18, lum_min=0.38):
+    """Silver texels: bright and colourless. Their diffuse is held at ``metal_diffuse`` (0.85) of the raw
+    base colour's silver: the colour transfer lifted the cataphract's scale to 160 against the raw 147
+    and the gallery's light showed it nearly white (the user, test 26); test 12's lesson: bright metals
+    read pale in game."""
+    c = px[..., :3]
+    mx, mn = c.max(-1), c.min(-1)
+    return cov & ((mx - mn) / np.maximum(mx, 1e-6) < chroma_max) & (c @ np.array([0.299, 0.587, 0.114]) > lum_min)
+
+
 def gloss_map(px, cov, gloss):
     """The specular map's gloss (alpha; RGB 0: no unit colour) by colour class of the base colour:
     silver (bright, colourless), gold (bright, yellow-orange, saturated), the rest matte (coat, cloth,
@@ -340,7 +350,20 @@ def main():
         spec.filepath_raw, spec.file_format = result["specular"], "PNG"
         spec.save()
     if a.get("colour_render"):
+        silver_before = silver_mask(px, filled)
         result["colour_transfer"] = colour_transfer(px, filled, a["colour_render"], a.get("colour_strength", (0.5, 1.0, 1.0)))
+        if silver_before.sum() > 100:  # the metal's diffuse kept under the raw model's (module doc of silver_mask)
+            src = bpy.data.images.load(a["image"])
+            src.colorspace_settings.name = "Non-Color"
+            raw = pixels(src)[..., :3].reshape(-1, 3)
+            raw_silver = raw[silver_mask(raw[None], np.ones((1, len(raw)), dtype=bool))[0]]
+            if len(raw_silver) > 100:
+                want = float(a.get("metal_diffuse", 0.85)) * float(np.median(raw_silver @ [0.299, 0.587, 0.114]))
+                have = float(np.median(px[silver_before, :3] @ [0.299, 0.587, 0.114]))
+                k = min(1.0, want / max(have, 1e-6))
+                px[silver_before, :3] *= k
+                result["metal_diffuse"] = {"raw_silver_lum": round(want / float(a.get("metal_diffuse", 0.85)) * 255, 1),
+                                           "before": round(have * 255, 1), "after": round(have * k * 255, 1)}
     img.pixels.foreach_set(px.ravel())
     path = os.path.join(a["out_dir"], f"{a['name']}_diffuse.png")
     img.filepath_raw, img.file_format = path, "PNG"

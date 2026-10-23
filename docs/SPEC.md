@@ -2571,6 +2571,32 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
   - Tier 1: the cataphract (v009). Tier 2: horse 2 (v013). Tier 3: vanilla. Units are named "T26 ...".
   - The validator found 0 errors and 0 warnings.
   - Seen in the gallery: the cataphract's scale and caparison render brighter than the raw model under the gallery's light (the colour transfer lifted its lightness 23 → 31). Both horses are bigger than vanilla.
+- **The user on test 26's gallery (2026-10-23):** "the cataphract finally reads as my reference". Test 26 not run. One round before the game test, as general steps:
+  - **Brightness:**
+    - The colour transfer's lightness runs at half strength, and its spread is lifted at most 1.1. The raw render's lightness carries the metal's reflections.
+    - Silver texels are held at 0.85 of the raw base colour's silver (`bake_colour` `metal_diffuse`): the cataphract's scale went 152 → 121, against the raw 142. Before, it rendered nearly white.
+  - **The cataphract's head band** (`bake_colour` `head_band`):
+    - A clean red stripe, 0.6 wide, behind the chanfron. The chanfron's rear edge is traced as a smooth curve: at each height across the head, where its gold starts along the head's axis.
+    - The ears and the top of the poll are kept out. Red on the chanfron ahead of it turns the chanfron's gold, so its edge stays sharp. Only when the head shows both gold and red (horse 2: no band).
+    - Tassels and plume are dropped: the head-and-neck opening had already taken them.
+    - Tries that failed: a flat cut at the poll (a red cap over the ears); distance to the nearest gold (a ragged band that followed the neck scale's gold rivets).
+  - **Size:**
+    - The bounding boxes match vanilla's, but the side silhouettes were 1.65× (cataphract) and 1.44× (horse 2) vanilla's: vanilla is slim.
+    - A model over 1.15× is now slimmed about the seat (`slim`): the body above the belly is scaled by s about the seat point, and the legs are stretched to keep the hooves on the ground. s = sqrt(1.15 / ratio), at least 0.75.
+    - Results: the cataphract 0.83 (to 1.31×), horse 2 0.89 (to 1.23×). The seats are 12.29 against vanilla's 12.23.
+    - At map zoom (the gallery's far row) the three read the same size.
+    - The head is found before the slim. After it, the cataphract's chest and tassels stood ahead of the head and were taken for it.
+- **Results (stretch p05–p95 / max / flips; vanilla idle 0.89–1.20 / 3.9 / 13, moving 0.91–1.14 / 3.2 / 8, attack 0.76–1.26 / 3.5 / 32):**
+
+  | | idle | moving | attack |
+  |---|---|---|---|
+  | cataphract v011 | 0.86–1.18 / 4.9 / 11 | 0.89–1.14 / 4.0 / 15 | 0.77–1.17 / 4.3 / 46 |
+  | horse 2 v015 | 0.86–1.22 / 3.5 / 17 | 0.87–1.19 / 5.1 / 42 | 0.75–1.26 / 6.5 / 66 |
+
+  Horse 2's moving and attack got worse with the slim (v013: 25 and 42 flips): its stretched legs.
+- **In-game test 27 STAGED** (`build/test27`; the run sheet is `README.txt`, the gallery `gallery/sheet.png` with a map-zoom row):
+  - Tier 1: the cataphract (v011). Tier 2: horse 2 (v015). Tier 3: vanilla. Units are named "T27 ...".
+  - The validator found 0 errors and 0 warnings.
 
 ## 11. References
 - EU4 wiki, Model modding: https://eu4.paradoxwikis.com/Model_modding
