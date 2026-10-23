@@ -41,8 +41,8 @@ clone() {  # url dir [branch]; records the commit built
 }
 : > "$AI/ext_commits.txt"
 echo "== extensions"
-clone https://github.com/NVlabs/nvdiffrast.git nvdiffrast v0.4.0
-clone https://github.com/JeffreyXiang/nvdiffrec.git nvdiffrec renderutils
+# No nvdiffrast or nvdiffrec (NVIDIA Source Code License, research or evaluation only; SPEC M21): the bake's
+# rasteriser is ours (ai/jobs/_uv_raster.py), and nvdiffrec only serves TRELLIS.2's preview renderer.
 clone https://github.com/JeffreyXiang/CuMesh.git CuMesh
 clone https://github.com/JeffreyXiang/FlexGEMM.git FlexGEMM
 rm -rf "$EXT/o-voxel" && cp -r "$AI_WIN/TRELLIS.2/o-voxel" "$EXT/o-voxel"
@@ -51,7 +51,8 @@ EIGEN=$(git -C "$AI_WIN/TRELLIS.2" ls-tree HEAD o-voxel/third_party/eigen | awk 
 [ -d "$EXT/eigen/.git" ] || git clone -q https://gitlab.com/libeigen/eigen.git "$EXT/eigen"
 git -C "$EXT/eigen" checkout -q "$EIGEN" && echo "eigen $EIGEN" >> "$AI/ext_commits.txt"
 rm -rf "$EXT/o-voxel/third_party/eigen" && cp -r "$EXT/eigen" "$EXT/o-voxel/third_party/eigen"
-for spec in nvdiffrast:nvdiffrast.torch nvdiffrec:nvdiffrec_render CuMesh:cumesh FlexGEMM:flex_gemm o-voxel:o_voxel; do
+uv pip uninstall --python "$ENV/bin/python" nvdiffrast nvdiffrec_render 2>/dev/null || true
+for spec in CuMesh:cumesh FlexGEMM:flex_gemm o-voxel:o_voxel; do
     d=${spec%%:*}
     echo "-- $d"
     if (cd /tmp && "$ENV/bin/python" -c "import ${spec#*:}" 2>/dev/null); then echo "   already built"; continue; fi
@@ -61,5 +62,7 @@ done
 
 echo "== import check"
 cd "$AI_WIN/TRELLIS.2"
-ATTN_BACKEND=xformers "$ENV/bin/python" -c "import torch, o_voxel, cumesh, flex_gemm, nvdiffrast.torch; \
+JOBS=$(dirname "$(readlink -f "$0")")/../../src/eu4unitgen/ai/jobs   # run from the repo (*.sh are LF)
+ATTN_BACKEND=xformers "$ENV/bin/python" -c "import sys; sys.path.insert(0, '$JOBS'); import _uv_raster; \
+_uv_raster.install(); import torch, o_voxel, cumesh, flex_gemm; \
 from trellis2.pipelines import Trellis2ImageTo3DPipeline; print('ok', torch.__version__, torch.cuda.get_device_name(0))"
