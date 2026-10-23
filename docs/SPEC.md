@@ -2503,7 +2503,51 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
     - The facing is not consistent (the cataphract's head points along +X, horse 2's along −Y), so it must be normalised.
     - The metallic and roughness maps don't carry over to EU4's material.
     - The UV atlases are very fragmented (thousands of small charts, mostly hair), so downsizing the 2048 textures needs padding or a re-bake.
-  - Nothing processed or game-tested yet: waiting for the user's verdict on the raw output.
+- **The user's verdict (2026-10-23):** both raw results approved; TRELLIS.2 is the default model source for new horses.
+- **Processing, first try (game v001):** fresh_horse's model path (box fit, reshape onto vanilla's rest pose, voxel 0.3, QuadriFlow) with the base colour baked on (Blender job `bake_colour`). The user: worse than the raw model (a goose-like neck and head, a lumpy body, a blurry texture).
+- **The direct path (the user's rules: keep the model's shape; minimal posing; 1024 texture baked from the raw model)** — fresh_horse source `"direct"`, all automatic:
+  1. **Import:** TRELLIS.2's mesh welded at its UV seams (it comes split there), the largest piece.
+  2. **Facing:** turned about the vertical to face −Z (the long horizontal axis, then the end that reaches higher holds the head). Horse 2: 0°; the cataphract: −90°.
+  3. **Scale:** one uniform scale, so proportions are kept: the croup's height first, then the seat matched to vanilla's. The seat is measured by downward rays at Saddle_Node: the dip between the saddle's rims.
+  4. **Posing:** each lower leg is slid sideways so its hoof stands under vanilla's heel, faded out from the knee to the belly (horse 2: 0.45–2.2; the cataphract: 0.9–2.8). The head and neck aren't moved: they're put on vanilla's poll only while the weights are taken (horse 2: 2.3 away, 19° off).
+  5. **Hair, read by colour and place:**
+     - **Tail colour:** the median of the rear-most hanging vertices at the height of vanilla's tail tip. The first rules failed: darkness took horse 2's shaded bay coat, and greyness would take silver scale.
+     - **Tail:** vertices within 40 (RGB) of that colour, behind the hips and the buttock, connected; cut off the closed solid. Cut off the open model instead, its ragged root leaked through the voxels and the hindquarters vanished.
+     - **New tail:** `hb.tail` on vanilla's tail bones, sized from the cut tail and painted from its colours (`bake_colour` `part_colours`). The body's tail-bone weights are cleared: the rump had swung with the tail in idle.
+     - **Mane:** vertices of the same colour on the neck's top half, smoothed hard on the even voxels into one crest. Cutting it took the neck's top half; smoothing the dense model barely moved it.
+  6. **Closed solid, then decimation:**
+     - **Solid:** a flood fill. Surface voxels are closed by one voxel, the outside is flooded in from the box, and the rest is solid. A plain voxel remesh of the cataphract's open surface made a hollow shell (volume 74) that collapsed to lace; filled, it was 627.
+     - **Smoothing:** a voxel remesh at 0.1, retried coarser if the collapse stalls.
+     - **Decimation:** quadric collapse to 2,500, then degenerate edges dissolved. A collapse straight on TRELLIS.2's surface stalls at 36–61k: thousands of non-manifold edges and open sheets.
+  7. **UVs:** a few large islands (each leg, the head, the trunk with the neck, the tail; left and right halves).
+     - Borders are straightened by a neighbour vote; unwrap conformal; packed with a 0.002 gap, then stretched to fill the square.
+     - Smart UV gave 45–59%. Larger islands' jagged borders packed at 52% until straightened.
+  8. **Weights:** chain weights; the tail along its own bones.
+  9. **Textures:**
+     - **Colour:** `bake_colour` bakes the raw model's base colour selected-to-active at 1024 and pads the gutters.
+     - **Normal and AO:** `bake_horse` from the raw model.
+     - **Specular:** coat gloss everywhere for now. The metal gloss for armour is still to do.
+  - **Comparison:** Blender job `render_compare` renders the raw model and the game version through one orthographic camera per view. The sheet adds a silhouette overlay and its IoU.
+- **Results (deformation, stretch p05–p95 / max / flips; vanilla 0.89–1.20 / 3.9 / 13, 0.91–1.14 / 3.2 / 8, 0.76–1.26 / 3.5 / 32):**
+
+  | | triangles | texture used | side IoU vs raw | idle | moving | attack |
+  |---|---|---|---|---|---|---|
+  | horse 2 v007 (staged) | 2,628 | 58% | 0.78 | 0.89–1.20 / 3.7 / 12 | 0.88–1.14 / 5.4 / 25 | 0.76–1.20 / 4.3 / 44 |
+  | horse 2 v009 (final code) | 2,627 | 54% | 0.78 | 0.85–1.21 / 4.0 / 15 | 0.86–1.15 / 4.5 / 20 | 0.71–1.25 / 4.3 / 45 |
+  | cataphract v006 | 2,432 | 67% | 0.73 | 0.85–1.19 / 4.1 / 17 | 0.90–1.11 / 5.7 / 13 | 0.77–1.18 / 10.4 / 33 |
+
+  - About 1–2.5 minutes per horse after TRELLIS.2 (build, bakes, renders and the deformation check).
+  - Sheets: `assets_in/bakeoff_m19/trellis2/game/v007/compare_sheet.png`, `game_cataphract/v006/compare_sheet.png`.
+  - **Known gaps:**
+    - The reins and stirrup leathers are lost (too thin for ~2,500 triangles).
+    - Small mane flaps remain on horse 2's neck.
+    - The cataphract's skirt is solid down to its hem; its attack has one edge at 10.4 at HorseHead/NeckBase.
+    - Texture use is 54–67%, under the 70% asked: islands with spiky outlines (saddle flaps, mane).
+    - No metal gloss yet.
+- **In-game test 25 STAGED** (`build/test25`; the run sheet is `README.txt`, the gallery `gallery/sheet.png`):
+  - Tier 1: horse 2 (game v007). Tier 2: vanilla. Units are named "T25 ...".
+  - Rider seated at the saddle in the gallery; the horse is bigger than vanilla (its own proportions).
+  - The validator found 0 errors.
 
 ## 11. References
 - EU4 wiki, Model modding: https://eu4.paradoxwikis.com/Model_modding
