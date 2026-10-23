@@ -1522,7 +1522,7 @@ def fill_open(obj):
     return len(loose)
 
 
-def region_uv(obj, bones, margin, method="CONFORMAL", split=(), smooth=4):
+def region_uv(obj, bones, margin, method="CONFORMAL", split=(), smooth=4, weights=None):
     """M21: a few large islands instead of Smart UV's many. Each face's region: the tail piece; a leg
     (below the belly, by the nearest vanilla heel column); the head (ahead of vanilla's head bone +
     0.5); else the trunk with the neck. Each region split into left and right (a leg at its heel's
@@ -1533,6 +1533,9 @@ def region_uv(obj, bones, margin, method="CONFORMAL", split=(), smooth=4):
     legs = ("FrontLeft", "FrontRight", "BackLeft", "BackRight")
     heels = np.array([[bones[f"Horse{k}Heel"][0], bones[f"Horse{k}Heel"][2]] for k in legs])
     head_z = bones["HorseHead"][2] + 0.5
+    panel_y = (6.0, 12.0)
+    panel_z = (max(bones["HorseFrontLeftUp"][2], bones["HorseFrontRightUp"][2]) + 1.0,
+               min(bones["HorseBackLeftUp"][2], bones["HorseBackRightUp"][2]) - 1.0)
     region = []
     for poly, part in zip(me.polygons, parts):
         c = poly.center
@@ -1543,6 +1546,8 @@ def region_uv(obj, bones, margin, method="CONFORMAL", split=(), smooth=4):
             zone, centre = legs[k], heels[k][0]
         elif c.z < head_z:
             zone, centre = "head", 0.0
+        elif (abs(c.x) > 0.9 and panel_y[0] < c.y < panel_y[1] and panel_z[0] < c.z < panel_z[1]):
+            zone, centre = "panel", 0.0  # the main caparison panel's place: its own island (decals stay sharp)
         else:
             zone, centre = "trunk", 0.0
             for i, z in enumerate(sorted(split)):  # the trunk cut across at these z (front to back)
@@ -1581,6 +1586,21 @@ def region_uv(obj, bones, margin, method="CONFORMAL", split=(), smooth=4):
     bpy.context.scene.tool_settings.use_uv_select_sync = True  # else the pack sees no UVs selected in background
     bpy.ops.uv.unwrap(method=method, margin=0.0)
     bpy.ops.uv.average_islands_scale()
+    if weights:  # more texels for some regions (the trunk: its panels carry decals), each island about its centre
+        bpy.ops.object.mode_set(mode="OBJECT")
+        uv = np.empty(len(me.loops) * 2, dtype=np.float64)
+        me.uv_layers.active.data.foreach_get("uv", uv)
+        uv = uv.reshape(-1, 2)
+        for name in set(region):
+            k = weights.get(name.rsplit("_", 1)[0])
+            if not k:
+                continue
+            loops = [li for f, r in zip(me.polygons, region) if r == name for li in f.loop_indices]
+            c = uv[loops].mean(0)
+            uv[loops] = c + (uv[loops] - c) * k
+        me.uv_layers.active.data.foreach_set("uv", uv.ravel())
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.uv.pack_islands(rotate=True, rotate_method="ANY", margin_method="FRACTION", margin=margin,
                             shape_method="CONCAVE")
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -1792,7 +1812,8 @@ def direct(a, van, vanilla):
         res["uv"] = {}
     else:
         res["uv"] = region_uv(obj, bones, float(a.get("uv_margin", 0.002)), a.get("uv_method", "CONFORMAL"),
-                              [bones["Saddle_Node"][2] + dz for dz in a.get("uv_trunk_cuts", [])], int(a.get("uv_smooth", 4)))
+                              [bones["Saddle_Node"][2] + dz for dz in a.get("uv_trunk_cuts", [])], int(a.get("uv_smooth", 4)),
+                              a.get("uv_weights", {"trunk": 1.4, "panel": 2.0}))
     res["uv"]["area"] = round(uv_area(obj), 4)
     rest = hs.verts(obj)
     if pose.get("head", "weights") == "weights":

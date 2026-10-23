@@ -9,6 +9,8 @@ args: {"low": geometry .json, "high": .obj with UVs (preview axes), "image": bas
        "size": px, "cage", "distance", "margin", "part_colours": {part: [lo rgb, hi rgb]} (our own pieces,
        painted), "gloss": {"silver", "gold", "matte", thresholds} (writes <name>_specular.png),
        "colour_render": the raw model's lit render (the colour transferred to it), "colour_strength",
+       "head_band": {"poll", "axis", "width"}, "head_marks": {"poll", "axis", "neck_base", "length", "ear_box"},
+       "emblem": {"decal": mask .png, "size", "gold", "red"} with "bones", "country_mask": bool,
        "out_dir", "name", "result_path"}
 Result: {"diffuse": path, "reached": share of the covered texels a ray found the high surface for, ...}
 """
@@ -236,6 +238,139 @@ def head_band(px, posmap, hit, poll, axis, width=0.6, radius=3.0):
             "red": [int(x * 255) for x in red_c], "gold": [int(x * 255) for x in gold_c]}
 
 
+def head_frame(posmap, poll, axis, neck_base):
+    """Per texel: t along the head's axis (poll to muzzle), f towards the face (away from the neck), x."""
+    axis = np.asarray(axis, dtype=np.float64)
+    rel = posmap - np.asarray(poll, dtype=np.float64)
+    away = np.asarray(poll, dtype=np.float64) - np.asarray(neck_base, dtype=np.float64)
+    away -= (away @ axis) * axis
+    away[0] = 0.0
+    f = away / max(np.linalg.norm(away), 1e-9)
+    return rel @ axis, rel @ f, rel[..., 0]
+
+
+def head_marks(px, posmap, hit, poll, axis, neck_base, length, red, radius=0.32, drop=0.8, ear_box=None):
+    """M21 (the user, test 27: the red tassels sat on the ears like hairpins; in the reference they hang on the
+    forehead, cheeks and chin, with a small plume between the ears): red tassel marks painted there, each a
+    round knot ``radius`` across with a strand ``drop`` long hanging under it (the texels within reach of a
+    vertical segment below the knot): the forehead (a third down the head, on the face), both cheeks (half
+    way, on each side), the chin (near the muzzle, underneath) and the plume (on the poll, between the
+    ears); the ears' red turned the ears' own colour. Geometry that small doesn't survive the budget.
+    -> {mark: centre}, the painted texels."""
+    t, f, x = head_frame(posmap, poll, axis, neck_base)
+    rad = np.sqrt(np.maximum(0.0, np.sum((posmap - np.asarray(poll)) ** 2, -1) - t ** 2))
+    hit = hit & (rad < 2.5) & (t > -0.8)  # the head only (the axis runs on into the body: cheeks went to the trunk)
+    marks = {}
+    # the cheeks on the face's side (x, pulled to the face: the jaw's back corner sat against the band), the chin
+    # the lowest point near the muzzle
+    for name, tt, score in (("forehead", 0.3, f), ("cheek_left", 0.55, x + 0.8 * f), ("cheek_right", 0.55, -x + 0.8 * f),
+                            ("chin", 0.85, -posmap[..., 1]), ("plume", 0.0, posmap[..., 1])):
+        band = hit & (np.abs(t - tt * length) < 0.12 * length + 0.15)
+        if name == "plume":
+            band &= np.abs(x) < 0.4
+        if not band.any():
+            continue
+        i = np.argmax(np.where(band, score, -np.inf))
+        marks[name] = posmap.reshape(-1, 3)[i]
+    painted = np.zeros(hit.shape, dtype=bool)
+    if ear_box is not None:  # the ears' red (the old tassels) to the ears' own colour
+        lo, hi = np.asarray(ear_box[0]), np.asarray(ear_box[1])
+        ears = hit & np.all((posmap >= lo) & (posmap <= hi), axis=-1)
+        c = px[..., :3]
+        mx, mn = c.max(-1), c.min(-1)
+        hue = (np.degrees(np.arctan2(np.sqrt(3) * (c[..., 1] - c[..., 2]), 2 * c[..., 0] - c[..., 1] - c[..., 2])) + 360) % 360
+        redish = ears & ((hue < 20) | (hue > 330)) & ((mx - mn) / np.maximum(mx, 1e-6) > 0.4)
+        if (ears & ~redish).sum() > 20:
+            px[redish, :3] = np.median(c[ears & ~redish], axis=0)
+    for name, p in marks.items():
+        d_knot = np.linalg.norm(posmap - p, axis=-1)
+        below = p[1] - posmap[..., 1]
+        side = np.linalg.norm((posmap - p)[..., [0, 2]], axis=-1)
+        strand = (below > 0) & (below < (0.0 if name == "plume" else drop)) & (side < radius * 0.45)
+        m = hit & ((d_knot < radius) | strand)
+        shade = 0.85 + 0.15 * np.cos(posmap[..., 0] * 40 + posmap[..., 2] * 40)  # thread lines
+        px[m, :3] = np.asarray(red)[None] * shade[m][:, None]
+        painted |= m
+    return {k: [round(float(v), 2) for v in p] for k, p in marks.items()}, painted
+
+
+def load_mask(path):
+    img = bpy.data.images.load(path)
+    img.colorspace_settings.name = "Non-Color"
+    return pixels(img)[..., 0].astype(np.float64)  # rows bottom up (Blender's): row 0 is the decal's foot
+
+
+def emblem(px, posmap, hit, bones, decal, gold, red, size=0.7, sides=(1, -1)):
+    """M21 (the user: the caparison's crosses were blurred; the unit is Byzantium's): a crisp decal on each side's
+    main caparison panel, the red cloth between the front and hind legs' tops, at the side. The panel's box
+    from its red texels (5-95%) in the side plane (z, y); inside it (shrunk 20%) the old, blurred gold turned
+    back to the cloth's red; the decal (``decal``: a mask image, white on black) centred there, ``size`` of
+    the box's height, painted ``gold``; read from outside on both sides (mirrored for the far side).
+    -> per side: the box, the decal's centre and size, its texels; and the decal's texels."""
+    c = px[..., :3]
+    mx, mn = c.max(-1), c.min(-1)
+    chroma = (mx - mn) / np.maximum(mx, 1e-6)
+    hue = (np.degrees(np.arctan2(np.sqrt(3) * (c[..., 1] - c[..., 2]), 2 * c[..., 0] - c[..., 1] - c[..., 2])) + 360) % 360
+    redm = (hue < 20) | (hue > 330)
+    goldm = (hue > 25) & (hue < 60) & (chroma > 0.3)
+    z0 = max(bones["HorseFrontLeftUp"][2], bones["HorseFrontRightUp"][2]) + 1.0
+    z1 = min(bones["HorseBackLeftUp"][2], bones["HorseBackRightUp"][2]) - 1.0
+    dm = load_mask(decal)
+    H, W = dm.shape
+    out, painted, cleaned = {}, np.zeros(hit.shape, dtype=bool), np.zeros(hit.shape, dtype=bool)
+    for sgn in sides:
+        side = hit & (posmap[..., 0] * sgn > 0.6) & (posmap[..., 2] > z0) & (posmap[..., 2] < z1) \
+            & (posmap[..., 1] > 3.5) & (posmap[..., 1] < 12.0)
+        cloth = side & redm & (chroma > 0.4)
+        if cloth.sum() < 500:
+            continue
+        zs, ys = posmap[cloth][:, 2], posmap[cloth][:, 1]
+        zlo, zhi, ylo, yhi = np.percentile(zs, 5), np.percentile(zs, 95), np.percentile(ys, 5), np.percentile(ys, 95)
+        zc, yc = (zlo + zhi) / 2, (ylo + yhi) / 2
+        hz, hy = (zhi - zlo) * 0.4, (yhi - ylo) * 0.4
+        inner = side & (np.abs(posmap[..., 2] - zc) < hz) & (np.abs(posmap[..., 1] - yc) < hy)
+        old = inner & (goldm | redm)
+        px[old, :3] = red
+        cleaned |= old
+        # the decal behind the saddle flap and the rider's leg, 65% back along the panel (centred, the rider's
+        # leg and the stirrup hid its front half), as big as fits there
+        zd = zlo + 0.65 * (zhi - zlo)
+        s = min(size * 2 * hy, 0.85 * 2 * min(zhi - zd, zd - zlo))
+        zc = zd
+        u = ((zc - posmap[..., 2]) if sgn > 0 else (posmap[..., 2] - zc)) / s + 0.5  # screen-right is -z seen from +x
+        v = (posmap[..., 1] - yc) / s + 0.5
+        inside = inner & (u >= 0) & (u < 1) & (v >= 0) & (v < 1)
+        val = np.zeros(hit.shape)
+        val[inside] = dm[np.clip((v[inside] * H).astype(int), 0, H - 1), np.clip((u[inside] * W).astype(int), 0, W - 1)]
+        on = inside & (val > 0.05)
+        px[on, :3] = (1 - val[on, None]) * px[on, :3] + val[on, None] * np.asarray(gold)[None]
+        painted |= inside & (val > 0.5)
+        out["left" if sgn > 0 else "right"] = {"panel_z": [round(zlo, 2), round(zhi, 2)], "panel_y": [round(ylo, 2), round(yhi, 2)],
+                                               "centre": [round(zc, 2), round(yc, 2)], "size": round(s, 2),
+                                               "decal_texels": int((inside & (val > 0.5)).sum())}
+    return out, painted, cleaned
+
+
+def cloth_mask(px, cov, exclude):
+    """M21 (the user, optional): the red cloth as the country colour's mask (PdxMeshColor: col = lerp(col,
+    col * spec.r * Primary, spec.r), SPEC §4): spec R 1 on red cloth (not the decal or trim), its diffuse
+    turned to a neutral grey whose product with the cloth's own red (the default primary colour, the
+    brightest channel 1) gives back the colour. -> the mask and that primary colour (0-255)."""
+    c = px[..., :3]
+    mx, mn = c.max(-1), c.min(-1)
+    chroma = (mx - mn) / np.maximum(mx, 1e-6)
+    hue = (np.degrees(np.arctan2(np.sqrt(3) * (c[..., 1] - c[..., 2]), 2 * c[..., 0] - c[..., 1] - c[..., 2])) + 360) % 360
+    m = cov & ~exclude & ((hue < 20) | (hue > 330)) & (chroma > 0.45)
+    if m.sum() < 500:
+        return m, None
+    prim = np.median(c[m], axis=0)
+    prim = prim / prim.max()
+    lum = np.array([0.299, 0.587, 0.114])
+    grey = np.clip((c[m] @ lum) / (prim @ lum), 0, 1)
+    px[m, :3] = grey[:, None]
+    return m, [int(round(x * 255)) for x in prim]
+
+
 def part_mask(low, part, size):
     """The texels of the low mesh's faces of ``part`` (the geometry's per-triangle ``part``)."""
     img = bpy.data.images.new(f"mask{part}", size, size, alpha=True)
@@ -335,20 +470,15 @@ def main():
                 q.append((yy, xx))
     px[..., 3] = 1.0
     result = {}
+    posmap = hit = None
+    if a.get("head_band") or a.get("emblem"):
+        posmap, hit = texel_positions(json.loads(open(a["low"], encoding="utf-8").read()), size)
     if a.get("head_band"):
         hb_ = a["head_band"]
-        posmap, hit = texel_positions(json.loads(open(a["low"], encoding="utf-8").read()), size)
         result["head_band"] = head_band(px, posmap, hit & filled, hb_["poll"], hb_["axis"], float(hb_.get("width", 0.6)))
-    if a.get("gloss") is not None:  # from the colour as baked (before any transfer)
+    g = None
+    if a.get("gloss") is not None:  # from the colour as baked (before any transfer); written at the end
         g, result["gloss_shares"] = gloss_map(px, filled, a["gloss"])
-        spec = bpy.data.images.new("specular", size, size, alpha=True)
-        spec.colorspace_settings.name = "Non-Color"
-        sp = np.zeros((size, size, 4), dtype=np.float32)
-        sp[..., 3] = np.clip(g, 0, 255) / 255.0
-        spec.pixels.foreach_set(sp.ravel())
-        result["specular"] = os.path.join(a["out_dir"], f"{a['name']}_specular.png")
-        spec.filepath_raw, spec.file_format = result["specular"], "PNG"
-        spec.save()
     if a.get("colour_render"):
         silver_before = silver_mask(px, filled)
         result["colour_transfer"] = colour_transfer(px, filled, a["colour_render"], a.get("colour_strength", (0.5, 1.0, 1.0)))
@@ -364,6 +494,38 @@ def main():
                 px[silver_before, :3] *= k
                 result["metal_diffuse"] = {"raw_silver_lum": round(want / float(a.get("metal_diffuse", 0.85)) * 255, 1),
                                            "before": round(have * 255, 1), "after": round(have * k * 255, 1)}
+    gl = a.get("gloss") or {}
+    decal_px = np.zeros((size, size), dtype=bool)
+    if a.get("head_marks") and result.get("head_band", {}).get("band"):
+        hm = a["head_marks"]
+        result["head_marks"], marked = head_marks(px, posmap, hit & filled, hm["poll"], hm["axis"], hm["neck_base"],
+                                                  float(hm["length"]), np.array(result["head_band"]["red"]) / 255.0,
+                                                  ear_box=hm.get("ear_box"))
+        if g is not None:
+            g[marked] = gl.get("matte", 5)
+    if a.get("emblem"):
+        em = a["emblem"]
+        gold = np.array(em.get("gold") or result.get("head_band", {}).get("gold", [200, 160, 70])) / 255.0
+        red = np.array(em.get("red") or result.get("head_band", {}).get("red", [120, 30, 30])) / 255.0
+        result["emblem"], decal_px, cleaned = emblem(px, posmap, hit & filled, a["bones"], em["decal"], gold, red,
+                                                     float(em.get("size", 0.7)))
+        if g is not None:
+            g[cleaned] = gl.get("matte", 5)
+            g[decal_px] = gl.get("gold", 12)
+    mask = np.zeros((size, size), dtype=bool)
+    if a.get("country_mask"):
+        mask, result["default_primary"] = cloth_mask(px, filled, decal_px)
+        result["country_mask_share"] = round(float(mask.sum() / max(filled.sum(), 1)), 3)
+    if g is not None:
+        spec = bpy.data.images.new("specular", size, size, alpha=True)
+        spec.colorspace_settings.name = "Non-Color"
+        sp = np.zeros((size, size, 4), dtype=np.float32)
+        sp[..., 0] = mask  # the country's primary colour where the cloth is
+        sp[..., 3] = np.clip(g, 0, 255) / 255.0
+        spec.pixels.foreach_set(sp.ravel())
+        result["specular"] = os.path.join(a["out_dir"], f"{a['name']}_specular.png")
+        spec.filepath_raw, spec.file_format = result["specular"], "PNG"
+        spec.save()
     img.pixels.foreach_set(px.ravel())
     path = os.path.join(a["out_dir"], f"{a['name']}_diffuse.png")
     img.filepath_raw, img.file_format = path, "PNG"
