@@ -1168,7 +1168,7 @@ def _grow(m):
     return out
 
 
-def solid_fill(obj, vs, closing=1, opening=0, protect=None):
+def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None):
     """``obj`` replaced by the solid it encloses, by flood fill: the voxels (size ``vs``) its surface
     passes through, closed by ``closing`` voxels (gaps up to twice that sealed), then everything the
     outside can't reach from the box's edge is solid; the closing taken back off; the solid's voxel
@@ -1230,11 +1230,15 @@ def solid_fill(obj, vs, closing=1, opening=0, protect=None):
             core &= ~_grow(~core)
         for _ in range(opening):
             core = _grow(core) & inside
+        ii = np.indices(inside.shape)
+
+        def box(b):
+            lo_b, hi_b = (np.array(b[0]) - lo) / vs, (np.array(b[1]) - lo) / vs
+            return np.all([(ii[d] >= lo_b[d]) & (ii[d] <= hi_b[d]) for d in range(3)], axis=0)
+        if region is not None:  # only there (the head and neck: the caparison's thin skirts stay)
+            core |= inside & ~box(region)
         if protect is not None:  # the ears: thin, kept
-            lo_b, hi_b = (np.array(protect[0]) - lo) / vs, (np.array(protect[1]) - lo) / vs
-            ii = np.indices(inside.shape)
-            keep = np.all([(ii[d] >= lo_b[d]) & (ii[d] <= hi_b[d]) for d in range(3)], axis=0)
-            core |= inside & keep
+            core |= inside & box(protect)
         inside = core
     # the solid's boundary faces (between an inside and an outside voxel) as quads on the corner grid
     S = np.array(inside.shape) + 1
@@ -1286,7 +1290,8 @@ def collapse_to(obj, target, close=None):
         vs_ = float(close)
         SOLID.setdefault("log", []).append(solid_fill(
             obj, vs_, closing=max(1, int(round(SOLID.get("closing", 0.2) / vs_))),
-            opening=int(round(SOLID.get("opening", 0.0) / vs_)), protect=SOLID.get("protect")))
+            opening=int(round(SOLID.get("opening", 0.0) / vs_)), protect=SOLID.get("protect"),
+            region=SOLID.get("region")))
         mod = obj.modifiers.new("close", "REMESH")
         mod.mode, mod.voxel_size, mod.adaptivity = "VOXEL", float(close), 0.0
         bpy.ops.object.modifier_apply(modifier=mod.name)
@@ -1662,7 +1667,11 @@ def direct(a, van, vanilla):
     poll = res["pose"]["head"]["poll"]
     SOLID.update({"opening": float(a.get("opening", 0.2)), "relax": int(a.get("relax", 3)), "closing": float(a.get("closing", 0.2)),
                   # the ears: from just under the poll up, round it
-                  "protect": [[poll[0] - 1.2, poll[1] - 0.3, poll[2] - 1.2], [poll[0] + 1.2, poll[1] + 3.0, poll[2] + 1.2]]})
+                  "protect": [[poll[0] - 1.2, poll[1] - 0.3, poll[2] - 1.2], [poll[0] + 1.2, poll[1] + 3.0, poll[2] + 1.2]],
+                  # the opening's reach: the head and neck, ahead of the withers and over the chest (fragments
+                  # are there: mane flaps, the bit under the muzzle; the cataphract's skirts went with a
+                  # whole-body opening)
+                  "region": [[-1e9, bones["HorseNeckBase"][1] - 3.5, -1e9], [1e9, 1e9, bones["HorseNeckBase"][2] + 1.0]]})
 
     def low(vs):
         """The low mesh from the posed model at voxel ``vs``: closed, the hair handled, collapsed."""
