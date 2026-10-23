@@ -1177,11 +1177,277 @@ def packed_uv(obj, margin):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
+def vertex_colours(obj):
+    """Per vertex: the model's base colour (0-255 sRGB) at its loops' UVs, averaged, and its
+    luminance. The base colour is the image on the imported material's Base Color."""
+    me = obj.data
+    bsdf = next(n for n in me.materials[0].node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    img = bsdf.inputs["Base Color"].links[0].from_node.image
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(h, w, 4)[..., :3]
+    uv = np.empty(len(me.loops) * 2, dtype=np.float64)
+    me.uv_layers.active.data.foreach_get("uv", uv)
+    uv = uv.reshape(-1, 2)
+    lv = np.empty(len(me.loops), dtype=np.int64)
+    me.loops.foreach_get("vertex_index", lv)
+    col = px[np.clip((uv[:, 1] * h).astype(int), 0, h - 1), np.clip((uv[:, 0] * w).astype(int), 0, w - 1)]
+    acc, n = np.zeros((len(me.vertices), 3)), np.zeros(len(me.vertices))
+    np.add.at(acc, lv, col)
+    np.add.at(n, lv, 1)
+    rgb = 255 * acc / np.maximum(n, 1)[:, None]
+    return rgb, rgb @ np.array([0.299, 0.587, 0.114])
+
+
+def flood(cand, seeds, edges):
+    """The candidate vertices connected to ``seeds`` through candidate vertices."""
+    keep = cand[edges[:, 0]] & cand[edges[:, 1]]
+    adj = [[] for _ in range(len(cand))]
+    for p, q in edges[keep]:
+        adj[p].append(q)
+        adj[q].append(p)
+    out = np.zeros(len(cand), dtype=bool)
+    stack = list(np.flatnonzero(seeds & cand))
+    out[stack] = True
+    while stack:
+        for u in adj[stack.pop()]:
+            if not out[u]:
+                out[u] = True
+                stack.append(u)
+    return out
+
+
+def hair(obj, bones, poll, chroma=0.15, light=38.0, mane_chroma=0.3, behind_hip=0.8, grow=3, max_share=0.15):
+    """M21: TRELLIS.2's tail and mane on the posed model, by colour and place (TRELLIS.2 bakes shade
+    into its colours, so darkness alone took horse 2's shadowed bay coat). Chroma is (max - min) / max
+    of RGB (horse 2: tail 0.08, coat 0.68, black lower legs 0.19). The tail: grey (chroma under
+    ``chroma``) and not dark (luminance ``light`` or more: the legs and shaded coat are darker),
+    ``behind_hip`` behind vanilla's hind leg tops (the hocks stay out), above the ground, connected to
+    its root (near the centre line, within 2.5 under vanilla's TailTop), then grown ``grow`` rings
+    over grey vertices (its dark streaks); refused over ``max_share`` of the model. The mane:
+    vertices under ``mane_chroma`` in the upper half of each neck slice between the poll and the neck
+    base (near-black hair against the bay neck). -> (tail mask, mane mask, info with its colours)."""
+    co = hs.verts(obj)
+    rgb, lum = vertex_colours(obj)
+    c = (rgb.max(1) - rgb.min(1)) / np.maximum(rgb.max(1), 1.0)
+    grey = c < chroma
+    is_dark = grey & (lum >= light)  # the tail's grey hair; the black lower legs and shadowed coat are darker
+    z_hip = max(bones["HorseBackLeftUp"][2], bones["HorseBackRightUp"][2])
+    e = np.empty(len(obj.data.edges) * 2, dtype=np.int64)
+    obj.data.edges.foreach_get("vertices", e)
+    e = e.reshape(-1, 2)
+    behind = co[:, 2] > z_hip + behind_hip
+    seeds = behind & (co[:, 1] > bones["HorseTailTop"][1] - 2.5) & (np.abs(co[:, 0]) < 1.0)
+    tail = flood(is_dark & behind & (co[:, 1] > 1.5), seeds, e)
+    for _ in range(grow):  # the darker streaks inside the tail: grey neighbours behind the hips
+        nxt = tail.copy()
+        nxt[e[tail[e[:, 0]], 1]] = True
+        nxt[e[tail[e[:, 1]], 0]] = True
+        tail = nxt & grey & behind
+    width = float(np.percentile(np.abs(co[tail, 0]), 95)) if tail.any() else 0.0
+    refused = tail.mean() > max_share
+    if refused:
+        tail[:] = False
+    nb = np.array(bones["HorseNeckBase"])
+    mane = np.zeros(len(co), dtype=bool)
+    for z0 in np.arange(poll[2] + 0.8, nb[2] + 1.0, 0.4):
+        sl = (co[:, 2] >= z0) & (co[:, 2] < z0 + 0.4) & (co[:, 1] > 8.0) & (np.abs(co[:, 0]) < 1.8)
+        if sl.any():
+            mane |= sl & (c < mane_chroma) & (co[:, 1] > 0.5 * (co[sl, 1].min() + co[sl, 1].max()))
+    info = {"chroma": chroma, "hair_share": round(float(is_dark.mean()), 3), "tail_vertices": int(tail.sum()),
+            "tail_refused": bool(refused), "mane_vertices": int(mane.sum())}
+    if tail.any():
+        t = co[tail]
+        # the tube's size from the cut tail: half its depth (z) and width (x), robust to stray strands
+        info["tail_half_depth"] = round(float(np.percentile(t[:, 2], 97) - np.percentile(t[:, 2], 3)) / 2, 3)
+        info["tail_half_width"] = round(float(np.percentile(np.abs(t[:, 0]), 97)), 3)
+        info["tail_colour"] = [int(round(x)) for x in np.median(rgb[tail], axis=0)]
+        info["tail_colour_p25_p75"] = [[int(round(x)) for x in np.percentile(rgb[tail], q, axis=0)] for q in (25, 75)]
+    return tail, mane, info
+
+
+def smooth_region(obj, mask, iterations=40, factor=0.5, fade=2):
+    """``mask``'s vertices smoothed hard (Laplacian), the ``fade`` rings round it gently: spiky
+    strands pulled into one solid mass that keeps its colours (its UVs ride along)."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    ring = set(np.flatnonzero(mask).tolist())
+    core = [bm.verts[i] for i in ring]
+    edge = []
+    for _ in range(fade):
+        nxt = {e.other_vert(bm.verts[i]).index for i in ring for e in bm.verts[i].link_edges} - ring
+        edge += [bm.verts[i] for i in nxt]
+        ring |= nxt
+    for _ in range(iterations):
+        bmesh.ops.smooth_vert(bm, verts=core, factor=factor, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+        if edge:
+            bmesh.ops.smooth_vert(bm, verts=edge, factor=factor * 0.3, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+
+
+def fill_open(obj):
+    """Boundary loops closed (the cut tail's root) before the voxel close. -> boundary edges found."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    loose = [e for e in bm.edges if e.is_boundary]
+    bmesh.ops.holes_fill(bm, edges=loose, sides=0)
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    return len(loose)
+
+
+def region_uv(obj, bones, margin, method="CONFORMAL", split=(), smooth=4):
+    """M21: a few large islands instead of Smart UV's many. Each face's region: the tail piece; a leg
+    (below the belly, by the nearest vanilla heel column); the head (ahead of vanilla's head bone +
+    0.5); else the trunk with the neck. Each region split into left and right (a leg at its heel's
+    x). Seams on the region borders, angle-based unwrap, one texel density, packed."""
+    me = obj.data
+    parts = face_parts(obj)
+    belly = min(bones["HorseFrontLeftDown"][1], bones["HorseBackLeftDown"][1])
+    legs = ("FrontLeft", "FrontRight", "BackLeft", "BackRight")
+    heels = np.array([[bones[f"Horse{k}Heel"][0], bones[f"Horse{k}Heel"][2]] for k in legs])
+    head_z = bones["HorseHead"][2] + 0.5
+    region = []
+    for poly, part in zip(me.polygons, parts):
+        c = poly.center
+        if part == hb.TAIL:
+            zone, centre = "tail", 0.0
+        elif c.y < belly and c.z > head_z:
+            k = int(np.argmin(((heels - [c.x, c.z]) ** 2).sum(1)))
+            zone, centre = legs[k], heels[k][0]
+        elif c.z < head_z:
+            zone, centre = "head", 0.0
+        else:
+            zone, centre = "trunk", 0.0
+            for i, z in enumerate(sorted(split)):  # the trunk cut across at these z (front to back)
+                if c.z > z:
+                    zone = f"trunk{i + 1}"
+        region.append(f"{zone}_{'L' if c.x > centre else 'R'}")
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.faces.ensure_lookup_table()
+    # borders straightened: each face takes its edge neighbours' majority region a few times over (face by
+    # face, the left/right and leg-top borders zig-zag, and jagged islands pack with wide gaps)
+    nbrs = [[g.index for e in f.edges for g in e.link_faces if g.index != f.index] for f in bm.faces]
+    for _ in range(smooth):
+        new = list(region)
+        for i, ns in enumerate(nbrs):
+            if region[i].startswith("tail") or not ns:
+                continue
+            votes = {}
+            for j in ns:
+                if not region[j].startswith("tail"):
+                    votes[region[j]] = votes.get(region[j], 0) + 1
+            best = max(votes, key=votes.get) if votes else region[i]
+            if votes.get(best, 0) >= 2 and best != region[i]:
+                new[i] = best
+        region = new
+    seams = 0
+    for e in bm.edges:
+        fs = e.link_faces
+        e.seam = len(fs) == 2 and region[fs[0].index] != region[fs[1].index]
+        seams += e.seam
+    bm.to_mesh(me)
+    bm.free()
+    activate(obj)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.context.scene.tool_settings.use_uv_select_sync = True  # else the pack sees no UVs selected in background
+    bpy.ops.uv.unwrap(method=method, margin=0.0)
+    bpy.ops.uv.average_islands_scale()
+    bpy.ops.uv.pack_islands(rotate=True, rotate_method="ANY", margin_method="FRACTION", margin=margin,
+                            shape_method="CONCAVE")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    # the pack keeps the islands' shared aspect, so its block can leave a strip of the square empty:
+    # stretched to fill it (texel density a little anisotropic, no texels wasted)
+    uv = np.empty(len(me.loops) * 2, dtype=np.float64)
+    me.uv_layers.active.data.foreach_get("uv", uv)
+    uv = uv.reshape(-1, 2)
+    lo, hi = uv.min(0), uv.max(0)
+    pad = margin / 2
+    uv = pad + (uv - lo) / np.maximum(hi - lo, 1e-9) * (1 - 2 * pad)
+    me.uv_layers.active.data.foreach_set("uv", uv.ravel())
+    counts = {}
+    for r in region:
+        counts[r] = counts.get(r, 0) + 1
+    return {"seam_edges": int(seams), "regions": counts, "packed_block": [round(float(x), 3) for x in hi - lo]}
+
+
+def uv_area(obj):
+    """The share of the unit square the UVs cover."""
+    me = obj.data
+    me.calc_loop_triangles()
+    uv = me.uv_layers.active.data
+    s = 0.0
+    for lt in me.loop_triangles:
+        a, b, c = (uv[i].uv for i in lt.loops)
+        s += abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2
+    return s
+
+
+def hair_voxels(obj, hair_pts, model_pts, bones, reach):
+    """The closed (voxel) surface's vertices to cut with the tail: nearest a tail vertex of the model,
+    or within ``reach`` of one behind the hips (the darker strands the mask missed)."""
+    from mathutils.kdtree import KDTree
+
+    def tree_of(*sets):
+        t = KDTree(sum(len(x) for x in sets))
+        k = 0
+        for pts in sets:
+            for q in pts:
+                t.insert(q, k)
+                k += 1
+        t.balance()
+        return t
+    both, hair_only = tree_of(hair_pts, model_pts), tree_of(hair_pts)
+    z_cut = max(bones["HorseBackLeftUp"][2], bones["HorseBackRightUp"][2]) + 0.8
+    cut = []
+    for i, q in enumerate(hs.verts(obj)):
+        if both.find(q)[1] < len(hair_pts):
+            cut.append(i)
+        elif q[2] > z_cut and hair_only.find(q)[2] < reach:
+            cut.append(i)
+    return cut
+
+
+def clear_tail_bones(obj):
+    """The body's vertices (part 0) lose any tail-bone weight (our tail is its own piece; vanilla's tail
+    bones run past a TRELLIS.2 horse's buttock, and the chain weights gave the rump to them: it swung
+    with the tail in idle); the rest renormalised, HorseSpineEnd if nothing is left. -> vertices changed."""
+    me = obj.data
+    kind = {}
+    for poly, part in zip(me.polygons, face_parts(obj)):
+        for vi in poly.vertices:
+            kind[vi] = max(kind.get(vi, 0), part)
+    tail = {obj.vertex_groups[n].index for n in hb.TAIL_NODES[1:] if n in obj.vertex_groups}
+    names = {g.index: g.name for g in obj.vertex_groups}
+    n = 0
+    for v in me.vertices:
+        if kind.get(v.index, 0) != 0 or not any(g.group in tail and g.weight > 0 for g in v.groups):
+            continue
+        row = {names[g.group]: g.weight for g in v.groups if g.group not in tail and g.weight > 0}
+        for g in list(v.groups):
+            obj.vertex_groups[g.group].remove([v.index])
+        total = sum(row.values())
+        for b, w in (row.items() if total > 0 else [("HorseSpineEnd", 1.0)]):
+            (obj.vertex_groups.get(b) or obj.vertex_groups.new(name=b)).add([v.index], w / (total or 1.0), "REPLACE")
+        n += 1
+    return n
+
+
 def direct(a, van, vanilla):
     """M21 (the user, 2026-10-23): a TRELLIS.2 model to the game mesh with its own shape kept: no
-    voxel remesh, no reshape onto vanilla's rest pose. Import, weld the seams, the largest piece,
-    direct_fit, direct_pose, ``textured_out`` (the posed model with its own UVs: the bake source),
-    collapse decimation to ``target_tris``, packed UVs, chain weights."""
+    reshape onto vanilla's rest pose. Import, weld the seams, the largest piece, direct_fit,
+    direct_pose; with ``hair``, TRELLIS.2's tail cut off (it tore in idle) and the mane's strands
+    smoothed into a solid crest; ``textured_out`` (the posed model with its own UVs: the bake
+    source); a fine voxel close and collapse decimation to ``target_tris``; our tail on vanilla's
+    tail bones; region UVs (``uv`` "smart": Smart UV); chain weights (the tail along its bones)."""
+    bones = van["bones"]
     src = a["source"]
     res = {"stages": {}}
     obj = import_model(src["path"])
@@ -1189,34 +1455,100 @@ def direct(a, van, vanilla):
     res["stages"]["imported"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
     keep_largest(obj)
     res["stages"]["largest_piece"] = {"tris": tri_count(obj)}
-    res["fit"] = direct_fit(obj, vanilla, van["bones"])
+    res["fit"] = direct_fit(obj, vanilla, bones)
     if a.get("fitted_out"):  # the model fitted, not posed: the raw model in the game's frame, for comparisons
         write_obj(obj, a["fitted_out"], uv=True)
     pose = a.get("pose") or {}
     # the legs moved (their hooves under vanilla's heels); the head and neck keep their shape and place:
     # the head is moved onto vanilla's poll only while the weights are taken (below)
-    res["pose"] = direct_pose(obj, vanilla, van["bones"], legs=pose.get("legs", True), apply_head=False)
-    if a.get("textured_out"):
-        write_obj(obj, a["textured_out"], uv=True)
+    res["pose"] = direct_pose(obj, vanilla, bones, legs=pose.get("legs", True), apply_head=False)
+    hc = a.get("hair") or {}
+    build_tail = build_mane = False
+    if hc:
+        tail, mane, res["hair"] = hair(obj, bones, np.array(res["pose"]["head"]["poll"]), hc.get("chroma", 0.15), max_share=hc.get("max_share", 0.15))
+        build_tail = bool(hc.get("tail", True) and tail.any())
+        build_mane = bool(hc.get("mane", True) and mane.any())
+        if build_mane and hc.get("mane") == "smooth":  # the first try (v004): too weak on a dense mesh
+            smooth_region(obj, mane, int(hc.get("mane_iterations", 40)))
+            build_mane = False
+    if a.get("textured_out"):  # the bake source: the tail cut off (its root left open: rays there miss and
+        # take their neighbours' colour)
+        tex = obj.copy()
+        tex.data = obj.data.copy()
+        bpy.context.scene.collection.objects.link(tex)
+        if build_tail:
+            delete_vertices(tex, np.flatnonzero(tail).tolist())
+        write_obj(tex, a["textured_out"], uv=True)
+        debug_dump(a, tex, "hair")
+        bpy.data.objects.remove(tex, do_unlink=True)
+    if build_tail or build_mane:
+        hair_pts, model_pts = hs.verts(obj)[tail], hs.verts(obj)[~tail]
+        mane_pts = hs.verts(obj)[mane] if build_mane else None
     while obj.data.uv_layers:  # the model's own UVs hold the collapse at their seams (~60k): new ones after
         obj.data.uv_layers.remove(obj.data.uv_layers[0])
-    res["stages"]["decimated"] = {"tris": collapse_to(obj, int(a["target_tris"]), a.get("close_voxel", 0.1)),
+    close = a.get("close_voxel", 0.1)
+    if build_tail or build_mane:
+        # closed first with the hair on (cut from TRELLIS.2's open surface, the tail's ragged root - 4,472
+        # boundary edges on horse 2 - leaked through the voxels and the hindquarters vanished), then the
+        # tail's voxels off and the few clean holes filled
+        collapse_to(obj, 10 ** 9, close)
+        if build_tail:
+            cut = hair_voxels(obj, hair_pts, model_pts, bones, float(hc.get("tail_reach", 0.35)))
+            delete_vertices(obj, cut)
+            keep_largest(obj)
+            res["hair"]["voxel_vertices_cut"] = len(cut)
+            res["hair"]["boundary_edges_filled"] = fill_open(obj)
+        if build_mane:
+            # the mane's voxels (within reach of its strands) smoothed hard into one crest: cut off, the
+            # strands took the neck's top half with them (v006: the neck thin and low); smoothed on the
+            # dense model, they barely moved (v004); on the even 0.1 voxels the smoothing spans the notches
+            from mathutils.kdtree import KDTree
+            t = KDTree(len(mane_pts))
+            for i, q in enumerate(mane_pts):
+                t.insert(q, i)
+            t.balance()
+            reach = float(hc.get("mane_reach", 0.4))
+            near = np.array([t.find(q)[2] < reach for q in hs.verts(obj)])
+            smooth_region(obj, near, int(hc.get("mane_iterations", 30)), 0.5, int(hc.get("mane_fade", 3)))
+            res["hair"]["mane_voxels_smoothed"] = int(near.sum())
+        close = None
+    res["stages"]["decimated"] = {"tris": collapse_to(obj, int(a["target_tris"]), close),
                                   "close_voxel": a.get("close_voxel", 0.1)}
     if count_pieces(obj) > 1:
         keep_largest(obj)
         res["stages"]["decimated"]["tris_one_piece"] = tri_count(obj)
+    if build_tail:
+        root, offset = tail_anchor(obj, bones)
+        tube = dict(hc.get("tube", {}))
+        if "radii" not in tube:  # hb.tail's profile scaled so its widest ring is the cut tail's half depth
+            k = float(np.clip(res["hair"]["tail_half_depth"] / 0.62, 1.0, 2.5))
+            tube["radii"] = [[f, r * k] for f, r in ((0.0, 0.3), (0.25, 0.36), (0.55, 0.62), (0.85, 0.5), (1.0, 0.18))]
+            tube["flat"] = float(np.clip(res["hair"]["tail_half_width"] / res["hair"]["tail_half_depth"], 0.5, 1.0))
+            tube["sides"] = 8
+        b = hb.tail(bones, root, offset=offset, **tube)
+        join_piece(obj, "tail", b)
+        res["hair"]["tube"] = {**b["log"], "offset": [round(x, 2) for x in offset]}
     obj.data.uv_layers.new(name="UV")
-    packed_uv(obj, float(a.get("uv_margin", 0.001)))
+    if a.get("uv") == "smart":
+        packed_uv(obj, float(a.get("uv_margin", 0.001)))
+        res["uv"] = {}
+    else:
+        res["uv"] = region_uv(obj, bones, float(a.get("uv_margin", 0.002)), a.get("uv_method", "CONFORMAL"),
+                              [bones["Saddle_Node"][2] + dz for dz in a.get("uv_trunk_cuts", [])], int(a.get("uv_smooth", 4)))
+    res["uv"]["area"] = round(uv_area(obj), 4)
     rest = hs.verts(obj)
     if pose.get("head", "weights") == "weights":
-        hs.set_verts(obj, head_shift(rest, van["bones"], res["pose"]["head"]))
+        hs.set_verts(obj, head_shift(rest, bones, res["pose"]["head"]))
         res["pose"]["head"]["note"] = "weights only: the geometry isn't moved"
     wstats = {}
     transfer_weights(obj, vanilla, a.get("smooth", 12), a.get("influences", 3),
-                     van["bones"] if a.get("chain_weights", True) else None, wstats)
+                     bones if a.get("chain_weights", True) else None, wstats)
     hs.set_verts(obj, rest)
+    if build_tail:
+        wstats["tail_pinned"] = pin_barding(obj, bones)
+        wstats["body_tail_weights_cleared"] = clear_tail_bones(obj)
     res["weights"] = wstats
-    saddle = van["bones"]["Saddle_Node"]
+    saddle = bones["Saddle_Node"]
     res["back"] = {"seat": {"ours": seat_top(obj, saddle[2]), "vanilla": seat_top(vanilla, saddle[2])}}
     verts, tris, unweighted = export(obj, a["geometry_out"], a.get("preview_out"))
     res["final"] = {"vertices": verts, "tris": tris, "unweighted_vertices": unweighted, "pieces": count_pieces(obj)}
