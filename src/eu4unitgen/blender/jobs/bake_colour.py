@@ -6,8 +6,11 @@ image as emission and baked selected to active: rays from ``cage`` outside the l
 ``distance`` deep, islands padded by ``margin`` texels. Texels no ray reached are reported.
 
 args: {"low": geometry .json, "high": .obj with UVs (preview axes), "image": base colour .png,
-       "size": px, "cage", "distance", "margin", "out_dir", "name", "result_path"}
-Result: {"diffuse": path, "reached": share of the covered texels a ray found the high surface for}
+       "size": px, "cage", "distance", "margin", "part_colours": {part: [lo rgb, hi rgb]} (our own pieces,
+       painted), "gloss": {"silver", "gold", "matte", thresholds} (writes <name>_specular.png),
+       "colour_render": the raw model's lit render (the colour transferred to it), "colour_strength",
+       "out_dir", "name", "result_path"}
+Result: {"diffuse": path, "reached": share of the covered texels a ray found the high surface for, ...}
 """
 import json
 import os
@@ -73,6 +76,68 @@ def target(obj, name, size, colour):
     obj.data.materials.clear()
     obj.data.materials.append(mat)
     return img
+
+
+def srgb_to_lab(c):
+    """sRGB (0-1, ... x 3) -> CIE Lab (D65)."""
+    c = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    m = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]])
+    xyz = c @ m.T / np.array([0.9505, 1.0, 1.089])
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
+    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
+
+
+def lab_to_srgb(lab):
+    fy = (lab[..., 0] + 16) / 116
+    f = np.stack([fy + lab[..., 1] / 500, fy, fy - lab[..., 2] / 200], -1)
+    xyz = np.where(f ** 3 > 0.008856, f ** 3, (f - 16 / 116) / 7.787) * np.array([0.9505, 1.0, 1.089])
+    m = np.linalg.inv(np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]))
+    c = np.clip(xyz @ m.T, 0, 1)
+    return np.where(c <= 0.0031308, 12.92 * c, 1.055 * c ** (1 / 2.4) - 0.055)
+
+
+def render_pixels(path):
+    """The subject's pixels of a render (not the corner's background colour), sRGB 0-1."""
+    img = bpy.data.images.load(path)
+    img.colorspace_settings.name = "Non-Color"  # the stored sRGB values as they are
+    im = pixels(img).astype(np.float64)
+    if im[..., 3].min() < 0.99:
+        sel = im[..., 3] > 0.5
+    else:
+        sel = np.abs(im[..., :3] - im[2, 2, :3]).sum(-1) > 0.05
+    return im[sel][:, :3]
+
+
+def colour_transfer(px, mask, render, strength=1.0):
+    """M21 (the user: the game horse looked flat and orange next to the raw model): the texels' Lab mean
+    and spread matched to the raw model's lit render (what the user approved), per channel, by
+    ``strength``. -> the stats before and after."""
+    ref = srgb_to_lab(render_pixels(render))
+    lab = srgb_to_lab(px[mask, :3])
+    mu_t, sd_t, mu_r, sd_r = lab.mean(0), lab.std(0) + 1e-6, ref.mean(0), ref.std(0) + 1e-6
+    new = (lab - mu_t) * (1 + strength * (sd_r / sd_t - 1)) + mu_t + strength * (mu_r - mu_t)
+    px[mask, :3] = lab_to_srgb(new)
+    return {"texture_lab_mean": mu_t.round(1).tolist(), "render_lab_mean": mu_r.round(1).tolist(),
+            "texture_lab_sd": sd_t.round(1).tolist(), "render_lab_sd": sd_r.round(1).tolist()}
+
+
+def gloss_map(px, cov, gloss):
+    """The specular map's gloss (alpha; RGB 0: no unit colour) by colour class of the base colour:
+    silver (bright, colourless), gold (bright, yellow-orange, saturated), the rest matte (coat, cloth,
+    leather, hair). TRELLIS.2's metallic map isn't used (horse 2: 0.65 over coat and hair alike)."""
+    c = px[..., :3]
+    mx, mn = c.max(-1), c.min(-1)
+    chroma = (mx - mn) / np.maximum(mx, 1e-6)
+    lum = c @ np.array([0.299, 0.587, 0.114])
+    r, g, b = c[..., 0], c[..., 1], c[..., 2]
+    hue = (np.degrees(np.arctan2(np.sqrt(3) * (g - b), 2 * r - g - b)) + 360) % 360
+    silver = cov & (chroma < gloss.get("silver_chroma", 0.18)) & (lum > gloss.get("silver_lum", 0.38))
+    gold = cov & ~silver & (hue > 28) & (hue < 58) & (chroma > 0.35) & (lum > gloss.get("gold_lum", 0.36))
+    out = np.full(cov.shape, float(gloss.get("matte", 5)))
+    out[silver] = gloss.get("silver", 14)
+    out[gold] = gloss.get("gold", 12)
+    return out, {"silver": round(float(silver.sum() / max(cov.sum(), 1)), 3),
+                 "gold": round(float(gold.sum() / max(cov.sum(), 1)), 3)}
 
 
 def part_mask(low, part, size):
@@ -173,12 +238,25 @@ def main():
                 px[yy, xx] = px[y, x]
                 q.append((yy, xx))
     px[..., 3] = 1.0
+    result = {}
+    if a.get("gloss") is not None:  # from the colour as baked (before any transfer)
+        g, result["gloss_shares"] = gloss_map(px, filled, a["gloss"])
+        spec = bpy.data.images.new("specular", size, size, alpha=True)
+        spec.colorspace_settings.name = "Non-Color"
+        sp = np.zeros((size, size, 4), dtype=np.float32)
+        sp[..., 3] = np.clip(g, 0, 255) / 255.0
+        spec.pixels.foreach_set(sp.ravel())
+        result["specular"] = os.path.join(a["out_dir"], f"{a['name']}_specular.png")
+        spec.filepath_raw, spec.file_format = result["specular"], "PNG"
+        spec.save()
+    if a.get("colour_render"):
+        result["colour_transfer"] = colour_transfer(px, filled, a["colour_render"], float(a.get("colour_strength", 1.0)))
     img.pixels.foreach_set(px.ravel())
     path = os.path.join(a["out_dir"], f"{a['name']}_diffuse.png")
     img.filepath_raw, img.file_format = path, "PNG"
     img.save()
     _pdx.write_result(a, {"diffuse": path, "reached": round(float(good.sum() / max(cov.sum(), 1)), 4),
-                          "covered": round(float(cov.mean()), 4)})
+                          "covered": round(float(cov.mean()), 4), **result})
 
 
 main()

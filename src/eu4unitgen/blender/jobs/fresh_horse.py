@@ -1168,7 +1168,7 @@ def _grow(m):
     return out
 
 
-def solid_fill(obj, vs, closing=1):
+def solid_fill(obj, vs, closing=1, opening=0, protect=None):
     """``obj`` replaced by the solid it encloses, by flood fill: the voxels (size ``vs``) its surface
     passes through, closed by ``closing`` voxels (gaps up to twice that sealed), then everything the
     outside can't reach from the box's edge is solid; the closing taken back off; the solid's voxel
@@ -1194,19 +1194,48 @@ def solid_fill(obj, vs, closing=1):
     occ = np.zeros(shape, dtype=bool)
     ijk = ((pts - lo) / vs).astype(int)
     occ[ijk[:, 0], ijk[:, 1], ijk[:, 2]] = True
-    for _ in range(closing):
-        occ = _grow(occ)
-    ext = np.zeros_like(occ)
-    ext[0], ext[-1], ext[:, 0], ext[:, -1], ext[:, :, 0], ext[:, :, -1] = True, True, True, True, True, True
-    ext &= ~occ
-    while True:
-        nxt = _grow(ext) & ~occ
-        if nxt.sum() == ext.sum():
-            break
-        ext = nxt
-    inside = ~ext
-    for _ in range(closing):
-        inside &= ~_grow(~inside)
+
+    def solid_at(r):
+        """Not reachable from the box's edge once the surface is grown by ``r`` voxels, grown back."""
+        o = occ
+        for _ in range(r):
+            o = _grow(o)
+        ext = np.zeros_like(o)
+        ext[0], ext[-1], ext[:, 0], ext[:, -1], ext[:, :, 0], ext[:, :, -1] = True, True, True, True, True, True
+        ext &= ~o
+        while True:
+            nxt = _grow(ext) & ~o
+            if nxt.sum() == ext.sum():
+                break
+            ext = nxt
+        ins = ~ext
+        for _ in range(r):
+            ins &= ~_grow(~ins)
+        return ins
+    inside = solid_at(1)
+    if closing > 1:
+        # what only the wider closing seals is kept where it is thick (a hollow body the outside got into:
+        # the cataphract's) and dropped where it is a thin slab (the gap between two legs standing close:
+        # horse 2's hind legs welded at a 0.2 closing and tore in the attack)
+        gap = solid_at(closing) & ~inside
+        thick = gap.copy()
+        for _ in range(closing):
+            thick &= ~_grow(~thick)
+        for _ in range(closing + 1):
+            thick = _grow(thick) & gap
+        inside |= thick
+    if opening:  # thin pieces off (mane slabs, flaps, a bit or rein under the muzzle): shrunk away, regrown
+        core = inside.copy()
+        for _ in range(opening):
+            core &= ~_grow(~core)
+        for _ in range(opening):
+            core = _grow(core) & inside
+        if protect is not None:  # the ears: thin, kept
+            lo_b, hi_b = (np.array(protect[0]) - lo) / vs, (np.array(protect[1]) - lo) / vs
+            ii = np.indices(inside.shape)
+            keep = np.all([(ii[d] >= lo_b[d]) & (ii[d] <= hi_b[d]) for d in range(3)], axis=0)
+            core |= inside & keep
+        inside = core
     # the solid's boundary faces (between an inside and an outside voxel) as quads on the corner grid
     S = np.array(inside.shape) + 1
     vid = lambda i, j, k: (i * S[1] + j) * S[2] + k  # noqa: E731
@@ -1241,6 +1270,9 @@ def solid_fill(obj, vs, closing=1):
     return {"volume": round(float(inside.sum() * vs ** 3), 1), "grid": [int(x) for x in inside.shape]}
 
 
+SOLID = {}  # collapse_to's solid_fill settings for this run (direct sets them)
+
+
 def collapse_to(obj, target, close=None):
     """Quadric (collapse) decimation straight to ``target`` triangles: the silhouette kept. With
     ``close``, a voxel remesh that fine first: TRELLIS.2's surface has thousands of non-manifold
@@ -1249,11 +1281,20 @@ def collapse_to(obj, target, close=None):
     the horse's length."""
     activate(obj)
     if close:
-        solid_fill(obj, float(close))  # a closed solid first: the remesh smooths its voxel steps
+        # a closed solid first; its closing and opening are distances (in voxels at this size): the
+        # cataphract's gaps let the outside in at a 0.1 closing (a shell, volume 211), not at 0.2 (598)
+        vs_ = float(close)
+        SOLID.setdefault("log", []).append(solid_fill(
+            obj, vs_, closing=max(1, int(round(SOLID.get("closing", 0.2) / vs_))),
+            opening=int(round(SOLID.get("opening", 0.0) / vs_)), protect=SOLID.get("protect")))
         mod = obj.modifiers.new("close", "REMESH")
         mod.mode, mod.voxel_size, mod.adaptivity = "VOXEL", float(close), 0.0
         bpy.ops.object.modifier_apply(modifier=mod.name)
         keep_largest(obj)  # the voxels leave tassels and cloth edges as their own pieces
+        if SOLID.get("relax"):  # the voxel steps relaxed before the collapse (they showed as lumps)
+            mod = obj.modifiers.new("relax", "SMOOTH")
+            mod.factor, mod.iterations = 0.5, int(SOLID["relax"])
+            bpy.ops.object.modifier_apply(modifier=mod.name)
     mod = obj.modifiers.new("tri", "TRIANGULATE")
     bpy.ops.object.modifier_apply(modifier=mod.name)
     for _ in range(8):  # one pass can stall far above the target (horse 2: 277k -> 61k)
@@ -1618,6 +1659,10 @@ def direct(a, van, vanilla):
         obj.data.uv_layers.remove(obj.data.uv_layers[0])
     src_mesh = obj.data.copy()
     target = int(a["target_tris"])
+    poll = res["pose"]["head"]["poll"]
+    SOLID.update({"opening": float(a.get("opening", 0.2)), "relax": int(a.get("relax", 3)), "closing": float(a.get("closing", 0.2)),
+                  # the ears: from just under the poll up, round it
+                  "protect": [[poll[0] - 1.2, poll[1] - 0.3, poll[2] - 1.2], [poll[0] + 1.2, poll[1] + 3.0, poll[2] + 1.2]]})
 
     def low(vs):
         """The low mesh from the posed model at voxel ``vs``: closed, the hair handled, collapsed."""
@@ -1642,9 +1687,9 @@ def direct(a, van, vanilla):
             for i, q in enumerate(mane_pts):
                 t.insert(q, i)
             t.balance()
-            reach = float(hc.get("mane_reach", 0.4))
+            reach = float(hc.get("mane_reach", 0.6))
             near = np.array([t.find(q)[2] < reach for q in hs.verts(obj)])
-            smooth_region(obj, near, int(hc.get("mane_iterations", 30)), 0.5, int(hc.get("mane_fade", 3)))
+            smooth_region(obj, near, int(hc.get("mane_iterations", 60)), 0.5, int(hc.get("mane_fade", 3)))
             res["hair"]["mane_voxels_smoothed"] = int(near.sum())
         return collapse_to(obj, target, None)
 
@@ -1661,7 +1706,7 @@ def direct(a, van, vanilla):
         obj.data = src_mesh.copy()
         bpy.data.meshes.remove(old)
         vs *= 1.5
-    res["stages"]["decimated"] = {"tris": n, "close_voxel": round(vs, 3), "close_tries": tries}
+    res["stages"]["decimated"] = {"tris": n, "close_voxel": round(vs, 3), "close_tries": tries, "solid": SOLID.get("log")}
     if count_pieces(obj) > 1:
         keep_largest(obj)
         res["stages"]["decimated"]["tris_one_piece"] = tri_count(obj)
