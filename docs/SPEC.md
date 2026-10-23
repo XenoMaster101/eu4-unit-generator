@@ -2548,6 +2548,29 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
   - Tier 1: horse 2 (game v007). Tier 2: vanilla. Units are named "T25 ...".
   - Rider seated at the saddle in the gallery; the horse is bigger than vanilla (its own proportions).
   - The validator found 0 errors.
+  - The user skipped running it in game. Its gallery notes, fixed as general steps:
+- **Fixes after test 25's gallery (2026-10-23), on the shared code:**
+  - **Fragments and the mane:** an opening of 0.2 on the solid, so pieces thinner than about 0.4 go: the mane's slabs and flaps, and the bit under the muzzle.
+    - It works only on the head and neck. A whole-body opening took the cataphract's caparison skirts and horse 2's saddle rims.
+    - The ears are protected round the poll.
+    - The mane is smoothed harder (reach 0.6, 60 passes).
+  - **The solid's closing (0.2):** the space it seals is kept only where it is thick.
+    - The cataphract's surface lets the outside in at a 0.1 closing, which gave a shell (volume 211) that the opening erased. At 0.2 it is solid (543).
+    - Horse 2's hind legs, standing close, were welded by a plain 0.2 closing and tore in the attack (worst 12.1).
+  - **Lumps and facets:** the voxel steps are relaxed (3 passes) before the collapse, and the budget is up to 2,800 body triangles (2,927 with the tail).
+  - **Colour:** a Lab colour transfer (mean and spread) of the baked texture to the raw model's lit render, what the user approved (`bake_colour` `colour_render`). TRELLIS.2's base colour carries its own shading patches, so the raw texture as-is read orange.
+  - **Shine:** gloss by colour class in the specular map's alpha: silver 14 (bright, colourless), gold 12 (bright, saturated yellow-orange), matte 5. RGB stays 0. TRELLIS.2's metallic map isn't used (horse 2: 0.65 over coat and hair). Shares: cataphract silver 1.8%, gold 2.3%; horse 2 0.1% and 0.4%. **UNVERIFIED in game.**
+  - **The cataphract's head–neck edge in the attack:** worst 10.4 → 4.3. A hollow solid was behind it; the fill fixed it.
+- **Results (stretch p05–p95 / max / flips; vanilla idle 0.89–1.20 / 3.9 / 13, moving 0.91–1.14 / 3.2 / 8, attack 0.76–1.26 / 3.5 / 32):**
+
+  | | triangles | texture used | side IoU vs raw | idle | moving | attack |
+  |---|---|---|---|---|---|---|
+  | cataphract v009 | 2,927 | 64% | 0.75 | 0.85–1.18 / 2.9 / 4 | 0.88–1.13 / 4.9 / 14 | 0.78–1.16 / 4.3 / 17 |
+  | horse 2 v013 | 2,927 | 60% | 0.78 | 0.87–1.20 / 3.0 / 13 | 0.85–1.16 / 5.6 / 25 | 0.75–1.22 / 4.4 / 42 |
+- **In-game test 26 STAGED** (`build/test26`; the run sheet is `README.txt`, the gallery `gallery/sheet.png`):
+  - Tier 1: the cataphract (v009). Tier 2: horse 2 (v013). Tier 3: vanilla. Units are named "T26 ...".
+  - The validator found 0 errors and 0 warnings.
+  - Seen in the gallery: the cataphract's scale and caparison render brighter than the raw model under the gallery's light (the colour transfer lifted its lightness 23 → 31). Both horses are bigger than vanilla.
 
 ## 11. References
 - EU4 wiki, Model modding: https://eu4.paradoxwikis.com/Model_modding
