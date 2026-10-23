@@ -48,6 +48,8 @@ args: {"vanilla": {"p", "tri", "weights": [{bone: w}], "bones": {name: [x, y, z]
        "chain_weights": bool (head, leg and tail regions weighted by distance to their bone chains),
        "target_tris", "quads" (QuadriFlow's target; default target_tris / 2), "relax", "smooth", "influences",
        "geometry_out": .json path, "preview_out": .obj path (Blender axes, for renders),
+       "textured_out": .obj path (model only: the model with its own UVs after the fit and reshape, for
+       bake_colour; M21),
        "bake_source_out": .obj path (preview axes; model only): the fine surface for bake_horse, with
        every reshape the low mesh gets (the edits, the tail cleared, the saddle matched), "result_path"}
 Result: counts per stage, the fit (scale, offset) and back heights (ours vs vanilla); "steep_reshapes":
@@ -1005,15 +1007,15 @@ def debug_dump(a, obj, stage):
         write_obj(obj, os.path.join(a["debug_dir"], f"{stage}.obj"))
 
 
-def write_obj(obj, path):
-    """``obj`` as an OBJ file in preview axes (PDX (x, y, z) -> Blender (x, z, y))."""
+def write_obj(obj, path, uv=False):
+    """``obj`` as an OBJ file in preview axes (PDX (x, y, z) -> Blender (x, z, y)); with ``uv``, its UVs too."""
     prev = obj.copy()
     prev.data = obj.data.copy()
     bpy.context.scene.collection.objects.link(prev)
     prev.data.transform(Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1))))
     activate(prev)
     bpy.ops.wm.obj_export(filepath=path, export_selected_objects=True,
-                          export_uv=False, export_materials=False)
+                          export_uv=uv, export_materials=False)
     bpy.data.objects.remove(prev, do_unlink=True)
 
 
@@ -1033,6 +1035,13 @@ def main():
     read = Readability(a.get("readability"), van, a["barding"]) if a.get("barding") else None
     if src["kind"] == "model":
         obj = import_model(src["path"])
+        if src.get("merge"):  # M21: TRELLIS.2's mesh is split at its UV seams (the UVs stay per loop)
+            bm = bmesh.new()
+            bm.from_mesh(obj.data)
+            bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=float(src["merge"]))
+            bm.to_mesh(obj.data)
+            bm.free()
+            obj.data.update()
         res["stages"]["imported"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
         keep_largest(obj)
         res["stages"]["largest_piece"] = {"tris": tri_count(obj)}
@@ -1045,6 +1054,8 @@ def main():
             res["fit"]["height_scale"] = scale_height(obj, vanilla, van["bones"])
             res["fit"]["reshape"] = hs.reshape(obj, vanilla, van["bones"], leg_top=float(a.get("leg_top", 6.0)))
         debug_dump(a, obj, "1_reshaped")
+        if a.get("textured_out"):  # M21: the model's own UVs after the fit and reshape, for its texture's bake
+            write_obj(obj, a["textured_out"], uv=True)
         if a.get("voxel_fine"):  # closed before any edit (TripoSG's pieces and open sheets)
             res["stages"]["solid_fine"] = solidify(obj, a["voxel_fine"])
         debug_dump(a, obj, "2_solid_fine")
