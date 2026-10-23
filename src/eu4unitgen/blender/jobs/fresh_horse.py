@@ -1083,6 +1083,54 @@ def face_forward(obj):
     return round((math.degrees(ang) + 180) % 360 - 180, 1)
 
 
+def side_area(obj, cell=0.15, density=4.0):
+    """The side silhouette's area (y, z), from surface samples on a ``cell`` grid."""
+    me = obj.data
+    me.calc_loop_triangles()
+    co = hs.verts(obj)
+    tri = np.array([lt.vertices[:] for lt in me.loop_triangles], dtype=np.int64)
+    a, b, c = co[tri[:, 0]], co[tri[:, 1]], co[tri[:, 2]]
+    area = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    n = np.maximum(1, np.ceil(area / (cell * cell) * density).astype(np.int64))
+    idx = np.repeat(np.arange(len(tri)), n)
+    rng = np.random.default_rng(0)
+    u, v = rng.random(len(idx)), rng.random(len(idx))
+    flip = u + v > 1
+    u[flip], v[flip] = 1 - u[flip], 1 - v[flip]
+    pts = a[idx] + u[:, None] * (b[idx] - a[idx]) + v[:, None] * (c[idx] - a[idx])
+    cells = np.unique(np.floor(pts[:, 1:] / cell).astype(np.int64), axis=0)
+    return len(cells) * cell * cell
+
+
+def slim(obj, vanilla, bones, target=1.15, low=0.75, points=None):
+    """M21 (the user: both horses look bigger than vanilla's): a model whose side silhouette is over
+    ``target`` x vanilla's is made smaller about the seat, so the rider still sits where vanilla's does:
+    the body above the belly (vanilla's leg tops) scaled by s about the seat point, x and z with it, and
+    the legs below stretched to keep the hooves on the ground. s = sqrt(target / ratio), at least
+    ``low``. -> the ratio before and after and s."""
+    before = side_area(obj) / side_area(vanilla)
+    s = float(np.clip(math.sqrt(target / before), low, 1.0))
+    if s < 0.999:
+        z = bones["Saddle_Node"][2]
+        seat = seat_top(obj, z)
+        belly = min(bones["HorseFrontLeftDown"][1], bones["HorseBackLeftDown"][1])
+        co = hs.verts(obj)
+        out = co.copy()
+        out[:, 0] = co[:, 0] * s
+        out[:, 2] = z + (co[:, 2] - z) * s
+        top = co[:, 1] >= belly
+        out[top, 1] = seat + (co[top, 1] - seat) * s
+        new_belly = seat + (belly - seat) * s
+        out[~top, 1] = co[~top, 1] * new_belly / belly
+        hs.set_verts(obj, out)
+        if points is not None:  # other points (the head's poll) moved the same way
+            for q in points:
+                q[0], q[2] = q[0] * s, z + (q[2] - z) * s
+                q[1] = seat + (q[1] - seat) * s if q[1] >= belly else q[1] * new_belly / belly
+    return {"side_area_ratio": round(before, 3), "scale": round(s, 3),
+            "after": round(side_area(obj) / side_area(vanilla), 3) if s < 0.999 else round(before, 3)}
+
+
 def direct_fit(obj, vanilla, bones):
     """M21: one uniform scale (the croup's height over the ground: vanilla's), the hooves on the
     ground, centred in x and with the hooves' midpoint at vanilla's heels' midpoint in z. The
@@ -1122,7 +1170,7 @@ def head_shift(co, bones, head):
     return co + np.where(up[:, None], t[:, None] * np.array(head["d"]), 0.0)
 
 
-def direct_pose(obj, vanilla, bones, legs=True, head=True, belly=None, apply_head=True):
+def direct_pose(obj, vanilla, bones, legs=True, head=True, belly=None, apply_head=True, head_at=None):
     """M21's minimal posing: each lower leg slid sideways (x, z) so its hoof stands under vanilla's
     heel, faded out from the knee up to the belly; the head and neck moved as one rigid piece onto
     vanilla's poll, faded out along the neck to its base. Nothing is turned or reshaped. Reports
@@ -1149,14 +1197,14 @@ def direct_pose(obj, vanilla, bones, legs=True, head=True, belly=None, apply_hea
         vco = hs.verts(vanilla)
         nb = np.array(bones["HorseNeckBase"])
         _, vaxis, vpoll, _ = hs.head_features(vco, nb)
-        _, axis, poll, _ = hs.head_features(co, nb)
+        _, axis, poll, _ = hs.head_features(co, nb) if head_at is None else (None, head_at[0], head_at[1], None)
         d = vpoll - poll
         if apply_head:
             co = head_shift(co, bones, {"poll": poll, "d": d})
         tilt = math.degrees(math.acos(float(np.clip(np.dot(axis, vaxis), -1, 1))))
         rep["head"] = {"poll": [round(float(x), 2) for x in poll], "vanilla_poll": [round(float(x), 2) for x in vpoll],
                        "moved": round(float(np.linalg.norm(d)), 3), "axis_vs_vanilla_deg": round(tilt, 1),
-                       "turned": 0.0, "d": d.tolist()}
+                       "turned": 0.0, "d": d.tolist(), "axis": [round(float(x), 4) for x in axis]}
     hs.set_verts(obj, co)
     return rep
 
@@ -1631,12 +1679,20 @@ def direct(a, van, vanilla):
     turn = face_forward(obj)
     res["fit"] = direct_fit(obj, vanilla, bones)
     res["fit"]["turned_deg"] = turn
+    # the head found before the slim (after it, the cataphract's chest and tassels stood ahead of its head and
+    # were taken for it: the poll at y 9.4, the axis upright), its poll moved with the model; above the belly
+    # the slim is uniform, so the axis holds
+    _, head_axis, head_poll, _ = hs.head_features(hs.verts(obj), np.array(bones["HorseNeckBase"]))
+    head_poll = np.array(head_poll, dtype=np.float64)
+    if a.get("slim", 1.15):
+        res["fit"]["slim"] = slim(obj, vanilla, bones, float(a.get("slim", 1.15)), points=[head_poll])
     if a.get("fitted_out"):  # the model fitted, not posed: the raw model in the game's frame, for comparisons
         write_obj(obj, a["fitted_out"], uv=True)
     pose = a.get("pose") or {}
     # the legs moved (their hooves under vanilla's heels); the head and neck keep their shape and place:
     # the head is moved onto vanilla's poll only while the weights are taken (below)
-    res["pose"] = direct_pose(obj, vanilla, bones, legs=pose.get("legs", True), apply_head=False)
+    res["pose"] = direct_pose(obj, vanilla, bones, legs=pose.get("legs", True), apply_head=False,
+                              head_at=(head_axis, head_poll))
     hc = a.get("hair") or {}
     build_tail = build_mane = False
     if hc:
