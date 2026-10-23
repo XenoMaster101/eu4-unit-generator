@@ -10,11 +10,12 @@ Runs in its own environment (Python 3.11, torch 2.7 cu128; inside WSL2, ``~/eu4u
   * the texture bake rasterises with ``_uv_raster`` (ours), so neither nvdiffrast nor nvdiffrec (NVIDIA Source
     Code License: research or evaluation only) is loaded or installed (SPEC M21);
   * low-VRAM mode (each stage's model moved to the GPU only while it runs) for a 12 GB card; on an
-    out-of-memory error the next lower ``pipeline_type`` is tried.
+    out-of-memory error the next lower ``pipeline_type`` is tried (not "512" after a larger one); only the
+    flow models those types use are loaded (1024_cascade: about 13.4 GB of system RAM, not 16).
 
 args: {"image": RGBA png, "output": .glb, "repo": TRELLIS.2 checkout, "weights": TRELLIS.2-4B folder,
        "ss_decoder": TRELLIS-image-large folder, "dinov3": DINOv3 folder, "seed", "pipeline_type"
-       ("1024_cascade" default; then "1024", "512"), "decimation_target" (faces, default 300000),
+       ("1024_cascade" default; then "1024"), "decimation_target" (faces, default 300000),
        "texture_size" (default 2048), "result_path"}
 Result: seconds (load, generate, export), peak VRAM (GB), the pipeline type used, faces and vertices.
 """
@@ -29,12 +30,28 @@ os.environ.setdefault("ATTN_BACKEND", "xformers")  # flash-attn isn't built
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 ORDER = ["1536_cascade", "1024_cascade", "1024", "512"]
+# flow models each pipeline type samples with (trellis2_image_to_3d.run); the decoders are always loaded
+USES = {"512": {"shape_slat_flow_model_512", "tex_slat_flow_model_512"},
+        "1024": {"shape_slat_flow_model_1024", "tex_slat_flow_model_1024"},
+        "1024_cascade": {"shape_slat_flow_model_512", "shape_slat_flow_model_1024", "tex_slat_flow_model_1024"},
+        "1536_cascade": {"shape_slat_flow_model_512", "shape_slat_flow_model_1024", "tex_slat_flow_model_1024"}}
 
 
-def local_config(weights: Path, ss_decoder: Path, dinov3: Path) -> str:
-    """pipeline.json with every model path local; written beside the original (inside the AI root)."""
+def fallbacks(first: str) -> list[str]:
+    """``first`` and the smaller types tried on out-of-memory; "512" only when asked for, so a larger run never
+    loads its 2.6 GB texture flow (every model sits in system RAM in low-VRAM mode)."""
+    chain = ORDER[ORDER.index(first):]
+    return chain if first == "512" else [t for t in chain if t != "512"]
+
+
+def local_config(weights: Path, ss_decoder: Path, dinov3: Path, types: list[str]) -> str:
+    """pipeline.json with every model path local and only the flow models ``types`` use; written beside the
+    original (inside the AI root)."""
     cfg = json.loads((weights / "pipeline.json").read_text(encoding="utf-8"))
     m = cfg["args"]["models"]
+    used = set().union(*(USES[t] for t in types))
+    for k in [k for k in m if "_flow_model_" in k and k not in used]:
+        del m[k]
     for k, v in m.items():
         if v.startswith("microsoft/TRELLIS-image-large/"):
             m[k] = str(ss_decoder / v.split("microsoft/TRELLIS-image-large/", 1)[1]).replace("\\", "/")
@@ -74,16 +91,16 @@ def main(args_path: str) -> None:
     rembg.NoRembg = NoRembg
     t0 = time.time()
     weights = Path(a["weights"])
+    types = fallbacks(a.get("pipeline_type", "1024_cascade"))
     pipe = Trellis2ImageTo3DPipeline.from_pretrained(str(weights), local_config(weights, Path(a["ss_decoder"]),
-                                                                                Path(a["dinov3"])))
+                                                                                Path(a["dinov3"]), types))
     pipe.low_vram = True
     pipe.cuda()
     t_load = time.time() - t0
     image = Image.open(a["image"]).convert("RGBA")
-    first = a.get("pipeline_type", "1024_cascade")
     tried, mesh, used = [], None, None
     t1 = time.time()
-    for ptype in ORDER[ORDER.index(first):]:
+    for ptype in types:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
         try:

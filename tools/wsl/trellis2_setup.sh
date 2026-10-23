@@ -32,7 +32,8 @@ echo "== torch"
 $PIP torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 $PIP xformers==0.0.30 --index-url https://download.pytorch.org/whl/cu128
 echo "== basic"
-$PIP imageio imageio-ffmpeg tqdm easydict opencv-python-headless ninja trimesh transformers zstandard kornia timm \
+# transformers 4.57: TRELLIS.2's DINOv3 feature extractor walks DINOv3ViTModel.layer, which 5.x moved
+$PIP imageio imageio-ffmpeg tqdm easydict opencv-python-headless ninja trimesh "transformers==4.57.1" zstandard kornia timm \
     setuptools wheel "git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8"
 
 clone() {  # url dir [branch]; records the commit built

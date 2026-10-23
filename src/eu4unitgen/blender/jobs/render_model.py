@@ -2,7 +2,8 @@
 from named views, for checking imported and generated geometry (Track C, test 15).
 
 args: {"model": path, "out_dir": path, "name": str, "size": 512, "texture": diffuse image | null,
-       "views": {"front": [azimuth_deg, elevation_deg], ...}, "result_path": path}
+       "views": {"front": [azimuth_deg, elevation_deg], ...}, "engine": "EEVEE" (the model's own materials),
+       "result_path": path}
 Azimuth 0 looks along +Y (Blender's front view: the camera at -Y), 90 from +X (right side).
 Workbench, studio light, object colours by random (pieces) or a single grey.
 Result: {"images": {view: path}, "triangles": n, "objects": n, "dimensions": [x, y, z]}.
@@ -64,6 +65,16 @@ def main() -> None:
     scene.render.film_transparent = False
     world = bpy.data.worlds.new("w")
     scene.world = world
+    if args.get("engine") == "EEVEE":  # the model's own materials as imported (raw textured output), plain light
+        scene.render.engine = "BLENDER_EEVEE_NEXT"
+        scene.view_settings.view_transform = "Standard"
+        world.use_nodes = True
+        world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.85, 0.85, 0.87, 1)
+        world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.9
+        sun = bpy.data.objects.new("sun", bpy.data.lights.new("sun", "SUN"))
+        sun.data.energy = 2.5
+        sun.rotation_euler = (math.radians(50), 0, math.radians(-30))
+        scene.collection.objects.link(sun)
     scene.display.shading.background_type = "VIEWPORT"
     scene.display.shading.background_color = (0.85, 0.85, 0.87)
     cam_data = bpy.data.cameras.new("cam")
