@@ -10,6 +10,9 @@ source "model": a generated model file (glTF: Y up, facing +Z; PDX = (x, y, -z))
   optionally a one-sided bulge pushed in, the skirts cut at a hem (legs and tail kept), the
   caparison pushed off the tail; a coarse voxel solid (a voxel remesh needs closed input, and
   booleans on a closed solid keep it closed).
+source "direct" (M21, TRELLIS.2 models): the model's own shape kept: no reshape onto vanilla's rest
+  pose, no coarse voxels or QuadriFlow (see ``direct``; args "merge", "pose", "close_voxel",
+  "uv_margin", "fitted_out", "textured_out").
 source "control": a crude horse from capsules along the vanilla bones, voxel-remeshed into one
   closed surface (a pipeline control only, never shipped).
 Then both: an even-sized remesh to about ``target_tris`` (QuadriFlow, then a collapse trim),
@@ -1019,6 +1022,207 @@ def write_obj(obj, path, uv=False):
     bpy.data.objects.remove(prev, do_unlink=True)
 
 
+def merge_seams(obj, dist):
+    """TRELLIS.2's mesh is split at its UV seams: coincident vertices welded (the UVs stay per loop)."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=dist)
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+
+
+def smoothstep(x, a, b):
+    t = np.clip((x - a) / (b - a), 0.0, 1.0)
+    return t * t * (3 - 2 * t)
+
+
+def hooves(co, mid_z, ground=0.8):
+    """Each leg's hoof (the centre of its vertices under ``ground``), the legs told apart by the
+    side (x) and by fore (z < mid_z) or hind."""
+    low = co[co[:, 1] < co[:, 1].min() + ground]
+    out = {}
+    for leg, side, fore in (("FrontLeft", 1, True), ("FrontRight", -1, True), ("BackLeft", 1, False), ("BackRight", -1, False)):
+        sel = low[((low[:, 0] > 0) if side > 0 else (low[:, 0] <= 0)) & ((low[:, 2] < mid_z) if fore else (low[:, 2] >= mid_z))]
+        out[leg] = sel.mean(axis=0) if len(sel) else None
+    return out
+
+
+def seat_top(obj, z, half=1.0, step=0.25):
+    """Where a rider sits: the lowest of the surface heights hit by rays straight down the centre
+    line from z - half to z + half (the dip between a saddle's front and back rims; on a bare back,
+    the back)."""
+    from mathutils.bvhtree import BVHTree
+    bvh = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+    tops = []
+    for z0 in np.arange(z - half, z + half + 1e-6, step):
+        hit = bvh.ray_cast(Vector((0.0, 100.0, float(z0))), Vector((0.0, -1.0, 0.0)))
+        if hit[0] is not None:
+            tops.append(hit[0].y)
+    return float(min(tops))
+
+
+def direct_fit(obj, vanilla, bones):
+    """M21: one uniform scale (the croup's height over the ground: vanilla's), the hooves on the
+    ground, centred in x and with the hooves' midpoint at vanilla's heels' midpoint in z. The
+    model's own proportions are kept."""
+    co = hs.verts(obj)
+    co -= [0.5 * (co[:, 0].min() + co[:, 0].max()), co[:, 1].min(), 0.5 * (co[:, 2].min() + co[:, 2].max())]
+    hs.set_verts(obj, co)
+    z = bones["Saddle_Node"][2]
+    # the croup band on the model: the same share of its hoof-to-hoof span behind its middle as vanilla's
+    heels = np.array([bones[f"Horse{l}Heel"] for l in ("FrontLeft", "FrontRight", "BackLeft", "BackRight")])
+    vmid, vspan = heels[:, 2].mean(), heels[2:, 2].mean() - heels[:2, 2].mean()
+    h = hooves(co, 0.0)
+    fz = np.mean([h[k][2] for k in ("FrontLeft", "FrontRight") if h[k] is not None])
+    bz = np.mean([h[k][2] for k in ("BackLeft", "BackRight") if h[k] is not None])
+    mmid, mspan = 0.5 * (fz + bz), bz - fz
+    rel0, rel1 = (z + 3.0 - vmid) / vspan, (z + 4.0 - vmid) / vspan
+    mine = top_at(obj, mmid + rel0 * mspan, mmid + rel1 * mspan, 1.0 * mspan / vspan)
+    s = top_at(vanilla, z + 3.0, z + 4.0, 1.0) / mine
+    co = hs.verts(obj) * s
+    off = np.array([0.0, -co[:, 1].min(), vmid - mmid * s])
+    hs.set_verts(obj, co + off)
+    # then the rider's seat: the top at Saddle_Node (the model's saddle, or its back) at vanilla's, about
+    # the ground under the hooves' midpoint (the croup's scale reported beside it)
+    seat = seat_top(vanilla, z) / seat_top(obj, z)
+    pivot = np.array([0.0, 0.0, vmid])
+    hs.set_verts(obj, (hs.verts(obj) - pivot) * seat + pivot)
+    return {"scale": float(s * seat), "croup_scale": float(s), "seat_factor": float(seat),
+            "offset": off.tolist(), "hoof_span": {"model": float(mspan * s * seat), "vanilla": float(vspan)}}
+
+
+def head_shift(co, bones, head):
+    """``co`` with the head and neck moved by ``head["d"]``: fully from the poll forward, faded out
+    along z to the neck base (only above the neck base's height less 3)."""
+    nb = np.array(bones["HorseNeckBase"])
+    t = smoothstep(-(co[:, 2] - nb[2]), 0.0, -(head["poll"][2] - nb[2]))
+    up = co[:, 1] > nb[1] - 3.0
+    return co + np.where(up[:, None], t[:, None] * np.array(head["d"]), 0.0)
+
+
+def direct_pose(obj, vanilla, bones, legs=True, head=True, belly=None, apply_head=True):
+    """M21's minimal posing: each lower leg slid sideways (x, z) so its hoof stands under vanilla's
+    heel, faded out from the knee up to the belly; the head and neck moved as one rigid piece onto
+    vanilla's poll, faded out along the neck to its base. Nothing is turned or reshaped. Reports
+    each part's move."""
+    co = hs.verts(obj)
+    rep = {}
+    if legs:
+        h = hooves(co, 0.5 * (bones["HorseFrontLeftHeel"][2] + bones["HorseBackLeftHeel"][2]))
+        knee = min(bones["HorseFrontLeftKnee"][1], bones["HorseBackLeftKnee"][1])
+        belly = belly if belly is not None else min(bones["HorseFrontLeftDown"][1], bones["HorseBackLeftDown"][1])
+        names = [k for k in h if h[k] is not None]
+        centres = np.array([[h[k][0], h[k][2]] for k in names])
+        near = np.argmin(((co[:, None, [0, 2]] - centres[None]) ** 2).sum(-1), axis=1)
+        w = 1.0 - smoothstep(co[:, 1], knee, belly)
+        move = np.zeros_like(co)
+        for i, k in enumerate(names):
+            heel = np.array(bones[f"Horse{k}Heel"])
+            d = np.array([heel[0] - h[k][0], 0.0, heel[2] - h[k][2]])
+            sel = near == i
+            move[sel] = d * w[sel, None]
+            rep[k] = {"hoof": [round(float(x), 2) for x in h[k]], "moved": round(float(np.linalg.norm(d)), 3)}
+        co = co + move
+    if head:
+        vco = hs.verts(vanilla)
+        nb = np.array(bones["HorseNeckBase"])
+        _, vaxis, vpoll, _ = hs.head_features(vco, nb)
+        _, axis, poll, _ = hs.head_features(co, nb)
+        d = vpoll - poll
+        if apply_head:
+            co = head_shift(co, bones, {"poll": poll, "d": d})
+        tilt = math.degrees(math.acos(float(np.clip(np.dot(axis, vaxis), -1, 1))))
+        rep["head"] = {"poll": [round(float(x), 2) for x in poll], "vanilla_poll": [round(float(x), 2) for x in vpoll],
+                       "moved": round(float(np.linalg.norm(d)), 3), "axis_vs_vanilla_deg": round(tilt, 1),
+                       "turned": 0.0, "d": d.tolist()}
+    hs.set_verts(obj, co)
+    return rep
+
+
+def collapse_to(obj, target, close=None):
+    """Quadric (collapse) decimation straight to ``target`` triangles: the silhouette kept. With
+    ``close``, a voxel remesh that fine first: TRELLIS.2's surface has thousands of non-manifold
+    edges and open sheets, and the collapse stalls on them (horse 2: at 36-61k triangles whatever
+    the clean-up); at 0.06 the strands fall into thousands of tiny pieces that stall it too (~31k); 0.1 is about 0.5% of
+    the horse's length."""
+    activate(obj)
+    if close:
+        mod = obj.modifiers.new("close", "REMESH")
+        mod.mode, mod.voxel_size, mod.adaptivity = "VOXEL", float(close), 0.0
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+    mod = obj.modifiers.new("tri", "TRIANGULATE")
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    for _ in range(8):  # one pass can stall far above the target (horse 2: 277k -> 61k)
+        if tri_count(obj) <= target * 1.02:
+            break
+        mod = obj.modifiers.new("collapse", "DECIMATE")
+        mod.decimate_type, mod.ratio, mod.use_collapse_triangulate = "COLLAPSE", target / tri_count(obj), True
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+    return tri_count(obj)
+
+
+def packed_uv(obj, margin):
+    """Smart UV Project (89 degrees: the fewest islands), the islands at one texel density, then packed
+    tightly (any rotation, concave shapes) for M21's 1024 bake. Horse 2 (2,404 triangles): 59% of the
+    image at a 0.001 gap (one texel at 1024), 71% at no gap (neighbouring islands bleed into each other)."""
+    activate(obj)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.context.scene.tool_settings.use_uv_select_sync = True  # else the pack sees no UVs selected in background
+    bpy.ops.uv.smart_project(angle_limit=math.radians(89), island_margin=0.0)
+    bpy.ops.uv.average_islands_scale()
+    bpy.ops.uv.pack_islands(rotate=True, rotate_method="ANY", margin_method="FRACTION", margin=margin,
+                            shape_method="CONCAVE")
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def direct(a, van, vanilla):
+    """M21 (the user, 2026-10-23): a TRELLIS.2 model to the game mesh with its own shape kept: no
+    voxel remesh, no reshape onto vanilla's rest pose. Import, weld the seams, the largest piece,
+    direct_fit, direct_pose, ``textured_out`` (the posed model with its own UVs: the bake source),
+    collapse decimation to ``target_tris``, packed UVs, chain weights."""
+    src = a["source"]
+    res = {"stages": {}}
+    obj = import_model(src["path"])
+    merge_seams(obj, float(src.get("merge", 1e-5)))
+    res["stages"]["imported"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
+    keep_largest(obj)
+    res["stages"]["largest_piece"] = {"tris": tri_count(obj)}
+    res["fit"] = direct_fit(obj, vanilla, van["bones"])
+    if a.get("fitted_out"):  # the model fitted, not posed: the raw model in the game's frame, for comparisons
+        write_obj(obj, a["fitted_out"], uv=True)
+    pose = a.get("pose") or {}
+    # the legs moved (their hooves under vanilla's heels); the head and neck keep their shape and place:
+    # the head is moved onto vanilla's poll only while the weights are taken (below)
+    res["pose"] = direct_pose(obj, vanilla, van["bones"], legs=pose.get("legs", True), apply_head=False)
+    if a.get("textured_out"):
+        write_obj(obj, a["textured_out"], uv=True)
+    while obj.data.uv_layers:  # the model's own UVs hold the collapse at their seams (~60k): new ones after
+        obj.data.uv_layers.remove(obj.data.uv_layers[0])
+    res["stages"]["decimated"] = {"tris": collapse_to(obj, int(a["target_tris"]), a.get("close_voxel", 0.1)),
+                                  "close_voxel": a.get("close_voxel", 0.1)}
+    if count_pieces(obj) > 1:
+        keep_largest(obj)
+        res["stages"]["decimated"]["tris_one_piece"] = tri_count(obj)
+    obj.data.uv_layers.new(name="UV")
+    packed_uv(obj, float(a.get("uv_margin", 0.001)))
+    rest = hs.verts(obj)
+    if pose.get("head", "weights") == "weights":
+        hs.set_verts(obj, head_shift(rest, van["bones"], res["pose"]["head"]))
+        res["pose"]["head"]["note"] = "weights only: the geometry isn't moved"
+    wstats = {}
+    transfer_weights(obj, vanilla, a.get("smooth", 12), a.get("influences", 3),
+                     van["bones"] if a.get("chain_weights", True) else None, wstats)
+    hs.set_verts(obj, rest)
+    res["weights"] = wstats
+    saddle = van["bones"]["Saddle_Node"]
+    res["back"] = {"seat": {"ours": seat_top(obj, saddle[2]), "vanilla": seat_top(vanilla, saddle[2])}}
+    verts, tris, unweighted = export(obj, a["geometry_out"], a.get("preview_out"))
+    res["final"] = {"vertices": verts, "tris": tris, "unweighted_vertices": unweighted, "pieces": count_pieces(obj)}
+    _pdx.write_result(a, res)
+
+
 def main():
     a = _pdx.args()
     _pdx.clear_scene()
@@ -1030,18 +1234,15 @@ def main():
         for bone, w in row.items():
             g = vanilla.vertex_groups.get(bone) or vanilla.vertex_groups.new(name=bone)
             g.add([vi], w, "REPLACE")
+    if a["source"]["kind"] == "direct":
+        return direct(a, van, vanilla)
     res = {"stages": {}}
     src = a["source"]
     read = Readability(a.get("readability"), van, a["barding"]) if a.get("barding") else None
     if src["kind"] == "model":
         obj = import_model(src["path"])
-        if src.get("merge"):  # M21: TRELLIS.2's mesh is split at its UV seams (the UVs stay per loop)
-            bm = bmesh.new()
-            bm.from_mesh(obj.data)
-            bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=float(src["merge"]))
-            bm.to_mesh(obj.data)
-            bm.free()
-            obj.data.update()
+        if src.get("merge"):
+            merge_seams(obj, float(src["merge"]))
         res["stages"]["imported"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
         keep_largest(obj)
         res["stages"]["largest_piece"] = {"tris": tri_count(obj)}
