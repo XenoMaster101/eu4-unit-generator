@@ -1062,6 +1062,27 @@ def seat_top(obj, z, half=1.0, step=0.25):
     return float(min(tops))
 
 
+def face_forward(obj):
+    """A generated model turned about the vertical to face -Z as the vanilla horse (TRELLIS.2 picks its
+    own facing: horse 2 faced -Z, the cataphract +-X): its long horizontal axis (principal axis of x, z)
+    onto z, then the head's end (the end fifth that reaches higher: the head and ears over the croup)
+    to -z. -> the turn in degrees."""
+    co = hs.verts(obj)
+    xz = co[:, [0, 2]] - co[:, [0, 2]].mean(0)
+    _, _, vt = np.linalg.svd(xz, full_matrices=False)
+    ang = math.atan2(vt[0][0], vt[0][1])  # the axis' angle from +z towards +x
+    c, s_ = math.cos(-ang), math.sin(-ang)
+    rot = np.array([[c, 0, s_], [0, 1, 0], [-s_, 0, c]])
+    co = co @ rot.T
+    z0, z1 = co[:, 2].min(), co[:, 2].max()
+    fifth = (z1 - z0) / 5
+    if co[co[:, 2] > z1 - fifth, 1].max() > co[co[:, 2] < z0 + fifth, 1].max():  # the head at +z: turned round
+        co[:, [0, 2]] *= -1
+        ang += math.pi
+    hs.set_verts(obj, co)
+    return round((math.degrees(ang) + 180) % 360 - 180, 1)
+
+
 def direct_fit(obj, vanilla, bones):
     """M21: one uniform scale (the croup's height over the ground: vanilla's), the hooves on the
     ground, centred in x and with the hooves' midpoint at vanilla's heels' midpoint in z. The
@@ -1140,6 +1161,86 @@ def direct_pose(obj, vanilla, bones, legs=True, head=True, belly=None, apply_hea
     return rep
 
 
+def _grow(m):
+    out = m.copy()
+    for ax in range(3):
+        out |= np.roll(m, 1, ax) | np.roll(m, -1, ax)
+    return out
+
+
+def solid_fill(obj, vs, closing=1):
+    """``obj`` replaced by the solid it encloses, by flood fill: the voxels (size ``vs``) its surface
+    passes through, closed by ``closing`` voxels (gaps up to twice that sealed), then everything the
+    outside can't reach from the box's edge is solid; the closing taken back off; the solid's voxel
+    faces as one closed mesh. A voxel remesh of an open surface makes a hollow shell wherever the
+    outside reaches in (the cataphract: volume 74 against horse 2's 379; its low mesh came out as
+    lace); filled, 627. -> {"volume", "grid"}."""
+    me = obj.data
+    me.calc_loop_triangles()
+    co = hs.verts(obj)
+    tri = np.array([lt.vertices[:] for lt in me.loop_triangles], dtype=np.int64)
+    a, b, c = co[tri[:, 0]], co[tri[:, 1]], co[tri[:, 2]]
+    area = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    n = np.maximum(1, np.ceil(area / (vs * vs) * 8).astype(np.int64))
+    idx = np.repeat(np.arange(len(tri)), n)
+    rng = np.random.default_rng(0)
+    u, v = rng.random(len(idx)), rng.random(len(idx))
+    flip = u + v > 1
+    u[flip], v[flip] = 1 - u[flip], 1 - v[flip]
+    pts = np.vstack([co, a[idx] + u[:, None] * (b[idx] - a[idx]) + v[:, None] * (c[idx] - a[idx])])
+    pad = closing + 2
+    lo = pts.min(0) - pad * vs
+    shape = np.ceil((pts.max(0) + pad * vs - lo) / vs).astype(int) + 1
+    occ = np.zeros(shape, dtype=bool)
+    ijk = ((pts - lo) / vs).astype(int)
+    occ[ijk[:, 0], ijk[:, 1], ijk[:, 2]] = True
+    for _ in range(closing):
+        occ = _grow(occ)
+    ext = np.zeros_like(occ)
+    ext[0], ext[-1], ext[:, 0], ext[:, -1], ext[:, :, 0], ext[:, :, -1] = True, True, True, True, True, True
+    ext &= ~occ
+    while True:
+        nxt = _grow(ext) & ~occ
+        if nxt.sum() == ext.sum():
+            break
+        ext = nxt
+    inside = ~ext
+    for _ in range(closing):
+        inside &= ~_grow(~inside)
+    # the solid's boundary faces (between an inside and an outside voxel) as quads on the corner grid
+    S = np.array(inside.shape) + 1
+    vid = lambda i, j, k: (i * S[1] + j) * S[2] + k  # noqa: E731
+    quads = []
+    for ax in range(3):
+        pad_in = np.pad(inside, [(1, 1) if d == ax else (0, 0) for d in range(3)])
+        lo_side, hi_side = np.take(pad_in, range(0, pad_in.shape[ax] - 1), ax), np.take(pad_in, range(1, pad_in.shape[ax]), ax)
+        for sign, mask in ((1, lo_side & ~hi_side), (-1, ~lo_side & hi_side)):
+            p = np.argwhere(mask)  # face at index p[ax] on axis ax (between cells p-1 and p)
+            o1, o2 = [d for d in range(3) if d != ax]
+            corners = []
+            for d1, d2 in ((0, 0), (1, 0), (1, 1), (0, 1)):
+                q = p.copy()
+                q[:, o1] += d1
+                q[:, o2] += d2
+                corners.append(vid(q[:, 0], q[:, 1], q[:, 2]))
+            f = np.stack(corners, 1)
+            if (sign > 0) != ((o1, o2) in ((1, 2), (2, 0), (0, 1))):
+                f = f[:, ::-1]
+            quads.append(f)
+    f = np.vstack(quads)
+    used, inv = np.unique(f.ravel(), return_inverse=True)
+    i, rem = np.divmod(used, S[1] * S[2])
+    j, k = np.divmod(rem, S[2])
+    verts = lo + np.stack([i, j, k], 1) * vs
+    new = bpy.data.meshes.new("solid")
+    new.from_pydata(verts.tolist(), [], inv.reshape(-1, 4).tolist())
+    new.validate()
+    old = obj.data
+    obj.data = new
+    bpy.data.meshes.remove(old)
+    return {"volume": round(float(inside.sum() * vs ** 3), 1), "grid": [int(x) for x in inside.shape]}
+
+
 def collapse_to(obj, target, close=None):
     """Quadric (collapse) decimation straight to ``target`` triangles: the silhouette kept. With
     ``close``, a voxel remesh that fine first: TRELLIS.2's surface has thousands of non-manifold
@@ -1148,9 +1249,11 @@ def collapse_to(obj, target, close=None):
     the horse's length."""
     activate(obj)
     if close:
+        solid_fill(obj, float(close))  # a closed solid first: the remesh smooths its voxel steps
         mod = obj.modifiers.new("close", "REMESH")
         mod.mode, mod.voxel_size, mod.adaptivity = "VOXEL", float(close), 0.0
         bpy.ops.object.modifier_apply(modifier=mod.name)
+        keep_largest(obj)  # the voxels leave tassels and cloth edges as their own pieces
     mod = obj.modifiers.new("tri", "TRIANGULATE")
     bpy.ops.object.modifier_apply(modifier=mod.name)
     for _ in range(8):  # one pass can stall far above the target (horse 2: 277k -> 61k)
@@ -1159,6 +1262,14 @@ def collapse_to(obj, target, close=None):
         mod = obj.modifiers.new("collapse", "DECIMATE")
         mod.decimate_type, mod.ratio, mod.use_collapse_triangulate = "COLLAPSE", target / tri_count(obj), True
         bpy.ops.object.modifier_apply(modifier=mod.name)
+    if target < 10 ** 8:  # zero-length edges and slivers the collapse leaves (the deformation check divides by them)
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=1e-3)
+        bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 3])
+        bm.to_mesh(obj.data)
+        bm.free()
+        obj.data.update()
     return tri_count(obj)
 
 
@@ -1218,45 +1329,61 @@ def flood(cand, seeds, edges):
     return out
 
 
-def hair(obj, bones, poll, chroma=0.15, light=38.0, mane_chroma=0.3, behind_hip=0.8, grow=3, max_share=0.15):
-    """M21: TRELLIS.2's tail and mane on the posed model, by colour and place (TRELLIS.2 bakes shade
-    into its colours, so darkness alone took horse 2's shadowed bay coat). Chroma is (max - min) / max
-    of RGB (horse 2: tail 0.08, coat 0.68, black lower legs 0.19). The tail: grey (chroma under
-    ``chroma``) and not dark (luminance ``light`` or more: the legs and shaded coat are darker),
-    ``behind_hip`` behind vanilla's hind leg tops (the hocks stay out), above the ground, connected to
-    its root (near the centre line, within 2.5 under vanilla's TailTop), then grown ``grow`` rings
-    over grey vertices (its dark streaks); refused over ``max_share`` of the model. The mane:
-    vertices under ``mane_chroma`` in the upper half of each neck slice between the poll and the neck
-    base (near-black hair against the bay neck). -> (tail mask, mane mask, info with its colours)."""
+def hair(obj, bones, poll, tol=40.0, behind_hip=0.8, grow=3, max_share=0.4):
+    """M21: TRELLIS.2's tail and mane on the posed model, by the tail's own colour and place (no fixed
+    colour rule: horse 2's tail is grey, the cataphract's black beside silver scale; TRELLIS.2 bakes
+    shade into its colours, so darkness took horse 2's shadowed coat).
+      * The tail's colour: the median of the rear-most vertices (within 0.3 of each slice's back) at the
+        height of vanilla's tail tip +-1.5, near the centre line: what hangs furthest back there is tail.
+      * The buttock: the back of the body's sides (|x| over 1.3) between y 5 and 11.
+      * The tail: vertices within ``tol`` (RGB distance) of its colour, ``behind_hip`` behind vanilla's
+        hind leg tops, no further forward than 0.3 ahead of the buttock, above the ground, connected to
+        those rear-most seeds; grown ``grow`` rings over such vertices; refused over ``max_share`` of the
+        model (TRELLIS.2 spends many vertices on strands: horse 2's tail is 24% of them).
+      * The mane: vertices within ``tol`` of the tail's colour in the upper half of each neck slice
+        between the poll and the neck base.
+    -> (tail mask, mane mask, info with its colours and size)."""
     co = hs.verts(obj)
     rgb, lum = vertex_colours(obj)
-    c = (rgb.max(1) - rgb.min(1)) / np.maximum(rgb.max(1), 1.0)
-    grey = c < chroma
-    is_dark = grey & (lum >= light)  # the tail's grey hair; the black lower legs and shadowed coat are darker
     z_hip = max(bones["HorseBackLeftUp"][2], bones["HorseBackRightUp"][2])
     e = np.empty(len(obj.data.edges) * 2, dtype=np.int64)
     obj.data.edges.foreach_get("vertices", e)
     e = e.reshape(-1, 2)
     behind = co[:, 2] > z_hip + behind_hip
-    seeds = behind & (co[:, 1] > bones["HorseTailTop"][1] - 2.5) & (np.abs(co[:, 0]) < 1.0)
-    tail = flood(is_dark & behind & (co[:, 1] > 1.5), seeds, e)
-    for _ in range(grow):  # the darker streaks inside the tail: grey neighbours behind the hips
+    tip = bones["HorseTailTip"][1]
+    seeds = np.zeros(len(co), dtype=bool)
+    for y0 in np.arange(tip - 1.5, tip + 1.5, 0.5):
+        sl = behind & (co[:, 1] >= y0) & (co[:, 1] < y0 + 0.5) & (np.abs(co[:, 0]) < 1.5)
+        if sl.any():
+            seeds |= sl & (co[:, 2] > co[sl, 2].max() - 0.3)
+    info = {"tail_seed_vertices": int(seeds.sum())}
+    tail = np.zeros(len(co), dtype=bool)
+    mane = np.zeros(len(co), dtype=bool)
+    if not seeds.any():
+        info["tail_refused"] = True
+        return tail, mane, info
+    ref = np.median(rgb[seeds], axis=0)
+    like = np.linalg.norm(rgb - ref, axis=1) < tol
+    sides = (np.abs(co[:, 0]) > 1.3) & (co[:, 1] > 5.0) & (co[:, 1] < 11.0)
+    butt = float(np.percentile(co[sides, 2], 99.5)) if sides.any() else z_hip
+    zone = behind & (co[:, 2] > butt - 0.3) & (co[:, 1] > 1.5)
+    tail = flood(like & zone, seeds & like, e)
+    for _ in range(grow):  # the strands' darker or lighter streaks
         nxt = tail.copy()
         nxt[e[tail[e[:, 0]], 1]] = True
         nxt[e[tail[e[:, 1]], 0]] = True
-        tail = nxt & grey & behind
-    width = float(np.percentile(np.abs(co[tail, 0]), 95)) if tail.any() else 0.0
+        tail = nxt & zone & (np.linalg.norm(rgb - ref, axis=1) < 1.5 * tol)
     refused = tail.mean() > max_share
     if refused:
         tail[:] = False
     nb = np.array(bones["HorseNeckBase"])
-    mane = np.zeros(len(co), dtype=bool)
     for z0 in np.arange(poll[2] + 0.8, nb[2] + 1.0, 0.4):
         sl = (co[:, 2] >= z0) & (co[:, 2] < z0 + 0.4) & (co[:, 1] > 8.0) & (np.abs(co[:, 0]) < 1.8)
         if sl.any():
-            mane |= sl & (c < mane_chroma) & (co[:, 1] > 0.5 * (co[sl, 1].min() + co[sl, 1].max()))
-    info = {"chroma": chroma, "hair_share": round(float(is_dark.mean()), 3), "tail_vertices": int(tail.sum()),
-            "tail_refused": bool(refused), "mane_vertices": int(mane.sum())}
+            mane |= sl & like & (co[:, 1] > 0.5 * (co[sl, 1].min() + co[sl, 1].max()))
+    info.update({"colour_reference": [int(round(x)) for x in ref], "tol": tol, "buttock_z": round(butt, 2),
+                 "tail_vertices": int(tail.sum()), "tail_share": round(float(tail.mean()), 3),
+                 "tail_refused": bool(refused), "mane_vertices": int(mane.sum())})
     if tail.any():
         t = co[tail]
         # the tube's size from the cut tail: half its depth (z) and width (x), robust to stray strands
@@ -1455,7 +1582,9 @@ def direct(a, van, vanilla):
     res["stages"]["imported"] = {"tris": tri_count(obj), "pieces": count_pieces(obj)}
     keep_largest(obj)
     res["stages"]["largest_piece"] = {"tris": tri_count(obj)}
+    turn = face_forward(obj)
     res["fit"] = direct_fit(obj, vanilla, bones)
+    res["fit"]["turned_deg"] = turn
     if a.get("fitted_out"):  # the model fitted, not posed: the raw model in the game's frame, for comparisons
         write_obj(obj, a["fitted_out"], uv=True)
     pose = a.get("pose") or {}
@@ -1465,7 +1594,8 @@ def direct(a, van, vanilla):
     hc = a.get("hair") or {}
     build_tail = build_mane = False
     if hc:
-        tail, mane, res["hair"] = hair(obj, bones, np.array(res["pose"]["head"]["poll"]), hc.get("chroma", 0.15), max_share=hc.get("max_share", 0.15))
+        tail, mane, res["hair"] = hair(obj, bones, np.array(res["pose"]["head"]["poll"]), float(hc.get("tol", 40.0)),
+                                       max_share=float(hc.get("max_share", 0.4)))
         build_tail = bool(hc.get("tail", True) and tail.any())
         build_mane = bool(hc.get("mane", True) and mane.any())
         if build_mane and hc.get("mane") == "smooth":  # the first try (v004): too weak on a dense mesh
@@ -1486,12 +1616,17 @@ def direct(a, van, vanilla):
         mane_pts = hs.verts(obj)[mane] if build_mane else None
     while obj.data.uv_layers:  # the model's own UVs hold the collapse at their seams (~60k): new ones after
         obj.data.uv_layers.remove(obj.data.uv_layers[0])
-    close = a.get("close_voxel", 0.1)
-    if build_tail or build_mane:
+    src_mesh = obj.data.copy()
+    target = int(a["target_tris"])
+
+    def low(vs):
+        """The low mesh from the posed model at voxel ``vs``: closed, the hair handled, collapsed."""
+        if not (build_tail or build_mane):
+            return collapse_to(obj, target, vs)
         # closed first with the hair on (cut from TRELLIS.2's open surface, the tail's ragged root - 4,472
         # boundary edges on horse 2 - leaked through the voxels and the hindquarters vanished), then the
         # tail's voxels off and the few clean holes filled
-        collapse_to(obj, 10 ** 9, close)
+        collapse_to(obj, 10 ** 9, vs)
         if build_tail:
             cut = hair_voxels(obj, hair_pts, model_pts, bones, float(hc.get("tail_reach", 0.35)))
             delete_vertices(obj, cut)
@@ -1501,7 +1636,7 @@ def direct(a, van, vanilla):
         if build_mane:
             # the mane's voxels (within reach of its strands) smoothed hard into one crest: cut off, the
             # strands took the neck's top half with them (v006: the neck thin and low); smoothed on the
-            # dense model, they barely moved (v004); on the even 0.1 voxels the smoothing spans the notches
+            # dense model, they barely moved (v004); on the even voxels the smoothing spans the notches
             from mathutils.kdtree import KDTree
             t = KDTree(len(mane_pts))
             for i, q in enumerate(mane_pts):
@@ -1511,9 +1646,22 @@ def direct(a, van, vanilla):
             near = np.array([t.find(q)[2] < reach for q in hs.verts(obj)])
             smooth_region(obj, near, int(hc.get("mane_iterations", 30)), 0.5, int(hc.get("mane_fade", 3)))
             res["hair"]["mane_voxels_smoothed"] = int(near.sum())
-        close = None
-    res["stages"]["decimated"] = {"tris": collapse_to(obj, int(a["target_tris"]), close),
-                                  "close_voxel": a.get("close_voxel", 0.1)}
+        return collapse_to(obj, target, None)
+
+    # the close made coarser (x1.5 a try, from the same input) while the collapse stalls over the target
+    # x 1.1: sheets a voxel thick don't collapse (the cataphract's caparison at 0.1: ~8k triangles; at 0.15
+    # they merge and it reaches 2,500)
+    vs, tries = float(a.get("close_voxel", 0.1)), []
+    for k in range(3):
+        n = low(vs)
+        tries.append({"voxel": round(vs, 3), "tris": n})
+        if n <= target * 1.1 or k == 2:
+            break
+        old = obj.data
+        obj.data = src_mesh.copy()
+        bpy.data.meshes.remove(old)
+        vs *= 1.5
+    res["stages"]["decimated"] = {"tris": n, "close_voxel": round(vs, 3), "close_tries": tries}
     if count_pieces(obj) > 1:
         keep_largest(obj)
         res["stages"]["decimated"]["tris_one_piece"] = tri_count(obj)
