@@ -1216,7 +1216,7 @@ def _grow(m):
     return out
 
 
-def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None, carve=(), carve_out=()):
+def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None, carve=(), carve_out=(), carve_in=()):
     """``obj`` replaced by the solid it encloses, by flood fill: the voxels (size ``vs``) its surface
     passes through, closed by ``closing`` voxels (gaps up to twice that sealed), then everything the
     outside can't reach from the box's edge is solid; the closing taken back off; the solid's voxel
@@ -1297,6 +1297,10 @@ def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None, carve=(
         ii = np.indices(inside.shape)
         wx, wy, wz = (lo[d] + ii[d] * vs for d in range(3))
         inside &= ~((wy > c["y0"]) & (np.hypot(wx - c["centre"][0], wz - c["centre"][1]) > c["radius"]))
+    for c in carve_in:  # M23: everything under ``y1`` within ``radius`` of a vertical axis (the plume's gap over a helmet)
+        ii = np.indices(inside.shape)
+        wx, wy, wz = (lo[d] + ii[d] * vs for d in range(3))
+        inside &= ~((wy < c["y1"]) & (np.hypot(wx - c["centre"][0], wz - c["centre"][1]) < c["radius"]))
     # the solid's boundary faces (between an inside and an outside voxel) as quads on the corner grid
     S = np.array(inside.shape) + 1
     vid = lambda i, j, k: (i * S[1] + j) * S[2] + k  # noqa: E731
@@ -1348,7 +1352,8 @@ def collapse_to(obj, target, close=None):
         SOLID.setdefault("log", []).append(solid_fill(
             obj, vs_, closing=max(1, int(round(SOLID.get("closing", 0.2) / vs_))),
             opening=int(round(SOLID.get("opening", 0.0) / vs_)), protect=SOLID.get("protect"),
-            region=SOLID.get("region"), carve=SOLID.get("carve", ()), carve_out=SOLID.get("carve_out", ())))
+            region=SOLID.get("region"), carve=SOLID.get("carve", ()), carve_out=SOLID.get("carve_out", ()),
+            carve_in=SOLID.get("carve_in", ())))
         mod = obj.modifiers.new("close", "REMESH")
         mod.mode, mod.voxel_size, mod.adaptivity = "VOXEL", float(close), 0.0
         bpy.ops.object.modifier_apply(modifier=mod.name)

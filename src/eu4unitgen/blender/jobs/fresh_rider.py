@@ -230,6 +230,32 @@ def part_object(src, mask, name):
     return o
 
 
+def plume_line(crest_pts, helmet_pts, helmet_top, head, fin, n=12):
+    """M23: the raw plume's centre line, from the finial on the helmet's top: the crest's points in shells by their
+    distance from the finial's top, each shell's centroid and side-to-side spread (its half width). Stops where the
+    line would come down to the helmet (within its radius + 0.35, under its top + 0.3) or near the cloak (under the
+    neck + 1.5): the gap the user asked for. In the head bone's frame (the mesh's axes, the bone at the origin)."""
+    hc = np.median(helmet_pts[helmet_pts[:, 1] > helmet_top - 0.3][:, [0, 2]], axis=0)
+    hr = float(np.percentile(np.hypot(helmet_pts[:, 0] - hc[0], helmet_pts[:, 2] - hc[1]), 90))
+    base = np.array([hc[0], helmet_top - 0.1, hc[1]])
+    tip = base + np.array([0.0, fin, 0.0])
+    d = np.linalg.norm(crest_pts - tip, axis=1)
+    edges = np.linspace(0.0, float(np.percentile(d, 97)), n + 1)
+    line, width = [], []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        m = (d >= lo) & (d < hi)
+        if m.sum() < 20:
+            continue
+        c = crest_pts[m].mean(0)
+        near_helmet = np.hypot(c[0] - hc[0], c[2] - hc[1]) < hr + 0.35 and c[1] < helmet_top + 0.3
+        if near_helmet or c[1] < NECK + 1.5:
+            break
+        line.append(c)
+        width.append(float(np.percentile(np.abs(crest_pts[m, 0] - c[0]), 80)))
+    return {"finial_base": (base - head).round(4).tolist(), "finial_height": fin, "helmet_radius": round(hr, 3),
+            "line": (np.array(line) - head).round(4).tolist() if line else [], "half_width": [round(w, 3) for w in width]}
+
+
 def export_part(o, path_model, path_node, R, origin):
     """The part as bake_colour's low geometry (model frame) and as the mesh part's geometry (node frame)."""
     fh.export(o, path_model, None)
@@ -305,6 +331,13 @@ def main():
     crest_pts = co[crest]
     # the parts, with their own raw copies (bake sources)
     parts = {}
+    helmet_top = float(np.percentile(helmet_pts[:, 1], 99)) if helmet_pts is not None and len(helmet_pts) > 20 else NECK + 2.0
+    if a.get("plume") == "part" and len(crest_pts) > 200 and helmet_pts is not None:
+        # the plume as a rigid part on the head (the user, test 31: test 29's arc was right, but smoothed into the body
+        # it merged into the helmet, mail and cloak; cut out as it was, its rise went with the gap): its centre line
+        # for a clean tube (trellis.plume_part) out of a finial on the helmet's top
+        res["plume_line"] = plume_line(crest_pts, helmet_pts, helmet_top, np.array(bones["head"]),
+                                       float(a.get("finial_height", 0.6)))
     for key, mask in (("lance", lance), ("shield", shield)):
         if mask.sum() > 50:
             p = part_object(obj, mask, key)
@@ -344,7 +377,7 @@ def main():
     vs = float(a.get("close_voxel", 0.1))
     fh.collapse_to(obj, 10 ** 9, vs)
     fh.keep_largest(obj)
-    if len(crest_pts) and a.get("plume", "cut") == "cut":
+    if len(crest_pts) and a.get("plume", "cut") in ("cut", "part"):  # (a part: its own tube replaces it)
         # the plume cut off the closed solid (smoothed, it was a heavy red arc over the head: the user, test 29); a
         # small crest part (a tuft on the head bone) takes its place in the loadout
         from mathutils.kdtree import KDTree
@@ -359,6 +392,17 @@ def main():
         res["plume_holes_filled"] = fh.fill_open(obj)
         crest_pts = crest_pts[:0]  # nothing left to keep rigid
     res["body_tris"] = fh.collapse_to(obj, int(a["target_tris"]), None)
+    if res.get("plume_line"):
+        # the finial on the low body's crown (the raw helmet's top points lean forward: it stood on the dome's front
+        # edge); the line moved with it, keeping its shape
+        v = hs.verts(obj)
+        top = v[v[:, 1] > v[:, 1].max() - 0.2]
+        crown = np.array([top[:, 0].mean(), v[:, 1].max() - 0.08, top[:, 2].mean()]) - np.array(bones["head"])
+        pl = res["plume_line"]
+        shift = crown - np.array(pl["finial_base"])
+        pl["finial_base"] = crown.round(4).tolist()
+        pl["line"] = (np.array(pl["line"]) + shift).round(4).tolist() if pl["line"] else []
+        pl["crown_shift"] = shift.round(3).tolist()
     if a.get("even", 0):  # the collapse's slivers evened out (a few smoothing passes on the low mesh; their flips)
         fh.activate(obj)
         mod = obj.modifiers.new("even", "SMOOTH")

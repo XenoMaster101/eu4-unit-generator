@@ -121,13 +121,15 @@ SPEAR_ZONES = (ZoneDef("shaft", "Shaft", WOOD, 3, material="wood"),
 # M23: parts with geometry and textures of their own (split off a TRELLIS.2 model: the rider's lance and shield);
 # one zone, the whole texture: "country1" there makes the part PdxMeshColor (its spec map's R is the mask)
 OWN_ZONES = (ZoneDef("own", "Own texture", (128, 128, 128), 5),)
-MESH_KINDS = ("mesh_weapon", "mesh_shield", "mesh_belt")
+MESH_KINDS = ("mesh_weapon", "mesh_shield", "mesh_belt", "mesh_head")
 
 KINDS: dict[str, PartKind] = {k.name: k for k in (
     PartKind("mesh_weapon", "Weapon (own mesh)", "Right_hand_node", LOADOUT_ROLES, "mesh", "own", {}, OWN_ZONES),
     PartKind("mesh_shield", "Shield (own mesh)", "Left_hand_node", LOADOUT_ROLES, "mesh", "own", {}, OWN_ZONES),
     # a sheathed sword or other gear hung from the belt: on the pelvis bone, rigid (decoration, never drawn)
     PartKind("mesh_belt", "Belt gear (own mesh)", "hip", LOADOUT_ROLES, "mesh", "own", {}, OWN_ZONES),
+    # a plume (and its holder) on the head bone, rigid with the head (in the head bone's frame: the mesh's axes)
+    PartKind("mesh_head", "Head gear (own mesh)", "head", LOADOUT_ROLES, "mesh", "own", {}, OWN_ZONES),
     PartKind("dory", "Dory (spear)", "Right_hand_node", LOADOUT_ROLES, "spear", "atlas",
              _spear(15.0, -11.5, 4.0, 0.45, 0.17, 1.3), SPEAR_ZONES,
              scaled=("tip", "butt", "head_length", "spike")),

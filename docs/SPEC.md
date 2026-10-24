@@ -2813,3 +2813,13 @@ The path went: nearest-surface weights 133 / 98 / 119 flips → leg slot → reg
   - Tier 1: the finished cataphract (TRELLIS.2 horse v012, rider v020). Tier 2: vanilla's rider on it. Tier 3: vanilla. Units are named "T31 ...".
   - The validator found 0 errors and 3 warnings (the parts' flat normal maps, the shield's texel density).
   - Flips 32 / 33 / 41.
+- **The user's correction after test 31 (2026-10-24): the plume back.** Test 29's arc had the right shape but merged into the helmet and mail. Test 31 was not run. Fixed as general steps (`process_rider(plume="part", sword=False)`, now the default):
+  - **Body:** the raw plume is cut off the body. Before this, `plume="part"` left the plume in the body, smoothed into the helmet.
+  - **Centre line:** `fresh_rider.plume_line` takes the raw plume's centre line as shells by distance from the finial's top, with each shell's centroid and side-to-side spread. It stops before the helmet (its radius + 0.35) and the cloak (neck + 1.5).
+  - **Finial:** it moves onto the low body's crown, and the line moves with it.
+  - **Part:** `trellis.plume_part` builds our own geometry, a gold finial (socket, post, knob) and a crimson tube out of the knob. The tube is narrow at the base, then as wide as the raw plume (half width 0.3 to 0.55), tapering at the end. It is a rigid `mesh_head` part on the head bone.
+  - A first try cut the raw plume mesh out with a gap round the helmet. It lost the rise and read as a flat lid.
+- **In-game test 32 STAGED** (`build/test32`, rider v024; units named "T32 ..."):
+  - The run sheet is `README.txt`; the head compare is `gallery/head_compare.png`.
+  - The validator found 0 errors and 3 warnings.
+  - Flips 32 / 33 / 41.
