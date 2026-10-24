@@ -2597,6 +2597,90 @@ The user (after test 22's report; in-game tests 21 and 22 skipped for now, "the 
 - **In-game test 27 STAGED** (`build/test27`; the run sheet is `README.txt`, the gallery `gallery/sheet.png` with a map-zoom row):
   - Tier 1: the cataphract (v011). Tier 2: horse 2 (v015). Tier 3: vanilla. Units are named "T27 ...".
   - The validator found 0 errors and 0 warnings.
+- **The user on test 27 in game (2026-10-23):** "the cataphract works and reads as an armoured warhorse; animations look good". The cloak overlap is accepted. Last fixes for the horse, as general steps:
+  - **Head decorations** (`bake_colour` `head_marks`, texture only: geometry that small doesn't survive ~2,900 triangles):
+    - Red tassel marks on the forehead (a third down the face), the cheeks (on the face's side) and the chin (the lowest point near the muzzle), and a plume mark on the poll. Each is a knot 0.32 across with a strand 0.8 long hanging under it.
+    - The ears' red is turned to the ears' own colour; in game it had read as hairpins.
+    - Only with a head band, that is, a chanfron.
+  - **Emblem** (`bake_colour` `emblem`; the unit is Byzantium's): a decal mask on each side's main caparison panel, 65% back along it, behind the saddle flap and the rider's leg.
+    - The old, blurred gold inside the panel is cleaned to the cloth's red, the decal is painted in the trim's gold, and it is mirrored for the far side.
+    - Design: the Palaiologan tetragrammatic cross, a gold cross with four betas, the left two mirrored. Drawn by `textures/decals.py` (`python -m eu4unitgen.textures.decals tetragrammatic <out.png>`). A historical symbol, public domain (rule 8).
+    - The main panels have their own UV islands at twice the texel density, and the trunk gets 1.4×. The decal went from 1,897 to about 8,700 texels a side, and the betas are legible.
+  - **Country colour** (`bake_colour` `country_mask`, opt-in): the red cloth is PdxMeshColor's primary mask (spec R 1; the diffuse a neutral grey whose product with the default primary gives the cloth's red back).
+    - The default primary is the cloth's own red, brightest channel 255: (255, 77, 70) for the cataphract.
+    - Vanilla Byzantium has no `country_colors` entry, so its units take its map colour (149, 45, 102), a purple. To keep the red for BYZ, the set gives BYZ that primary unit colour. Test 28 sets it on HDA.
+    - Not for horse 2: its bay coat is close to red in hue.
+- **In-game test 28 STAGED** (`build/test28`; the run sheet is `README.txt`, the gallery `gallery/sheet.png`, the close-ups `gallery/closeups_head_panels.png` from our renderer with the country colour applied as the shader does):
+  - Tier 1: the cataphract (v012). Tier 2: horse 2 (v016). Tier 3: vanilla. Units are named "T28 ...". The validator found 0 errors and 0 warnings.
+
+#### M22. The standard horse pipeline: image → TRELLIS.2 → processing → game (2026-10-23)
+The horse track's result. It replaces M18–M20's self-reading, fitted and cloak pipelines as the default for new horses; those stay as fallbacks.
+
+**One command** (`ref3d/trellis.py`):
+```
+python -m eu4unitgen.ref3d.trellis run <image> --name <subject> --rights "<declaration>" --ai-python <Windows AI python>
+                                       [--emblem <decal.png>] [--country-mask] [--test testNN]
+```
+It writes `assets_in/<name>/subject.json`, then `assets_in/<name>/trellis/`: `input/`, `raw.glb`, and `game/vNNN/` with the textures, `manifest.json`, `compare_sheet.png` and `deform/`. `process <glb> --out <dir>` and `stage --test testNN --names TNN <dir>@<subject.json> ...` run the later stages alone.
+
+**Inputs:** a side view of the horse on a plain background; a name; the rights declaration (rule 8: the user's own statement). For a nation-specific unit, a decal mask (white on black) and the country-colour option.
+
+**1. Cut-out** (Windows AI environment): BiRefNet (MIT, ai job `ref3d_mask`) masks the horse; the image goes to TRELLIS.2 as RGBA, so its own background remover (RMBG-2.0, non-commercial) is never loaded.
+
+**2. TRELLIS.2** (WSL2, `tools/wsl/trellis2_setup.sh`; the environment, licences and memory are in M21): ai job `trellis2_generate`.
+- 1024_cascade, seed 42, low-VRAM mode, our UV rasteriser instead of nvdiffrast.
+- About 6 minutes and 4–6 GB of VRAM; up to ~19 GB of system RAM in WSL.
+- The result is a ~280k-face textured `.glb`.
+
+**3. Processing** (Blender, fresh_horse source `direct`; everything automatic):
+
+| Step | What it does | Why (the case that taught it) |
+|---|---|---|
+| Weld, largest piece | coincident vertices merged | TRELLIS.2 splits its mesh at UV seams |
+| Face forward | the long axis onto z, the head's end (higher) to −Z | TRELLIS.2 picks its own facing (the cataphract: 90° off) |
+| Scale | one uniform scale: the croup, then the seat (rays at Saddle_Node, the dip between the saddle's rims) at vanilla's | the rider sits on `Saddle_Node` |
+| Slim | a body whose side silhouette is over 1.15× vanilla's is scaled about the seat, the legs stretched to the ground | test 26: bulkier than vanilla's slim horse (1.44–1.65×) |
+| Head found before the slim, its poll carried through | head features on the unslimmed model | after it, the cataphract's chest was taken for its head |
+| Legs | each lower leg slid under vanilla's heel, faded from the knee to the belly; the head and neck not moved (put on vanilla's poll only for the weights) | test 25 v001's reshape bent the neck into a goose curve |
+| Hair | the tail found by its own colour (the rear-most hanging vertices), behind the buttock, cut off the closed solid; our tube on vanilla's tail bones, sized and painted from it; the body's tail-bone weights cleared. The mane's voxels smoothed into a crest | the strands tore in idle; darkness and greyness rules took coat and silver |
+| Closed solid | flood fill (closing 0.2, kept only where thick; an opening of 0.2 on the head and neck, the ears kept); voxel remesh 0.1, relaxed | the cataphract's surface is open (a shell, then lace); legs standing close welded; fragments (mane flaps, the bit) |
+| Decimate | quadric collapse to 2,800 body triangles (2,928 with the tail), degenerate edges dissolved; the close retried coarser if it stalls | a collapse on TRELLIS.2's surface stalls at 36–61k |
+| UVs | region islands (legs, head, trunk with neck, main panels, tail; left and right), borders straightened, conformal, the panels 2× and the trunk 1.4× texel density, packed, stretched to the square | Smart UV's many islands packed at 45–59% |
+| Weights | chain weights; the tail along its bones | |
+
+**4. Textures** (1024; `bake_colour`, `bake_horse`):
+- base colour baked from the raw model, selected-to-active, gutters padded;
+- the tail painted from its colours;
+- head band and marks (with a chanfron), emblem decal and country-colour mask (opt-in);
+- gloss by colour class (silver 14, gold 12, matte 5; TRELLIS.2's metallic map isn't used);
+- the colour matched in Lab to the raw model's lit render (lightness half way), silver held at 0.85 of the raw's;
+- the normal map and AO from the raw model.
+
+**5. Checks:**
+- the comparison sheet (raw and game version through one camera, overlay and IoU: 0.75–0.80 side);
+- the deformation check against vanilla in idle, moving and attack;
+- the gallery, staged with `stage`;
+- the validator at staging.
+
+**6. Game:** the loadout's `horses` (geometry, textures, rights) on `cavalry_horse`'s skeleton and animations, through `core/fresh_mesh` and the test-mod writer.
+
+**Results:** the cataphract and horse 2 are in M21 (tests 25–28). The cataphract works in game (test 27).
+
+**Known limits:**
+- the reins and stirrup leathers are lost;
+- the cataphract's skirt is solid to its hem;
+- texture use is 60–72%;
+- horse 2's moving and attack deformation is above vanilla's since the slim (its legs stretched);
+- head marks and the band are texture, not geometry;
+- the country colour's brightness in game is UNVERIFIED (test 28).
+
+**End to end, untouched (2026-10-23):** `run` on `new_refs/horse2_light_cavalry.png` as subject `horse2_t2`.
+- Total 13.6 min: the cut-out; TRELLIS.2 10.4 min (load 212 s, generate 360 s, export 48 s; 4.0 GB VRAM; 289k faces; our rasteriser); processing, bakes, the sheet and the deformation check 85 s.
+- Facing turned −0.3°, slimmed 0.90 (1.43× → 1.23× vanilla's side silhouette), seat 12.30 against 12.23, 2,927 triangles, side IoU 0.81.
+- Deformation idle 0.86–1.21 / 3.6 / 23, moving 0.86–1.16 / 5.4 / 35, attack 0.73–1.24 / 5.7 / 55.
+- Its only human inputs: the image, the name, the rights declaration and the AI python.
+
+**Next track: the rider** (the user named `assets_in/new_refs/cataphract_rider.png`; the folder holds `cataphract_rider_v1.png`).
 
 ## 11. References
 - EU4 wiki, Model modding: https://eu4.paradoxwikis.com/Model_modding
