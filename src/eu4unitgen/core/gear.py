@@ -10,7 +10,10 @@ Rules (the user, test 32):
   * horsehair is a flat blade (tall and thin, a brush along its line), never a round tube; its top edge is jagged;
     its texture is strands along its length, a dark base with lighter streaks, in the reference's colours;
   * a kite shield is a tall almond with a pointed bottom, slightly curved, a raised rim, a crisp painted emblem, a
-    normal map for the rim and studs, the field on the country colour's mask.
+    normal map for the rim and studs, the field on the country colour's mask;
+and (test 34): the shield belongs to the design, not a clean sticker: the caparison's red and aged gold, worn and
+shaded like the baked textures, studs all round the rim, a little darker than the armour; metal fittings (finials,
+helmet bands) are our own simple geometry on the body's surface, in the horse's gold.
 """
 from __future__ import annotations
 
@@ -81,6 +84,100 @@ def chaikin(pts: list[V], values: list[float], passes: int) -> tuple[list[V], li
             w += [0.75 * va + 0.25 * vb, 0.25 * va + 0.75 * vb]
         pts, values = q + [pts[-1]], w + [values[-1]]
     return pts, values
+
+
+def _noise(size: int, cells: int, seed: int, lo: float, hi: float) -> Image.Image:
+    """Smooth value noise (L) between ``lo`` and ``hi`` (0-1 of 255): a ``cells`` x ``cells`` random grid, enlarged."""
+    rnd = random.Random(seed)
+    g = Image.new("L", (cells, cells))
+    g.putdata([int(255 * (lo + (hi - lo) * rnd.random())) for _ in range(cells * cells)])
+    return g.resize((size, size), Image.BICUBIC)
+
+
+def _shade(im: Image.Image, mult: Image.Image) -> Image.Image:
+    """``im`` (RGB) times ``mult`` (L, 255 = unchanged)."""
+    return ImageChops.multiply(im, Image.merge("RGB", (mult, mult, mult)))
+
+
+# metal fittings -----------------------------------------------------------------------------------------------
+
+def lathe(m: Mesh, profile: list[tuple[float, float]], base: V, sides: int, uv) -> None:
+    """A solid of revolution round the vertical (y) through ``base``: ``profile`` (radius, height) bottom to top,
+    closed at both ends; every corner on ``uv`` (a plain metal patch)."""
+    rings = [[m.vert([base[0] + r * math.cos(2 * math.pi * k / sides), base[1] + y,
+                      base[2] + r * math.sin(2 * math.pi * k / sides)], uv) for k in range(sides)] for r, y in profile]
+    for (ra, (r0, y0)), (rb, (r1, y1)) in zip(zip(rings[:-1], profile[:-1]), zip(rings[1:], profile[1:])):
+        for k in range(sides):
+            j = (k + 1) % sides
+            ang = 2 * math.pi * (k + 0.5) / sides
+            # outward and, where the profile narrows or widens, up or down
+            m.face([ra[k], ra[j], rb[j], rb[k]], [math.cos(ang) * (y1 - y0), r0 - r1, math.sin(ang) * (y1 - y0)])
+    m.face(list(reversed(rings[0])), [0, -1, 0])
+    m.face(rings[-1], [0, 1, 0])
+
+
+def raycast_far(tris: list, origin: V, d: V, reach: float):
+    """The farthest hit of the ray ``origin`` + t ``d`` (t in 0..reach) on ``tris`` (corner triples; Moller-Trumbore):
+    the outer surface of a closed body seen from inside. -> (t, the triangle's unit normal turned along ``d``) or
+    None."""
+    best = None
+    for a, b, c in tris:
+        e1, e2 = _add(b, a, -1), _add(c, a, -1)
+        pv = _cross(d, e2)
+        det = _dot(e1, pv)
+        if abs(det) < 1e-12:
+            continue
+        tv = _add(origin, a, -1)
+        u = _dot(tv, pv) / det
+        if u < 0 or u > 1:
+            continue
+        qv = _cross(tv, e1)
+        v = _dot(d, qv) / det
+        if v < 0 or u + v > 1:
+            continue
+        t = _dot(e2, qv) / det
+        if 0 < t <= reach and (best is None or t > best[0]):
+            n = _norm(_cross(e1, e2))
+            best = (t, n if _dot(n, d) > 0 else [-x for x in n])
+    return best
+
+
+def surface_band(m: Mesh, pts: list[V], normals: list[V], half_w: list[float], lift: float, sink: float,
+                 closed: bool = False, uv_u: tuple[float, float] = (0.77, 0.98)) -> None:
+    """A raised metal band along ``pts`` on a surface (``normals`` outward): its foot ``sink`` under the surface,
+    its face ``lift`` over it and a little narrower; uv across the band (``uv_u``: edge to edge, v 0.5) for a
+    shaded strip. ``closed``: a ring."""
+    n = len(pts)
+    u0, u1 = uv_u
+    cols = []
+    for i in range(n):
+        a, b = pts[(i - 1) % n if closed else max(i - 1, 0)], pts[(i + 1) % n if closed else min(i + 1, n - 1)]
+        t = _norm(_add(b, a, -1))
+        side = _norm(_cross(normals[i], t))
+        w, nn, p = half_w[i], normals[i], pts[i]
+        foot, face = _add(p, nn, -sink), _add(p, nn, lift)
+        cols.append((side, nn, [m.vert(_add(foot, side, -w), (u0, 0.5)),
+                                m.vert(_add(face, side, -0.75 * w), (u0 + 0.25 * (u1 - u0), 0.5)),
+                                m.vert(_add(face, side, 0.75 * w), (u1 - 0.25 * (u1 - u0), 0.5)),
+                                m.vert(_add(foot, side, w), (u1, 0.5))]))
+    pairs = list(zip(cols, cols[1:] + cols[:1])) if closed else list(zip(cols[:-1], cols[1:]))
+    for (side, nn, a), (_, _, b) in pairs:
+        m.face([a[0], a[1], b[1], b[0]], _add(nn, side, -1))
+        m.face([a[1], a[2], b[2], b[1]], nn)
+        m.face([a[2], a[3], b[3], b[2]], _add(nn, side, 1))
+    if not closed:
+        for (side, nn, q), sgn in ((cols[0], -1), (cols[-1], 1)):
+            m.face(q, [sgn * x for x in _cross(side, nn)])
+
+
+def stud(m: Mesh, p: V, nrm: V, r: float, h: float, uv) -> None:
+    """A rivet head: a low four-sided pyramid on the surface at ``p``."""
+    side = _norm(_cross(nrm, [0.0, 0.0, 1.0] if abs(nrm[2]) < 0.9 else [1.0, 0.0, 0.0]))
+    other = _cross(nrm, side)
+    base = [m.vert(_add(_add(p, nrm, -0.01), d, r), uv) for d in (side, other, [-x for x in side], [-x for x in other])]
+    top = m.vert(_add(p, nrm, h), uv)
+    for k in range(4):
+        m.face([base[k], base[(k + 1) % 4], top], nrm)
 
 
 # horsehair ----------------------------------------------------------------------------------------------------
@@ -175,8 +272,11 @@ def normal_from_height(height: Image.Image, strength: float = 2.0) -> Image.Imag
 
 KITE = {"aspect": 0.52, "widest": 0.18, "bulge": 0.1, "bulge_v": 0.04, "thickness": 0.08, "rim": 0.075, "rim_h": 0.05,
         "sides": 24, "tex": 512}
-# the reference's colours (new_refs/cataphract_rider.png: the shield's field and its gold, sampled)
-KITE_COLOURS = {"field": (85, 25, 27), "gold": (172, 118, 60), "stud": (196, 146, 86), "back": (72, 48, 32)}
+# the caparison's (the user, test 34: the shield part of the design): its red as the horse bake recorded it (the head
+# band's red) and its gold (the median of the horse texture's gold texels); the wear below darkens both about 12%
+KITE_COLOURS = {"field": (94, 26, 23), "gold": (147, 116, 80), "stud": (170, 136, 94), "back": (60, 40, 28)}
+KITE_WEAR = {"grime": (0.78, 1.0), "grain": (0.9, 1.0), "edge": 0.3, "top_light": 0.88, "scratches": 60, "chips": 50,
+             "seed": 5}
 KITE_GLOSS = {"field": 5, "gold": 12, "back": 3}
 
 
@@ -304,9 +404,38 @@ def kite_shield(H: float, centre: V, out: V, up: V, across: V, primary=None, cfg
         field_px = (g, g, g)
     else:
         field_px = field
+    wear = {**KITE_WEAR, **c.get("wear", {})}
+    rnd = random.Random(wear["seed"])
     diffuse = Image.new("RGB", (B, B), KITE_COLOURS["back"])
     ImageDraw.Draw(diffuse).polygon([to_px(x * 1.04, y * 1.03) for x, y in outline], fill=gold)  # the rim, its walls too
     diffuse.paste(field_px, (0, 0, B, B), field_mask)
+    # the paint's dark edge round the emblem, and chips worn out of it
+    edge = ImageChops.multiply(ImageChops.subtract(emblem.filter(ImageFilter.MaxFilter(2 * (B // 400) + 1)), emblem),
+                               region)
+    diffuse.paste(tuple(int(v * 0.6) for v in field_px), (0, 0, B, B), edge)
+    chips = Image.new("L", (B, B), 0)
+    cd = ImageDraw.Draw(chips)
+    for _ in range(int(wear["chips"])):
+        x, y = rnd.uniform(0.2, 0.8) * B, rnd.uniform(0.05, 0.95) * B
+        r = rnd.uniform(0.002, 0.007) * B
+        cd.ellipse([x - r, y - r * rnd.uniform(0.5, 1.0), x + r, y + r], fill=255)
+    diffuse.paste(tuple(int(v * 0.85) for v in field_px), (0, 0, B, B), ImageChops.multiply(chips, emblem))
+    # scratches: thin lighter lines over the face
+    scr = Image.new("L", (B, B), 0)
+    sd = ImageDraw.Draw(scr)
+    for _ in range(int(wear["scratches"])):
+        x, y = rnd.uniform(0.15, 0.85) * B, rnd.uniform(0.05, 0.95) * B
+        a, ln = rnd.uniform(0, math.pi), rnd.uniform(0.02, 0.08) * B
+        sd.line([(x, y), (x + ln * math.cos(a), y + ln * math.sin(a))], fill=rnd.randint(70, 150), width=max(1, B // 900))
+    diffuse = Image.composite(diffuse.point(lambda v: min(255, int(v * 1.3 + 6))), diffuse, scr)
+    # shading like the baked textures: grime, grain, darker towards the rim and the bottom
+    mult = ImageChops.multiply(_noise(B, 9, rnd.randint(0, 10 ** 6), *wear["grime"]),
+                               _noise(B, 90, rnd.randint(0, 10 ** 6), *wear["grain"]))
+    rim_dark = region.filter(ImageFilter.GaussianBlur(B * 0.025)).point(
+        lambda v: int(255 * (1 - wear["edge"] * (1 - v / 255.0))))
+    mult = ImageChops.multiply(mult, rim_dark)
+    top = Image.linear_gradient("L").resize((B, B)).point(lambda v: int(255 * (1 - (1 - wear["top_light"]) * v / 255.0)))
+    diffuse = _shade(diffuse, ImageChops.multiply(mult, top))
     height = Image.new("L", (B, B), 0)
     hd = ImageDraw.Draw(height)
     hd.polygon([to_px(x * 1.04, y * 1.03) for x, y in outline], fill=200)
@@ -314,12 +443,15 @@ def kite_shield(H: float, centre: V, out: V, up: V, across: V, primary=None, cfg
     height.paste(110, (0, 0, B, B), emblem)
     dd = ImageDraw.Draw(diffuse)
     studs = _inset(outline, c["rim"] * H / 4.0)
-    rs = c["rim"] * H * 0.17 * scale * B
-    for k, (x, y) in enumerate(studs):
-        if k % 2:
-            continue
+    rs = c["rim"] * H * 0.2 * scale * B
+    stud_c = KITE_COLOURS["stud"]
+    for x, y in studs:  # every one, each with its shadow and a highlight up and left
         px, py = to_px(x, y)
-        dd.ellipse([px - rs, py - rs, px + rs, py + rs], fill=KITE_COLOURS["stud"])
+        dd.ellipse([px - rs * 1.35, py - rs * 1.2, px + rs * 1.35, py + rs * 1.5], fill=tuple(int(v * 0.45) for v in gold))
+        dd.ellipse([px - rs, py - rs, px + rs, py + rs], fill=stud_c)
+        hr = rs * 0.4
+        dd.ellipse([px - rs * 0.35 - hr, py - rs * 0.35 - hr, px - rs * 0.35 + hr, py - rs * 0.35 + hr],
+                   fill=tuple(min(255, int(v * 1.25)) for v in stud_c))
         for r, v in ((rs, 230), (rs * 0.6, 255)):
             hd.ellipse([px - r, py - r, px + r, py + r], fill=v)
     diffuse = diffuse.resize((T, T), Image.LANCZOS)

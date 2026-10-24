@@ -1,4 +1,6 @@
 """core.gear: horsehair blades, strand textures, kite shields, normal maps (SPEC M23)."""
+import math
+
 from PIL import Image
 
 from eu4unitgen.core import gear
@@ -65,3 +67,45 @@ def test_kite_shield_shape_and_mask():
     assert spec.getpixel((52, 80))[0] == 255  # the field on the mask (below the cross's bar, off the upright)
     r, g, b, _ = tex["diffuse"].getpixel((52, 80))
     assert abs(r - g) < 3 and abs(g - b) < 3  # the masked field is grey
+
+
+def _sphere(r, n=16):
+    """A closed UV sphere's triangles (corner triples) of radius ``r`` at the origin."""
+    import math
+    pts = [[[r * math.sin(math.pi * i / n) * math.cos(2 * math.pi * j / n), r * math.cos(math.pi * i / n),
+             r * math.sin(math.pi * i / n) * math.sin(2 * math.pi * j / n)] for j in range(n)] for i in range(n + 1)]
+    tris = []
+    for i in range(n):
+        for j in range(n):
+            a, b, c, d = pts[i][j], pts[i][(j + 1) % n], pts[i + 1][(j + 1) % n], pts[i + 1][j]
+            tris += [(a, b, c), (a, c, d)]
+    return tris
+
+
+def test_raycast_far_hits_the_outer_shell():
+    tris = _sphere(1.0) + _sphere(0.5)  # an inner shell too: the outer one wins
+    t, n = gear.raycast_far(tris, [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 3.0)
+    assert 0.95 < t <= 1.0 and n[0] > 0.9
+    assert gear.raycast_far(tris, [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.3) is None
+
+
+def test_surface_band_and_lathe():
+    m = gear.Mesh()
+    ring = [[math.cos(a / 10 * math.tau), 0.0, math.sin(a / 10 * math.tau)] for a in range(10)]
+    gear.surface_band(m, ring, ring, [0.05] * 10, 0.04, 0.02, closed=True)
+    assert len(m.tri) // 3 == 10 * 6
+    r = [math.hypot(m.p[i], m.p[i + 2]) for i in range(0, len(m.p), 3)]
+    assert min(r) > 0.97 and max(r) < 1.05  # on the surface: its foot under it, its face over it
+    k = len(m.tri)
+    gear.lathe(m, [(0.3, 0.0), (0.2, 0.5), (0.3, 1.0)], [0.0, 2.0, 0.0], 8, (0.5, 0.5))
+    assert (len(m.tri) - k) // 3 == 2 * 8 * 2 + 2 * 6  # two bands of quads, two octagon caps
+    assert _normals_facing({"p": m.p, "tri": m.tri[k:]}, [0.0, 2.5, 0.0]) > 0.9
+
+
+def test_kite_shield_worn_and_darker():
+    _, tex = gear.kite_shield(3.0, [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], primary=None, cfg={"tex": 128})
+    d = tex["diffuse"].convert("RGB")
+    field = [d.getpixel((x, y)) for x in range(40, 60) for y in range(70, 90)]
+    reds = [p[0] for p in field]
+    assert max(reds) - min(reds) > 6  # worn: not one flat colour
+    assert sum(reds) / len(reds) < gear.KITE_COLOURS["field"][0]  # a little darker than the caparison's red

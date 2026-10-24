@@ -249,7 +249,16 @@ def sword_part(out: Path, frame: dict, hip_half_width: float, cfg: dict | None =
                                           "normal": str(out / "sword_normal.png"), "specular": str(out / "sword_specular.png")}}
 
 
-FINIAL_GOLD, FINIAL_GLOSS = (205, 165, 70), 12
+# the horse's gold (the user, test 34: "same gold as the chanfron"; the median of its texture's gold texels)
+FINIAL_GOLD, FINIAL_GLOSS = (147, 116, 80), 12
+# the reference's helmet (new_refs/cataphract_rider.png, its head): a tall turned finial on the crown (a flange on the
+# dome, a waisted neck with a ring, a flared lip the plume rises out of: about 0.4 of the dome's width tall), a brow
+# band, a nasal guard and ribs up the dome to the finial, riveted. Radii and heights in helmet radii; the bands
+# ray-cast onto the low body's dome (from its centre, the crown less a radius), front (-z here) the plume's opposite
+HELMET = {"finial": [(0.36, -0.12), (0.36, 0.05), (0.21, 0.12), (0.18, 0.30), (0.25, 0.34), (0.25, 0.42),
+                     (0.18, 0.46), (0.18, 0.62), (0.27, 0.78), (0.29, 0.84), (0.2, 0.84)],
+          "sides": 12, "brow_elev": 0.05, "brow_w": 0.085, "rib_w": 0.06, "nasal_w": 0.07, "nasal_down": 0.6,
+          "lift": 0.05, "sink": 0.04, "ribs": (0, 90, 180, 270), "rib_top": 0.82, "rivets": 12, "rivet_r": 0.045}
 # the plume as horsehair (the user, test 32: a round tube read as a sausage): a flat blade along the raw plume's line,
 # its height across the line from the raw plume's spread (clamped), a jagged top; strands in the reference's colours
 PLUME_HAIR = {"base_h": 0.3, "min_h": 0.75, "max_h": 1.15, "spread_k": 2.8, "end_h": 0.35, "half_thick": 0.11,
@@ -258,22 +267,120 @@ PLUME_HAIR = {"base_h": 0.3, "min_h": 0.75, "max_h": 1.15, "spread_k": 2.8, "end
 PLUME_DARK, PLUME_LIGHT = (86, 14, 22), (150, 38, 52)
 
 
-def plume_part(parts_dir: Path, info: dict, cfg: dict | None = None, colours: tuple | None = None) -> dict:
+# the helmet rigid on the head bone (test 35): fresh_rider's weight smoothing (24 passes at the standard budget) carried
+# the neck's weights up into the dome (about 70% head): posed, the dome sagged ~0.4 under the head's rigid parts (the
+# finial floated, the helmet bands hung round the face). Above y0 the dome's pinned back to the head, fully by y1
+HEAD_PIN = (14.45, 14.75)
+
+
+def pin_head(geometry: Path, y0: float = HEAD_PIN[0], y1: float = HEAD_PIN[1]) -> int:
+    """Pin the low body's helmet to the head bone (``low_geometry.json`` in place; vertices above ``y0`` mixed
+    towards ``head`` 1.0, fully above ``y1``). -> the vertices changed."""
+    g = json.loads(Path(geometry).read_text(encoding="utf-8"))
+    n = 0
+    for i, row in enumerate(g["weights"]):
+        y = g["p"][3 * i + 1]
+        if y <= y0:
+            continue
+        t = min(1.0, (y - y0) / (y1 - y0))
+        f = t * t * (3 - 2 * t)
+        new = {k: w * (1 - f) for k, w in row.items()}
+        new["head"] = new.get("head", 0.0) + f
+        g["weights"][i] = {k: w for k, w in new.items() if w > 1e-4}
+        n += 1
+    Path(geometry).write_text(json.dumps(g), encoding="utf-8")
+    return n
+
+
+def helmet_gold(m, info: dict, body: dict, cfg: dict | None = None) -> dict:
+    """The reference's helmet gold on ``m`` (a ``core.gear.Mesh`` in the head bone's frame): the brow band, the
+    nasal guard, the ribs and rivets on the low body's dome (``body``: {"geometry": low_geometry.json, "head": the
+    head bone's position in it}; the helmet's rigid on the head bone, so the bands stay put). -> counts."""
+    from eu4unitgen.core import gear
+    c = {**HELMET, **(cfg or {})}
+    g = json.loads(Path(body["geometry"]).read_text(encoding="utf-8"))
+    hx, hy, hz = body["head"]
+    P = [[g["p"][i] - hx, g["p"][i + 1] - hy, g["p"][i + 2] - hz] for i in range(0, len(g["p"]), 3)]
+    R = float(info.get("helmet_radius", 1.0))
+    bx, by, bz = info["finial_base"]
+    centre = [bx, by + 0.08 - R, bz]  # the crown (finial_base: 0.08 under the low body's top) less a radius
+    near = [(P[a], P[b], P[c2]) for a, b, c2 in zip(g["tri"][0::3], g["tri"][1::3], g["tri"][2::3])
+            if any(sum((P[k][j] - centre[j]) ** 2 for j in range(3)) < (2.0 * R) ** 2 for k in (a, b, c2))]
+    line = info.get("line") or []
+    back = 1.0 if not line or line[-1][2] >= bz else -1.0  # the plume flows back
+
+    def hit(az, el):  # azimuth 0 = front, 90 = the rider's left (x+); elevation up from the dome's centre
+        a, e = math.radians(az), math.radians(el)
+        d = [math.cos(e) * math.sin(a), math.sin(e), -back * math.cos(e) * math.cos(a)]
+        h = gear.raycast_far(near, centre, d, 2.5 * R)
+        return (gear._add(centre, d, h[0]), h[1]) if h else None
+
+    def smooth(ns):
+        return [gear._norm(gear._add(gear._add(ns[i - 1] if i else ns[i], ns[i]), ns[i + 1] if i + 1 < len(ns) else ns[i]))
+                for i in range(len(ns))]
+    counts = {}
+    brow_el = math.degrees(c["brow_elev"])
+    ring = [hit(az, brow_el) for az in range(0, 360, 10)]
+    ring = [q for q in ring if q]
+    if len(ring) > 20:
+        ns = smooth([n for _, n in ring])
+        gear.surface_band(m, [p for p, _ in ring], ns, [c["brow_w"] * R] * len(ring), c["lift"] * R, c["sink"] * R, closed=True)
+        for k in range(int(c["rivets"])):
+            p, n = ring[(k * len(ring)) // int(c["rivets"])]
+            gear.stud(m, gear._add(p, ns[(k * len(ring)) // int(c["rivets"])], c["lift"] * R), n, c["rivet_r"] * R,
+                      0.6 * c["rivet_r"] * R, (0.875, 0.5))
+        counts["brow"] = len(ring)
+    top_el = math.degrees(math.asin(min(0.99, c["rib_top"])))
+    for az in c["ribs"]:
+        pts = [hit(az, brow_el + (top_el - brow_el) * k / 9) for k in range(10)]
+        pts = [q for q in pts if q]
+        if len(pts) > 3:
+            gear.surface_band(m, [p for p, _ in pts], smooth([n for _, n in pts]), [c["rib_w"] * R] * len(pts),
+                              0.8 * c["lift"] * R, c["sink"] * R)
+            counts[f"rib_{az}"] = len(pts)
+    nasal = [hit(0, brow_el - k * 8) for k in range(int(c["nasal_down"] * 10))]
+    nasal = [q for q in nasal if q and q[0][1] > centre[1] - c["nasal_down"] * R]
+    if len(nasal) > 2:
+        gear.surface_band(m, [p for p, _ in nasal], smooth([n for _, n in nasal]),
+                          [c["nasal_w"] * R * (1 - 0.3 * k / len(nasal)) for k in range(len(nasal))], c["lift"] * R, c["sink"] * R)
+        counts["nasal"] = len(nasal)
+    return counts
+
+
+# the cavalry_rider_* animations scale the rider's root to 0.805 (measured: every bone's posed scale at frame 1 of
+# cavalry_rider_idle on western_generic_01_type1); the body shrinks with it. The gallery (render_unit) places an
+# attached part at its bone without that scale, so a head part built in the body's units came out 1.24x too big and
+# 1.24x too far from the head bone (test 35: the finial floated, the helmet bands hung round the face).
+# UNVERIFIED: whether the game applies the bone's animated scale to an attached entity. Test 35 shows both (tier 1
+# scaled by this, as the gallery wants; tier 2 unscaled); TODO: keep the one that sits right in game
+RIDER_ANIM_SCALE = 0.805
+
+
+def plume_part(parts_dir: Path, info: dict, cfg: dict | None = None, colours: tuple | None = None,
+               body: dict | None = None, scale: float = 1.0) -> dict:
     """M23 (the user, tests 31 and 32): the rider's plume as a rigid head part (``mesh_head``) with its gold holder
     (finial): our own geometry on ``fresh_rider``'s ``plume_line`` (the raw plume's centre line and side-to-side
     spread, in the head bone's frame). The finial: a socket, a post and a knob on the helmet's top. The plume: a
     horsehair blade (``core.gear``) out of the knob, low at the base, tall along the line, low at its end; strand
-    texture (``colours``: dark, light; the reference's by default) beside a gold patch. -> a loadout part entry."""
+    texture (``colours``: dark, light; the reference's by default) beside a gold patch. The finial (test 35): the
+    reference's tall turned one (``HELMET``), the plume out of its lip; with ``body`` the helmet's gold bands too
+    (``helmet_gold``). ``scale``: the whole part about the head bone (``RIDER_ANIM_SCALE``: the gallery's model).
+    -> a loadout part entry."""
     from PIL import Image
 
     from eu4unitgen.core import gear
     c = {**PLUME_HAIR, **(cfg or {})}
     dark, light = colours or (PLUME_DARK, PLUME_LIGHT)
     bx, by, bz = info["finial_base"]
-    h = float(info["finial_height"])
-    tip = [bx, by + h * 0.9, bz]
+    R = float(info.get("helmet_radius", 1.0))
+    prof = [(r * R, y * R) for r, y in HELMET["finial"]]
+    h = prof[-1][1]
+    tip = [bx, by + h * 0.95, bz]
+    rise = [bx, tip[1] + 0.4, bz]
     line = [list(map(float, q)) for q in info["line"]] or [[bx, by + h + 1.3, bz + 0.3]]
-    pts = [tip, [bx, by + h * 0.9 + 0.4, bz]] + line
+    # the raw line's first points under the rise, close over the finial: a dip; dropped
+    line = [q for q in line if q[1] > rise[1] - 0.1 or math.hypot(q[0] - bx, q[2] - bz) > 0.6] or line[-1:]
+    pts = [tip, rise] + line
     heights = [c["base_h"], c["base_h"] * 1.6] + [min(max(c["spread_k"] * w, c["min_h"]), c["max_h"])
                                                   for w in info.get("half_width", [])]
     heights = (heights + [c["min_h"]] * len(pts))[:len(pts)]
@@ -287,15 +394,11 @@ def plume_part(parts_dir: Path, info: dict, cfg: dict | None = None, colours: tu
     m.p, m.tri, m.uv = list(blade["p"]), list(blade["tri"]), [x * (0.75 if k % 2 == 0 else 1.0) for k, x in enumerate(blade["uv"])]
     gold_uv = (0.875, 0.5)
 
-    def box(y0, y1, half):
-        ids = [m.vert([bx + sx * half, y, bz + sz * half], gold_uv) for y in (y0, y1)
-               for sx, sz in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
-        for f, e in (((0, 1, 2, 3), (0, -1, 0)), ((4, 5, 6, 7), (0, 1, 0)), ((0, 1, 5, 4), (0, 0, -1)),
-                     ((1, 2, 6, 5), (1, 0, 0)), ((2, 3, 7, 6), (0, 0, 1)), ((3, 0, 4, 7), (-1, 0, 0))):
-            m.face([ids[i] for i in f], list(e))
-    box(by, by + 0.15, 0.22)  # the socket on the helmet
-    box(by + 0.15, by + h * 0.75, 0.09)  # the post
-    box(by + h * 0.75, by + h, 0.16)  # the knob the plume comes out of
+    gear.lathe(m, prof, [bx, by, bz], int(HELMET["sides"]), gold_uv)
+    if body:
+        helmet_gold(m, info, body, cfg)
+    if scale != 1.0:
+        m.p = [x * scale for x in m.p]
     parts_dir.mkdir(parents=True, exist_ok=True)
     (parts_dir / "plume_part.json").write_text(json.dumps(m.geometry()), encoding="utf-8")
     tex = gear.strand_texture(dark, light, 256)
@@ -304,6 +407,11 @@ def plume_part(parts_dir: Path, info: dict, cfg: dict | None = None, colours: tu
     for kind, fill in (("diffuse", FINIAL_GOLD + (255,)), ("specular", (0, 0, 0, FINIAL_GLOSS)), ("normal", (128, 128, 255, 255))):
         im = Image.new("RGBA", (S, S), fill)
         im.paste(tex[kind].resize((int(S * 0.75), S), Image.LANCZOS), (0, 0))
+        if kind == "diffuse":  # the gold strip: darker at its edges, a raised band's light
+            for x in range(int(S * 0.75), S):
+                t = abs((x / S - 0.875) / 0.125)
+                k = 1.08 - 0.4 * t * t
+                im.paste(tuple(min(255, int(v * k)) for v in FINIAL_GOLD) + (255,), (x, 0, x + 1, S))
         images[kind] = parts_dir / f"plume_{kind}.png"
         im.save(images[kind])
     return {"kind": "mesh_head", "mesh": {"geometry": str(parts_dir / "plume_part.json"), **{k: str(v) for k, v in images.items()}}}
@@ -368,6 +476,7 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                                     **{**RIDER, **(cfg or {})}, "shield_frame": frame, "plume": "part" if plume == "part" else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
                                     "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),
                                     "parts_dir": str(out / "parts")}).result
+    fr["head_pinned"] = pin_head(out / "low_geometry.json")
     raw = br.run_job("render_model", {"model": str(Path(glb).resolve()), "engine": "EEVEE", "out_dir": str(out / "raw"),
                                       "name": "raw", "size": 900, "views": {"front": [0, 5]}}).result
     common = {"gloss": PROCESS["gloss"], **PROCESS["bake"], "image": str(basecolor), "colour_render": raw["images"]["front"]}
@@ -396,7 +505,9 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
         parts["shield"] = kite_part(out / "parts", frame, tall, primary=(bc.get("default_primary") or [255, 77, 70])
                                     if country_mask else None)
     if plume == "part" and (fr.get("plume_line") or {}).get("line"):  # with its gold holder (the user, test 31)
-        parts["plume"] = plume_part(out / "parts", fr["plume_line"])
+        parts["plume"] = plume_part(out / "parts", fr["plume_line"],
+                                    body={"geometry": str(out / "low_geometry.json"), "head": base_arrays(base)["bones"]["head"]},
+                                    scale=RIDER_ANIM_SCALE)
     if fr.get("plume_voxels_cut") and plume == "tuft":  # the earlier option: a small upright tuft (crest part)
         parts["plume"] = {"kind": "crest", "params": dict(PLUME), "colours": {"hair": list(PLUME_RED)}}
     if sword:  # on the side the shield doesn't cover (the reference hangs it on the shield's side; the user, test 30)

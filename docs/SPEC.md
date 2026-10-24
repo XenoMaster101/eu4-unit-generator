@@ -2866,3 +2866,28 @@ The path went: nearest-surface weights 133 / 98 / 119 flips → leg slot → reg
   - Tier 1: the cataphract at the standard budget (horse `cataphract_budget/horse/v001`, rider `cataphract_budget/rider/v001`: blade plume, kite shield). Tier 2: vanilla's rider on it. Tier 3: vanilla. Units are named "T34 ...".
   - The validator found 0 errors and 3 warnings.
   - The cataphract is done; next is packaging.
+- **The user on test 34 (2026-10-24): two last touches.** The helmet gold: the reference's tall gold tube finial with the plume rising out of it, plus the brow band, nasal guard and ribs, in the chanfron's gold. The shield: part of the design, not a clean sticker (the caparison's deep red and aged gold, wear and shading, studs on the rim, a little darker).
+  - **Helmet (`trellis.plume_part`, `helmet_gold`; `core.gear.lathe`, `surface_band`, `stud`, `raycast_far`):**
+    - The finial is a turned solid (`HELMET["finial"]`, 12 sides): a flange on the dome, a waisted neck with a ring, a flared lip. It is about 0.85 helmet radii tall, taken from the reference's proportions. The blade plume starts inside the lip.
+    - The bands are ray-cast from the dome's centre (the crown less a helmet radius) onto the low body's outer surface: a brow ring with 12 rivets, four ribs from the brow up to the finial, and a nasal guard tapering down the front. They are raised strips (0.05 helmet radii proud), using the plume texture's gold strip, which is shaded across its width.
+    - The gold is the horse's: the median of its texture's gold texels, (147, 116, 80) (the chanfron's). Before this it was (205, 165, 70).
+    - Cost: the head part grew from about 600 to 1,540 triangles.
+  - **Shield (`core.gear.kite_shield`):**
+    - The colours are the caparison's: its red (94, 26, 23), the horse bake's head-band red; its gold (147, 116, 80).
+    - `KITE_WEAR`: low-frequency grime and grain; edge darkening towards the rim; a top-to-bottom light falloff; 60 light scratches; 50 chips worn out of the emblem; a dark painted edge round the emblem. Overall it is about 12% darker than the caparison.
+    - Studs: all of them now (every other one before), larger, each with a shadow and a highlight.
+    - The field's mask grey is computed against the set's colour (255, 77, 70), the horse's, not the rider bake's (255, 105, 92).
+  - **Found: the helmet wasn't rigid.** `fresh_rider`'s weight smoothing (24 passes at the standard budget) carried the neck's weights into the dome, so it was about 70% on the head. `trellis.pin_head` now pins everything above y 14.45 back onto `head`, fully above 14.75. It is pure Python, runs on `low_geometry.json` in `process_rider` after the job, and is applied to v004/v005.
+  - **Found: the rider animation's scale (UNVERIFIED in game).**
+    - `cavalry_rider_*` scales every rider bone to 0.805 at frame 1, measured in Blender (infantry `polearm_twohanded_idle`: 1.0). The body shrinks with it.
+    - `render_unit` places attached parts without the bone's scale, so a head part built in body units came out 1.24 times too big and too far from the head bone. The finial floated about 0.35 over the dome; test 34's cube did the same, unnoticed at the game camera's angle.
+    - The "attached scale" fact above (parts keep their own pdxmesh scale) was found on infantry, whose animations have no scale. Whether the game applies an animated bone scale to an attachment is unknown.
+    - `plume_part(scale=)` scales the whole part about the head bone. `process_rider` uses `RIDER_ANIM_SCALE` = 0.805, the gallery's model, until test 35 decides.
+    - The lance and kite are positioned from `rider_frames`' posed positions (already scaled), but sized in body units. If the game applies the scale, they come out about 20% smaller and closer to the hand than in the gallery; the user approved them in game either way.
+- **In-game test 35 STAGED** (`build/test35`; the run sheet is `README.txt`, the close-ups are `gallery/head_shield_closeup.png`):
+  - Tier 1: rider `cataphract_budget/rider/v004`, head part ×0.805 (right if the game ignores the bone scale; it matches the gallery).
+  - Tier 2: v005, the same but unscaled (right if the game applies it).
+  - Tier 3: vanilla.
+  - Horse `cataphract_budget/horse/v001` on both custom tiers. Units are named "T35 ...".
+  - The validator found 0 errors and 6 warnings, the parts' texture-quality notes once per tier.
+  - The tier whose finial sits on the helmet and whose bands lie on it sets `RIDER_ANIM_SCALE` (0.805 or 1.0) and closes the UNVERIFIED note.
