@@ -2692,3 +2692,41 @@ It writes `assets_in/<name>/subject.json`, then `assets_in/<name>/trellis/`: `in
 - Forum: "How to change unit models": https://forum.paradoxplaza.com/forum/threads/how-to-change-unit-models.1461268/
 - Blender command-line/background scripting: https://docs.blender.org/api/current/info_tips_and_tricks.html
 - DirectXTex / texconv: https://github.com/microsoft/DirectXTex/wiki/Getting-Started
+
+#### M23. The rider: image → TRELLIS.2 → processing → game (2026-10-23)
+**Reference** (rule 8): the user named `assets_in/new_refs/cataphract_rider.png` ("the arms-out version, ChatGPT-generated from my original, I own the output"). That file isn't in the folder, so `cataphract_rider_v1.png` (a front view, arms slightly out, the lance in the right hand, a kite shield in the left) is used until it is. Recorded in `assets_in/cataphract_rider/subject.json`.
+
+**Raw TRELLIS.2** (`assets_in/cataphract_rider/trellis/raw_sheet.png`): 1024_cascade, about 5 minutes, 4.5 GB VRAM, 278k faces.
+- It matches the reference: the scale cuirass, gilded pauldrons and bracers, red cloak and skirt with gold trim and tassels, scale greaves, the helmet with its mail veil, the lance and the kite shield.
+- The crest is spiky strands; the shield's crosses are blurred.
+
+**Processing** (Blender job `fresh_rider`; `python -m eu4unitgen.ref3d.trellis run <image> --rider ...` or `trellis.process_rider`). The rider wears the infantry pdxmesh and plays its `horse_*` ids (`cavalry_rider_*` animations) at the horse's `Saddle_Node` (§7.2).
+
+| Step | What it does | Why |
+|---|---|---|
+| Split | the lance: the column standing beside the body above its top; axis fitted, within 1.6 shaft radii (1.15 at the grip, 0.035 H round the blade and tassel). The shield: the outermost points on the other side give its plane; what is connected to them within the plate's thickness | the weapons come fused to the hands |
+| Scale | the helmet's top (the highest point near the centre line that isn't the crest's red) at 16.4, feet on the ground, centred | the narrowest-slice neck took the crest for the head (15.7 tall) |
+| Arms | each arm turned about its shoulder so the lance's grip points at `Right_hand_node` and the shield's at `Left_hand_node` (28° and 31°), the rest slid; each weapon carried with its hand | sliding the hands 4.6 and 5.9 units stretched the arms |
+| Plume | smoothed on the closed solid; rigid on `head` | its lower half took the spine's weights and stretched |
+| Solid | flood fill (closing 0.2), a slot between the legs under the crotch, the cloth hanging under each arm outside the torso cut | closed round both legs, the skirt was one block that tore when the seated legs spread; the cloak draped over the shield arm tore when the arm moved |
+| Decimate | quadric collapse to 2,600 (vanilla's rider body: 2,883) | |
+| Weights | nearest-surface transfer, then region rules: head above the neck; arms along their chains (within 1.2); the cloak behind the back on the spine by height; legs and skirt halves along the leg chains; 12 smoothing passes | nearest-surface alone: ~100 flips seated |
+| Parts | the lance and shield each closed, collapsed (200 and 400 triangles), unwrapped, baked; written in their nodes' frames (the lance along −Z from the grip, the rider's "down", levelled forward in game; the shield's face along +X, top +Y) as `mesh_weapon` and `mesh_shield` parts | |
+| Textures | `bake_colour` (the red cloth and the shield's face as the country colour's mask; gloss by colour class; the colour matched to the raw front render) and `bake_horse` | |
+
+- **New code:** part kinds with their own mesh (`mesh_weapon`, `mesh_shield`: geometry and textures of their own, `build_parts` builder `mesh`); loadout `riders` (`fresh_mesh.apply_horses(kind="rider")`, rule `fresh_mesh` for both); `ref3d.trellis.process_rider`.
+- **Byzantium's colour:** a game horse with a cloth mask carries `unit_colours`, and the set's tags without colours of their own get them (`export.pipeline.horse_unit_colours`). BYZ gets the cloth red (255, 77, 70) as its primary, instead of its map purple.
+
+**Deformation** (flipped triangles; stretch p05–p95 / max):
+
+| | idle | moving | attack |
+|---|---|---|---|
+| ours | 39 (head 5, arms 6, legs 15, torso 18); 0.51–1.17 / 2.9 | 28 (arms 3, legs 11, torso 15); 0.55–1.04 / 2.7 | 52 (head 11, arms 11, legs 11, torso 29); 0.54–1.15 / 4.1 |
+| vanilla rider | 12; 0.68–0.94 / 7.2 | 0; 0.70–0.90 / 4.1 | 12; 0.65–1.01 / 8.4 |
+
+The path went: nearest-surface weights 133 / 98 / 119 flips → leg slot → region weights → the cloak under the arms cut 59 / 39 / 71 → 12 smoothing passes 39 / 28 / 52. The worst stretch is lower than vanilla's; the flips are 3× vanilla's, mostly the torso, cloak and skirt.
+
+**In-game test 29 STAGED** (`build/test29`; the run sheet is `README.txt`, the gallery `gallery/sheet.png`, close and near rows):
+- Tier 1: our rider on the cataphract. Tier 2: vanilla's rider on the cataphract. Tier 3: vanilla. Units are named "T29 ...".
+- The validator found 0 errors and 2 warnings: the parts' flat normal maps, under the base-game normal-strength range.
+- Seen in the gallery: seated at the saddle, the lance levelled forward, the shield on the left arm; the plume is a heavy red arc; the body is bulkier than vanilla's rider.
