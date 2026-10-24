@@ -119,8 +119,10 @@ def glb_basecolor(glb: Path, out: Path) -> Path:
     return out
 
 
-def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: bool = False, blender: str | None = None) -> dict:
-    """``glb`` (TRELLIS.2) into ``root/vNNN`` (module doc). -> the manifest."""
+def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: bool = False, blender: str | None = None,
+            cfg: dict | None = None) -> dict:
+    """``glb`` (TRELLIS.2) into ``root/vNNN`` (module doc); ``cfg`` overrides ``PROCESS`` (e.g. a detail budget's
+    ``target_tris``). -> the manifest."""
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.fresh_mesh import base_arrays
     from eu4unitgen.core.project import default_blender_path
@@ -128,7 +130,7 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=3600)
     base = (eu4() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes()
     van = base_arrays(base)
-    t0, P = time.time(), PROCESS
+    t0, P = time.time(), {**PROCESS, **(cfg or {})}
     basecolor = glb_basecolor(glb, out / "raw_basecolor.png")
     fr = br.run_job("fresh_horse", {
         "source": {"kind": "direct", "path": str(Path(glb).resolve()), "merge": 1e-5},
@@ -248,86 +250,89 @@ def sword_part(out: Path, frame: dict, hip_half_width: float, cfg: dict | None =
 
 
 FINIAL_GOLD, FINIAL_GLOSS = (205, 165, 70), 12
-PLUME_TUBE = {"base_half": 0.12, "min_half": 0.3, "max_half": 0.55, "end_half": 0.1, "depth": 0.9, "sides": 8, "smooth": 2}
-PLUME_TUBE_RED = (140, 24, 30)  # the reference's crimson (165 read toy-bright, 128 22 22 black on the old crest)
+# the plume as horsehair (the user, test 32: a round tube read as a sausage): a flat blade along the raw plume's line,
+# its height across the line from the raw plume's spread (clamped), a jagged top; strands in the reference's colours
+PLUME_HAIR = {"base_h": 0.3, "min_h": 0.75, "max_h": 1.15, "spread_k": 2.8, "end_h": 0.35, "half_thick": 0.11,
+              "end_thick": 0.04, "smooth": 2}
+# new_refs/cataphract_rider.png's plume, sampled: its dark base (p20-p50) and its lighter strands (p80-p95)
+PLUME_DARK, PLUME_LIGHT = (86, 14, 22), (150, 38, 52)
 
 
-def plume_part(parts_dir: Path, info: dict, cfg: dict | None = None) -> dict:
-    """M23 (the user, test 31): the rider's plume as a rigid head part (``mesh_head``) with its gold holder (finial):
-    our own geometry on ``fresh_rider``'s ``plume_line`` (the raw plume's centre line and side-to-side spread, in the
-    head bone's frame). The finial: a socket, a post and a knob on the helmet's top. The plume: a tube out of the knob,
-    narrow at the base, as wide as the raw plume along the line (clamped), tapering at its end; its section wider side
-    to side than deep. A two-swatch texture (crimson, gold). -> a loadout part entry."""
-    import math
-
+def plume_part(parts_dir: Path, info: dict, cfg: dict | None = None, colours: tuple | None = None) -> dict:
+    """M23 (the user, tests 31 and 32): the rider's plume as a rigid head part (``mesh_head``) with its gold holder
+    (finial): our own geometry on ``fresh_rider``'s ``plume_line`` (the raw plume's centre line and side-to-side
+    spread, in the head bone's frame). The finial: a socket, a post and a knob on the helmet's top. The plume: a
+    horsehair blade (``core.gear``) out of the knob, low at the base, tall along the line, low at its end; strand
+    texture (``colours``: dark, light; the reference's by default) beside a gold patch. -> a loadout part entry."""
     from PIL import Image
-    c = {**PLUME_TUBE, **(cfg or {})}
-    add = lambda u, v, k=1.0: [u[i] + k * v[i] for i in range(3)]  # noqa: E731
-    mix = lambda u, v, t: [u[i] * (1 - t) + v[i] * t for i in range(3)]  # noqa: E731
-    norm = lambda v: [x / (math.sqrt(sum(y * y for y in v)) or 1.0) for x in v]  # noqa: E731
-    cross = lambda u, v: [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]  # noqa: E731
+
+    from eu4unitgen.core import gear
+    c = {**PLUME_HAIR, **(cfg or {})}
+    dark, light = colours or (PLUME_DARK, PLUME_LIGHT)
     bx, by, bz = info["finial_base"]
     h = float(info["finial_height"])
-    p, tri, uv = [], [], []
-    red_uv, gold_uv = (0.25, 0.5), (0.75, 0.5)
+    tip = [bx, by + h * 0.9, bz]
+    line = [list(map(float, q)) for q in info["line"]] or [[bx, by + h + 1.3, bz + 0.3]]
+    pts = [tip, [bx, by + h * 0.9 + 0.4, bz]] + line
+    heights = [c["base_h"], c["base_h"] * 1.6] + [min(max(c["spread_k"] * w, c["min_h"]), c["max_h"])
+                                                  for w in info.get("half_width", [])]
+    heights = (heights + [c["min_h"]] * len(pts))[:len(pts)]
+    heights[-1] = c["end_h"]
+    pts, heights = gear.chaikin(pts, heights, int(c["smooth"]))
+    n = len(pts)
+    thick = [c["half_thick"] + (c["end_thick"] - c["half_thick"]) * max(0.0, (i / (n - 1) - 0.6) / 0.4) for i in range(n)]
+    blade = gear.horsehair_blade(pts, heights, thick)
+    # the hair's uv into the left 3/4 of the image, the finial on the gold strip at the right
+    m = gear.Mesh()
+    m.p, m.tri, m.uv = list(blade["p"]), list(blade["tri"]), [x * (0.75 if k % 2 == 0 else 1.0) for k, x in enumerate(blade["uv"])]
+    gold_uv = (0.875, 0.5)
 
     def box(y0, y1, half):
-        corners = [[bx + sx * half, y, bz + sz * half] for y in (y0, y1) for sx, sz in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
-        for f in ((0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)):
-            base = len(p) // 3
-            for i in f:
-                p.extend(corners[i])
-                uv.extend(gold_uv)
-            tri.extend([base, base + 1, base + 2, base, base + 2, base + 3])
+        ids = [m.vert([bx + sx * half, y, bz + sz * half], gold_uv) for y in (y0, y1)
+               for sx, sz in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        for f, e in (((0, 1, 2, 3), (0, -1, 0)), ((4, 5, 6, 7), (0, 1, 0)), ((0, 1, 5, 4), (0, 0, -1)),
+                     ((1, 2, 6, 5), (1, 0, 0)), ((2, 3, 7, 6), (0, 0, 1)), ((3, 0, 4, 7), (-1, 0, 0))):
+            m.face([ids[i] for i in f], list(e))
     box(by, by + 0.15, 0.22)  # the socket on the helmet
     box(by + 0.15, by + h * 0.75, 0.09)  # the post
     box(by + h * 0.75, by + h, 0.16)  # the knob the plume comes out of
-    # the centre line: the knob's top, straight up a little, then the raw plume's line; smoothed (Chaikin)
-    tip = [bx, by + h * 0.9, bz]
-    line = [list(map(float, q)) for q in info["line"]]
-    pts = [tip, add(tip, [0.0, 0.4, 0.0])] + line if line else [tip, add(tip, [0.0, 1.3, -0.3])]
-    halves = [c["base_half"], c["base_half"] * 1.5] + [min(max(w, c["min_half"]), c["max_half"]) for w in info.get("half_width", [])]
-    halves = (halves + [c["min_half"]] * len(pts))[:len(pts)]
-    halves[-1] = c["end_half"]
-    for _ in range(int(c["smooth"])):
-        q, hq = [pts[0]], [halves[0]]
-        for a_, b_, ha, hb in zip(pts[:-1], pts[1:], halves[:-1], halves[1:]):
-            q += [mix(a_, b_, 0.25), mix(a_, b_, 0.75)]
-            hq += [0.75 * ha + 0.25 * hb, 0.25 * ha + 0.75 * hb]
-        pts, halves = q + [pts[-1]], hq + [halves[-1]]
-    k = int(c["sides"])
-    rings = []
-    for i, ctr in enumerate(pts):
-        t = norm(add(pts[min(i + 1, len(pts) - 1)], pts[max(i - 1, 0)], -1.0))
-        side = norm(add([1.0, 0.0, 0.0], t, -t[0]))
-        nrm = cross(t, side)
-        rings.append(len(p) // 3)
-        for j in range(k):
-            ang = 2 * math.pi * j / k
-            v = add(add(ctr, side, halves[i] * math.cos(ang)), nrm, halves[i] * c["depth"] * math.sin(ang))
-            p.extend(v)
-            uv.extend(red_uv)
-    for r0, r1 in zip(rings[:-1], rings[1:]):
-        for j in range(k):
-            a_, b_ = r0 + j, r0 + (j + 1) % k
-            tri.extend([a_, r1 + j, b_, b_, r1 + j, r1 + (j + 1) % k])
-    for ring, ctr, flip in ((rings[0], pts[0], True), (rings[-1], pts[-1], False)):  # the two ends closed
-        centre = len(p) // 3
-        p.extend(ctr)
-        uv.extend(red_uv)
-        for j in range(k):
-            a_, b_ = ring + j, ring + (j + 1) % k
-            tri.extend([centre, b_, a_] if flip else [centre, a_, b_])
     parts_dir.mkdir(parents=True, exist_ok=True)
-    (parts_dir / "plume_part.json").write_text(json.dumps({"p": [round(x, 5) for x in p], "tri": tri, "uv": uv}), encoding="utf-8")
-    diff, spec = Image.new("RGBA", (64, 64), PLUME_TUBE_RED + (255,)), Image.new("RGBA", (64, 64), (0, 0, 0, 3))
-    diff.paste(FINIAL_GOLD + (255,), (32, 0, 64, 64))
-    spec.paste((0, 0, 0, FINIAL_GLOSS), (32, 0, 64, 64))
-    diff.save(parts_dir / "plume_diffuse.png")
-    spec.save(parts_dir / "plume_specular.png")
-    Image.new("RGBA", (64, 64), (128, 128, 255, 255)).save(parts_dir / "plume_normal.png")
-    return {"kind": "mesh_head", "mesh": {"geometry": str(parts_dir / "plume_part.json"), "diffuse": str(parts_dir / "plume_diffuse.png"),
-                                          "normal": str(parts_dir / "plume_normal.png"), "specular": str(parts_dir / "plume_specular.png")}}
+    (parts_dir / "plume_part.json").write_text(json.dumps(m.geometry()), encoding="utf-8")
+    tex = gear.strand_texture(dark, light, 256)
+    S = 256
+    images = {}
+    for kind, fill in (("diffuse", FINIAL_GOLD + (255,)), ("specular", (0, 0, 0, FINIAL_GLOSS)), ("normal", (128, 128, 255, 255))):
+        im = Image.new("RGBA", (S, S), fill)
+        im.paste(tex[kind].resize((int(S * 0.75), S), Image.LANCZOS), (0, 0))
+        images[kind] = parts_dir / f"plume_{kind}.png"
+        im.save(images[kind])
+    return {"kind": "mesh_head", "mesh": {"geometry": str(parts_dir / "plume_part.json"), **{k: str(v) for k, v in images.items()}}}
+
+
+def node_bind(mesh_bytes: bytes, node: str) -> list | None:
+    """A bone's bind pose in a .mesh (the skeleton summary's 12 numbers, as the gallery passes render_unit)."""
+    from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
+    b = (summarize_mesh(parse_pdx_mesh(mesh_bytes))["skeleton"].get(node) or {}).get("bind")
+    return list(b) if b else None
+
+
+def kite_part(parts_dir: Path, frame: dict, height: float, primary=None, cfg: dict | None = None) -> dict:
+    """M23 (the user, test 32): the rider's shield as the reference's kite (``core.gear.kite_shield``), strapped to
+    the left forearm like the raw shield was (``rider_frames``' Left_hand_node frame: half way to the elbow, 0.6
+    out, 1.5 down; facing out, its top up, its width along the rider's forward), ``height`` tall; the field on the
+    country colour's mask against ``primary``. -> a loadout part entry (``mesh_shield``)."""
+    from eu4unitgen.core import gear
+    c = {"out": 1.2, "down": -0.3, **(cfg or {})}  # out 0.6, down 1.5 (the raw disc's): the kite's point sank into the caparison
+    centre = [0.5 * frame["elbow"][k] + c["out"] * frame["out"][k] - c["down"] * frame["up"][k] for k in range(3)]
+    geo, tex = gear.kite_shield(height, centre, frame["out"], frame["up"], frame["forward"], primary=primary, cfg=cfg)
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    (parts_dir / "kite_part.json").write_text(json.dumps(geo), encoding="utf-8")
+    paths = {}
+    for kind, im in tex.items():
+        paths[kind] = str(parts_dir / f"kite_{kind}.png")
+        im.save(paths[kind])
+    return {"kind": "mesh_shield", **({"colours": {"own": "country1"}} if primary is not None else {}),
+            "mesh": {"geometry": str(parts_dir / "kite_part.json"), **paths}}
 
 
 RIDER_GROUPS = {"head": ["head"], "arms": ["R_shoulder", "R_arm", "R_elbow", "R_wrist", "R_hand", "L_shoulder", "L_arm",
@@ -337,7 +342,7 @@ RIDER_GROUPS = {"head": ["head"], "arms": ["R_shoulder", "R_arm", "R_elbow", "R_
 
 
 def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None, plume: str = "part",
-                  sword: bool = False) -> dict:
+                  sword: bool = False, kite: bool = True, cfg: dict | None = None) -> dict:
     """A TRELLIS.2 rider (.glb from a front view) into ``root/vNNN`` (SPEC M23): Blender job fresh_rider (the body on
     the infantry skeleton; the lance and shield split off as parts in their hand nodes' frames); bake_colour (the
     body and each part; the red cloth as the country colour's mask) and bake_horse (the body's normal and AO); the
@@ -357,9 +362,10 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     basecolor = glb_basecolor(glb, out / "raw_basecolor.png")
     anim = eu4() / "gfx" / "models" / "Units" / "animation" / "cavalry_rider_idle.anim"
     frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": "Left_hand_node",
-                                        "elbow": "L_elbow", "shoulder": "L_shoulder"}).result  # the strapped shield's frame
+                                        "elbow": "L_elbow", "shoulder": "L_shoulder",
+                                        "bind": node_bind(base, "Left_hand_node")}).result  # the strapped shield's frame
     fr = br.run_job("fresh_rider", {"vanilla": base_arrays(base), "source": {"path": str(Path(glb).resolve()), "merge": 1e-5},
-                                    **RIDER, "shield_frame": frame, "plume": "part" if plume == "part" else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
+                                    **{**RIDER, **(cfg or {})}, "shield_frame": frame, "plume": "part" if plume == "part" else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
                                     "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),
                                     "parts_dir": str(out / "parts")}).result
     raw = br.run_job("render_model", {"model": str(Path(glb).resolve()), "engine": "EEVEE", "out_dir": str(out / "raw"),
@@ -384,13 +390,18 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                       **({"colours": {"own": "country1"}} if pb.get("default_primary") else {}),
                       "mesh": {"geometry": str(out / "parts" / f"{key}_part.json"), "diffuse": pb["diffuse"],
                                "normal": str(out / "parts" / f"{key}_normal.png"), "specular": pb["specular"]}}
+    if kite and "shield" in parts:  # the reference's kite in the raw shield's place, about as tall (the user, test 32)
+        b = (fr.get("parts") or {}).get("shield", {}).get("bounds")
+        tall = 0.88 * max(hi - lo for lo, hi in zip(*b)) if b else 5.6
+        parts["shield"] = kite_part(out / "parts", frame, tall, primary=(bc.get("default_primary") or [255, 77, 70])
+                                    if country_mask else None)
     if plume == "part" and (fr.get("plume_line") or {}).get("line"):  # with its gold holder (the user, test 31)
         parts["plume"] = plume_part(out / "parts", fr["plume_line"])
     if fr.get("plume_voxels_cut") and plume == "tuft":  # the earlier option: a small upright tuft (crest part)
         parts["plume"] = {"kind": "crest", "params": dict(PLUME), "colours": {"hair": list(PLUME_RED)}}
     if sword:  # on the side the shield doesn't cover (the reference hangs it on the shield's side; the user, test 30)
         hip_frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": "hip",
-                                                "elbow": "R_thigh", "shoulder": "R_shoulder"}).result
+                                                "elbow": "R_thigh", "shoulder": "R_shoulder", "bind": node_bind(base, "hip")}).result
         parts["sword"] = sword_part(out / "parts", hip_frame, float(fr.get("slim", {}).get("hip_half", 1.9)))
     dd = out / "deform"
     dd.mkdir()

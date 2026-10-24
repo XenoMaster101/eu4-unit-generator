@@ -10,7 +10,11 @@ frame that lands there. Reported, in that frame:
   * ``up``: world up;
   * ``forward``: the rider's forward (horizontal).
 
-args: {"mesh", "anim", "node", "elbow", "result_path"}
+The node's frame is the game's (render_unit's): the posed bone matrix times the offset from Blender's bone rest
+to the bind pose the .mesh records (``bind``: the skeleton summary's 12 numbers). On western_generic_01_type1 the
+offset is the identity (checked for Left_hand_node, test 33's round); applied anyway, as render_unit does.
+
+args: {"mesh", "anim", "node", "elbow", "shoulder", "bind", "result_path"}
 """
 import os
 import sys
@@ -24,6 +28,7 @@ import _pdx  # noqa: E402
 import check_deform as cd  # noqa: E402
 
 S = Matrix(((1, 0, 0), (0, 0, 1), (0, 1, 0)))
+S4 = Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
 
 
 def main():
@@ -43,6 +48,12 @@ def main():
     pb = rig.pose.bones
     world = lambda name: rig.matrix_world @ pb[name].matrix  # noqa: E731
     P = world(a["node"])
+    if a.get("bind"):  # as render_unit.place: the bone's rest -> the .mesh's bind pose, the scale taken out
+        b = a["bind"]
+        rest_local = S4 @ Matrix([b[0:4], b[4:8], b[8:12], [0, 0, 0, 1]]) @ S4
+        P = P @ (rig.data.bones[a["node"]].matrix_local.inverted() @ rest_local)
+        loc, rot, _ = P.decompose()
+        P = Matrix.Translation(loc) @ rot.to_matrix().to_4x4()
     inv = P.inverted()
     rot_inv = inv.to_3x3()
     to_part = lambda v: S @ v  # Blender (the node's) local -> the part's PDX coordinates (S is its own inverse)  # noqa: E731
