@@ -2730,3 +2730,16 @@ The path went: nearest-surface weights 133 / 98 / 119 flips → leg slot → reg
 - Tier 1: our rider on the cataphract. Tier 2: vanilla's rider on the cataphract. Tier 3: vanilla. Units are named "T29 ...".
 - The validator found 0 errors and 2 warnings: the parts' flat normal maps, under the base-game normal-strength range.
 - Seen in the gallery: seated at the saddle, the lance levelled forward, the shield on the left arm; the plume is a heavy red arc; the body is bulkier than vanilla's rider.
+- **The user on test 29's gallery (2026-10-23), test 29 not run; fixed as general steps:**
+  - **Plume:** cut off the closed solid (smoothed, it was a heavy red arc over the head). A `crest` part takes its place: a short arc (12° each side, 1.3 tall, 0.5 thick, fixed red 128, 22, 22), an upright tuft on the helmet.
+  - **Shield strapped to the forearm** (on the rein hand it sat over the horse's neck, as C0c's did). Blender job `rider_frames` measures `Left_hand_node`'s frame in the seated pose, from frame 1 of `cavalry_rider_idle` on the base body: where the elbow, outward and up are in the part's own PDX coordinates. The left node's local +Z is outward, so the hoplon convention (+X) points a shield half backwards on a rider. The shield is turned face outward and top up, and centred half way to the elbow and 0.6 out.
+  - **Slimmer:** x and z scaled towards vanilla's rider's waist and chest (half-width 1.69 against ours 2.82, the cloak's sides), to at least 0.75. Across the torso (|x| under 2) x scales; beyond, the arms shift in whole (scaled, the hands fell short of their nodes and the slide stretched the arms).
+  - **Flips:** the low mesh evened (3 smoothing passes on the collapse's slivers) and the weights smoothed 24 times. Side slits in the skirt were tried and dropped (no gain).
+    - The counts move by ~20 between equivalent meshes (each change re-triangulates the collapse); compare runs, not single numbers.
+    - Runs (idle / moving / attack): v007 39 / 28 / 52 → with the plume cut and slim 0.7, v009 57 / 54 / 55 → slim 0.85 and 24 smoothing passes, v013 42 / 37 / 51 → plus evened, v015 39 / 34 / 38 → slim 0.75, v016 30 / 29 / 41.
+- **Final rider v017:** 2,600 triangles, worst stretch 2.4 / 2.1 / 2.8 (vanilla's 7.2 / 4.1 / 8.4). Flips 30 (arms 8, legs 12, torso 15) / 29 (6, 12, 12) / 41 (10, 14, 23); vanilla's 12 / 0 / 12.
+- **The reference:** the user saved the arms-out version as `cataphract_rider.png`. The folder holds `cataphract_rider.png.png`, pixel for pixel the `_v1` image used since test 29 (`_v1` no longer exists), so the raw model was not regenerated.
+- **In-game test 30 STAGED** (`build/test30`; the run sheet is `README.txt`, the gallery `gallery/sheet.png`):
+  - Tier 1: our rider (v017) on the cataphract. Tier 2: vanilla's rider on it. Tier 3: vanilla. Units are named "T30 ...".
+  - The validator found 0 errors and 3 warnings: the parts' flat normal maps, the shield's texel density, the tuft's shading.
+  - Seen in the gallery: the shield on the left forearm, face outward, its cross showing; a small red tuft on the helmet; slimmer.

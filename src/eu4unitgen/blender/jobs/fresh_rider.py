@@ -131,6 +131,37 @@ def place(obj, bones, keep, top=16.4):
     return s, off, helmet
 
 
+def torso_half(co, bands=((8.6, 9.6), (9.6, 10.6), (10.6, 11.6)), reach=3.0):
+    """The body's half-width (x) and half-depth (z) at the waist and chest: the 95th percentile of |x| and of
+    |z - median z| over points within ``reach`` of the centre line (the arms are farther out at those heights)."""
+    xs, zs = [], []
+    for y0, y1 in bands:
+        sl = co[(co[:, 1] >= y0) & (co[:, 1] < y1) & (np.abs(co[:, 0]) < reach)]
+        if len(sl) > 20:
+            xs.append(np.percentile(np.abs(sl[:, 0]), 95))
+            zs.append(np.percentile(np.abs(sl[:, 2] - np.median(sl[:, 2])), 95))
+    return (float(np.median(xs)) if xs else None), (float(np.median(zs)) if zs else None)
+
+
+def slim_body(co, keep, vanilla_co, low=0.7, edge=2.0):
+    """M23 (the user, test 29: bulkier than vanilla's rider): x and z scaled about the centre line towards vanilla's
+    rider body's waist and chest (half-width and half-depth: ``torso_half``), at least ``low`` (the armour, cloak and
+    skirt need room); before the arms are turned, so the hands still reach their nodes. -> (kx, kz, measures)."""
+    vx, vz = torso_half(vanilla_co)
+    ox, oz = torso_half(co[keep])
+    kx = float(np.clip(vx / ox, low, 1.0)) if vx and ox else 1.0
+    kz = float(np.clip(vz / oz, low, 1.0)) if vz and oz else 1.0
+    zc = float(np.median(co[keep & (co[:, 1] > 8.6) & (co[:, 1] < 11.6), 2]))
+    SLIM_ZC["zc"] = zc
+    SLIM_ZC["edge"] = edge
+    # across the torso (|x| under ``edge``) x scales; beyond, the arms shift in whole (their shape and length kept:
+    # scaled, the hands fell short of their nodes and the slide stretched the arms)
+    ax = np.abs(co[:, 0])
+    co[:, 0] = np.sign(co[:, 0]) * np.where(ax < edge, ax * kx, ax - edge * (1 - kx))
+    co[:, 2] = zc + (co[:, 2] - zc) * kz
+    return kx, kz, {"vanilla": [vx, vz], "ours": [ox, oz]}
+
+
 def swing_arm(co, movable, grip, target, shoulder, side):
     """``movable`` points on one arm turned about the shoulder so the grip points where the target is (arm length
     kept: the hands were 4.6 and 5.9 from vanilla's, holding the lance in front and the shield at the hip; sliding
@@ -153,6 +184,17 @@ def swing_arm(co, movable, grip, target, shoulder, side):
     slide = np.asarray(target) - end
     co[m] = sh + rot + w[m, None] * slide
     return math.degrees(ang), slide
+
+
+SLIM_ZC = {}
+
+
+def slimmed(p, kx, kz, co):
+    """A point measured before ``slim_body``, moved as it moved the body."""
+    zc, edge = SLIM_ZC.get("zc", 0.0), SLIM_ZC.get("edge", 2.0)
+    ax = abs(p[0])
+    x = np.sign(p[0]) * (ax * kx if ax < edge else ax - edge * (1 - kx))
+    return np.array([x, p[1], zc + (p[2] - zc) * kz])
 
 
 def carry(pts, grip, target, shoulder):
@@ -220,10 +262,12 @@ def main():
     if a.get("fitted_out"):
         fh.write_obj(obj, a["fitted_out"], uv=True)
     co = hs.verts(obj)
+    kx, kz, measured = slim_body(co, ~lance & ~shield, hs.verts(vanilla), float(a.get("slim_low", 0.7)))
+    res["slim"] = {"x": round(kx, 3), "z": round(kz, 3), **measured}
     moves, dirs = {}, {}
     li, si = res["split"].get("lance"), res["split"].get("shield")
     if li:
-        grip = np.array(li["grip"]) * s + off
+        grip = slimmed(np.array(li["grip"]) * s + off, kx, kz, co)
         side = -1.0 if grip[0] < 0 else 1.0
         node = "Right_hand_node" if side < 0 else "Left_hand_node"
         sh = bones["R_shoulder" if side < 0 else "L_shoulder"]
@@ -235,7 +279,7 @@ def main():
         moves["lance"] = {"node": node, "grip": grip.round(3).tolist(), "turned_deg": round(ang, 1),
                           "slid": round(float(np.linalg.norm(slide)), 3)}
     if si:
-        grip = np.array(si["grip"]) * s + off
+        grip = slimmed(np.array(si["grip"]) * s + off, kx, kz, co)
         side = -1.0 if grip[0] < 0 else 1.0
         node = "Right_hand_node" if side < 0 else "Left_hand_node"
         sh = bones["R_shoulder" if side < 0 else "L_shoulder"]
@@ -276,31 +320,45 @@ def main():
     # and the cloth hanging under each arm, outside the torso: draped over the shield arm, it hung from it in one
     # sheet beside the leg and tore when the arm moved (the arms' flips: 64 against vanilla's 2)
     side_x = float(a.get("side_cut", 2.1))
+    slit_x, slit = float(a.get("slit_x", 1.85)), float(a.get("slit_half", 0.0))  # slits off: no gain (54 against 57 flips)
     under = min(bones["R_hand"][1], bones["L_hand"][1]) - 1.0
     fh.SOLID.update({"closing": 0.2, "opening": 0.0, "relax": 3,
                      "carve": [[[-gap, -1.0, -20.0], [gap, crotch, 20.0]],
+                               # side slits: the skirt's front panels follow the thighs, its back ones the hips
+                               *([[[slit_x, -1.0, -slit], [20.0, crotch, slit]], [[-20.0, -1.0, -slit], [-slit_x, crotch, slit]]]
+                                 if slit > 0 else []),
                                [[side_x, -1.0, -20.0], [20.0, under, 20.0]], [[-20.0, -1.0, -20.0], [-side_x, under, 20.0]]]})
     res["leg_slot"] = {"half_width": gap, "top": round(crotch, 2)}
     res["side_cut"] = {"beyond_x": side_x, "below_y": round(under, 2)}
     vs = float(a.get("close_voxel", 0.1))
     fh.collapse_to(obj, 10 ** 9, vs)
     fh.keep_largest(obj)
-    if len(crest_pts):
+    if len(crest_pts) and a.get("plume", "cut") == "cut":
+        # the plume cut off the closed solid (smoothed, it was a heavy red arc over the head: the user, test 29); a
+        # small crest part (a tuft on the head bone) takes its place in the loadout
         from mathutils.kdtree import KDTree
         tree = KDTree(len(crest_pts))
         for i, q in enumerate(crest_pts):
             tree.insert(q, i)
         tree.balance()
-        near = np.array([tree.find(q)[2] < 0.5 for q in hs.verts(obj)])
-        fh.smooth_region(obj, near, 60, 0.5, 3)
-        res["crest_voxels_smoothed"] = int(near.sum())
+        cut = [i for i, q in enumerate(hs.verts(obj)) if q[1] > NECK + 1.2 and tree.find(q)[2] < 0.4]
+        fh.delete_vertices(obj, cut)
+        fh.keep_largest(obj)
+        res["plume_voxels_cut"] = len(cut)
+        res["plume_holes_filled"] = fh.fill_open(obj)
+        crest_pts = crest_pts[:0]  # nothing left to keep rigid
     res["body_tris"] = fh.collapse_to(obj, int(a["target_tris"]), None)
+    if a.get("even", 0):  # the collapse's slivers evened out (a few smoothing passes on the low mesh; their flips)
+        fh.activate(obj)
+        mod = obj.modifiers.new("even", "SMOOTH")
+        mod.factor, mod.iterations = 0.4, int(a["even"])
+        bpy.ops.object.modifier_apply(modifier=mod.name)
     obj.data.uv_layers.new(name="UV")
     fh.packed_uv(obj, float(a.get("uv_margin", 0.002)))
     res["uv_area"] = round(fh.uv_area(obj), 4)
     wstats = {}
     fh.transfer_weights(obj, vanilla, a.get("smooth", 12), a.get("influences", 4), None, wstats)
-    res["regions"] = rider_weights(obj, bones, a.get("influences", 4), plume=crest_pts)
+    res["regions"] = rider_weights(obj, bones, a.get("influences", 4), int(a.get("weight_smooth", 12)), plume=crest_pts)
     verts, tris, unweighted = fh.export(obj, a["geometry_out"], a.get("preview_out"))
     res["final"] = {"vertices": verts, "tris": tris, "unweighted_vertices": unweighted, "pieces": fh.count_pieces(obj)}
     # the parts in their nodes' frames
@@ -317,12 +375,24 @@ def main():
         node = moves[key]["node"]
         origin = np.array(bones[node])
         a_dir, b_dir = dirs[key]  # after the arm's turn
+        place_at = None
         if key == "lance":  # the axis (tip) to -Z (the rider's "down"), the figure's forward (-Z) to +Y
             R = frame_rotation(a_dir, np.array([0.0, 0.0, -1.0]), [0, 0, -1], [0, 1, 0])
-        else:  # the face outwards to +X, the shield's top to +Y
+        elif a.get("shield_frame"):
+            # strapped to the forearm (the user, test 29: it sat on the rein hand over the horse's neck): its face
+            # along the rider's outward side and its top up, in the hand node's frame as the seated pose has it
+            # (rider_frames), centred half way to the elbow and out from the forearm
+            f = a["shield_frame"]
+            R = frame_rotation(a_dir, b_dir, f["out"], f["up"])
+            place_at = 0.5 * np.array(f["elbow"]) + float(a.get("shield_out", 0.6)) * np.array(f["out"])
+        else:  # the face outwards to +X, the shield's top to +Y (the hoplon's convention: on the rein hand)
             R = frame_rotation(a_dir, b_dir, [1, 0, 0], [0, 1, 0])
-        res["parts"][key] = {"node": node, **export_part(p, os.path.join(a["parts_dir"], f"{key}_low.json"),
-                                                        os.path.join(a["parts_dir"], f"{key}_part.json"), R, origin)}
+        if place_at is not None:
+            centre = hs.verts(p).mean(0)
+            origin = centre - np.linalg.solve(R, place_at)  # (centre - origin) @ R.T == place_at
+        res["parts"][key] = {"node": node, **({"strapped_at": place_at.round(3).tolist()} if place_at is not None else {}),
+                             **export_part(p, os.path.join(a["parts_dir"], f"{key}_low.json"),
+                                           os.path.join(a["parts_dir"], f"{key}_part.json"), R, origin)}
     _pdx.write_result(a, res)
 
 

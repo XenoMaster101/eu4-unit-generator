@@ -175,7 +175,13 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     return manifest
 
 
-RIDER = {"target_tris": 2600, "part_tris": {"lance": 200, "shield": 400}, "close_voxel": 0.1}
+# the plume's replacement (the user, test 29): a crest part's short arc, a tuft upright on the helmet's top
+PLUME = {"height": 1.3, "radius": 0.6, "span_deg": 12.0, "thickness": 0.5, "orientation": "fore_aft"}
+PLUME_RED = (128, 22, 22)
+# the rider (M23, test 30 round): slimmed to at least 0.75 of its width towards vanilla's rider, the low mesh evened
+# (3 passes) and its weights smoothed 24 times: flips idle 30 / moving 29 / attack 41 (12 / 0 / 12 for vanilla's)
+RIDER = {"target_tris": 2600, "part_tris": {"lance": 200, "shield": 400}, "close_voxel": 0.1, "slim_low": 0.75,
+         "weight_smooth": 24, "even": 3}
 RIDER_GROUPS = {"head": ["head"], "arms": ["R_shoulder", "R_arm", "R_elbow", "R_wrist", "R_hand", "L_shoulder", "L_arm",
                                           "L_elbow", "L_wrist", "L_hand"],
                 "legs": ["R_thigh", "R_knee", "R_foot", "R_toe", "L_thigh", "L_knee", "L_foot", "L_toe"],
@@ -200,8 +206,11 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     base = base_file.read_bytes()
     t0 = time.time()
     basecolor = glb_basecolor(glb, out / "raw_basecolor.png")
+    anim = eu4() / "gfx" / "models" / "Units" / "animation" / "cavalry_rider_idle.anim"
+    frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": "Left_hand_node",
+                                        "elbow": "L_elbow", "shoulder": "L_shoulder"}).result  # the strapped shield's frame
     fr = br.run_job("fresh_rider", {"vanilla": base_arrays(base), "source": {"path": str(Path(glb).resolve()), "merge": 1e-5},
-                                    **RIDER, "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
+                                    **RIDER, "shield_frame": frame, "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
                                     "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),
                                     "parts_dir": str(out / "parts")}).result
     raw = br.run_job("render_model", {"model": str(Path(glb).resolve()), "engine": "EEVEE", "out_dir": str(out / "raw"),
@@ -226,6 +235,8 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                       **({"colours": {"own": "country1"}} if pb.get("default_primary") else {}),
                       "mesh": {"geometry": str(out / "parts" / f"{key}_part.json"), "diffuse": pb["diffuse"],
                                "normal": str(out / "parts" / f"{key}_normal.png"), "specular": pb["specular"]}}
+    if fr.get("plume_voxels_cut"):  # the plume's place: a small upright tuft on the head (crest part, short arc)
+        parts["plume"] = {"kind": "crest", "params": dict(PLUME), "colours": {"hair": list(PLUME_RED)}}
     dd = out / "deform"
     dd.mkdir()
     (dd / "rider.mesh").write_bytes(write_fresh(base, geometry_from_job(out / "low_geometry.json")))
