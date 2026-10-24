@@ -567,7 +567,7 @@ def derived_body(ctx: Context) -> list[Issue]:
 
 @rule("fresh_mesh")
 def fresh_mesh(ctx: Context) -> list[Issue]:
-    """Fresh horses (Track C, test 15, core.fresh_mesh): on a base-game horse (never DLC), the
+    """Fresh horses (Track C, test 15, core.fresh_mesh) and riders (M23): on a base-game horse or body (never DLC), the
     re-import checks pass (the base's skeleton byte for byte, locators, skin within its influence
     count, aabb, no boundingsphere); the pdxmesh plays every animation id of the base's; the
     textures its material names are generated beside it; the cavalry entity wears it; the file
@@ -576,16 +576,18 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
     from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
 
     res = ctx.generated.loadout
-    if res is None or not res.horses:
+    if res is None or not (res.horses or getattr(res, "riders", None)):
         return []
     w, game, out = ctx.world, ctx.world.game, []
-    for tier, rec in sorted(res.horses.items()):
+    # M23: fresh riders the same way (on the base infantry body, wearing the cavalry rider entity)
+    every = [(t, r, "horse") for t, r in sorted(res.horses.items())] +         [(t, r, "rider") for t, r in sorted((getattr(res, "riders", None) or {}).items())]
+    for tier, rec, what in every:
         f = ctx.generated.files.get(rec.file)
         if f is None:
             out.append(Issue(ERROR, "fresh_mesh", f"tier {tier}: {rec.file} wasn't generated", subject=rec.entity))
             continue
         if not game.in_base_game(rec.base_file):
-            out.append(Issue(ERROR, "fresh_mesh", f"base horse {rec.base_file} isn't a base-game file", f.path))
+            out.append(Issue(ERROR, "fresh_mesh", f"base {what} {rec.base_file} isn't a base-game file", f.path))
             continue
         if game.exists(rec.file):
             out.append(Issue(ERROR, "fresh_mesh", "has a game file's name: it would replace it for everyone", f.path))
@@ -595,7 +597,7 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
         base = w.pdxmesh(rec.base_pdxmesh) or {}
         missing = sorted(set(base.get("animations") or {}) - set(pdx.get("animations") or {}))
         if missing:
-            out.append(Issue(ERROR, "fresh_mesh", f"{rec.pdxmesh} lacks the base horse's animation ids {missing}",
+            out.append(Issue(ERROR, "fresh_mesh", f"{rec.pdxmesh} lacks the base {what}'s animation ids {missing}",
                              subject=rec.pdxmesh))
         if (pdx.get("file") or "").lower() != rec.file.lower():
             out.append(Issue(ERROR, "fresh_mesh", f"{rec.pdxmesh} doesn't point at {rec.file}", subject=rec.pdxmesh))
@@ -609,7 +611,7 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
                     out.append(Issue(ERROR, "fresh_mesh", f"its {kind} texture {path} isn't generated", f.path))
         if rec.triangles > HORSE_TRIANGLES:
             out.append(Issue(WARNING, "fresh_mesh", f"{rec.triangles} triangles (budget {HORSE_TRIANGLES})", f.path))
-        out.append(Issue(INFO, "fresh_mesh", f"tier {tier}: {rec.entity} on a fresh horse ({rec.triangles} triangles, "
+        out.append(Issue(INFO, "fresh_mesh", f"tier {tier}: {rec.entity} on a fresh {what} ({rec.triangles} triangles, "
                                              f"{rec.base_pdxmesh}'s skeleton); rights: {rec.rights}", f.path))
     return out
 

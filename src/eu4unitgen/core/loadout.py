@@ -151,6 +151,13 @@ def check_horse(key, raw) -> dict:
     return {"base": "cavalry_horse", **raw}
 
 
+def check_rider(key, raw) -> dict:
+    """A loadout's fresh rider (M23): as a fresh horse, on the base infantry body (``base`` default
+    western_generic_01_type1, whose pdxmesh carries the horse_* animation ids)."""
+    out = check_horse(key, raw)
+    return {**out, "base": raw.get("base") or "western_generic_01_type1"}
+
+
 def slot_warnings(slot: RoleLoadout) -> list[str]:
     """Hints for a slot as the form shows it (the validator checks the generated result)."""
     kinds = {KINDS[p.kind].bone: p.kind for p in slot.parts}
@@ -171,6 +178,7 @@ class Loadout:
     accept_clipping: list[str] = field(default_factory=list)  # addition kinds whose clipping (C2) is a known limit
     hair: dict = field(default_factory=dict)  # a character spec's "hair" (swatch colours); empty: the library's
     horses: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh horse (core.fresh_mesh: geometry, textures, rights)
+    riders: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh rider (M23; as horses, on the infantry body)
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -229,6 +237,10 @@ class Loadout:
             if not str(key).isdigit() or int(key) not in TIERS:
                 raise LoadoutError(f"horses: {key!r} must be a tier {TIERS}")
             out.horses[int(key)] = check_horse(key, raw)
+        for key, raw in (doc.get("riders") or {}).items():
+            if not str(key).isdigit() or int(key) not in TIERS:
+                raise LoadoutError(f"riders: {key!r} must be a tier {TIERS}")
+            out.riders[int(key)] = check_rider(key, raw)
         for role, point in (doc.get("weapon_point") or {}).items():
             if role not in LOADOUT_ROLES or point not in POINTS:
                 raise LoadoutError(f"weapon_point: {role!r} must be one of {LOADOUT_ROLES} and {point!r} one of {POINTS}")
@@ -247,6 +259,8 @@ class Loadout:
             out["accept_clipping"] = list(self.accept_clipping)
         if self.horses:
             out["horses"] = {str(t): dict(h) for t, h in sorted(self.horses.items())}
+        if self.riders:
+            out["riders"] = {str(t): dict(h) for t, h in sorted(self.riders.items())}
         points = {r: p for r, p in sorted(self.points.items()) if p != DEFAULT_POINTS[r]}
         if points:
             out["weapon_point"] = points
@@ -263,7 +277,7 @@ class Loadout:
                 if s.parts or s.resolved_stance() != "base" or k[1] == "crew"}
 
     def changes_anything(self) -> bool:
-        return bool(self.active() or self.bodies or self.derived or self.horses)
+        return bool(self.active() or self.bodies or self.derived or self.horses or self.riders)
 
     def needs_blender(self) -> bool:
         return any(d["add"] for d in self.derived.values()) or any(s.parts for s in self.active().values())
@@ -313,6 +327,7 @@ class LoadoutResult:
     carried: dict[tuple[int, str], list[str]] = field(default_factory=dict)  # slot -> part entities it carries
     derived: dict[int, "DerivedRecord"] = field(default_factory=dict)  # tier -> its infantry's derived body
     horses: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse (rule fresh_mesh)
+    riders: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a fresh rider (rule fresh_mesh)
     texture_files: list[GeneratedFile] = field(default_factory=list)  # derived bodies' derived textures (Q5)
 
 
@@ -686,6 +701,13 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
 
         files, res.horses, notes = apply_horses(naming, set_name, owner, by_name, pdx.records, pdx.by_name, loadout,
                                                 game, idx)
+        derived_files += files
+        res.notes += notes
+    if loadout.riders:  # M23: after the slots (a rider's stance pdxmesh is replaced by the fresh one)
+        from eu4unitgen.core.fresh_mesh import apply_horses
+
+        files, res.riders, notes = apply_horses(naming, set_name, owner, by_name, pdx.records, pdx.by_name, loadout,
+                                                game, idx, kind="rider")
         derived_files += files
         res.notes += notes
     built = build_parts(runner, naming, set_name, builds, version, cache)

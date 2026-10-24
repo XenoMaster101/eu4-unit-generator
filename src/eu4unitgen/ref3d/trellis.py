@@ -175,6 +175,77 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     return manifest
 
 
+RIDER = {"target_tris": 2600, "part_tris": {"lance": 200, "shield": 400}, "close_voxel": 0.1}
+RIDER_GROUPS = {"head": ["head"], "arms": ["R_shoulder", "R_arm", "R_elbow", "R_wrist", "R_hand", "L_shoulder", "L_arm",
+                                          "L_elbow", "L_wrist", "L_hand"],
+                "legs": ["R_thigh", "R_knee", "R_foot", "R_toe", "L_thigh", "L_knee", "L_foot", "L_toe"],
+                "torso": ["hip", "lower_spine", "mid_spine", "top_spine", "root"]}
+
+
+def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None) -> dict:
+    """A TRELLIS.2 rider (.glb from a front view) into ``root/vNNN`` (SPEC M23): Blender job fresh_rider (the body on
+    the infantry skeleton; the lance and shield split off as parts in their hand nodes' frames); bake_colour (the
+    body and each part; the red cloth as the country colour's mask) and bake_horse (the body's normal and AO); the
+    deformation check against vanilla's rider (cavalry_rider_* animations, per bone group).
+    -> the manifest (``parts``: ready loadout part entries)."""
+    from PIL import Image
+
+    from eu4unitgen.blender.runner import BlenderRunner
+    from eu4unitgen.core.fresh_mesh import base_arrays, geometry_from_job, write_fresh
+    from eu4unitgen.core.project import default_blender_path
+    out = s1.next_version(Path(root)).resolve()
+    (out / "parts").mkdir(parents=True)
+    br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=3600)
+    base_file = eu4() / "gfx" / "models" / "Units" / "western_generic_01_type1.mesh"
+    base = base_file.read_bytes()
+    t0 = time.time()
+    basecolor = glb_basecolor(glb, out / "raw_basecolor.png")
+    fr = br.run_job("fresh_rider", {"vanilla": base_arrays(base), "source": {"path": str(Path(glb).resolve()), "merge": 1e-5},
+                                    **RIDER, "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
+                                    "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),
+                                    "parts_dir": str(out / "parts")}).result
+    raw = br.run_job("render_model", {"model": str(Path(glb).resolve()), "engine": "EEVEE", "out_dir": str(out / "raw"),
+                                      "name": "raw", "size": 900, "views": {"front": [0, 5]}}).result
+    common = {"gloss": PROCESS["gloss"], **PROCESS["bake"], "image": str(basecolor), "colour_render": raw["images"]["front"]}
+    bc = br.run_job("bake_colour", {**common, "size": PROCESS["size"], "country_mask": bool(country_mask),
+                                    "low": str(out / "low_geometry.json"), "high": str(out / "textured.obj"),
+                                    "out_dir": str(out), "name": "rider"}).result
+    nb = br.run_job("bake_horse", {"low": str(out / "low_geometry.json"), "high": [str(out / "textured.obj")],
+                                   "diffuse": bc["diffuse"], "size": PROCESS["size"], **PROCESS["normal"], "preview": False,
+                                   "out_dir": str(out), "name": "riderb"}).result
+    parts = {}
+    for key in ("lance", "shield"):
+        low = out / "parts" / f"{key}_low.json"
+        if not low.is_file():
+            continue
+        pb = br.run_job("bake_colour", {**common, "size": 512, "country_mask": bool(country_mask) and key == "shield",
+                                        "low": str(low), "high": str(out / "parts" / f"{key}_textured.obj"),
+                                        "out_dir": str(out / "parts"), "name": key}).result
+        Image.new("RGBA", (64, 64), (128, 128, 255, 255)).save(out / "parts" / f"{key}_normal.png")  # flat
+        parts[key] = {"kind": "mesh_weapon" if key == "lance" else "mesh_shield",
+                      **({"colours": {"own": "country1"}} if pb.get("default_primary") else {}),
+                      "mesh": {"geometry": str(out / "parts" / f"{key}_part.json"), "diffuse": pb["diffuse"],
+                               "normal": str(out / "parts" / f"{key}_normal.png"), "specular": pb["specular"]}}
+    dd = out / "deform"
+    dd.mkdir()
+    (dd / "rider.mesh").write_bytes(write_fresh(base, geometry_from_job(out / "low_geometry.json")))
+    anims = [{"id": k, "path": str(eu4() / "gfx" / "models" / "Units" / "animation" / f"cavalry_rider_{k}.anim")}
+             for k in ("idle", "moving", "attack")]
+    res = {name: br.run_job("check_mesh_deform", {"mesh": str(m), "anims": anims, "groups": RIDER_GROUPS,
+                                                  "renders": {"out_dir": str(dd), "name": name, "size": 700}}).result
+           for name, m in (("ours", dd / "rider.mesh"), ("vanilla", base_file))}
+    (dd / "deform.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    summary = {who: {k: {"stretch": [round(x["str_p05"], 2), round(x["str_p95"], 2)], "max": round(x["str_max"], 2),
+                         "flips": x["flips"], "groups": {g: m.get("flips") for g, m in (x.get("groups") or {}).items()}}
+                     for k, x in res[who]["anims"].items()} for who in res}
+    tex = {"diffuse": str(out / "riderb_diffuse.png"), "specular": bc["specular"], "normal": str(out / "riderb_normal.png")}
+    manifest = {"stage": "rider game version (M23)", "glb": str(glb), "version": out.name, "fresh": fr, "colour": bc,
+                "normal": {k: nb.get(k) for k in ("tilt", "match")}, "textures": tex, "parts": parts,
+                "geometry": str(out / "low_geometry.json"), "deform": summary, "seconds": round(time.time() - t0, 1)}
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str), encoding="utf-8")
+    return manifest
+
+
 def compare_sheet(br, out: Path, basecolor: Path) -> dict:
     """The raw model (fitted only) and the game version through one camera per view, and their overlay."""
     from PIL import Image, ImageChops, ImageDraw, ImageFont
@@ -252,7 +323,7 @@ def stage(test: str, entries: list[tuple[Path, Path]], names: str) -> dict:
 
 
 def run(image: Path, name: str, rights: str, ai_python: str, emblem: Path | None = None, country_mask: bool = False,
-        test: str | None = None) -> dict:
+        test: str | None = None, rider: bool = False) -> dict:
     from eu4unitgen.ref3d.writeguard import ai_root
     folder = Path("assets_in") / name
     if (folder / "trellis").exists():
@@ -269,6 +340,11 @@ def run(image: Path, name: str, rights: str, ai_python: str, emblem: Path | None
     (folder / "subject.json").write_text(json.dumps(subject, indent=1), encoding="utf-8")
     rgba = cutout(Path(image), tr / "input", ai_python)
     gen = generate(rgba, (tr / "raw.glb").resolve(), root)
+    if rider:  # M23: a rider (front view): the body and its lance and shield; staged with a horse by the caller
+        m = process_rider(tr / "raw.glb", tr / "game", True)
+        rep = {"generate": gen, "game": m["version"], "deform": m["deform"], "seconds": round(time.time() - t0, 1)}
+        (tr / "run.json").write_text(json.dumps(rep, indent=1, default=str), encoding="utf-8")
+        return rep
     m = process(tr / "raw.glb", tr / "game", emblem, country_mask)
     st = stage(test, [(Path(m["geometry"]).parent, folder / "subject.json")], test.upper()) if test else None
     rep = {"generate": gen, "game": m["version"], "deform": m["deform"], "compare": m["compare"], "test": st,
@@ -288,6 +364,7 @@ def main(argv=None):
     a.add_argument("--emblem", type=Path)
     a.add_argument("--country-mask", action="store_true")
     a.add_argument("--test")
+    a.add_argument("--rider", action="store_true", help="a rider (front view, lance and shield in hand), not a horse")
     b = sub.add_parser("process")
     b.add_argument("glb", type=Path)
     b.add_argument("--out", type=Path, required=True)
@@ -299,7 +376,7 @@ def main(argv=None):
     c.add_argument("entries", nargs="+", help="<game version dir>@<subject.json>, tier 1 first")
     args = p.parse_args(argv)
     if args.cmd == "run":
-        out = run(args.image, args.name, args.rights, args.ai_python, args.emblem, args.country_mask, args.test)
+        out = run(args.image, args.name, args.rights, args.ai_python, args.emblem, args.country_mask, args.test, args.rider)
     elif args.cmd == "process":
         m = process(args.glb, args.out, args.emblem, args.country_mask)
         out = {k: m[k] for k in ("version", "compare", "deform", "seconds")}

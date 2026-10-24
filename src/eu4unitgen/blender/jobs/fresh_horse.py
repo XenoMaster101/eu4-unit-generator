@@ -1216,7 +1216,7 @@ def _grow(m):
     return out
 
 
-def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None):
+def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None, carve=()):
     """``obj`` replaced by the solid it encloses, by flood fill: the voxels (size ``vs``) its surface
     passes through, closed by ``closing`` voxels (gaps up to twice that sealed), then everything the
     outside can't reach from the box's edge is solid; the closing taken back off; the solid's voxel
@@ -1288,6 +1288,11 @@ def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None):
         if protect is not None:  # the ears: thin, kept
             core |= inside & box(protect)
         inside = core
+    if carve:  # M23: slots cut out of the solid (boxes, world units): the rider's skirt split between the legs
+        ii = np.indices(inside.shape)
+        for b in carve:
+            lo_b, hi_b = (np.array(b[0]) - lo) / vs, (np.array(b[1]) - lo) / vs
+            inside &= ~np.all([(ii[d] >= lo_b[d]) & (ii[d] <= hi_b[d]) for d in range(3)], axis=0)
     # the solid's boundary faces (between an inside and an outside voxel) as quads on the corner grid
     S = np.array(inside.shape) + 1
     vid = lambda i, j, k: (i * S[1] + j) * S[2] + k  # noqa: E731
@@ -1339,7 +1344,7 @@ def collapse_to(obj, target, close=None):
         SOLID.setdefault("log", []).append(solid_fill(
             obj, vs_, closing=max(1, int(round(SOLID.get("closing", 0.2) / vs_))),
             opening=int(round(SOLID.get("opening", 0.0) / vs_)), protect=SOLID.get("protect"),
-            region=SOLID.get("region")))
+            region=SOLID.get("region"), carve=SOLID.get("carve", ())))
         mod = obj.modifiers.new("close", "REMESH")
         mod.mode, mod.voxel_size, mod.adaptivity = "VOXEL", float(close), 0.0
         bpy.ops.object.modifier_apply(modifier=mod.name)
@@ -2011,4 +2016,5 @@ def main():
     _pdx.write_result(a, res)
 
 
-main()
+if __name__ == "__main__":  # fresh_rider imports the helpers
+    main()

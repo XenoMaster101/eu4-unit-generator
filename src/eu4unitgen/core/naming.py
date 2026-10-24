@@ -193,6 +193,21 @@ class Naming:
             raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
         return f"{self.fresh_horse(set_name, tier)}_{kind}.dds"
 
+    def fresh_rider(self, set_name: str, tier: int) -> str:
+        """hr_mac_fresh_rider_1: a new rider body on the base infantry skeleton (M23, core.fresh_mesh)."""
+        return f"{self.prefix}{check_set_name(set_name)}_fresh_rider_{_check_tier(tier)}"
+
+    def fresh_rider_pdxmesh(self, set_name: str, tier: int) -> str:
+        return f"{self.fresh_rider(set_name, tier)}_mesh"
+
+    def fresh_rider_file(self, set_name: str, tier: int) -> str:
+        return f"{self.part_dir(set_name)}/{self.fresh_rider(set_name, tier)}.mesh"
+
+    def fresh_rider_texture(self, set_name: str, tier: int, kind: str) -> str:
+        if kind not in TEXTURE_KINDS:
+            raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
+        return f"{self.fresh_rider(set_name, tier)}_{kind}.dds"
+
     # ------------------------------------------------------------------ derived bodies (Track R)
     def derived_body(self, set_name: str, tier: int) -> str:
         """hr_mac_body_1: a base-game body with skinned additions (tail, tuft) appended."""
