@@ -2840,7 +2840,7 @@ The path went: nearest-surface weights 133 / 98 / 119 flips → leg slot → reg
   - **The game camera:** it looks down at about 58°, so an upright kite looks about 1.5 times as tall as wide in the gallery and in game.
   - **`rider_frames` takes the .mesh's bind like `render_unit`:** the identity on `western_generic_01_type1`, checked.
 - **Detail experiment (the user):** the cataphract at three budgets.
-  - `process(cfg)` and `process_rider(cfg)` take `target_tris`. Weight smoothing scales with the count (horse 12/24/48, rider 24/48/96): at a fixed pass count the denser meshes' flips tripled (horse 11 027 tris: 167 / 180 / 302).
+  - `process(cfg)` and `process_rider(cfg)` take `target_tris`. Weight smoothing scales with the count (horse 12/24/48, rider 24/48/96): at a fixed pass count the denser meshes' flips tripled (horse 11,327 tris: 167 / 180 / 302).
   - Built into `assets_in/cataphract_budget/{horse,rider}`:
 
 | tier | horse tris | rider tris | horse flips | rider flips | processing |
