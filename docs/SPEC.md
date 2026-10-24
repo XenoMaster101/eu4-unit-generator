@@ -2823,3 +2823,35 @@ The path went: nearest-surface weights 133 / 98 / 119 flips → leg slot → reg
   - The run sheet is `README.txt`; the head compare is `gallery/head_compare.png`.
   - The validator found 0 errors and 3 warnings.
   - Flips 32 / 33 / 41.
+- **The user's test 32 notes (2026-10-24), test 32 not run; fixed as general rules (`core/gear.py`, pure Python):**
+  - **Horsehair (plumes, crests, manes):** a flat blade along the hair's line (`horsehair_blade`), not a round tube.
+    - The blade is tall across the line and thin side to side, and thins towards its top.
+    - Spike columns between line points give a jagged top edge.
+    - `strand_texture` paints strands along the length: a dark base with lighter streaks and a darker root.
+    - The plume (`trellis.plume_part`) uses the reference's sampled reds: dark (86, 14, 22), light (150, 38, 52).
+    - Applied so far: the rider's plume. The horse's mane and the `crest` part kind still use their own builders (TODO: move them onto the blade; the cataphract's mane is under its scale armour).
+  - **Kite shield (shields):** `kite_shield` builds the reference's almond kite.
+    - Shape: a rounded top over the widest point (18% above the centre), sides narrowing to a point, 0.52 as wide as tall.
+    - Curved 0.1 W across and 0.04 H down. The gold rim is raised 0.05.
+    - The emblem is painted at 4× and reduced, so it stays crisp: a cross with flared ends, its bar at the widest point, and a small cross in each quarter, clipped inside the rim.
+    - The studded rim, the studs and the cross are raised in a height map turned into the normal map.
+    - The field is on the country colour's mask.
+  - **`trellis.kite_part`:** the kite replaces the raw shield, 0.88 of the raw shield's largest extent (5.6). It is strapped on `rider_frames`' `Left_hand_node` frame, 1.2 out and 0.3 up. With the raw disc's offsets (0.6 out, 1.5 down) its point sank into the caparison.
+  - **The game camera:** it looks down at about 58°, so an upright kite looks about 1.5 times as tall as wide in the gallery and in game.
+  - **`rider_frames` takes the .mesh's bind like `render_unit`:** the identity on `western_generic_01_type1`, checked.
+- **Detail experiment (the user):** the cataphract at three budgets.
+  - `process(cfg)` and `process_rider(cfg)` take `target_tris`. Weight smoothing scales with the count (horse 12/24/48, rider 24/48/96): at a fixed pass count the denser meshes' flips tripled (horse 11 027 tris: 167 / 180 / 302).
+  - Built into `assets_in/cataphract_budget/{horse,rider}`:
+
+| tier | horse tris | rider tris | horse flips | rider flips | processing |
+|---|---|---|---|---|---|
+| 1 | 2,927 | 2,600 | 11 / 15 / 46 | 32 / 33 / 41 | 71 s + 78 s |
+| 2 | 5,727 | 5,200 | 29 / 31 / 62 | 72 / 65 / 71 | 83 s + 91 s |
+| 3 | 11,327 | 10,400 | 76 / 70 / 143 | 170 / 155 / 185 | 151 s + 107 s |
+
+  - Flips grow about in step with the triangle count.
+  - At map zoom the three look the same in the gallery; up close the higher budgets are a little smoother in outline.
+  - Textures are equal across the tiers.
+- **In-game test 33 STAGED** (`build/test33`; tiers 1–3 are the three budgets; units named "T33 ...").
+  - The run sheet `README.txt` includes a frame-rate check with 30+ regiments on screen.
+  - The validator found 0 errors and 13 warnings: the budget on tiers 2–3, the parts' texture-quality notes once per tier.
