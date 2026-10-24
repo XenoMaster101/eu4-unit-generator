@@ -2693,6 +2693,64 @@ It writes `assets_in/<name>/subject.json`, then `assets_in/<name>/trellis/`: `in
 - Blender command-line/background scripting: https://docs.blender.org/api/current/info_tips_and_tricks.html
 - DirectXTex / texconv: https://github.com/microsoft/DirectXTex/wiki/Getting-Started
 
+#### M24. The standard rider pipeline: image → TRELLIS.2 → processing → game (2026-10-23)
+The rider track's result (its development record is M23). The counterpart of M22 for riders, and the path for any soldier on the vanilla infantry skeleton.
+
+**One command** (`ref3d/trellis.py`):
+```
+python -m eu4unitgen.ref3d.trellis run <image> --rider --name <subject> --rights "<declaration>" --ai-python <Windows AI python>
+```
+or `trellis.process_rider(<raw.glb>, <dir>)` on a TRELLIS.2 model. It writes `assets_in/<name>/trellis/game/vNNN/`: the body's geometry and textures, `parts/` (the lance, shield and sword geometry and textures), `manifest.json` (its `parts` are ready loadout part entries) and `deform/`.
+
+**Inputs:** a front view of the soldier, arms a little out, weapons in hand, on a plain background; a name; the rights declaration (rule 8).
+
+**1. Cut-out and TRELLIS.2:** as M22 (BiRefNet, then TRELLIS.2 in WSL2). About 5 minutes, ~280k faces.
+
+**2. Processing** (Blender job `fresh_rider`, reusing `fresh_horse`'s direct-path helpers). The rider wears the base infantry body (`western_generic_01_type1`, 28 bones) and plays its `horse_*` ids (`cavalry_rider_*` animations) at the horse's `Saddle_Node` (§7.2).
+
+| Step | What it does |
+|---|---|
+| Split | the lance: the column standing beside the body above its top, by its fitted axis and shaft radius (fingers kept at the grip, the blade and tassel taken). The shield: the plate on the other side, from its outermost points' plane, connected within its thickness |
+| Scale and place | the helmet's top (not the crest's red) at 16.4, feet on the ground, centred |
+| Slim | x and z towards vanilla's rider's waist and chest, at least 0.75; across the torso x scales, the arms shift in whole |
+| Arms | each arm turned about its shoulder so the lance's grip points at `Right_hand_node` and the shield's at `Left_hand_node`; the weapons carried with their hands |
+| Plume | cut off (optional crest tuft part; the user dropped it) |
+| Solid | flood fill (closing 0.2); a slot between the legs under the crotch; the cloth hanging under each arm outside the torso cut; the collar above the neck outside the helmet's radius cut |
+| Decimate | quadric collapse to 2,600 (vanilla's rider body: 2,883), the slivers evened (3 passes) |
+| Weights | nearest-surface transfer, then region rules: head (and anything rigid on it) above the neck; arms along their chains; the cloak behind the back on the spine by height; legs and skirt halves along the leg chains; 24 smoothing passes, 4 bones at most |
+| Parts | each weapon closed, collapsed (lance 200, shield 400), unwrapped and baked, written in its node's frame as a `mesh_weapon` / `mesh_shield` part |
+| Lance | along −Z from the grip (the rider's "down": levelled forward in game) |
+| Shield | strapped to the left forearm: `rider_frames` measures `Left_hand_node`'s frame in the seated pose (frame 1 of `cavalry_rider_idle`); face outward, top up, half way to the elbow, lowered 1.5, at 0.85 |
+| Sword | `sword_part`: our own sword in its scabbard (pommel, grip, crossguard, scabbard with locket and chape) in the reference's colours, a `mesh_belt` part on the pelvis bone; on the side the shield doesn't cover; hanging back 65° along the horse's flank, clear of the caparison |
+| Textures | `bake_colour` (the red cloth and the shield's face as the country colour's mask; gloss by colour class; the colour matched to the raw front render), `bake_horse` (normal and AO) |
+
+**3. Checks:**
+- the deformation check against vanilla's rider (idle, moving, attack; per group: head, arms, legs, torso);
+- the gallery with the rider on its horse, and close-ups;
+- the validator at staging.
+
+**4. Game:**
+- **The body:** the loadout's `riders` (geometry, textures, rights, base `western_generic_01_type1`): `core/fresh_mesh.apply_horses(kind="rider")` writes the .mesh on the base body's skeleton and points the cavalry rider entity's pdxmesh at it (rule `fresh_mesh`).
+- **The parts:** the loadout slot `<tier>/rider` (part kinds with their own mesh).
+- **Colours:** with a cloth mask, the horse's `unit_colours` give the set's tags without colours of their own the cloth red (BYZ: 255, 77, 70).
+
+**Results:**
+
+| | flips idle / moving / attack | worst stretch |
+|---|---|---|
+| ours | 32 / 33 / 41 (mostly torso and legs) | 2.4 / 2.1 / 2.8 |
+| vanilla's rider | 12 / 0 / 12 | 7.2 / 4.1 / 8.4 |
+
+The flips are 2.6–3.4× vanilla's in idle and attack (and 33 against vanilla's none in moving), and the worst stretch is lower than vanilla's. 2,600 body triangles; about 80 s of processing after TRELLIS.2. Test 31 staged (the finished cataphract).
+
+**Known limits:**
+- the arms are fitted to one pose (the hands' rest positions), elbows unbent;
+- the cloak's hem is cut under the arms;
+- the parts' normal maps are flat;
+- the sword may touch the caparison;
+- the flips are still 2.6–3.4× vanilla's in idle and attack;
+- one-sided weapons only (lance right, shield left).
+
 #### M23. The rider: image → TRELLIS.2 → processing → game (2026-10-23)
 **Reference** (rule 8): the user named `assets_in/new_refs/cataphract_rider.png` ("the arms-out version, ChatGPT-generated from my original, I own the output"). That file isn't in the folder, so `cataphract_rider_v1.png` (a front view, arms slightly out, the lance in the right hand, a kite shield in the left) is used until it is. Recorded in `assets_in/cataphract_rider/subject.json`.
 
@@ -2743,3 +2801,15 @@ The path went: nearest-surface weights 133 / 98 / 119 flips → leg slot → reg
   - Tier 1: our rider (v017) on the cataphract. Tier 2: vanilla's rider on it. Tier 3: vanilla. Units are named "T30 ...".
   - The validator found 0 errors and 3 warnings: the parts' flat normal maps, the shield's texel density, the tuft's shading.
   - Seen in the gallery: the shield on the left forearm, face outward, its cross showing; a small red tuft on the helmet; slimmer.
+- **The user on test 30's gallery (2026-10-23), test 30 not run; fixed as general steps:**
+  - The lance stays as it is (good for attacks).
+  - **No plume:** the tuft read as a hooded blob. The cloak's collar is cut round the helmet (the solid's `carve_out`: above the neck, farther out than the helmet's steel radius, 1.13), so the head shows clean steel and its mail veil with the collar below.
+  - **Sword:** a sword in its scabbard as a rigid belt part (`mesh_belt` on the pelvis bone, `sword_part`).
+    - It is on the right hip, the side the shield doesn't cover (the reference hangs it on the shield's side).
+    - Hanging down (25°), it ran inside the cataphract's caparison (about x 3.9 at the saddle). At 65° it lies back along the flank.
+    - `rider_frames`' forward was backwards (the rider faces Blender −Y): fixed. The camera's elevation makes the far hip's sword look raised from the left; that is projection, not placement.
+  - **Shield:** lowered 1.5 and at 0.85. Centred on the raised forearm, the kite's top stood over the helmet, and its rim showed as a ribbon over the head from behind.
+- **In-game test 31 STAGED** (`build/test31`; the run sheet is `README.txt`, the gallery `gallery/sheet.png`, the close-ups `gallery/closeups.png`: head, sword, shield):
+  - Tier 1: the finished cataphract (TRELLIS.2 horse v012, rider v020). Tier 2: vanilla's rider on it. Tier 3: vanilla. Units are named "T31 ...".
+  - The validator found 0 errors and 3 warnings (the parts' flat normal maps, the shield's texel density).
+  - Flips 32 / 33 / 41.
