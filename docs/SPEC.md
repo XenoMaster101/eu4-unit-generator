@@ -2891,3 +2891,53 @@ The path went: nearest-surface weights 133 / 98 / 119 flips → leg slot → reg
   - Horse `cataphract_budget/horse/v001` on both custom tiers. Units are named "T35 ...".
   - The validator found 0 errors and 6 warnings, the parts' texture-quality notes once per tier.
   - The tier whose finial sits on the helmet and whose bands lie on it sets `RIDER_ANIM_SCALE` (0.805 or 1.0) and closes the UNVERIFIED note.
+- **Test 35 approved in game (the user, 2026-10-24):** "the cataphract is done (horse + rider)". The user didn't name a tier, so tier 1 is kept: rider `cataphract_budget/rider/v004`, the head part at `RIDER_ANIM_SCALE` 0.805, which is what the pipeline builds. The horse is `cataphract_budget/horse/v001`. Together they are the regression set's reference result (Track P1.4). Whether the game scales attachments by the animated bone scale is still UNVERIFIED: only tier 1 was approved.
+
+### Track P: the app, built from what we learned (PLANNED 2026-10-24)
+The user's brief after test 35: turn every lesson into a built-in rule, give it one flow in the app, tidy the repo and package it. Work in phases and commit after each step. Stop only for the user's decisions.
+
+- **P1. App logic**
+  1. **Audit M15–M24:** every fix becomes a general rule in code. One-offs are made general: the cataphract's colours, helmet, kite and emblem were hard-coded.
+  2. **Parts are never placeholders.** Each part is cropped from the reference with SAM 2 (a point prompt where the split part projects), generated alone by TRELLIS.2, then decimated, baked (colour and normal), aligned to the split part and attached to its bone (`ref3d/part_gen.py`).
+     - Fallback: `core.gear`'s procedural shapes, textured from the crop's colours.
+     - Per-part check: the part rendered next to its crop, with silhouette IoU and colour distance; mismatches are flagged.
+  3. **Known fixes:** a registry (`core/known_fixes.py`: the rule, the case that taught it, where it lives, the test that checks it). The SPEC list is written from it, and a test checks that every entry's test exists.
+  4. **Regression set** (`ref3d/regress.py`): horse 2, the cataphract horse and the cataphract rider are rebuilt from their raw `.glb`s after every pipeline change. Their quality numbers are compared with `regression/baseline.json` (test 35 for the cataphract); anything worse is flagged.
+  5. **Quality report** per model, in plain language: silhouette against the reference, deformation against vanilla, parts kept/rebuilt/lost, texture use, and brightness and contrast at map zoom against vanilla.
+- **P2. App**
+  1. **One flow:** image → name + rights → type (horse / rider; the foot soldier is shown as roadmap) and unit slot → Generate → staged progress with estimates → sheet next to the reference → quality report → Add to mod.
+  2. **Edits that rebuild only their step:**
+     - plume and tassels on/off;
+     - emblem (upload or choose);
+     - cloth colour and the country-colour mask;
+     - brightness;
+     - shield side;
+     - hem length.
+  3. **Input guide**, with warnings before the run.
+  4. **Pre-run checks** (free RAM, EU4 closed, WSL and the AI weights, disk space), each with its fix.
+  5. **Runs:**
+     - They resume after the app closes or a drive drops out.
+     - GPU stages wait while EU4 runs.
+  6. **Export:**
+     - a normal mod;
+     - an "achievement-safe" mod: graphics only, a graphical culture's units re-dressed via `version`. Which files touch the checksum is read from the install's `checksum_manifest.txt`.
+  7. **Add to mod:**
+     - It writes into a mod folder the user picks.
+     - If Windows blocks it (Controlled Folder Access), the app says exactly what to copy.
+     - The unit names include the subject's name.
+  8. **Errors** in plain words: what happened and what to do, with the details hidden behind a button.
+- **P3. Cleanliness**
+  1. **Repo:** the abandoned paths (hand-built master, cloth sim, precision fitting, procedural bodies, the self-reading M18 pipeline) move to `archive/` (outside the package); what the live path still uses is moved out first. TripoSG becomes optional.
+  2. **Data:** `build/` and `assets_in/` keep the references, the regression set and test 35. Old tests and scratch go to `D:\eu4unitgen_archive`; the space freed is reported.
+  3. **Settings:** one file for paths (`core/config.py`; EU4, mod folder, AI environment, WSL, Blender), editable in the app.
+  4. **Docs:** a user README (install, first run, a good reference) and `docs/DEVELOPER.md` (the pipeline, where each rule lives, the regression set).
+  5. **Licences:** every test passes; all model and tool licences are listed in one place (SPEC §9 and the app's About page).
+- **P4. Packaging (Windows)**
+  - **The package:** an installer that needs no terminal. It is built from Python's own venv and PowerShell, with no new tools. A one-file `.exe` would need Inno Setup or PyInstaller, which is the user's call.
+  - **The app's Setup screen** checks or sets up WSL, the TRELLIS.2 environment, the weights and Blender, and guides the user step by step where admin rights, a reboot or a Hugging Face licence acceptance are needed.
+  - **Tested as a fresh user:** install, open, horse 2 from its image end to end, staged.
+- **Roadmap (later, not now):**
+  - import a 3D model file (with a licence check);
+  - the horse-girl foot unit;
+  - infantry;
+  - other unit types.
