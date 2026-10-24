@@ -222,6 +222,22 @@ class _Checked:
             raise SpecError(str(exc)) from exc
 
 
+def horse_unit_colours(spec):
+    """The set's unit colours, with the tags it leaves out given the first fresh horse's (by tier) whose cloth
+    is the country colour's mask (loadout horses ``unit_colours``, SPEC M21): Byzantium has no vanilla
+    ``country_colors`` entry, so without it the cataphract's caparison would take BYZ's map purple."""
+    uc = spec.unit_colours
+    lo = load_loadout(spec)
+    suggested = next((h["unit_colours"] for _, h in sorted((lo.horses if lo else {}).items()) if h.get("unit_colours")), None)
+    if not suggested or not spec.tags:
+        return uc
+    if uc is None:
+        return {t: [tuple(c) for c in suggested] for t in spec.tags}
+    if isinstance(uc, dict):
+        return {**{t: [tuple(c) for c in suggested] for t in spec.tags}, **uc}
+    return uc  # one triple for every tag: the user's choice
+
+
 def load_loadout(spec: "SetSpec"):
     """The spec's parts loadout: a Loadout as it is (the GUI's), or loaded from a file."""
     from eu4unitgen.core.loadout import Loadout, LoadoutError
@@ -350,7 +366,7 @@ class Session:
                 tech = known[0] if known else "western"
             return [Nation(list(spec.tags), spec.gfx, base_gfx=spec.base_gfx, name=spec.name,
                            adjective=spec.adjective, colour=spec.colour, tech_group=tech, set_name=spec.set_name,
-                           gfx_set_base=spec.gfx_set_base or None, unit_colours=spec.unit_colours,
+                           gfx_set_base=spec.gfx_set_base or None, unit_colours=horse_unit_colours(spec),
                            cultures=list(spec.cultures), unit_names=dict(spec.unit_names or {}))]
         except (NamingError, ValueError) as exc:
             if isinstance(exc, SpecError):

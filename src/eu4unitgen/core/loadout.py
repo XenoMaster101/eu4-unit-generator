@@ -127,14 +127,16 @@ def check_slot(tier: int, role: str, slot: RoleLoadout) -> None:
         bones[k.bone] = p.kind
 
 
-HORSE_KEYS = {"geometry", "textures", "base", "rights", "source"}
+HORSE_KEYS = {"geometry", "textures", "base", "rights", "source", "unit_colours"}
 
 
 def check_horse(key, raw) -> dict:
     """A loadout's fresh horse (Track C, test 15): ``geometry`` (the fresh_horse job's JSON),
     ``textures`` {diffuse, specular, normal} (PNG paths), ``base`` (the base-game horse pdxmesh
     whose skeleton the geometry was built on; default cavalry_horse), and the reference's
-    ``rights`` and ``source`` (CLAUDE.md rule 8: required, written to the notes)."""
+    ``rights`` and ``source`` (CLAUDE.md rule 8: required, written to the notes); optionally ``unit_colours``
+    ([[r, g, b] x 3]: the horse's cloth is the country colour's mask (SPEC M21) and these keep its look; the
+    set's tags without colours of their own get them: export.pipeline)."""
     if not isinstance(raw, dict) or set(raw) - HORSE_KEYS:
         raise LoadoutError(f"horses: tier {key} must be an object with keys from {sorted(HORSE_KEYS)}")
     if not raw.get("geometry") or not isinstance(raw.get("textures"), dict) or             set(raw["textures"]) != {"diffuse", "specular", "normal"}:
@@ -142,6 +144,10 @@ def check_horse(key, raw) -> dict:
     if not str(raw.get("rights") or "").strip():
         raise LoadoutError(f"horses: tier {key} needs the reference's rights (original, licensed or authorised; "
                            "CLAUDE.md rule 8)")
+    uc = raw.get("unit_colours")
+    if uc is not None and not (isinstance(uc, list) and len(uc) == 3 and all(
+            isinstance(c, list) and len(c) == 3 and all(isinstance(x, int) and 0 <= x <= 255 for x in c) for c in uc)):
+        raise LoadoutError(f"horses: tier {key}: unit_colours must be three [r, g, b] triples, 0-255")
     return {"base": "cavalry_horse", **raw}
 
 

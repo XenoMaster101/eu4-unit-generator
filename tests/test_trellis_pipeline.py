@@ -63,3 +63,23 @@ def test_tetragrammatic_decal(tmp_path):
 @pytest.mark.parametrize("bad", ["nope"])
 def test_decal_names(bad):
     assert bad not in decals.DECALS and "tetragrammatic" in decals.DECALS
+
+
+def test_horse_unit_colours_fill_tags_without_their_own(tmp_path):
+    """A masked horse's colours go to the set's tags that have none (BYZ: else its map purple), not over the user's."""
+    from types import SimpleNamespace
+
+    from eu4unitgen.core.loadout import Loadout, LoadoutError
+    from eu4unitgen.export.pipeline import horse_unit_colours
+    red = [[255, 77, 70], [212, 175, 55], [230, 225, 210]]
+    horse = {"geometry": "g.json", "textures": {"diffuse": "d.png", "specular": "s.png", "normal": "n.png"},
+             "rights": "original (test)", "unit_colours": red}
+    lo = Loadout.from_json({"schema": 1, "horses": {"1": horse}}, tmp_path)
+    spec = SimpleNamespace(tags=["BYZ"], unit_colours=None, loadout=lo)
+    assert horse_unit_colours(spec) == {"BYZ": [tuple(c) for c in red]}
+    mine = {"BYZ": [(1, 2, 3), (4, 5, 6), (7, 8, 9)]}
+    assert horse_unit_colours(SimpleNamespace(tags=["BYZ", "TRE"], unit_colours=mine, loadout=lo)) == {
+        "BYZ": mine["BYZ"], "TRE": [tuple(c) for c in red]}
+    assert horse_unit_colours(SimpleNamespace(tags=["BYZ"], unit_colours=None, loadout=None)) is None
+    with pytest.raises(LoadoutError):
+        Loadout.from_json({"schema": 1, "horses": {"1": {**horse, "unit_colours": [[300, 0, 0]] * 3}}}, tmp_path)

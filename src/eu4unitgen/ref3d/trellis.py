@@ -41,6 +41,8 @@ from eu4unitgen.ref3d import s1
 WSL = {"python": "~/eu4unitgen_ai/trellis2_env/bin/python", "repo": "TRELLIS.2", "weights": "weights/TRELLIS.2-4B",
        "ss_decoder": "weights/TRELLIS-image-large", "dinov3": "weights/dinov3-vitl16-pretrain-lvd1689m",
        "seed": 42, "pipeline_type": "1024_cascade"}
+# a masked horse's secondary and tertiary unit colours (its primary is its cloth's red): gold and off-white
+BYZ_GOLD, BYZ_WHITE = (212, 175, 55), (230, 225, 210)
 PROCESS = {"target_tris": 2800, "smooth": 12, "influences": 3, "chain_weights": True, "uv_margin": 0.002,
            "hair": {"mane": True, "tail": True}, "size": 1024,
            "gloss": {"silver": 14, "gold": 12, "matte": 5},
@@ -237,6 +239,8 @@ def stage(test: str, entries: list[tuple[Path, Path]], names: str) -> dict:
                        "textures": {k2: str(Path(v).resolve()) for k2, v in m["textures"].items()},
                        "rights": s["rights"], "source": f"TRELLIS.2 (M21) from {s.get('original', '?')}, {Path(vd).name}",
                        "_name": s["name"]})
+        if m["colour"].get("default_primary"):  # its cloth is the country colour's mask: the colours that keep its look
+            horses[-1]["unit_colours"] = [m["colour"]["default_primary"], list(BYZ_GOLD), list(BYZ_WHITE)]
         if k == 0:
             prim = m["colour"].get("default_primary")
     cfg = dict(game.GAME_DEFAULTS)
