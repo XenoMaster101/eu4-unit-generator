@@ -424,8 +424,14 @@ def test_parts_test_mod_and_checklist(project, game, tmp_path):
 @pytest.mark.skipif(default_blender_path() is None or not default_blender_path().is_file(),
                     reason="pinned Blender not installed")
 def test_real_blender_builds_every_kind_in_vanilla_convention(tmp_path):
-    specs = [(k, "infantry") for k in KINDS] + [("xiphos", "rider")]
+    specs = [(k, "infantry") for k in KINDS if KINDS[k].builder != "mesh"] + [("xiphos", "rider")]
     builds = [PartBuild(N.part("mac", k, 1, r), 1, resolve(PartSpec(k), r)) for k, r in specs]
+    # M23: a part with its own geometry and textures (a square plate in the hand's YZ plane)
+    own = {"geometry": {"p": [0, -1, -1, 0, -1, 1, 0, 1, 1, 0, 1, -1], "tri": [0, 1, 2, 0, 2, 3],
+                        "uv": [0, 1, 1, 1, 1, 0, 0, 0]},
+           "images": {k: Image.new("RGBA", (16, 16), (200, 30, 30, 255)) for k in ("diffuse", "normal", "specular")}}
+    mesh_spec = PartSpec("mesh_shield", mesh={"geometry": "g.json", "diffuse": "d.png", "normal": "n.png", "specular": "s.png"})
+    builds.append(PartBuild(N.part("mac", "mesh_shield", 1, "rider"), 1, resolve(mesh_spec, "rider"), None, own))
     built = build_parts(BlenderRunner(default_blender_path(), log_dir=tmp_path), N, "mac", builds, 20)
     boxes = {name: summarize_mesh(parse_pdx_mesh(data))["aabb"] for name, data in built.raw_meshes.items()}
     dory = boxes["hr_mac_dory_1"]
@@ -435,6 +441,9 @@ def test_real_blender_builds_every_kind_in_vanilla_convention(tmp_path):
     crest = boxes["hr_mac_crest_1"]
     assert crest["min"][1] == pytest.approx(0.98, abs=0.01) and crest["max"][1] == pytest.approx(3.1, abs=0.01)
     assert crest["max"][0] - crest["min"][0] == pytest.approx(0.28, abs=0.01)  # test 7's width
+    plate = boxes["hr_mac_mesh_shield_rider_1"]
+    assert plate["min"][1] == pytest.approx(-1, abs=0.01) and plate["max"][2] == pytest.approx(1, abs=0.01)
+    assert built.images(builds[-1])["diffuse"].getpixel((3, 3))[:3] == (200, 30, 30)  # its own texture
     shield = boxes["hr_mac_hoplon_1"]
     assert shield["min"][0] == pytest.approx(-0.1, abs=0.01) and shield["max"][0] > 0.8  # domed towards +X
     assert shield["max"][1] - shield["min"][1] == pytest.approx(7.6, abs=0.05)  # radius 3.8

@@ -329,7 +329,26 @@ def build_helmet(b, p):
             b.face([bl, tl, tr, br], 1)
 
 
-BUILDERS = {"spear": build_spear, "sword": build_sword, "shield": build_shield, "crest": build_crest, "ears": build_ears,
+def build_mesh(b, p):
+    """M23: our own geometry (``p["geometry"]``: "p" PDX positions in the attach node's frame, "tri", "uv"
+    per vertex in image coordinates, v down): a part split off a TRELLIS.2 model (the rider's lance and
+    shield), textured by its own baked images rather than zone swatches."""
+    g = p["geometry"]
+    pos, uv = g["p"], g["uv"]
+    verts = [b.vert(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]) for i in range(len(pos) // 3)]
+    tri = g["tri"]
+    for i in range(0, len(tri), 3):
+        ids = tri[i:i + 3]
+        try:
+            f = b.bm.faces.new([verts[k] for k in ids])
+        except ValueError:  # a duplicate face
+            continue
+        f[b.zone] = 0
+        for loop, k in zip(f.loops, ids):
+            loop[b.uv].uv = (uv[2 * k], 1.0 - uv[2 * k + 1])
+
+
+BUILDERS = {"mesh": build_mesh, "spear": build_spear, "sword": build_sword, "shield": build_shield, "crest": build_crest, "ears": build_ears,
             "helmet": build_helmet}
 
 

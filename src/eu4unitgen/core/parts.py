@@ -118,7 +118,14 @@ def _spear(tip, butt, head_length, head_width, shaft_radius, spike) -> dict:
 SPEAR_ZONES = (ZoneDef("shaft", "Shaft", WOOD, 3, material="wood"),
                ZoneDef("metal", "Head and butt spike", BRONZE, 8, material="bronze"))
 
+# M23: parts with geometry and textures of their own (split off a TRELLIS.2 model: the rider's lance and shield);
+# one zone, the whole texture: "country1" there makes the part PdxMeshColor (its spec map's R is the mask)
+OWN_ZONES = (ZoneDef("own", "Own texture", (128, 128, 128), 5),)
+MESH_KINDS = ("mesh_weapon", "mesh_shield")
+
 KINDS: dict[str, PartKind] = {k.name: k for k in (
+    PartKind("mesh_weapon", "Weapon (own mesh)", "Right_hand_node", LOADOUT_ROLES, "mesh", "own", {}, OWN_ZONES),
+    PartKind("mesh_shield", "Shield (own mesh)", "Left_hand_node", LOADOUT_ROLES, "mesh", "own", {}, OWN_ZONES),
     PartKind("dory", "Dory (spear)", "Right_hand_node", LOADOUT_ROLES, "spear", "atlas",
              _spear(15.0, -11.5, 4.0, 0.45, 0.17, 1.3), SPEAR_ZONES,
              scaled=("tip", "butt", "head_length", "spike")),
@@ -201,11 +208,19 @@ class PartSpec:
     params: dict[str, Any] = field(default_factory=dict)  # overrides: numbers, or choice strings
     colours: dict[str, Any] = field(default_factory=dict)  # zone -> [r, g, b] or "country1".."country3"
     blazon: str | None = None  # PNG painted on the face (disc parts), relative to the loadout file
+    # mesh kinds: {"geometry": .json ("p" in the node's frame, "tri", "uv"), "diffuse", "normal", "specular": PNGs},
+    # relative to the loadout file
+    mesh: dict | None = None
 
     def check(self) -> None:
         k = KINDS.get(self.kind)
         if k is None:
             raise PartError(f"unknown part kind {self.kind!r}; known: {', '.join(KINDS)}")
+        if (k.builder == "mesh") != bool(self.mesh):
+            raise PartError(f"{self.kind}: " + ("needs a mesh {geometry, diffuse, normal, specular}" if k.builder == "mesh"
+                                                else "takes no mesh"))
+        if self.mesh and set(self.mesh) != {"geometry", "diffuse", "normal", "specular"}:
+            raise PartError(f"{self.kind}: mesh must name geometry, diffuse, normal and specular")
         for name, value in self.params.items():
             p = k.params.get(name)
             if p is None:
@@ -236,13 +251,16 @@ class PartSpec:
             out["colours"] = {z: (v if isinstance(v, str) else list(v)) for z, v in self.colours.items()}
         if self.blazon:
             out["blazon"] = self.blazon
+        if self.mesh:
+            out["mesh"] = dict(self.mesh)
         return out
 
     @classmethod
     def from_json(cls, raw: dict) -> "PartSpec":
         if not isinstance(raw, dict) or "kind" not in raw:
             raise PartError(f"a part must be an object with a \"kind\", not {raw!r}")
-        spec = cls(raw["kind"], dict(raw.get("params") or {}), dict(raw.get("colours") or {}), raw.get("blazon"))
+        spec = cls(raw["kind"], dict(raw.get("params") or {}), dict(raw.get("colours") or {}), raw.get("blazon"),
+                   dict(raw["mesh"]) if raw.get("mesh") else None)
         spec.check()
         return spec
 
@@ -303,6 +321,7 @@ class PartBuild:
     tier: int
     part: ResolvedPart
     blazon: Image.Image | None = None
+    own: dict | None = None  # mesh kinds: {"geometry": {p, tri, uv}, "images": {diffuse, normal, specular}}
 
 
 @dataclass
@@ -318,6 +337,8 @@ class BuiltParts:
     def images(self, b: "PartBuild") -> dict[str, Image.Image]:
         """The part's {diffuse, normal, specular} images: painted on its unwrap (atlas layout), else
         the swatch or disc layout."""
+        if b.own is not None:  # its own baked textures
+            return {k: im.convert("RGBA") for k, im in b.own["images"].items()}
         p = b.part.params
         atlas = self.atlas.get(b.name)
         layout = KINDS[b.part.kind].layout
@@ -348,6 +369,10 @@ def _names(naming: Naming, set_name: str, b: PartBuild) -> dict[str, str]:
 def job_entry(naming: Naming, set_name: str, b: PartBuild) -> dict:
     """The Blender job's description of one part (no paths: also the cache key)."""
     k = KINDS[b.part.kind]
+    if k.builder == "mesh":
+        return {"kind": b.part.kind, "builder": "mesh", "shape": f"{b.name}Shape", "shader": b.part.shader,
+                "zones": 1, "layout": "own", "bake": False, "zone_uvs": [[0.5, 0.5]],
+                "params": {"geometry": b.own["geometry"]}, "textures": _names(naming, set_name, b)}
     return {"kind": b.part.kind, "builder": k.builder, "shape": f"{b.name}Shape", "shader": b.part.shader,
             "zones": len(b.part.zones), "layout": k.layout, "density": TEXEL_DENSITY,
             "materials": [z.material for z in b.part.zones], "bake": True,

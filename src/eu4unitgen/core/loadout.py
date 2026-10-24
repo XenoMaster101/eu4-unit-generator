@@ -641,13 +641,21 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
                 except PartError as exc:
                     raise GenerationError(f"loadout slot {tier}/{role}: {exc}") from exc
                 identity = json.dumps([tier, spec.kind, part.params, [(z.colour, z.gloss, z.channel) for z in part.zones],
-                                       spec.blazon], sort_keys=True, default=list)
+                                       spec.blazon, spec.mesh], sort_keys=True, default=list)
                 name = shared.get(identity)
                 if name is None:
                     name = naming.part(set_name, spec.kind, tier, role)
                     shared[identity] = name
                     blazon = loadout.image(spec.blazon) if spec.blazon else None
-                    builds.append(PartBuild(name, tier, part, blazon))
+                    own = None
+                    if spec.mesh:  # M23: geometry and textures of its own
+                        try:
+                            geometry = json.loads(loadout.path(spec.mesh["geometry"]).read_text(encoding="utf-8"))
+                        except (OSError, ValueError) as exc:
+                            raise GenerationError(f"loadout slot {tier}/{role}: {spec.kind}: can't read its geometry: {exc}") from exc
+                        own = {"geometry": {k: geometry[k] for k in ("p", "tri", "uv")},
+                               "images": {k: loadout.image(spec.mesh[k]) for k in ("diffuse", "normal", "specular")}}
+                    builds.append(PartBuild(name, tier, part, blazon, own))
                     res.parts.append(PartRecord(
                         name, spec.kind, tier, role, part.bone, part.shader,
                         naming.part_mesh_file(set_name, spec.kind, tier, role), part.params,
