@@ -1216,7 +1216,7 @@ def _grow(m):
     return out
 
 
-def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None, carve=()):
+def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None, carve=(), carve_out=()):
     """``obj`` replaced by the solid it encloses, by flood fill: the voxels (size ``vs``) its surface
     passes through, closed by ``closing`` voxels (gaps up to twice that sealed), then everything the
     outside can't reach from the box's edge is solid; the closing taken back off; the solid's voxel
@@ -1293,6 +1293,10 @@ def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None, carve=(
         for b in carve:
             lo_b, hi_b = (np.array(b[0]) - lo) / vs, (np.array(b[1]) - lo) / vs
             inside &= ~np.all([(ii[d] >= lo_b[d]) & (ii[d] <= hi_b[d]) for d in range(3)], axis=0)
+    for c in carve_out:  # M23: everything above ``y0`` farther than ``radius`` from a vertical axis (the collar round a head)
+        ii = np.indices(inside.shape)
+        wx, wy, wz = (lo[d] + ii[d] * vs for d in range(3))
+        inside &= ~((wy > c["y0"]) & (np.hypot(wx - c["centre"][0], wz - c["centre"][1]) > c["radius"]))
     # the solid's boundary faces (between an inside and an outside voxel) as quads on the corner grid
     S = np.array(inside.shape) + 1
     vid = lambda i, j, k: (i * S[1] + j) * S[2] + k  # noqa: E731
@@ -1344,7 +1348,7 @@ def collapse_to(obj, target, close=None):
         SOLID.setdefault("log", []).append(solid_fill(
             obj, vs_, closing=max(1, int(round(SOLID.get("closing", 0.2) / vs_))),
             opening=int(round(SOLID.get("opening", 0.0) / vs_)), protect=SOLID.get("protect"),
-            region=SOLID.get("region"), carve=SOLID.get("carve", ())))
+            region=SOLID.get("region"), carve=SOLID.get("carve", ()), carve_out=SOLID.get("carve_out", ())))
         mod = obj.modifiers.new("close", "REMESH")
         mod.mode, mod.voxel_size, mod.adaptivity = "VOXEL", float(close), 0.0
         bpy.ops.object.modifier_apply(modifier=mod.name)

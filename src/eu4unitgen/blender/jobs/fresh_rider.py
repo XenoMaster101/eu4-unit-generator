@@ -298,6 +298,10 @@ def main():
     chroma = (rgb.max(1) - rgb.min(1)) / np.maximum(rgb.max(1), 1)
     crest = ~lance & ~shield & (co[:, 1] > NECK + 1.2) & ((hue < 20) | (hue > 330)) & (chroma > 0.4)
     res["crest_vertices"] = int(crest.sum())
+    # the helmet's steel: not red, above the neck, near the centre line (its axis and radius for the collar cut)
+    steel = ~lance & ~shield & ~((hue < 20) | (hue > 330)) & (co[:, 1] > NECK) & (np.abs(co[:, 0]) < 1.5) \
+        & (co[:, 1] < NECK + 2.6)
+    helmet_pts = co[steel] if steel.any() else None
     crest_pts = co[crest]
     # the parts, with their own raw copies (bake sources)
     parts = {}
@@ -329,6 +333,13 @@ def main():
                                  if slit > 0 else []),
                                [[side_x, -1.0, -20.0], [20.0, under, 20.0]], [[-20.0, -1.0, -20.0], [-side_x, under, 20.0]]]})
     res["leg_slot"] = {"half_width": gap, "top": round(crotch, 2)}
+    # the collar round the helmet (the user, test 30: the head read as a hooded blob): above the neck, anything farther
+    # out than the helmet (its steel near the centre line: the median axis, the 90th percentile radius, + 0.1) is cut
+    if a.get("collar_cut", True) and helmet_pts is not None and len(helmet_pts) > 50:
+        hc = np.median(helmet_pts[:, [0, 2]], axis=0)
+        hr = float(np.percentile(np.hypot(helmet_pts[:, 0] - hc[0], helmet_pts[:, 2] - hc[1]), 90)) + 0.1
+        fh.SOLID["carve_out"] = [{"centre": hc.tolist(), "radius": hr, "y0": NECK - 0.2}]
+        res["collar_cut"] = {"centre": hc.round(3).tolist(), "radius": round(hr, 3), "above": NECK - 0.2}
     res["side_cut"] = {"beyond_x": side_x, "below_y": round(under, 2)}
     vs = float(a.get("close_voxel", 0.1))
     fh.collapse_to(obj, 10 ** 9, vs)
@@ -384,12 +395,16 @@ def main():
             # (rider_frames), centred half way to the elbow and out from the forearm
             f = a["shield_frame"]
             R = frame_rotation(a_dir, b_dir, f["out"], f["up"])
-            place_at = 0.5 * np.array(f["elbow"]) + float(a.get("shield_out", 0.6)) * np.array(f["out"])
+            # and lowered (centred on the raised forearm, the kite's top stood over the helmet: its rim showed as a
+            # ribbon over the head from behind), a little smaller
+            place_at = 0.5 * np.array(f["elbow"]) + float(a.get("shield_out", 0.6)) * np.array(f["out"])                 - float(a.get("shield_down", 1.5)) * np.array(f["up"])
+            k = float(a.get("shield_scale", 0.85))
+            R = R * k
         else:  # the face outwards to +X, the shield's top to +Y (the hoplon's convention: on the rein hand)
             R = frame_rotation(a_dir, b_dir, [1, 0, 0], [0, 1, 0])
         if place_at is not None:
             centre = hs.verts(p).mean(0)
-            origin = centre - np.linalg.solve(R, place_at)  # (centre - origin) @ R.T == place_at
+            origin = centre - np.linalg.solve(R, place_at)  # (centre - origin) @ R.T == place_at (R may carry a scale)
         res["parts"][key] = {"node": node, **({"strapped_at": place_at.round(3).tolist()} if place_at is not None else {}),
                              **export_part(p, os.path.join(a["parts_dir"], f"{key}_low.json"),
                                            os.path.join(a["parts_dir"], f"{key}_part.json"), R, origin)}

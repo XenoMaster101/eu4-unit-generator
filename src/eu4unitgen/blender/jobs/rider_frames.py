@@ -52,7 +52,9 @@ def main():
     out.z = 0.0
     out.normalize()
     up = Vector((0.0, 0.0, 1.0))
-    fwd = up.cross(out) if a["node"].startswith("Left") else out.cross(up)
+    # forward (the rider faces PDX -Z, Blender -Y): out x up on the left, up x out on the right (checked in the
+    # gallery: with the other order a sword hung "back" pointed at the horse's head)
+    fwd = out.cross(up) if a["node"].startswith("Left") else up.cross(out)
     res = {"elbow": list(elbow), "out": list(to_part(rot_inv @ out).normalized()), "up": list(to_part(rot_inv @ up).normalized()),
            "forward": list(to_part(rot_inv @ fwd).normalized()), "node_world": list(P.translation)}
     _pdx.write_result(a, res)

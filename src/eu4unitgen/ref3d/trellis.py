@@ -182,13 +182,79 @@ PLUME_RED = (128, 22, 22)
 # (3 passes) and its weights smoothed 24 times: flips idle 30 / moving 29 / attack 41 (12 / 0 / 12 for vanilla's)
 RIDER = {"target_tris": 2600, "part_tris": {"lance": 200, "shield": 400}, "close_voxel": 0.1, "slim_low": 0.75,
          "weight_smooth": 24, "even": 3}
+# the sword in its scabbard (the user, test 30: decoration, never drawn): in the reference's colours
+SWORD = {"hang_deg": 65.0, "length": 6.5, "grip": 1.3, "guard": 1.4, "out": 1.0, "up": 0.2, "forward": 0.6}  # out 0.35: inside the skirt
+SWORD_COLOURS = {"gold": (200, 160, 70), "grip": (60, 38, 26), "scabbard": (150, 38, 32), "steel": (150, 150, 152)}  # lit, 105 read black
+SWORD_GLOSS = {"gold": 12, "grip": 4, "scabbard": 4, "steel": 14}
+
+
+def sword_part(out: Path, frame: dict, hip_half_width: float, cfg: dict | None = None) -> dict:
+    """M23: a sword in its scabbard as a rigid belt part (``mesh_belt``, the pelvis bone): our own geometry, plain
+    boxes (pommel, grip, crossguard, a tapered scabbard with a gold locket and chape) on a four-swatch texture in
+    the reference's colours (gold hilt, dark grip, dark red scabbard). Placed with ``frame`` (rider_frames on
+    ``hip``, the seated pose: the part's own PDX directions for out, up and forward): the hilt at the hip's side
+    (``hip_half_width`` + out), a little forward and up; the scabbard hanging down and back at ``hang_deg`` from
+    vertical, its flat facing outward. -> a loadout part entry (files under ``out``)."""
+    import math
+
+    from PIL import Image
+    c = {**SWORD, **(cfg or {})}
+    norm = lambda v: [x / math.sqrt(sum(y * y for y in v)) for x in v]  # noqa: E731
+    cross = lambda u, v: [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]  # noqa: E731
+    o, up, fwd = norm(frame["out"]), norm(frame["up"]), norm(frame["forward"])
+    th = math.radians(c["hang_deg"])
+    ax = norm([-up[k] * math.cos(th) - fwd[k] * math.sin(th) for k in range(3)])  # down and back
+    w = norm(cross(o, ax))  # the flat's width (in the plane facing outward)
+    t = norm(cross(ax, w))  # its thickness (outward)
+    hilt = [o[k] * (hip_half_width + c["out"]) + up[k] * c["up"] + fwd[k] * c["forward"] for k in range(3)]
+    swatch = {"gold": (0, 0), "grip": (1, 0), "scabbard": (0, 1), "steel": (1, 1)}
+    p, tri, uv = [], [], []
+
+    def box(s0, s1, w0, w1, t0, zone):
+        """A box from s0 to s1 along the sword (half widths w0 -> w1, half thickness t0), one swatch."""
+        corners = []
+        for s, hw in ((s0, w0), (s1, w1)):
+            for a_, b_ in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+                corners.append([hilt[k] + ax[k] * s + w[k] * hw * a_ + t[k] * t0 * b_ for k in range(3)])
+        u0, v0 = swatch[zone]
+        quad_uv = [(u0 * 0.5 + 0.05, v0 * 0.5 + 0.05), (u0 * 0.5 + 0.45, v0 * 0.5 + 0.05),
+                   (u0 * 0.5 + 0.45, v0 * 0.5 + 0.45), (u0 * 0.5 + 0.05, v0 * 0.5 + 0.45)]
+        for f in ((0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)):
+            base = len(p) // 3
+            for i in f:
+                p.extend(corners[i])
+            for q in quad_uv:
+                uv.extend(q)
+            tri.extend([base, base + 1, base + 2, base, base + 2, base + 3])
+    L, g = c["length"], c["grip"]
+    box(-g - 0.35, -g, 0.24, 0.24, 0.22, "gold")  # pommel
+    box(-g, -0.1, 0.13, 0.13, 0.12, "grip")
+    box(-0.1, 0.15, c["guard"] / 2, c["guard"] / 2, 0.15, "gold")  # crossguard
+    box(0.15, 0.6, 0.3, 0.29, 0.15, "gold")  # locket
+    box(0.6, L - 0.6, 0.29, 0.2, 0.13, "scabbard")
+    box(L - 0.6, L, 0.2, 0.12, 0.12, "gold")  # chape
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "sword_part.json").write_text(json.dumps({"p": [round(x, 5) for x in p], "tri": tri, "uv": uv}), encoding="utf-8")
+    diff, spec = Image.new("RGBA", (64, 64)), Image.new("RGBA", (64, 64))
+    for zone, (u0, v0) in swatch.items():
+        box_px = (u0 * 32, v0 * 32, u0 * 32 + 32, v0 * 32 + 32)
+        diff.paste(SWORD_COLOURS[zone] + (255,), box_px)
+        spec.paste((0, 0, 0, SWORD_GLOSS[zone]), box_px)
+    diff.save(out / "sword_diffuse.png")
+    spec.save(out / "sword_specular.png")
+    Image.new("RGBA", (64, 64), (128, 128, 255, 255)).save(out / "sword_normal.png")
+    return {"kind": "mesh_belt", "mesh": {"geometry": str(out / "sword_part.json"), "diffuse": str(out / "sword_diffuse.png"),
+                                          "normal": str(out / "sword_normal.png"), "specular": str(out / "sword_specular.png")}}
+
+
 RIDER_GROUPS = {"head": ["head"], "arms": ["R_shoulder", "R_arm", "R_elbow", "R_wrist", "R_hand", "L_shoulder", "L_arm",
                                           "L_elbow", "L_wrist", "L_hand"],
                 "legs": ["R_thigh", "R_knee", "R_foot", "R_toe", "L_thigh", "L_knee", "L_foot", "L_toe"],
                 "torso": ["hip", "lower_spine", "mid_spine", "top_spine", "root"]}
 
 
-def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None) -> dict:
+def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None, plume: bool = False,
+                  sword: bool = True) -> dict:
     """A TRELLIS.2 rider (.glb from a front view) into ``root/vNNN`` (SPEC M23): Blender job fresh_rider (the body on
     the infantry skeleton; the lance and shield split off as parts in their hand nodes' frames); bake_colour (the
     body and each part; the red cloth as the country colour's mask) and bake_horse (the body's normal and AO); the
@@ -235,8 +301,12 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                       **({"colours": {"own": "country1"}} if pb.get("default_primary") else {}),
                       "mesh": {"geometry": str(out / "parts" / f"{key}_part.json"), "diffuse": pb["diffuse"],
                                "normal": str(out / "parts" / f"{key}_normal.png"), "specular": pb["specular"]}}
-    if fr.get("plume_voxels_cut"):  # the plume's place: a small upright tuft on the head (crest part, short arc)
+    if fr.get("plume_voxels_cut") and plume:  # optional: a small upright tuft on the head (the user, test 30: dropped)
         parts["plume"] = {"kind": "crest", "params": dict(PLUME), "colours": {"hair": list(PLUME_RED)}}
+    if sword:  # on the side the shield doesn't cover (the reference hangs it on the shield's side; the user, test 30)
+        hip_frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": "hip",
+                                                "elbow": "R_thigh", "shoulder": "R_shoulder"}).result
+        parts["sword"] = sword_part(out / "parts", hip_frame, float(fr.get("slim", {}).get("hip_half", 1.9)))
     dd = out / "deform"
     dd.mkdir()
     (dd / "rider.mesh").write_bytes(write_fresh(base, geometry_from_job(out / "low_geometry.json")))
