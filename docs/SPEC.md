@@ -2700,7 +2700,7 @@ The rider track's result (its development record is M23). The counterpart of M22
 ```
 python -m eu4unitgen.ref3d.trellis run <image> --rider --name <subject> --rights "<declaration>" --ai-python <Windows AI python>
 ```
-or `trellis.process_rider(<raw.glb>, <dir>)` on a TRELLIS.2 model. It writes `assets_in/<name>/trellis/game/vNNN/`: the body's geometry and textures, `parts/` (the lance, shield and sword geometry and textures), `manifest.json` (its `parts` are ready loadout part entries) and `deform/`.
+or `trellis.process_rider(<raw.glb>, <dir>)` on a TRELLIS.2 model. It writes `assets_in/<name>/trellis/game/vNNN/`: the body's geometry and textures, `parts/` (the lance, shield and plume geometry and textures; the sword if asked for), `manifest.json` (its `parts` are ready loadout part entries) and `deform/`.
 
 **Inputs:** a front view of the soldier, arms a little out, weapons in hand, on a plain background; a name; the rights declaration (rule 8).
 
@@ -2714,14 +2714,14 @@ or `trellis.process_rider(<raw.glb>, <dir>)` on a TRELLIS.2 model. It writes `as
 | Scale and place | the helmet's top (not the crest's red) at 16.4, feet on the ground, centred |
 | Slim | x and z towards vanilla's rider's waist and chest, at least 0.75; across the torso x scales, the arms shift in whole |
 | Arms | each arm turned about its shoulder so the lance's grip points at `Right_hand_node` and the shield's at `Left_hand_node`; the weapons carried with their hands |
-| Plume | cut off (optional crest tuft part; the user dropped it) |
+| Plume | cut off the body and rebuilt as a rigid `mesh_head` part (`plume_line` + `trellis.plume_part`): a gold finial on the crown and a crimson tube along the raw plume's centre line, rising then flowing back, clear of the helmet and cloak |
 | Solid | flood fill (closing 0.2); a slot between the legs under the crotch; the cloth hanging under each arm outside the torso cut; the collar above the neck outside the helmet's radius cut |
 | Decimate | quadric collapse to 2,600 (vanilla's rider body: 2,883), the slivers evened (3 passes) |
 | Weights | nearest-surface transfer, then region rules: head (and anything rigid on it) above the neck; arms along their chains; the cloak behind the back on the spine by height; legs and skirt halves along the leg chains; 24 smoothing passes, 4 bones at most |
 | Parts | each weapon closed, collapsed (lance 200, shield 400), unwrapped and baked, written in its node's frame as a `mesh_weapon` / `mesh_shield` part |
 | Lance | along −Z from the grip (the rider's "down": levelled forward in game) |
 | Shield | strapped to the left forearm: `rider_frames` measures `Left_hand_node`'s frame in the seated pose (frame 1 of `cavalry_rider_idle`); face outward, top up, half way to the elbow, lowered 1.5, at 0.85 |
-| Sword | `sword_part`: our own sword in its scabbard (pommel, grip, crossguard, scabbard with locket and chape) in the reference's colours, a `mesh_belt` part on the pelvis bone; on the side the shield doesn't cover; hanging back 65° along the horse's flank, clear of the caparison |
+| Sword (optional, off by default: `sword=True`) | `sword_part`: our own sword in its scabbard (pommel, grip, crossguard, scabbard with locket and chape) in the reference's colours, a `mesh_belt` part on the pelvis bone; on the side the shield doesn't cover; hanging back 65° along the horse's flank, clear of the caparison |
 | Textures | `bake_colour` (the red cloth and the shield's face as the country colour's mask; gloss by colour class; the colour matched to the raw front render), `bake_horse` (normal and AO) |
 
 **3. Checks:**
