@@ -2855,3 +2855,14 @@ The path went: nearest-surface weights 133 / 98 / 119 flips → leg slot → reg
 - **In-game test 33 STAGED** (`build/test33`; tiers 1–3 are the three budgets; units named "T33 ...").
   - The run sheet `README.txt` includes a frame-rate check with 30+ regiments on screen.
   - The validator found 0 errors and 13 warnings: the budget on tiers 2–3, the parts' texture-quality notes once per tier.
+- **The user on test 33 (2026-10-24):** the shield is fine; only the plume still looks off. The user asked for hair cards if EU4 has a cutout shader for unit meshes.
+  - **Checked against the base game (`gfx/FX/pdxmesh.shader`):**
+    - Both blend states have `AlphaTest = no`.
+    - The only alpha clip in pdxmesh is `PixelPdxMeshAlphaBlendShadow` (`clip(vColor.a - 0.5)`), a shadow pass.
+    - `PdxMeshAlphaBlend`, `PdxMeshAlphaBlendSkinned` and `PdxMeshAlphaBlendNoZWriteSkinned` blend by the diffuse's alpha (SRC_ALPHA / INV_SRC_ALPHA). Only 16 African city meshes and `Mapitems/selection.mesh` use them; no unit does.
+    - `tree.shader` cuts out (`clip(vDiffuseColor.a - 0.5)`), but it is the map trees' own shader (effects `tree`, `treeunlit`, `treeshadow`). Nothing shows a unit pdxmesh can use it (rule 6).
+  - **Known limit: no cutout for unit meshes.** Plumes, crests and manes stay solid horsehair blades (`core.gear`), with no see-through gaps between strands. Alpha-blended cards (`PdxMeshAlphaBlend`) are untried for units; expect sorting artefacts where cards cross, and no country colour.
+- **In-game test 34 STAGED** (`build/test34`; the run sheet is `README.txt`, the head close-up next to the reference is `gallery/head_closeup.png`):
+  - Tier 1: the cataphract at the standard budget (horse `cataphract_budget/horse/v001`, rider `cataphract_budget/rider/v001`: blade plume, kite shield). Tier 2: vanilla's rider on it. Tier 3: vanilla. Units are named "T34 ...".
+  - The validator found 0 errors and 3 warnings.
+  - The cataphract is done; next is packaging.
