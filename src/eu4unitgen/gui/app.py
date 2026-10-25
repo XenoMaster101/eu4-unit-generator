@@ -928,6 +928,14 @@ def _install_error_reporting() -> None:
 def main(argv: list[str] | None = None) -> int:
     _install_error_reporting()
     app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
+    from PySide6.QtGui import QIcon
+    app.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.png"))))
+    if sys.platform == "win32":  # the taskbar shows our icon, not Python's
+        import ctypes
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("eu4unitgen.app")
+        except (AttributeError, OSError):
+            pass
     window = MainWindow(store=QSettings("eu4unitgen", "eu4unitgen"))
     window.show()
     window.auto_setup()

@@ -27,6 +27,7 @@ where = ["src"]
 "eu4unitgen.ref3d" = ["templates/*.json"]
 "eu4unitgen.ai" = ["jobs/*.py"]
 "eu4unitgen.setup_scripts" = ["*.sh"]
+"eu4unitgen.gui" = ["icon.png", "eu4unitgen.ico"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
