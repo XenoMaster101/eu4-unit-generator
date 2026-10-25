@@ -3088,3 +3088,38 @@ The user's brief after test 35: turn every lesson into a built-in rule, give it 
   - The TRELLIS.2 shield passed its crop check (outline 0.84, colour 12.5) but is not better. Its projected emblem breaks up close, its rim is plain, and it reads the same at the game camera and map zoom.
   - The check doesn't measure emblem crispness yet: a next step.
 - **Package rebuilt** with every fix: `dist/eu4unitgen-0.1.0-windows.zip`.
+
+### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
+
+| Tool, model or library | For | Where | Size | Licence | Status | Safe to remove |
+|---|---|---|---|---|---|---|
+| Python 3.14 (python.org) | runs the app from the source checkout (the installed app brings its own Python) | `C:\Python314` | 174 MB | PSF | required | no |
+| PySide6 6.12, Pillow, Jinja2 | the app's window, images and DDS, script templates | `<app>\venv (dev: .venv)` | 717 MB | LGPL-3.0 / MIT-CMU / BSD-3 | required | no |
+| Blender 4.2 LTS | every mesh job, run as a separate program | `C:\Program Files\Blender Foundation\Blender 4.2` | 973 MB | GPL-2.0-or-later | required | no |
+| io_pdx_mesh 0.91 (Blender extension) | reads and writes EU4 .mesh files | `%APPDATA%\Blender Foundation\Blender\4.2\extensions\user_default\io_pdx_mesh` | 2 MB | GPL-3.0-or-later | required | no |
+| WSL2 + Ubuntu 26.04 | where TRELLIS.2 runs (the 38 GB disk holds the three items below; it doesn't shrink by itself when files inside are deleted) | `%LOCALAPPDATA%\wsl\...\ext4.vhdx` | 38.0 GB | Microsoft / open source | required | no |
+| CUDA toolkit 12.9 | builds TRELLIS.2's GPU extensions (needed to rebuild the extensions; whether TRELLIS.2 needs it while running is UNVERIFIED, so keep it) | `WSL /usr/local/cuda-12.9` | 7.3 GB | NVIDIA CUDA EULA | required | no |
+| TRELLIS.2 environment (torch 2.7 cu128, xformers, transformers 4.57.1, CuMesh, FlexGEMM, o-voxel, utils3d) | image to 3D model | `WSL ~/eu4unitgen_ai/trellis2_env` | 7.2 GB | BSD / MIT / Apache-2.0 | required | no |
+| TRELLIS.2 extension build tree | the sources CuMesh, FlexGEMM and o-voxel were built from (installed as copies: only a rebuild needs it (setup re-downloads it)) | `WSL ~/eu4unitgen_ai/ext` | 1.1 GB | MIT / MPL-2.0 (Eigen) | optional | yes |
+| uv cache in WSL | package download cache (frees space inside the WSL disk, not on C: until the disk is compacted) | `WSL ~/eu4unitgen_ai/uv_cache` | 778 MB | - | optional | yes |
+| TRELLIS.2 code (commit 75fbf01) | TRELLIS.2's model code, read by the WSL environment | `D:\eu4unitgen_ai\TRELLIS.2` | 41 MB | MIT | required | no |
+| TRELLIS.2-4B weights | the 3D model | `D:\eu4unitgen_ai\weights\TRELLIS.2-4B` | 16.0 GB | MIT | required | no |
+| TRELLIS-image-large (decoder) | TRELLIS.2's sparse-structure decoder | `D:\eu4unitgen_ai\weights\TRELLIS-image-large` | 143 MB | MIT | required | no |
+| DINOv3 ViT-L/16 | TRELLIS.2's image encoder | `D:\eu4unitgen_ai\weights\dinov3-vitl16-pretrain-lvd1689m` | 1.2 GB | DINOv3 License (gated) | required | no |
+| SAM 2.1 hiera-large | cuts each part out of the reference | `D:\eu4unitgen_ai\weights\sam2.1-hiera-large` | 881 MB | Apache-2.0 | required | no |
+| BiRefNet-general (ONNX, via rembg) | cuts the subject out of the image | `D:\eu4unitgen_ai\rembg_models` | 952 MB | MIT | required | no |
+| Windows AI environment "triposg_env" (torch 2.14 cu126, transformers 5.20, rembg, onnxruntime-gpu, scipy, opencv) | runs BiRefNet and SAM 2 (misnamed: made for TripoSG; it also carries packages only TripoSG used (diffusers, peft, pymeshlab, numba, accelerate). A clean environment would be ~3 GB) | `D:\eu4unitgen_ai\triposg_env` | 5.1 GB | BSD / Apache-2.0 / MIT | required | no |
+| CPython 3.10 (uv) | the base Python of the Windows AI environment | `D:\eu4unitgen_ai\python\cpython-3.10.19-windows-x86_64-none` | 72 MB | PSF | required | no |
+| uv | makes Python environments (setup) | `D:\eu4unitgen_ai\tools\uv` | 61 MB | MIT / Apache-2.0 | optional | no |
+| uv cache (Windows) | package download cache | `D:\eu4unitgen_ai\uv_cache` | 184 MB | - | optional | yes |
+| Windows TRELLIS.2 environment | the first TRELLIS.2 build, on Windows (blocked by Smart App Control) (also holds nvdiffrast and nvdiffrec (NVIDIA: research or evaluation only), which the pipeline never uses) | `D:\eu4unitgen_ai\trellis2_env` | 6.6 GB | mixed | unused | yes |
+| CPython 3.11 (uv) | base of the Windows TRELLIS.2 environment | `D:\eu4unitgen_ai\python\cpython-3.11.14-windows-x86_64-none` | 82 MB | PSF | unused | yes |
+| TRELLIS.2 Windows wheels | the Windows build's wheels | `D:\eu4unitgen_ai\wheels` | 6 MB | MIT | unused | yes |
+| TripoSG weights and code | the hand-built master pipeline's 3D shells (archived) | `D:\eu4unitgen_ai\weights\TripoSG, D:\eu4unitgen_ai\TripoSG` | 7.5 GB | MIT | unused | yes |
+| SDXL inpainting | filled hidden views for the master pipeline (archived) | `D:\eu4unitgen_ai\weights\sdxl_inpaint` | 6.5 GB | CreativeML Open RAIL++-M | unused | yes |
+| SigLIP 2 so400m | labelled parts for the self-reading pipeline (archived) | `D:\eu4unitgen_ai\weights\siglip2-so400m-patch14-384` | 4.3 GB | Apache-2.0 | unused | yes |
+| LPIPS | perceptual metric, in TRELLIS.2's requirement list (not found in either environment) | `not in any environment now` | - | BSD-2 | unused | no |
+| ControlNet depth SDXL, IP-Adapter SDXL, DINOv2, cma (CMA-ES) | proposed for the master pipeline (SPEC M1-M2) | `-` | - | RAIL++ / Apache-2.0 / Apache-2.0 / BSD | never installed | no |
+| texconv (DirectXTex) | optional DDS encoder (Pillow writes the DDS files) | `-` | - | MIT | never installed | no |
+
+Safe to remove in all: about 27.1 GB (nothing is removed until the user confirms).

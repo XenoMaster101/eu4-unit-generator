@@ -158,3 +158,14 @@ def test_setup_detects_and_saves_paths(tmp_path, monkeypatch):
     c = config.load()
     assert c.eu4() == tmp_path / "eu4"
     assert setup_page.detect() == {}  # set already: nothing overwritten
+
+
+def test_inventory_lists_every_piece_and_what_is_safe():
+    from eu4unitgen.core import inventory
+    names = " ".join(i.name for i in inventory.ITEMS)
+    for must in ("TRELLIS.2-4B", "DINOv3", "SAM 2.1", "BiRefNet", "TripoSG", "SDXL", "SigLIP", "LPIPS", "ControlNet",
+                 "IP-Adapter", "DINOv2", "cma", "Blender", "io_pdx_mesh", "WSL2", "CUDA"):
+        assert must in names, must
+    assert all(not i.safe_to_remove for i in inventory.ITEMS if i.status == "required")
+    assert 20 < inventory.freed_gb() < 40
+    assert "| Status |" in inventory.markdown() and "<table" in inventory.html()
