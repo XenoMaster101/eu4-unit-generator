@@ -84,7 +84,7 @@ def copy_steps(staged: Path, mod_dir: Path, name: str) -> list[str]:
     return [f"Windows didn't let the app write into {mod_dir} (Controlled Folder Access).",
             f"Open {staged} in Explorer.",
             f"Copy the folder {name} and the file {name}.mod into {mod_dir} (replace them if asked).",
-            f"In the EU4 launcher, enable \"{name.replace('_', ' ')}\"."]
+            f"In the EU4 launcher, enable \"{name}\"."]
 
 
 def keep_graphics(paths: list[str], name: str, gfx: str, tier: int, rules) -> tuple[set[str], dict[str, bytes], list[str]]:

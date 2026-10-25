@@ -487,7 +487,7 @@ QListWidget {{ background: {t['surface']}; color: {t['text']}; border: 1px solid
                 open_folder(r.staged_at)
                 return self.show_message(f"Staged at {r.staged_at}. {chk}")
             self.show_message(f"Written to {r.written_to} ({len(r.files)} files). {chk} Enable "
-                              f"\"{r.mod_name.replace('_', ' ')}\" in the launcher.")
+                              f"\"{r.mod_name}\" in the launcher.")
         self.window_.run(self, "Adding the unit to your mod", work, done)
 
     def show_guide(self) -> None:

@@ -3058,3 +3058,28 @@ The user's brief after test 35: turn every lesson into a built-in rule, give it 
 | the crest is found by its own colour over the helmet, whatever it is | Track P1 audit: a fixed red | `blender/jobs/_colour.py:crest_colour` | test_rule[crest_any_colour] |
 | the helmet's gold (finial, brow band, nasal, ribs) is built where the reference's helmet shows it, in the unit's gold | test 34: the reference's tall finial and bands | `ref3d/part_gen.py:read_helmet` | test_read_helmet_finds_its_gold |
 | every part carries a normal map (baked from its model, or from its height) | M24's known limit: the parts' normal maps were flat | `ref3d/trellis.py:process_rider` | test_sword_is_textured_not_flat; test_normal_from_height_signs |
+
+#### Track P4: the Windows package and the fresh-user test (2026-10-24/25)
+- **The package** (`python packaging/windows/build_package.py` -> `dist/eu4unitgen-0.1.0-windows.zip`, 0.5 MB):
+  - **Contents:** the app's wheel, Install.cmd/install.ps1, Uninstall.cmd/uninstall.ps1 and README.txt. No game files, no weights, no third-party binaries. The wheel carries the WSL setup scripts (`setup_scripts/`).
+  - **Install.cmd** needs no terminal; its questions are message boxes. It finds Python 3.11+ (or offers Python 3.12 through winget), makes a venv in `%LOCALAPPDATA%\eu4unitgen\app`, installs the wheel (PySide6, Jinja2 and Pillow come from PyPI), and adds Desktop and Start-menu shortcuts.
+  - **Uninstall** keeps the settings, the runs and the AI setup.
+  - **Licence:** the project's licence isn't decided (the user, 2026-10-25). No LICENSE file is committed or packaged until it is; `pyproject.toml` and `core/licences.py` still say GPL-3.0, as since Phase 0.
+- **The app's first run** opens Setup while the EU4 install, the AI environment or Blender is missing. Setup finds and saves the EU4 install (Steam's library list), Blender 4.2 and the mod folder by itself. The steps for the AI side each run in a window of their own (`core/setup.py`).
+- **The fresh-user test, on the author's machine:**
+  - **Install:** from the zip, into a new prefix, with an empty settings folder and without the developer's environment variables. 17 s with pip's cache; a new machine downloads about 260 MB.
+  - **Setup:** found EU4, Blender and the mod folder. The AI environment and folder were pointed at the ones already on this PC (D:\eu4unitgen_ai), as Setup's Browse would. The AI install steps were not re-run: they need about an hour, about 20 GB of downloads and the Linux password. Their commands were checked (the io_pdx_mesh URL against its release), not executed.
+  - **The run:** horse 2 from its image, through the installed app's own flow (detached). Cut-out 31 s; TRELLIS.2 load 117 s, generate 153 s, export 35 s; build 68 s; preview 3.5 min. Quality "Usable": outline 64% against the raw model's 74%; flips 19/36/60 against vanilla's 13/8/32; tail and reins rebuilt; texture 52%; map zoom 13% brighter than vanilla.
+  - **Found and fixed by this test:**
+    - Staging failed for a fresh user: the command-line tool only read `EU4_PATH`. The EU4 install and Blender are now read from the settings file everywhere.
+    - TRELLIS.2's own timings overwrote the stage's time.
+    - The checks box didn't resize.
+    - Setup's fields started blank.
+    - Add to mod didn't fall back to staging on the writer's own error.
+  - **Add to mod (normal):** Controlled Folder Access blocked the mod folder, so it was staged (30 files, 16 in checksummed folders) with the copy steps shown. Unit names: "Horse2 Fresh Cavalry I".
+- **Found by the gallery, not the regression set:** the generalised cloth rule turned the cataphract's country colour orange (255 155 112 against test 35's 255 77 70).
+  - Causes: a plain ±25° window took the copper trim; worse, the head band took the head's own dominant hue (the chanfron's copper), and that colour cleans the caparison panels.
+  - Fixed: the cloth window never enters the orange-to-gold band unless the cloth itself is orange; the head band uses the cloth's colour.
+  - The regression set now measures the country colour (Lab, within 8) and the mask's share (within 0.04) against test 35's.
+- **Hem length:** first try left shards at the legs (any grey texel counted as cloth: the silver scale and the legs too). Now: the country mask, and only whole cloth triangles. The effect is subtle on a caparison that is one shape with the legs.
+- **Shield side:** right forearm works, the lance mirrored into the left hand. The cavalry animations raise the right arm, so a right-side shield sits high behind the shoulder (said in its tooltip).
