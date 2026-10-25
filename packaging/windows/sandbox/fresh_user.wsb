@@ -1,0 +1,26 @@
+<!-- The fresh-user installer test in Windows Sandbox: double-click this file. The package (dist\) is mapped read-only,
+     results come back to dist\sandbox_results. Paths are this repo's on the author's PC; change them for another. -->
+<Configuration>
+  <Networking>Enable</Networking>
+  <vGPU>Disable</vGPU>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\antho\Projects\eu4unitgen\dist</HostFolder>
+      <SandboxFolder>C:\pkg</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Users\antho\Projects\eu4unitgen\dist\sandbox_results</HostFolder>
+      <SandboxFolder>C:\results</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Users\antho\Projects\eu4unitgen\packaging\windows\sandbox</HostFolder>
+      <SandboxFolder>C:\test</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell -NoProfile -ExecutionPolicy Bypass -File C:\test\sandbox_test.ps1</Command>
+  </LogonCommand>
+</Configuration>
