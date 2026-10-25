@@ -33,7 +33,14 @@ def ai_root(python: Path | str | None = None) -> Path | None:
 
 
 def allowed_roots(python: Path | str | None = None) -> list[Path]:
-    return [r for r in (project_root(), ai_root(python)) if r is not None]
+    """The project, the workspace (settings: where an installed app keeps its runs) and the AI root."""
+    from eu4unitgen.core import config
+    roots = [project_root(), config.load().work(), ai_root(python)]
+    out = []
+    for r in roots:
+        if r is not None and r not in out:
+            out.append(r)
+    return out
 
 
 def is_inside(path: Path | str, roots: list[Path]) -> bool:

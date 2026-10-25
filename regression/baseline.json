@@ -1,0 +1,59 @@
+{
+ "models": {
+  "horse2": {
+   "from": "assets_in/horse2_t2/trellis/game/v001",
+   "stored": "2026-10-24",
+   "metrics": {
+    "tris": 2927,
+    "flips_idle": 23,
+    "max_idle": 3.62,
+    "flips_moving": 35,
+    "max_moving": 5.36,
+    "flips_attack": 55,
+    "max_attack": 5.69,
+    "iou_side": 0.805,
+    "iou_front34": 0.732,
+    "iou_rear34": 0.74,
+    "uv_used": 0.5176,
+    "ref_iou": 0.641
+   }
+  },
+  "cataphract_horse": {
+   "from": "assets_in/cataphract_budget/horse/v001",
+   "stored": "2026-10-24",
+   "metrics": {
+    "tris": 2927,
+    "flips_idle": 11,
+    "max_idle": 4.86,
+    "flips_moving": 15,
+    "max_moving": 3.99,
+    "flips_attack": 46,
+    "max_attack": 4.28,
+    "iou_side": 0.8,
+    "iou_front34": 0.779,
+    "iou_rear34": 0.785,
+    "uv_used": 0.6068,
+    "ref_iou": 0.658
+   }
+  },
+  "cataphract_rider": {
+   "from": "assets_in/cataphract_budget/rider/v004",
+   "stored": "2026-10-24",
+   "metrics": {
+    "tris": 2600,
+    "flips_idle": 32,
+    "max_idle": 2.43,
+    "flips_moving": 33,
+    "max_moving": 2.1,
+    "flips_attack": 41,
+    "max_attack": 2.84,
+    "parts": [
+     "lance",
+     "plume",
+     "shield"
+    ]
+   }
+  }
+ },
+ "note": "the regression set's last good numbers (Track P1.4); derived numbers only, no assets"
+}

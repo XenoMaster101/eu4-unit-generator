@@ -17,7 +17,10 @@ args: {"image": RGBA png, "output": .glb, "repo": TRELLIS.2 checkout, "weights":
        "ss_decoder": TRELLIS-image-large folder, "dinov3": DINOv3 folder, "seed", "pipeline_type"
        ("1024_cascade" default; then "1024"), "decimation_target" (faces, default 300000),
        "texture_size" (default 2048), "result_path"}
-Result: seconds (load, generate, export), peak VRAM (GB), the pipeline type used, faces and vertices.
+       or, for several images on one model load (Track P1.2's part crops), "batch": [{"image", "output",
+       "decimation_target", "texture_size"}, ...] in place of "image" and "output".
+Result: seconds (load, generate, export), peak VRAM (GB), the pipeline type used, faces and vertices; with
+"batch", {"load": seconds, "items": [that, per image]}.
 """
 import json
 import os
@@ -97,6 +100,21 @@ def main(args_path: str) -> None:
     pipe.low_vram = True
     pipe.cuda()
     t_load = time.time() - t0
+    if a.get("batch"):
+        items = []
+        for it in a["batch"]:
+            r = one(pipe, types, {**a, **it}, torch, Image, o_voxel, 0.0)
+            items.append(r)
+            print(json.dumps(r), flush=True)
+        Path(a["result_path"]).write_text(json.dumps({"load": round(t_load, 1), "items": items}, indent=1), encoding="utf-8")
+        return
+    res = one(pipe, types, a, torch, Image, o_voxel, t_load)
+    Path(a["result_path"]).write_text(json.dumps(res, indent=1), encoding="utf-8")
+    print(json.dumps(res), flush=True)
+
+
+def one(pipe, types, a, torch, Image, o_voxel, t_load):
+    """One image through the loaded pipeline -> its .glb; the result entry."""
     image = Image.open(a["image"]).convert("RGBA")
     tried, mesh, used = [], None, None
     t1 = time.time()
@@ -129,8 +147,7 @@ def main(args_path: str) -> None:
            "peak_vram_gb": round(max(peak_gen, torch.cuda.max_memory_allocated() / 2 ** 30), 2),
            "gpu": torch.cuda.get_device_name(0), "rasteriser": sys.modules["nvdiffrast.torch"].rasterize.__module__,
            "faces": int(len(glb.faces)), "vertices": int(len(glb.vertices))}
-    Path(a["result_path"]).write_text(json.dumps(res, indent=1), encoding="utf-8")
-    print(json.dumps(res), flush=True)
+    return res
 
 
 if __name__ == "__main__":

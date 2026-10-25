@@ -59,10 +59,11 @@ def wsl_path(p: Path) -> str:
 
 
 def eu4() -> Path:
-    p = os.environ.get("EU4_PATH")
-    if not p:
-        raise SystemExit("set EU4_PATH to the EU4 install (the vanilla horse is read from it)")
-    return Path(p)
+    from eu4unitgen.core import config
+    p = config.load().eu4()
+    if p is None:
+        raise SystemExit("set the EU4 install in Settings (or EU4_PATH): the vanilla skeletons are read from it")
+    return p
 
 
 def cutout(image: Path, out: Path, ai_python: str) -> Path:
@@ -85,7 +86,9 @@ def cutout(image: Path, out: Path, ai_python: str) -> Path:
 
 def generate(rgba: Path, glb: Path, ai_root: Path, wsl: dict | None = None) -> dict:
     """TRELLIS.2 on one RGBA image in WSL2 -> ``glb``; its result (seconds, peak VRAM, faces)."""
-    w = {**WSL, **(wsl or {})}
+    from eu4unitgen.core import config
+    cfg = config.load()
+    w = {**WSL, "python": cfg.wsl_python or WSL["python"], **(wsl or {})}
     job = Path(__file__).resolve().parents[1] / "ai" / "jobs" / "trellis2_generate.py"
     result = glb.with_suffix(".result.json")
     args = {"image": wsl_path(rgba), "output": wsl_path(glb), "result_path": wsl_path(result),
@@ -96,7 +99,7 @@ def generate(rgba: Path, glb: Path, ai_root: Path, wsl: dict | None = None) -> d
     args_path.write_text(json.dumps(args, indent=1), encoding="utf-8")
     log = glb.with_suffix(".log")
     cmd = f"cd /tmp && {w['python']} {wsl_path(job)} {wsl_path(args_path)} > {wsl_path(log)} 2>&1"
-    rc = subprocess.run(["wsl.exe", "-e", "bash", "-lc", cmd]).returncode
+    rc = subprocess.run(cfg.wsl_base() + ["-e", "bash", "-lc", cmd]).returncode
     if rc != 0 or not result.is_file():
         raise SystemExit(f"TRELLIS.2 failed (exit {rc}); see {log}")
     return json.loads(result.read_text(encoding="utf-8"))
@@ -153,7 +156,8 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
             length = max(length, t)
     hair = fr.get("hair") or {}
     args = {"low": str(out / "low_geometry.json"), "high": str(out / "textured.obj"), "image": str(basecolor),
-            "part_colours": {"6": hair["tail_colour_p25_p75"]} if hair.get("tube") else {},
+            "part_colours": {**({"6": hair["tail_colour_p25_p75"]} if hair.get("tube") else {}),
+                             **({"7": (fr.get("reins") or {})["colour_p25_p75"]} if (fr.get("reins") or {}).get("built") else {})},
             "gloss": P["gloss"], "head_band": {"poll": poll, "axis": axis},
             "head_marks": {"poll": poll, "axis": axis, "neck_base": van["bones"]["HorseNeckBase"], "length": length,
                            "ear_box": [[poll[0] - 1.2, poll[1] - 0.3, poll[2] - 1.2], [poll[0] + 1.2, poll[1] + 3.0, poll[2] + 1.2]]},
@@ -167,7 +171,7 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
                                    "out_dir": str(out), "name": "horseb"}).result
     tex = {"diffuse": str(out / "horseb_diffuse.png"), "specular": bc["specular"], "normal": str(out / "horseb_normal.png")}
     manifest = {"stage": "game version (M21 standard horse pipeline)", "glb": str(glb), "version": out.name,
-                "fresh": {k: fr.get(k) for k in ("fit", "pose", "hair", "final", "back", "uv", "stages")},
+                "fresh": {k: fr.get(k) for k in ("fit", "pose", "hair", "reins", "final", "back", "uv", "stages")},
                 "colour": bc, "normal": {k: nb.get(k) for k in ("tilt", "match")}, "textures": tex,
                 "geometry": str(out / "low_geometry.json"), "seconds": round(time.time() - t0, 1)}
     manifest["compare"] = compare_sheet(br, out, basecolor)
@@ -319,10 +323,11 @@ def helmet_gold(m, info: dict, body: dict, cfg: dict | None = None) -> dict:
         return [gear._norm(gear._add(gear._add(ns[i - 1] if i else ns[i], ns[i]), ns[i + 1] if i + 1 < len(ns) else ns[i]))
                 for i in range(len(ns))]
     counts = {}
+    shows = c.get("shows") or {"brow": True, "nasal": True, "ribs": True}  # read_helmet's flags (Track P1)
     brow_el = math.degrees(c["brow_elev"])
     ring = [hit(az, brow_el) for az in range(0, 360, 10)]
     ring = [q for q in ring if q]
-    if len(ring) > 20:
+    if len(ring) > 20 and shows.get("brow"):
         ns = smooth([n for _, n in ring])
         gear.surface_band(m, [p for p, _ in ring], ns, [c["brow_w"] * R] * len(ring), c["lift"] * R, c["sink"] * R, closed=True)
         for k in range(int(c["rivets"])):
@@ -331,7 +336,7 @@ def helmet_gold(m, info: dict, body: dict, cfg: dict | None = None) -> dict:
                       0.6 * c["rivet_r"] * R, (0.875, 0.5))
         counts["brow"] = len(ring)
     top_el = math.degrees(math.asin(min(0.99, c["rib_top"])))
-    for az in c["ribs"]:
+    for az in (c["ribs"] if shows.get("ribs") else ()):
         pts = [hit(az, brow_el + (top_el - brow_el) * k / 9) for k in range(10)]
         pts = [q for q in pts if q]
         if len(pts) > 3:
@@ -340,7 +345,7 @@ def helmet_gold(m, info: dict, body: dict, cfg: dict | None = None) -> dict:
             counts[f"rib_{az}"] = len(pts)
     nasal = [hit(0, brow_el - k * 8) for k in range(int(c["nasal_down"] * 10))]
     nasal = [q for q in nasal if q and q[0][1] > centre[1] - c["nasal_down"] * R]
-    if len(nasal) > 2:
+    if len(nasal) > 2 and shows.get("nasal"):
         gear.surface_band(m, [p for p, _ in nasal], smooth([n for _, n in nasal]),
                           [c["nasal_w"] * R * (1 - 0.3 * k / len(nasal)) for k in range(len(nasal))], c["lift"] * R, c["sink"] * R)
         counts["nasal"] = len(nasal)
@@ -357,7 +362,7 @@ RIDER_ANIM_SCALE = 0.805
 
 
 def plume_part(parts_dir: Path, info: dict, cfg: dict | None = None, colours: tuple | None = None,
-               body: dict | None = None, scale: float = 1.0) -> dict:
+               body: dict | None = None, scale: float = 1.0, gold=None) -> dict:
     """M23 (the user, tests 31 and 32): the rider's plume as a rigid head part (``mesh_head``) with its gold holder
     (finial): our own geometry on ``fresh_rider``'s ``plume_line`` (the raw plume's centre line and side-to-side
     spread, in the head bone's frame). The finial: a socket, a post and a knob on the helmet's top. The plume: a
@@ -365,6 +370,7 @@ def plume_part(parts_dir: Path, info: dict, cfg: dict | None = None, colours: tu
     texture (``colours``: dark, light; the reference's by default) beside a gold patch. The finial (test 35): the
     reference's tall turned one (``HELMET``), the plume out of its lip; with ``body`` the helmet's gold bands too
     (``helmet_gold``). ``scale``: the whole part about the head bone (``RIDER_ANIM_SCALE``: the gallery's model).
+    ``gold``: the unit's gold (Track P1: the palette's; ``FINIAL_GOLD``, the cataphract's, by default).
     -> a loadout part entry."""
     from PIL import Image
 
@@ -404,14 +410,20 @@ def plume_part(parts_dir: Path, info: dict, cfg: dict | None = None, colours: tu
     tex = gear.strand_texture(dark, light, 256)
     S = 256
     images = {}
-    for kind, fill in (("diffuse", FINIAL_GOLD + (255,)), ("specular", (0, 0, 0, FINIAL_GLOSS)), ("normal", (128, 128, 255, 255))):
+    gold = tuple(int(v) for v in (gold or FINIAL_GOLD))
+    for kind, fill in (("diffuse", gold + (255,)), ("specular", (0, 0, 0, FINIAL_GLOSS)), ("normal", (128, 128, 255, 255))):
         im = Image.new("RGBA", (S, S), fill)
         im.paste(tex[kind].resize((int(S * 0.75), S), Image.LANCZOS), (0, 0))
         if kind == "diffuse":  # the gold strip: darker at its edges, a raised band's light
             for x in range(int(S * 0.75), S):
                 t = abs((x / S - 0.875) / 0.125)
                 k = 1.08 - 0.4 * t * t
-                im.paste(tuple(min(255, int(v * k)) for v in FINIAL_GOLD) + (255,), (x, 0, x + 1, S))
+                im.paste(tuple(min(255, int(v * k)) for v in gold) + (255,), (x, 0, x + 1, S))
+        if kind == "normal":  # the gold strip's raised band: a ridge across u (Track P1: no flat normal maps)
+            for x in range(int(S * 0.75), S):
+                t = (x / S - 0.875) / 0.125
+                nx = int(128 + 90 * max(-1.0, min(1.0, t)) * 0.6)
+                im.paste((nx, 128, 255, 255), (x, 0, x + 1, S))
         images[kind] = parts_dir / f"plume_{kind}.png"
         im.save(images[kind])
     return {"kind": "mesh_head", "mesh": {"geometry": str(parts_dir / "plume_part.json"), **{k: str(v) for k, v in images.items()}}}
@@ -432,7 +444,8 @@ def kite_part(parts_dir: Path, frame: dict, height: float, primary=None, cfg: di
     from eu4unitgen.core import gear
     c = {"out": 1.2, "down": -0.3, **(cfg or {})}  # out 0.6, down 1.5 (the raw disc's): the kite's point sank into the caparison
     centre = [0.5 * frame["elbow"][k] + c["out"] * frame["out"][k] - c["down"] * frame["up"][k] for k in range(3)]
-    geo, tex = gear.kite_shield(height, centre, frame["out"], frame["up"], frame["forward"], primary=primary, cfg=cfg)
+    geo, tex = gear.kite_shield(height, centre, frame["out"], frame["up"], frame["forward"], primary=primary, cfg=cfg,
+                                **(c.get("kite_kw") or {}))
     parts_dir.mkdir(parents=True, exist_ok=True)
     (parts_dir / "kite_part.json").write_text(json.dumps(geo), encoding="utf-8")
     paths = {}
@@ -449,13 +462,28 @@ RIDER_GROUPS = {"head": ["head"], "arms": ["R_shoulder", "R_arm", "R_elbow", "R_
                 "torso": ["hip", "lower_spine", "mid_spine", "top_spine", "root"]}
 
 
+def default_reference(glb: Path) -> dict | None:
+    """The cut-out reference ``run`` left beside a TRELLIS.2 model (``input/``), or None."""
+    d = Path(glb).parent / "input"
+    if (d / "input_rgb.png").is_file() and (d / "input_fg.png").is_file():
+        return {"image": str(d / "input_rgb.png"), "fg": str(d / "input_fg.png")}
+    return None
+
+
 def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None, plume: str = "part",
-                  sword: bool = False, kite: bool = True, cfg: dict | None = None) -> dict:
+                  sword: bool = False, kite: bool = True, cfg: dict | None = None, reference: dict | None = None,
+                  ai_python: str | None = None, palette_from: dict | None = None, part_method: str = "auto",
+                  part_cache: Path | None = None) -> dict:
     """A TRELLIS.2 rider (.glb from a front view) into ``root/vNNN`` (SPEC M23): Blender job fresh_rider (the body on
     the infantry skeleton; the lance and shield split off as parts in their hand nodes' frames); bake_colour (the
-    body and each part; the red cloth as the country colour's mask) and bake_horse (the body's normal and AO); the
+    body and each part; the cloth as the country colour's mask) and bake_horse (the body's normal and AO); the
     deformation check against vanilla's rider (cavalry_rider_* animations, per bone group).
-    -> the manifest (``parts``: ready loadout part entries)."""
+    Parts (Track P1.2, ``part_gen``): with the ``reference`` (default: ``run``'s cut-out beside the model) and the AI
+    environment, each part is found and cut out of the reference; the shield is TRELLIS.2's own model of its crop
+    (``part_method`` "auto"), checked against the crop, else the procedural kite traced from the crop; the plume's
+    colours and the helmet's gold come from their crops; every colour is moved onto the unit's palette
+    (``palette_from``: {"diffuse", "specular", "primary"} of the horse it rides, else the rider's own).
+    -> the manifest (``parts``: ready loadout part entries; ``part_checks``)."""
     from PIL import Image
 
     from eu4unitgen.blender.runner import BlenderRunner
@@ -486,6 +514,7 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     nb = br.run_job("bake_horse", {"low": str(out / "low_geometry.json"), "high": [str(out / "textured.obj")],
                                    "diffuse": bc["diffuse"], "size": PROCESS["size"], **PROCESS["normal"], "preview": False,
                                    "out_dir": str(out), "name": "riderb"}).result
+    tex_body = {"diffuse": str(out / "riderb_diffuse.png")}
     parts = {}
     for key in ("lance", "shield"):
         low = out / "parts" / f"{key}_low.json"
@@ -494,20 +523,55 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
         pb = br.run_job("bake_colour", {**common, "size": 512, "country_mask": bool(country_mask) and key == "shield",
                                         "low": str(low), "high": str(out / "parts" / f"{key}_textured.obj"),
                                         "out_dir": str(out / "parts"), "name": key}).result
-        Image.new("RGBA", (64, 64), (128, 128, 255, 255)).save(out / "parts" / f"{key}_normal.png")  # flat
+        # its normal map baked from the raw model too (Track P1: no flat normal maps on parts)
+        br.run_job("bake_horse", {"low": str(low), "high": [str(out / "parts" / f"{key}_textured.obj")],
+                                  "diffuse": pb["diffuse"], "size": 512, "cage": 0.05, "distance": 0.2, "high_smooth": 0,
+                                  "strength": 0.8, "samples": 16, "ao_strength": 0.0, "preview": False,
+                                  "out_dir": str(out / "parts"), "name": f"{key}b"})
+        (out / "parts" / f"{key}b_normal.png").replace(out / "parts" / f"{key}_normal.png")
         parts[key] = {"kind": "mesh_weapon" if key == "lance" else "mesh_shield",
                       **({"colours": {"own": "country1"}} if pb.get("default_primary") else {}),
                       "mesh": {"geometry": str(out / "parts" / f"{key}_part.json"), "diffuse": pb["diffuse"],
                                "normal": str(out / "parts" / f"{key}_normal.png"), "specular": pb["specular"]}}
-    if kite and "shield" in parts:  # the reference's kite in the raw shield's place, about as tall (the user, test 32)
+    # the unit's palette: the horse's it rides (the shield "same red and gold as the caparison"), else the rider's
+    from eu4unitgen.core import palette as palmod
+    from eu4unitgen.ref3d import part_gen
+    ps = palette_from or {"diffuse": tex_body["diffuse"], "specular": bc["specular"], "primary": bc.get("default_primary")}
+    pal = palmod.classes(ps["diffuse"], ps["specular"], ps.get("primary"))
+    primary = (ps.get("primary") or bc.get("default_primary") or [255, 77, 70]) if country_mask else None
+    checks, crops_res = {}, {}
+    ref = reference if reference is not None else default_reference(glb)
+    ai_py = ai_python or _config().ai()
+    if part_method != "procedural" and ref and ai_py and (out / "parts" / "fitted_points.json").is_file():
+        try:
+            from eu4unitgen.ref3d.auto import ai_paths
+            loc = part_gen.locate(json.loads((out / "parts" / "fitted_points.json").read_text(encoding="utf-8")),
+                                  Image.open(ref["fg"]).convert("L"))
+            checks["locate"] = {"mirror": loc["mirror"], "fit_iou": loc["fit_iou"]}
+            crops_res = part_gen.crops(Path(ref["image"]), Path(ref["fg"]), loc, out / "parts" / "crops", ai_py,
+                                       ai_paths(ai_py)["sam2"])
+        except Exception as exc:  # noqa: BLE001 - the parts fall back to procedural; recorded
+            checks["crops_error"] = f"{type(exc).__name__}: {exc}"
+    if kite and "shield" in parts:  # the reference's shield in the raw shield's place, about as tall (the user, test 32)
         b = (fr.get("parts") or {}).get("shield", {}).get("bounds")
         tall = 0.88 * max(hi - lo for lo, hi in zip(*b)) if b else 5.6
-        parts["shield"] = kite_part(out / "parts", frame, tall, primary=(bc.get("default_primary") or [255, 77, 70])
-                                    if country_mask else None)
+        parts["shield"], checks["shield"] = shield_from_reference(
+            br, out / "parts", frame, tall, crops_res.get("shield"), pal, primary,
+            {k: v for k, v in common.items() if k != "colour_render"}, part_method, part_cache or (Path(glb).parent / "parts_cache"),
+            Path(out / "parts" / "shield_part.json"))
     if plume == "part" and (fr.get("plume_line") or {}).get("line"):  # with its gold holder (the user, test 31)
-        parts["plume"] = plume_part(out / "parts", fr["plume_line"],
-                                    body={"geometry": str(out / "low_geometry.json"), "head": base_arrays(base)["bones"]["head"]},
-                                    scale=RIDER_ANIM_SCALE)
+        hair = None
+        if (crops_res.get("crest") or {}).get("crop"):
+            hair = part_gen.hair_colours(Image.open(crops_res["crest"]["crop"]))
+        helmet = part_gen.read_helmet(Image.open(crops_res["helmet"]["crop"])) if (crops_res.get("helmet") or {}).get("crop") else None
+        shows = {k: helmet[k] for k in ("brow", "nasal", "ribs")} if helmet else None
+        checks["plume"] = {"colours": hair, "from": "crop" if hair else "default"}
+        checks["helmet"] = helmet or {"from": "default (no crop)"}
+        gold = (pal.get("gold") or {}).get("colour") if (pal.get("gold") or {}).get("share", 0) > 0.005 else None
+        parts["plume"] = plume_part(out / "parts", fr["plume_line"], colours=hair,
+                                    body={"geometry": str(out / "low_geometry.json"), "head": base_arrays(base)["bones"]["head"]}
+                                    if (helmet is None or helmet.get("gold_share", 0) > 0.03) else None,
+                                    scale=RIDER_ANIM_SCALE, gold=gold, cfg={"shows": shows} if shows else None)
     if fr.get("plume_voxels_cut") and plume == "tuft":  # the earlier option: a small upright tuft (crest part)
         parts["plume"] = {"kind": "crest", "params": dict(PLUME), "colours": {"hair": list(PLUME_RED)}}
     if sword:  # on the side the shield doesn't cover (the reference hangs it on the shield's side; the user, test 30)
@@ -527,11 +591,108 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                          "flips": x["flips"], "groups": {g: m.get("flips") for g, m in (x.get("groups") or {}).items()}}
                      for k, x in res[who]["anims"].items()} for who in res}
     tex = {"diffuse": str(out / "riderb_diffuse.png"), "specular": bc["specular"], "normal": str(out / "riderb_normal.png")}
-    manifest = {"stage": "rider game version (M23)", "glb": str(glb), "version": out.name, "fresh": fr, "colour": bc,
+    # the raw model and the game body from the front, one camera (the quality report's outline against the reference)
+    cmp_ = br.run_job("render_compare", {"models": {"raw": {"obj": str(out / "fitted.obj"), "texture": str(basecolor)},
+                                                    "game": {"obj": str(out / "low.obj"), "texture": tex["diffuse"]}},
+                                         "views": {"front": [0, 0]}, "size": 700, "out_dir": str(out / "compare")}).result
+    manifest = {"stage": "rider game version (M23)", "compare": {"images": {k: dict(cmp_[k]) for k in ("raw", "game")}}, "glb": str(glb), "version": out.name, "fresh": fr, "colour": bc,
                 "normal": {k: nb.get(k) for k in ("tilt", "match")}, "textures": tex, "parts": parts,
+                "part_checks": checks, "palette": pal,
                 "geometry": str(out / "low_geometry.json"), "deform": summary, "seconds": round(time.time() - t0, 1)}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str), encoding="utf-8")
     return manifest
+
+
+def _config():
+    from eu4unitgen.core import config
+    return config.load()
+
+
+def strap(frame: dict, cfg: dict | None = None):
+    """Where a shield sits on the forearm (``kite_part``'s rule) and its axes: (centre, {"across", "up", "out"})."""
+    c = {"out": 1.2, "down": -0.3, **(cfg or {})}
+    centre = [0.5 * frame["elbow"][k] + c["out"] * frame["out"][k] - c["down"] * frame["up"][k] for k in range(3)]
+    return centre, {"across": frame["forward"], "up": frame["up"], "out": frame["out"]}
+
+
+SHIELD_DARKEN = 0.12  # the user, test 34: a little darker than the armour
+
+
+def shield_from_reference(br, parts_dir: Path, frame: dict, tall: float, crop: dict | None, pal: dict, primary,
+                          common: dict, method: str, cache: Path, raw_part: Path) -> tuple[dict, dict]:
+    """The shield (Track P1.2): TRELLIS.2's model of its crop, built and checked (``part_gen``), else the procedural
+    kite with the crop's outline, emblem and colours, else (no crop) the default kite in the palette's colours.
+    Either way its colours are moved onto the palette and it is ``SHIELD_DARKEN`` darker. -> (the loadout entry,
+    what was tried and how each scored)."""
+    from PIL import Image
+
+    from eu4unitgen.core import gear
+    from eu4unitgen.ref3d import part_gen
+    record = {"tried": []}
+    centre, axes = strap(frame)
+    cloth = (pal.get("cloth") or {}).get("colour") or gear.KITE_COLOURS["field"]
+    gold = (pal.get("gold") or {}).get("colour") if (pal.get("gold") or {}).get("share", 0) > 0.005 else gear.KITE_COLOURS["gold"]
+    rows = []
+    cim = Image.open(crop["crop"]).convert("RGBA") if crop and crop.get("crop") else None
+    tc = part_gen.two_colours(cim) if cim is not None else None
+    mapping = [(tc[0], cloth), (tc[1], gold)] if tc else [(gear.KITE_COLOURS["field"], cloth), (gear.KITE_COLOURS["gold"], gold)]
+    if cim is not None and method == "auto":
+        try:
+            from eu4unitgen.ai.env import AIJobRunner  # noqa: F401 - the AI environment is needed for the crop path
+            root = _config().ai_root_path()
+            g = part_gen.generate({"shield": Path(crop["crop"])}, cache, root)["shield"]
+            built = part_gen.build(br, Path(g["glb"]), Path(crop["crop"]), parts_dir / "gen", "shield", tall, False, common)
+            fin = part_gen.finish_texture(Path(built["diffuse"]), Path(built["specular"]), mapping, primary, cloth,
+                                          SHIELD_DARKEN, parts_dir / "gen" / "shield_final", PROCESS["gloss"])
+            geo = json.loads(Path(built["geometry"]).read_text(encoding="utf-8"))
+            look = part_gen.palette_crop(cim, mapping, SHIELD_DARKEN)  # the crop as the unit's palette shows it
+            r, front = part_gen.check_turned(geo, Image.open(fin["diffuse"]), look)
+            if tc:  # the emblem crisp, seen as the crop sees the shield; then checked again
+                part_gen.project_emblem(Path(built["geometry"]), Path(fin["diffuse"]), tc[2], part_gen.inner_face(cim),
+                                        part_gen.emblem_box(cim.getchannel("A")), r["yaw"],
+                                        [int(v * (1 - SHIELD_DARKEN)) for v in gold],
+                                        [int(v * (1 - SHIELD_DARKEN)) for v in cloth], Path(fin["diffuse"]))
+                r, front = part_gen.check_turned(geo, Image.open(fin["diffuse"]), look)
+            record["tried"].append({"method": "trellis", **r, "view": built["view"], "tris": built["tris"], "cached": g.get("cached")})
+            rows.append(("shield: TRELLIS.2 from its crop", cim, front, r))
+            if r["ok"]:
+                part_gen.place(Path(built["geometry"]), axes, centre, tall, raw_part)
+                record["method"] = "trellis"
+                part_gen.check_sheet(rows, parts_dir / "part_checks.png")
+                return ({"kind": "mesh_shield", **({"colours": {"own": "country1"}} if primary is not None else {}),
+                         "mesh": {"geometry": str(raw_part), "diffuse": fin["diffuse"], "specular": fin["specular"],
+                                  "normal": built["normal"]}}, record)
+        except Exception as exc:  # noqa: BLE001 - the fallback below; recorded
+            record["tried"].append({"method": "trellis", "error": f"{type(exc).__name__}: {exc}"})
+    # the procedural kite, from the crop when there is one
+    kw = {"colours": {"field": cloth, "gold": gold, "stud": tuple(min(255, int(v * 1.15)) for v in gold)}}
+    if cim is not None:
+        ol = part_gen.outline(cim, int(gear.KITE["sides"]))
+        # the crop is foreshortened (the shield turned from the camera): its width as the raw model's own shield
+        try:
+            rp = json.loads(raw_part.read_text(encoding="utf-8"))["p"]
+            q = [rp[i:i + 3] for i in range(0, len(rp), 3)]
+            w3 = max(sum(a * b for a, b in zip(v, axes["across"])) for v in q) - min(sum(a * b for a, b in zip(v, axes["across"])) for v in q)
+            h3 = max(sum(a * b for a, b in zip(v, axes["up"])) for v in q) - min(sum(a * b for a, b in zip(v, axes["up"])) for v in q)
+            want = max(0.35, min(0.8, w3 / max(h3, 1e-6)))
+        except (OSError, ValueError, KeyError):
+            want = gear.KITE["aspect"]
+        have = (max(x for x, _ in ol) - min(x for x, _ in ol)) or 1.0
+        kx = want / have
+        kw["outline_unit"] = [(x * kx, y) for x, y in ol]
+        if tc:
+            kw["emblem"] = {"mask": tc[2], "box": part_gen.emblem_box(cim.getchannel("A")), "stretch": kx}
+        record["outline_aspect"] = round(want, 3)
+    geo0, tex0 = gear.kite_shield(tall, [0, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], primary=primary, **kw)
+    entry = kite_part(parts_dir, frame, tall, primary=primary, cfg={"kite_kw": kw})
+    if cim is not None:
+        r, front = part_gen.check_turned({"p": geo0["p"], "tri": geo0["tri"], "uv": geo0["uv"]}, tex0["diffuse"],
+                                         part_gen.palette_crop(cim, mapping, SHIELD_DARKEN))
+        record["tried"].append({"method": "procedural (from the crop)", **r})
+        rows.append(("shield: procedural, traced from its crop", cim, front, r))
+        part_gen.check_sheet(rows, parts_dir / "part_checks.png")
+    record["method"] = "procedural (from the crop)" if cim is not None else "procedural (default kite)"
+    return entry, record
 
 
 def compare_sheet(br, out: Path, basecolor: Path) -> dict:
@@ -567,7 +728,7 @@ def compare_sheet(br, out: Path, basecolor: Path) -> dict:
             sheet.paste(cell.convert("RGB"), (P + j * (C + P), y + H))
             d.text((P + j * (C + P) + 4, y + 6), label, fill=(20, 20, 24), font=font)
     sheet.save(out / "compare_sheet.png")
-    return {"sheet": str(out / "compare_sheet.png"), "iou": iou}
+    return {"sheet": str(out / "compare_sheet.png"), "iou": iou, "images": {k: dict(r[k]) for k in ("raw", "game")}}
 
 
 def deform(br, out: Path, base: bytes) -> dict:

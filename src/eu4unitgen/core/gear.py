@@ -14,6 +14,9 @@ Rules (the user, test 32):
 and (test 34): the shield belongs to the design, not a clean sticker: the caparison's red and aged gold, worn and
 shaded like the baked textures, studs all round the rim, a little darker than the armour; metal fittings (finials,
 helmet bands) are our own simple geometry on the body's surface, in the horse's gold.
+Made general (Track P1): the shield's outline, emblem and colours come from its crop of the reference when there is
+one (``kite_shield(outline_unit=, emblem=, colours=)``; ref3d.part_gen traces them); the kite and its cross with
+crosslets are the defaults without a crop.
 """
 from __future__ import annotations
 
@@ -336,14 +339,23 @@ def _cross_emblem(draw: ImageDraw.ImageDraw, to_px, H: float, W: float):
         rect(cx - s, cy - b2 / 2, cx + s, cy + b2 / 2)
 
 
-def kite_shield(H: float, centre: V, out: V, up: V, across: V, primary=None, cfg: dict | None = None) -> tuple[dict, dict]:
+def kite_shield(H: float, centre: V, out: V, up: V, across: V, primary=None, cfg: dict | None = None,
+                outline_unit: list | None = None, emblem: dict | None = None,
+                colours: dict | None = None) -> tuple[dict, dict]:
     """A kite shield ``H`` tall centred at ``centre``, facing ``out`` (convex that way), its top along ``up``, its
     width along ``across`` (all in the part's frame). ``primary`` (0-255): the unit colour the field's mask is
-    multiplied by (None: no mask, the field painted red). -> (geometry, {"diffuse", "specular", "normal"} images)."""
+    multiplied by (None: no mask, the field painted red). From a crop (Track P1): ``outline_unit`` the outline
+    (x right, y up, height 1, anticlockwise from the bottom), ``emblem`` {"mask": L image, "box": the part's box in
+    it, "stretch": how much wider the outline was made than the crop shows} (white: the emblem), ``colours`` over
+    ``KITE_COLOURS``. -> (geometry, {"diffuse", "specular", "normal"})."""
     c = {**KITE, **(cfg or {})}
     out, up, across = _norm(list(out)), _norm(list(up)), _norm(list(across))
-    W = H * c["aspect"]
-    outline = kite_outline(H, W, int(c["sides"]))
+    if outline_unit:
+        outline = [(x * H, y * H) for x, y in outline_unit]
+        W = max(x for x, _ in outline) - min(x for x, _ in outline)
+    else:
+        W = H * c["aspect"]
+        outline = kite_outline(H, W, int(c["sides"]))
     inner = _inset(outline, c["rim"] * H / 2.0)
     scale = 0.96 / H
 
@@ -392,12 +404,27 @@ def kite_shield(H: float, centre: V, out: V, up: V, across: V, primary=None, cfg
         return (u * B, v * B)
     region = Image.new("L", (B, B), 0)  # 255 inside the rim (the field)
     ImageDraw.Draw(region).polygon([to_px(x, y) for x, y in inner], fill=255)
+    emblem_img = emblem
     emblem = Image.new("L", (B, B), 0)
-    _cross_emblem(ImageDraw.Draw(emblem), to_px, H, W)
+    if emblem_img is not None:  # traced from the crop: the crop's box maps onto the outline's (same normalisation)
+        x0, y0, x1, y1 = emblem_img["box"]
+        hp = y1 - y0
+        cxp, cyp = (x0 + x1) / 2, (y0 + y1) / 2
+        k = hp / H / scale / B  # crop px per texel
+        kx = k / float(emblem_img.get("stretch", 1.0))  # the outline widened by ``stretch``: the emblem with it
+        emblem = emblem_img["mask"].convert("L").transform((B, B), Image.AFFINE,
+                                                          (kx, 0, cxp - 0.5 * B * kx, 0, k, cyp - 0.5 * B * k),
+                                                          resample=Image.BILINEAR).point(lambda v: 255 if v > 127 else 0)
+        eb, rb = emblem.getbbox(), region.getbbox()
+        if eb and rb:  # centred across the face (a three-quarter view puts it off centre)
+            emblem = ImageChops.offset(emblem, int((rb[0] + rb[2]) / 2 - (eb[0] + eb[2]) / 2), 0)
+    else:
+        _cross_emblem(ImageDraw.Draw(emblem), to_px, H, W)
     emblem = ImageChops.multiply(emblem, region.filter(ImageFilter.MinFilter(9)))
     field_mask = ImageChops.subtract(region, emblem)
-    gold = KITE_COLOURS["gold"]
-    field = KITE_COLOURS["field"]
+    col = {**KITE_COLOURS, **(colours or {})}
+    gold = col["gold"]
+    field = col["field"]
     if primary is not None:  # the field's mask: a grey whose product with the primary colour is the field's red
         p = [x / 255.0 for x in primary]
         g = int(round(min(1.0, _lum(field) / 255.0 / max(_lum(p), 1e-6)) * 255))
@@ -406,7 +433,7 @@ def kite_shield(H: float, centre: V, out: V, up: V, across: V, primary=None, cfg
         field_px = field
     wear = {**KITE_WEAR, **c.get("wear", {})}
     rnd = random.Random(wear["seed"])
-    diffuse = Image.new("RGB", (B, B), KITE_COLOURS["back"])
+    diffuse = Image.new("RGB", (B, B), col["back"])
     ImageDraw.Draw(diffuse).polygon([to_px(x * 1.04, y * 1.03) for x, y in outline], fill=gold)  # the rim, its walls too
     diffuse.paste(field_px, (0, 0, B, B), field_mask)
     # the paint's dark edge round the emblem, and chips worn out of it
@@ -444,7 +471,7 @@ def kite_shield(H: float, centre: V, out: V, up: V, across: V, primary=None, cfg
     dd = ImageDraw.Draw(diffuse)
     studs = _inset(outline, c["rim"] * H / 4.0)
     rs = c["rim"] * H * 0.2 * scale * B
-    stud_c = KITE_COLOURS["stud"]
+    stud_c = col["stud"]
     for x, y in studs:  # every one, each with its shadow and a highlight up and left
         px, py = to_px(x, y)
         dd.ellipse([px - rs * 1.35, py - rs * 1.2, px + rs * 1.35, py + rs * 1.5], fill=tuple(int(v * 0.45) for v in gold))

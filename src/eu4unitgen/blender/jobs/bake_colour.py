@@ -24,6 +24,7 @@ import bpy  # noqa: E402 - Blender module
 import numpy as np  # noqa: E402 - Blender's numpy
 from mathutils import Matrix  # noqa: E402 - Blender module
 
+import _colour as cc  # noqa: E402
 import _pdx  # noqa: E402
 
 FLIP_Z = Matrix.Diagonal((1, 1, -1, 1))  # preview axes (x, y, -z) -> PDX
@@ -206,7 +207,9 @@ def head_band(px, posmap, hit, poll, axis, width=0.6, radius=3.0):
     rad = np.linalg.norm(rel - t[..., None] * axis, axis=-1)
     near = hit & (rad < radius)
     gold = near & (t > -0.5) & (hue > 28) & (hue < 58) & (chroma > 0.3) & (lum > 0.25)
-    red = near & (t > -1.5) & ((hue < 15) | (hue > 340)) & (chroma > 0.45)
+    # the band's cloth: the head's own dominant saturated colour (Track P1: it was a fixed red window, 340 to 15)
+    band_h, _ = cc.dominant_hue(c, near & (t > -1.5), chroma_min=0.45)
+    red = near & (t > -1.5) & cc.near_hue(hue, 357.5 if band_h is None else band_h, 17.5) & (chroma > 0.45)
     if gold.sum() < 200 or red.sum() < 50:
         return {"band": False, "gold_texels": int(gold.sum()), "red_texels": int(red.sum())}
     t0, t1 = float(np.percentile(t[gold], 5)), float(np.percentile(t[gold], 99)) + 0.3  # the chanfron's ends
@@ -235,7 +238,8 @@ def head_band(px, posmap, hit, poll, axis, width=0.6, radius=3.0):
     px[band, :3] = red_c
     px[stray, :3] = gold_c
     return {"band": True, "rear_edge_t": round(t0, 3), "band_texels": int(band.sum()), "red_recoloured": int(stray.sum()),
-            "red": [int(x * 255) for x in red_c], "gold": [int(x * 255) for x in gold_c]}
+            "red": [int(x * 255) for x in red_c], "gold": [int(x * 255) for x in gold_c],
+            "hue": None if band_h is None else round(band_h, 1)}
 
 
 def head_frame(posmap, poll, axis, neck_base):
@@ -249,7 +253,7 @@ def head_frame(posmap, poll, axis, neck_base):
     return rel @ axis, rel @ f, rel[..., 0]
 
 
-def head_marks(px, posmap, hit, poll, axis, neck_base, length, red, radius=0.32, drop=0.8, ear_box=None):
+def head_marks(px, posmap, hit, poll, axis, neck_base, length, red, radius=0.32, drop=0.8, ear_box=None, red_hue=None):
     """M21 (the user, test 27: the red tassels sat on the ears like hairpins; in the reference they hang on the
     forehead, cheeks and chin, with a small plume between the ears): red tassel marks painted there, each a
     round knot ``radius`` across with a strand ``drop`` long hanging under it (the texels within reach of a
@@ -279,7 +283,7 @@ def head_marks(px, posmap, hit, poll, axis, neck_base, length, red, radius=0.32,
         c = px[..., :3]
         mx, mn = c.max(-1), c.min(-1)
         hue = (np.degrees(np.arctan2(np.sqrt(3) * (c[..., 1] - c[..., 2]), 2 * c[..., 0] - c[..., 1] - c[..., 2])) + 360) % 360
-        redish = ears & ((hue < 20) | (hue > 330)) & ((mx - mn) / np.maximum(mx, 1e-6) > 0.4)
+        redish = ears & cc.cloth_window(red_hue)(hue) & ((mx - mn) / np.maximum(mx, 1e-6) > 0.4)
         if (ears & ~redish).sum() > 20:
             px[redish, :3] = np.median(c[ears & ~redish], axis=0)
     for name, p in marks.items():
@@ -300,7 +304,7 @@ def load_mask(path):
     return pixels(img)[..., 0].astype(np.float64)  # rows bottom up (Blender's): row 0 is the decal's foot
 
 
-def emblem(px, posmap, hit, bones, decal, gold, red, size=0.7, sides=(1, -1)):
+def emblem(px, posmap, hit, bones, decal, gold, red, size=0.7, sides=(1, -1), cloth_hue=None):
     """M21 (the user: the caparison's crosses were blurred; the unit is Byzantium's): a crisp decal on each side's
     main caparison panel, the red cloth between the front and hind legs' tops, at the side. The panel's box
     from its red texels (5-95%) in the side plane (z, y); inside it (shrunk 20%) the old, blurred gold turned
@@ -311,7 +315,7 @@ def emblem(px, posmap, hit, bones, decal, gold, red, size=0.7, sides=(1, -1)):
     mx, mn = c.max(-1), c.min(-1)
     chroma = (mx - mn) / np.maximum(mx, 1e-6)
     hue = (np.degrees(np.arctan2(np.sqrt(3) * (c[..., 1] - c[..., 2]), 2 * c[..., 0] - c[..., 1] - c[..., 2])) + 360) % 360
-    redm = (hue < 20) | (hue > 330)
+    redm = cc.cloth_window(cloth_hue)(hue)  # the cloth's colour (Track P1: a fixed red window before)
     goldm = (hue > 25) & (hue < 60) & (chroma > 0.3)
     z0 = max(bones["HorseFrontLeftUp"][2], bones["HorseFrontRightUp"][2]) + 1.0
     z1 = min(bones["HorseBackLeftUp"][2], bones["HorseBackRightUp"][2]) - 1.0
@@ -351,7 +355,7 @@ def emblem(px, posmap, hit, bones, decal, gold, red, size=0.7, sides=(1, -1)):
     return out, painted, cleaned
 
 
-def cloth_mask(px, cov, exclude):
+def cloth_mask(px, cov, exclude, cloth_hue=None):
     """M21 (the user, optional): the red cloth as the country colour's mask (PdxMeshColor: col = lerp(col,
     col * spec.r * Primary, spec.r), SPEC §4): spec R 1 on red cloth (not the decal or trim), its diffuse
     turned to a neutral grey whose product with the cloth's own red (the default primary colour, the
@@ -360,7 +364,7 @@ def cloth_mask(px, cov, exclude):
     mx, mn = c.max(-1), c.min(-1)
     chroma = (mx - mn) / np.maximum(mx, 1e-6)
     hue = (np.degrees(np.arctan2(np.sqrt(3) * (c[..., 1] - c[..., 2]), 2 * c[..., 0] - c[..., 1] - c[..., 2])) + 360) % 360
-    m = cov & ~exclude & ((hue < 20) | (hue > 330)) & (chroma > 0.45)
+    m = cov & ~exclude & cc.cloth_window(cloth_hue)(hue) & (chroma > 0.45)
     if m.sum() < 500:
         return m, None
     prim = np.median(c[m], axis=0)
@@ -471,8 +475,11 @@ def main():
     px[..., 3] = 1.0
     result = {}
     posmap = hit = None
-    if a.get("head_band") or a.get("emblem"):
+    if a.get("head_band") or a.get("emblem") or a.get("bones"):
         posmap, hit = texel_positions(json.loads(open(a["low"], encoding="utf-8").read()), size)
+    # the subject's own cloth colour (and a horse's coat, kept apart from it): every cloth rule below uses it
+    result["classes"] = cc.cloth_and_coat(px, filled, posmap, a.get("bones"))
+    cloth_h = result["classes"]["cloth"]
     if a.get("head_band"):
         hb_ = a["head_band"]
         result["head_band"] = head_band(px, posmap, hit & filled, hb_["poll"], hb_["axis"], float(hb_.get("width", 0.6)))
@@ -500,7 +507,7 @@ def main():
         hm = a["head_marks"]
         result["head_marks"], marked = head_marks(px, posmap, hit & filled, hm["poll"], hm["axis"], hm["neck_base"],
                                                   float(hm["length"]), np.array(result["head_band"]["red"]) / 255.0,
-                                                  ear_box=hm.get("ear_box"))
+                                                  ear_box=hm.get("ear_box"), red_hue=result["head_band"].get("hue"))
         if g is not None:
             g[marked] = gl.get("matte", 5)
     if a.get("emblem"):
@@ -508,13 +515,13 @@ def main():
         gold = np.array(em.get("gold") or result.get("head_band", {}).get("gold", [200, 160, 70])) / 255.0
         red = np.array(em.get("red") or result.get("head_band", {}).get("red", [120, 30, 30])) / 255.0
         result["emblem"], decal_px, cleaned = emblem(px, posmap, hit & filled, a["bones"], em["decal"], gold, red,
-                                                     float(em.get("size", 0.7)))
+                                                     float(em.get("size", 0.7)), cloth_hue=cloth_h)
         if g is not None:
             g[cleaned] = gl.get("matte", 5)
             g[decal_px] = gl.get("gold", 12)
     mask = np.zeros((size, size), dtype=bool)
     if a.get("country_mask"):
-        mask, result["default_primary"] = cloth_mask(px, filled, decal_px)
+        mask, result["default_primary"] = cloth_mask(px, filled, decal_px, cloth_h)
         result["country_mask_share"] = round(float(mask.sum() / max(filled.sum(), 1)), 3)
     if g is not None:
         spec = bpy.data.images.new("specular", size, size, alpha=True)

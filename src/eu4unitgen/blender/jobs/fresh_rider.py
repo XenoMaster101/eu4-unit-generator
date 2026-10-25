@@ -38,6 +38,7 @@ import bmesh  # noqa: E402 - Blender module
 import bpy  # noqa: E402 - Blender module
 import numpy as np  # noqa: E402 - Blender's numpy
 
+import _colour as cc  # noqa: E402
 import _horse_shape as hs  # noqa: E402
 import _pdx  # noqa: E402
 import fresh_horse as fh  # noqa: E402
@@ -117,10 +118,11 @@ def place(obj, bones, keep, top=16.4):
     rgb, _ = fh.vertex_colours(obj)
     hue = (np.degrees(np.arctan2(np.sqrt(3) * (rgb[:, 1] - rgb[:, 2]), 2 * rgb[:, 0] - rgb[:, 1] - rgb[:, 2])) + 360) % 360
     chroma = (rgb.max(1) - rgb.min(1)) / np.maximum(rgb.max(1), 1)
-    red = ((hue < 20) | (hue > 330)) & (chroma > 0.4)
     body = co[keep]
     y0 = body[:, 1].min()
     H = body[:, 1].max() - y0
+    is_crest, _ = cc.crest_colour(co, rgb, keep, y0 + 0.85 * H)
+    red = is_crest(hue, chroma)
     x0 = float(np.median(body[:, 0]))
     head = keep & ~red & (np.abs(co[:, 0] - x0) < 0.06 * H) & (co[:, 1] > y0 + 0.75 * H)
     helmet = float(np.percentile(co[head, 1], 99.5)) if head.sum() > 20 else body[:, 1].max()
@@ -288,6 +290,7 @@ def main():
     if a.get("fitted_out"):
         fh.write_obj(obj, a["fitted_out"], uv=True)
     co = hs.verts(obj)
+    fitted = co.copy()  # placed, not yet slimmed or posed: as the reference shows it (Track P1.2's part crops)
     kx, kz, measured = slim_body(co, ~lance & ~shield, hs.verts(vanilla), float(a.get("slim_low", 0.7)))
     res["slim"] = {"x": round(kx, 3), "z": round(kz, 3), **measured}
     moves, dirs = {}, {}
@@ -318,17 +321,28 @@ def main():
                            "slid": round(float(np.linalg.norm(slide)), 3)}
     hs.set_verts(obj, co)
     res["arms"] = moves
-    # the crest: red over the helmet
+    # the crest: the crest's own colour over the helmet (the cataphract's is red)
     rgb, lum = fh.vertex_colours(obj)
     hue = (np.degrees(np.arctan2(np.sqrt(3) * (rgb[:, 1] - rgb[:, 2]), 2 * rgb[:, 0] - rgb[:, 1] - rgb[:, 2])) + 360) % 360
     chroma = (rgb.max(1) - rgb.min(1)) / np.maximum(rgb.max(1), 1)
-    crest = ~lance & ~shield & (co[:, 1] > NECK + 1.2) & ((hue < 20) | (hue > 330)) & (chroma > 0.4)
+    is_crest, crest_h = cc.crest_colour(co, rgb, ~lance & ~shield, NECK + 1.2)
+    crest = ~lance & ~shield & (co[:, 1] > NECK + 1.2) & is_crest(hue, chroma)
     res["crest_vertices"] = int(crest.sum())
-    # the helmet's steel: not red, above the neck, near the centre line (its axis and radius for the collar cut)
-    steel = ~lance & ~shield & ~((hue < 20) | (hue > 330)) & (co[:, 1] > NECK) & (np.abs(co[:, 0]) < 1.5) \
+    res["crest_hue"] = None if crest_h is None else round(crest_h, 1)
+    # the helmet's steel: not the crest's colour, above the neck, near the centre line (its axis and radius for the
+    # collar cut)
+    steel = ~lance & ~shield & ~is_crest(hue, chroma) & (co[:, 1] > NECK) & (np.abs(co[:, 0]) < 1.5) \
         & (co[:, 1] < NECK + 2.6)
     helmet_pts = co[steel] if steel.any() else None
     crest_pts = co[crest]
+    # Track P1.2: where each part lies in the placed model, to find it in the reference (ref3d.part_gen.locate)
+    def sample(mask, n):
+        idx = np.flatnonzero(mask)
+        return fitted[idx[:: max(1, len(idx) // n)]].round(4).tolist() if len(idx) else []
+    with open(os.path.join(a["parts_dir"], "fitted_points.json"), "w", encoding="utf-8") as f:
+        json.dump({"all": sample(np.ones(len(fitted), dtype=bool), 30000), "lance": sample(lance, 3000),
+                   "shield": sample(shield, 3000), "crest": sample(crest, 3000),
+                   "helmet": sample(steel, 3000)}, f)
     # the parts, with their own raw copies (bake sources)
     parts = {}
     helmet_top = float(np.percentile(helmet_pts[:, 1], 99)) if helmet_pts is not None and len(helmet_pts) > 20 else NECK + 2.0
@@ -449,7 +463,8 @@ def main():
         if place_at is not None:
             centre = hs.verts(p).mean(0)
             origin = centre - np.linalg.solve(R, place_at)  # (centre - origin) @ R.T == place_at (R may carry a scale)
-        res["parts"][key] = {"node": node, **({"strapped_at": place_at.round(3).tolist()} if place_at is not None else {}),
+        res["parts"][key] = {"node": node, "R": np.asarray(R).round(6).tolist(), "origin": np.asarray(origin).round(6).tolist(),
+                             **({"strapped_at": place_at.round(3).tolist()} if place_at is not None else {}),
                              **export_part(p, os.path.join(a["parts_dir"], f"{key}_low.json"),
                                            os.path.join(a["parts_dir"], f"{key}_part.json"), R, origin)}
     _pdx.write_result(a, res)

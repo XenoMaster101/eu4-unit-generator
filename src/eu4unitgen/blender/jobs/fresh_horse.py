@@ -73,6 +73,7 @@ import numpy as np  # noqa: E402 - Blender's numpy
 
 import _horse_barding as hb  # noqa: E402
 import _horse_read as hr  # noqa: E402
+import _reins  # noqa: E402
 import _horse_shape as hs  # noqa: E402
 import _pdx  # noqa: E402
 
@@ -832,6 +833,8 @@ def pin_barding(obj, bones):
             row = {"HorseSpineTop": 1.0}
         elif k == hb.TAIL:
             row = hb.tail_weights(chain[vi])
+        elif k == _reins.REINS:
+            row = _reins.weights(chain[vi])
         else:
             row = dict(sorted(blended[tuple(round(x, 3) for x in anchor[3 * vi:3 * vi + 3])].items(), key=lambda kv: -kv[1])[:3])
         total = sum(row.values())
@@ -1695,6 +1698,34 @@ def clear_tail_bones(obj):
     return n
 
 
+def add_reins(obj, raw_co, raw_rgb, head, bones):
+    """The reins (``_reins``), joined into the low mesh when the raw model shows them. -> what was found."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    poll, axis = np.array(head["poll"], dtype=np.float64), np.array(head["axis"], dtype=np.float64)
+    rel = raw_co - poll
+    t = rel @ axis
+    radial = np.linalg.norm(rel - t[:, None] * axis, axis=1)
+    head_pts = raw_co[(t > 0) & (radial < 2.5)]
+    if len(head_pts) < 50:
+        return {"found": False, "why": "no head points"}
+    bl, br, length = _reins.bit_points(head_pts, poll, axis)
+    rem = np.array(bones["Rem"], dtype=np.float64)
+    region = (raw_co[:, 2] < rem[2] + 1.0) & (raw_co[:, 1] > bones["HorseNeckBase"][1] - 4.0)
+    bvh = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+    dist = np.full(len(raw_co), 0.0)
+    for i in np.flatnonzero(region):
+        hit = bvh.find_nearest(Vector(raw_co[i]))
+        dist[i] = hit[3] if hit[0] is not None else 0.0
+    ok, colour, n = _reins.found(raw_co, raw_rgb, dist, bl, br, rem)
+    out = {"found": ok, "points": n, "colour_p25_p75": colour}
+    if ok:
+        b = _reins.build(head_pts, poll, axis, rem, segs=5)
+        join_piece(obj, "reins", b)
+        out.update({"built": True, **b["log"]})
+    return out
+
+
 def direct(a, van, vanilla):
     """M21 (the user, 2026-10-23): a TRELLIS.2 model to the game mesh with its own shape kept: no
     reshape onto vanilla's rest pose. Import, weld the seams, the largest piece, direct_fit,
@@ -1737,6 +1768,9 @@ def direct(a, van, vanilla):
         if build_mane and hc.get("mane") == "smooth":  # the first try (v004): too weak on a dense mesh
             smooth_region(obj, mane, int(hc.get("mane_iterations", 40)))
             build_mane = False
+    # the raw model's points and colours, for the reins (Track P1: rebuilt when the raw model shows them)
+    raw_co = hs.verts(obj).copy() if a.get("reins", True) else None
+    raw_rgb = vertex_colours(obj)[0] if raw_co is not None else None
     if a.get("textured_out"):  # the bake source: the tail cut off (its root left open: rays there miss and
         # take their neighbours' colour)
         tex = obj.copy()
@@ -1809,6 +1843,8 @@ def direct(a, van, vanilla):
     if count_pieces(obj) > 1:
         keep_largest(obj)
         res["stages"]["decimated"]["tris_one_piece"] = tri_count(obj)
+    if raw_co is not None and "Rem" in bones:
+        res["reins"] = add_reins(obj, raw_co, raw_rgb, res["pose"]["head"], bones)
     if build_tail:
         root, offset = tail_anchor(obj, bones)
         tube = dict(hc.get("tube", {}))
