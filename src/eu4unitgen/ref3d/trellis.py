@@ -138,6 +138,7 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     fr = br.run_job("fresh_horse", {
         "source": {"kind": "direct", "path": str(Path(glb).resolve()), "merge": 1e-5},
         **{k: P[k] for k in ("target_tris", "smooth", "influences", "chain_weights", "uv_margin", "hair")},
+        "reins": P.get("reins", True),
         "vanilla": van, "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
         "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj")}).result
     (out / "fresh.json").write_text(json.dumps(fr, indent=1, default=str), encoding="utf-8")
@@ -160,7 +161,8 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
                              **({"7": (fr.get("reins") or {})["colour_p25_p75"]} if (fr.get("reins") or {}).get("built") else {})},
             "gloss": P["gloss"], "head_band": {"poll": poll, "axis": axis},
             "head_marks": {"poll": poll, "axis": axis, "neck_base": van["bones"]["HorseNeckBase"], "length": length,
-                           "ear_box": [[poll[0] - 1.2, poll[1] - 0.3, poll[2] - 1.2], [poll[0] + 1.2, poll[1] + 3.0, poll[2] + 1.2]]},
+                           "ear_box": [[poll[0] - 1.2, poll[1] - 0.3, poll[2] - 1.2], [poll[0] + 1.2, poll[1] + 3.0, poll[2] + 1.2]]}
+            if P.get("tassels", True) else None,
             "bones": van["bones"], "country_mask": bool(country_mask), "colour_render": raw["images"]["side"],
             "size": P["size"], **P["bake"], "out_dir": str(out), "name": "horse"}
     if emblem:
@@ -518,10 +520,32 @@ def default_reference(glb: Path) -> dict | None:
     return None
 
 
+def mirror_part(geometry: Path, frame_from: dict, frame_to: dict, out: Path) -> None:
+    """A part in one hand node's frame moved into the other hand's as its mirror image (the shield side swapped):
+    each point's outward, up and forward parts (``rider_frames``, the seated pose) laid on the other node's outward,
+    up and forward; the winding reversed (a mirror turns faces inside out)."""
+    g = json.loads(Path(geometry).read_text(encoding="utf-8"))
+    A = [frame_from[k] for k in ("out", "up", "forward")]
+    B = [frame_to[k] for k in ("out", "up", "forward")]
+    p = g["p"]
+    q = []
+    for i in range(0, len(p), 3):
+        c = [sum(p[i + j] * a[j] for j in range(3)) for a in A]
+        q += [sum(c[k] * B[k][j] for k in range(3)) for j in range(3)]
+    tri = g["tri"]
+    g["p"] = [round(v, 5) for v in q]
+    g["tri"] = [v for t in range(0, len(tri), 3) for v in (tri[t], tri[t + 2], tri[t + 1])]
+    Path(out).write_text(json.dumps(g), encoding="utf-8")
+
+
+HAND = {"left": "Left_hand_node", "right": "Right_hand_node"}
+HAND_KIND = {"Right_hand_node": "mesh_weapon", "Left_hand_node": "mesh_shield"}  # core.parts: the kind gives the bone
+
+
 def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None, plume: str = "part",
                   sword: bool = False, kite: bool = True, cfg: dict | None = None, reference: dict | None = None,
                   ai_python: str | None = None, palette_from: dict | None = None, part_method: str = "auto",
-                  part_cache: Path | None = None) -> dict:
+                  part_cache: Path | None = None, shield_side: str = "auto") -> dict:
     """A TRELLIS.2 rider (.glb from a front view) into ``root/vNNN`` (SPEC M23): Blender job fresh_rider (the body on
     the infantry skeleton; the lance and shield split off as parts in their hand nodes' frames); bake_colour (the
     body and each part; the cloth as the country colour's mask) and bake_horse (the body's normal and AO); the
@@ -531,6 +555,8 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     (``part_method`` "auto"), checked against the crop, else the procedural kite traced from the crop; the plume's
     colours and the helmet's gold come from their crops; every colour is moved onto the unit's palette
     (``palette_from``: {"diffuse", "specular", "primary"} of the horse it rides, else the rider's own).
+    ``shield_side``: "left" or "right" forearm ("auto": where the reference has it); the weapon goes to the other
+    hand, mirrored (``mirror_part``). ``plume`` "none" leaves the plume off.
     -> the manifest (``parts``: ready loadout part entries; ``part_checks``)."""
     from PIL import Image
 
@@ -549,7 +575,7 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                                         "elbow": "L_elbow", "shoulder": "L_shoulder",
                                         "bind": node_bind(base, "Left_hand_node")}).result  # the strapped shield's frame
     fr = br.run_job("fresh_rider", {"vanilla": base_arrays(base), "source": {"path": str(Path(glb).resolve()), "merge": 1e-5},
-                                    **{**RIDER, **(cfg or {})}, "shield_frame": frame, "plume": "part" if plume == "part" else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
+                                    **{**RIDER, **(cfg or {})}, "shield_frame": frame, "plume": "part" if plume in ("part", "none") else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
                                     "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),
                                     "parts_dir": str(out / "parts")}).result
     fr["head_pinned"] = pin_head(out / "low_geometry.json")
@@ -600,6 +626,30 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                                        ai_paths(ai_py)["sam2"])
         except Exception as exc:  # noqa: BLE001 - the parts fall back to procedural; recorded
             checks["crops_error"] = f"{type(exc).__name__}: {exc}"
+    frames = {"Left_hand_node": frame}
+
+    def hand_frame(node):
+        if node not in frames:
+            side = "R" if node.startswith("Right") else "L"
+            frames[node] = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": node,
+                                                        "elbow": f"{side}_elbow", "shoulder": f"{side}_shoulder",
+                                                        "bind": node_bind(base, node)}).result
+        return frames[node]
+    lance_node = ((fr.get("parts") or {}).get("lance") or {}).get("node")
+    split_shield = ((fr.get("parts") or {}).get("shield") or {}).get("node")
+    other = {"Left_hand_node": "Right_hand_node", "Right_hand_node": "Left_hand_node"}
+    shield_node = HAND.get(shield_side) or split_shield or (other[lance_node] if lance_node else "Left_hand_node")
+    checks["shield_side"] = {"shield": shield_node, "asked": shield_side}
+    if "lance" in parts and lance_node == shield_node:  # the weapon to the other hand, mirrored
+        to = other[lance_node]
+        mirror_part(Path(parts["lance"]["mesh"]["geometry"]), hand_frame(lance_node), hand_frame(to),
+                    out / "parts" / "lance_part.json")
+        parts["lance"]["mesh"]["geometry"] = str(out / "parts" / "lance_part.json")
+        parts["lance"]["kind"] = HAND_KIND[to]
+        checks["shield_side"]["weapon_moved_to"] = to
+    frame = hand_frame(shield_node)
+    if "shield" in parts:
+        parts["shield"]["kind"] = HAND_KIND[shield_node]
     if kite and "shield" in parts:  # the reference's shield in the raw shield's place, about as tall (the user, test 32)
         b = (fr.get("parts") or {}).get("shield", {}).get("bounds")
         tall = 0.88 * max(hi - lo for lo, hi in zip(*b)) if b else 5.6
@@ -607,6 +657,7 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
             br, out / "parts", frame, tall, crops_res.get("shield"), pal, primary,
             {k: v for k, v in common.items() if k != "colour_render"}, part_method, part_cache or (Path(glb).parent / "parts_cache"),
             Path(out / "parts" / "shield_part.json"))
+        parts["shield"]["kind"] = HAND_KIND[shield_node]
     if plume == "part" and (fr.get("plume_line") or {}).get("line"):  # with its gold holder (the user, test 31)
         hair = None
         if (crops_res.get("crest") or {}).get("crop"):

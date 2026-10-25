@@ -41,11 +41,17 @@ def _mask(im: Image.Image, size: int = 200) -> Image.Image | None:
     return out
 
 
-def silhouette_iou(model: Image.Image, reference_fg: Image.Image) -> float:
-    """Overlap of two outlines framed by their boxes, the better of as-is and mirrored."""
+def silhouette_iou(model: Image.Image, reference_fg: Image.Image, band: float | None = None) -> float:
+    """Overlap of two outlines framed by their boxes, the better of as-is and mirrored. ``band``: only the central
+    columns, that share of the frame (a rider: its head, torso and legs; its arms are posed to the hand nodes)."""
     a, b = _mask(model), _mask(reference_fg)
     if a is None or b is None:
         return 0.0
+    if band:
+        keep = Image.new("L", a.size, 0)
+        x0 = int(a.width * (0.5 - band / 2))
+        keep.paste(255, (x0, 0, a.width - x0, a.height))
+        a, b = ImageChops.multiply(a, keep), ImageChops.multiply(b, keep)
     best = 0.0
     for m in (a, a.transpose(Image.FLIP_LEFT_RIGHT)):
         inter = ImageChops.multiply(m, b).histogram()[255]
@@ -89,7 +95,8 @@ def deformation(deform: dict, kind: str) -> dict:
             continue
         f, vf = o.get("flips", 0), v.get("flips", 0)
         # flips: vanilla's own plus a margin that grows with it; the M23 rider sits near 3x vanilla's
-        verdict = GOOD if f <= 1.5 * vf + 10 else OK if f <= 3.5 * vf + 25 else CHECK
+        # ok up to the approved cataphract rider's level (test 35: 33 in moving against vanilla's 0)
+        verdict = GOOD if f <= 1.5 * vf + 10 else OK if f <= 3.5 * vf + 35 else CHECK
         if o.get("max", 0) > max(2 * v.get("max", 0), 6.0):
             verdict = CHECK
         rows.append((anim, f, vf, o.get("max"), v.get("max"), verdict))
@@ -183,19 +190,26 @@ def map_zoom(ours: Path | None, vanilla: Path | None) -> dict:
 
 def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path | None,
            map_ours: Path | None = None, map_vanilla: Path | None = None, raw_view: Path | None = None,
-           legs: dict | None = None) -> dict:
+           legs: dict | None = None, exclude: list | None = None) -> dict:
     """The five measures (module doc). ``game_view``: the game version rendered from the reference's view
     (compare/game_side.png for a horse, compare/game_front.png for a rider); ``raw_view``: TRELLIS.2's own model
     from the same camera. The outline's verdict is relative to the raw model's own overlap (the approved horses'
-    raw models overlap their references by 72-74%: camera and perspective differ from the drawing)."""
+    raw models overlap their references by 72-74%: camera and perspective differ from the drawing). ``exclude``:
+    masks of parts cut off the body (a rider's lance, shield, plume) taken out of the reference first."""
     m = {}
     if reference_fg and game_view and Path(reference_fg).is_file() and Path(game_view).is_file():
-        fg = Image.open(reference_fg)
-        iou = silhouette_iou(Image.open(game_view), fg)
-        raw = silhouette_iou(Image.open(raw_view), fg) if raw_view and Path(raw_view).is_file() else None
+        fg = Image.open(reference_fg).convert("L")
+        for mp in exclude or []:
+            if Path(mp).is_file():
+                fg = ImageChops.subtract(fg, Image.open(mp).convert("L").resize(fg.size).point(lambda v: 255 if v > 127 else 0))
+        band = 0.3 if kind == "rider" else None
+        iou = silhouette_iou(Image.open(game_view), fg, band)
+        raw = silhouette_iou(Image.open(raw_view), fg, band) if raw_view and Path(raw_view).is_file() else None
         rel = iou / raw if raw else iou / 0.73
-        v = _verdict(rel, 0.88, 0.78)
-        text = f"Its outline overlaps the reference's by {iou:.0%}"
+        # a rider is slimmed to vanilla's rider (the user, test 29): the approved cataphract keeps 63% of its raw
+        # model's overlap; a horse 88-92% (slimmed only when over 1.15x vanilla)
+        v = _verdict(rel, 0.58, 0.48) if band else _verdict(rel, 0.88, 0.78)
+        text = f"Its outline{' (head, body and legs)' if band else ''} overlaps the reference's by {iou:.0%}"
         if raw:
             text += f" (TRELLIS.2's own model: {raw:.0%}; the game version is slimmed and posed to vanilla's build)"
         text += "." if v != CHECK else ": compare the sheet; the shape may be off."

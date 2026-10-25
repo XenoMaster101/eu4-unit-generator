@@ -197,8 +197,10 @@ def measure(name: str, vdir: Path) -> tuple[dict, dict]:
         hits = sorted((Path(vdir) / "compare").glob(f"game*{view}*.png"))
         game = str(hits[0]) if hits else None
     raw = game.replace("game", "raw") if game and Path(game.replace("game", "raw")).is_file() else None
+    crops = Path(vdir) / "parts" / "crops"
     rep = q.report(manifest, kind, source(name) / "input" / "input_fg.png", Path(game) if game else None,
-                   raw_view=Path(raw) if raw else None)
+                   raw_view=Path(raw) if raw else None,
+                   exclude=[crops / f"{k}_mask.png" for k in ("lance", "shield", "crest")] if kind == "rider" else None)
     q.save(rep, Path(vdir))
     return metrics(manifest, kind, rep), rep
 
@@ -260,6 +262,23 @@ def store_baseline(entries: dict[str, tuple[Path, str]]) -> Path:
     return p
 
 
+def add_new_measures(run_dir: Path) -> Path:
+    """A run's measures that the baseline doesn't have yet added to it (the stored ones kept: test 35's stay)."""
+    rep = json.loads((Path(run_dir) / "report.json").read_text(encoding="utf-8"))
+    p = baseline_path()
+    base = json.loads(p.read_text(encoding="utf-8"))
+    for name, r in rep["models"].items():
+        if "metrics" not in r:
+            continue
+        b = base["models"].setdefault(name, {"from": f"regression run {rep['stamp']}", "metrics": {}})
+        added = {k: v for k, v in r["metrics"].items() if k not in b["metrics"]}
+        b["metrics"].update(added)
+        if added:
+            b.setdefault("added", {})[rep["stamp"]] = sorted(added)
+    p.write_text(json.dumps(base, indent=1), encoding="utf-8")
+    return p
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -268,12 +287,16 @@ def main(argv=None):
     b = sub.add_parser("baseline")
     b.add_argument("--run", type=Path, help="a regression run's folder: its versions become the baseline")
     b.add_argument("--version", nargs="*", default=[], help="NAME=<version dir>")
+    b.add_argument("--add-new", action="store_true", help="with --run: only add the measures the baseline lacks")
     a = ap.parse_args(argv)
     if a.cmd == "run":
         res = run(a.only)
         print(Path(res["report"]).read_text(encoding="utf-8"))
         raise SystemExit(1 if res.get("worse") else 0)
     entries = {}
+    if a.run and a.add_new:
+        print(add_new_measures(a.run))
+        return
     if a.run:
         rep = json.loads((a.run / "report.json").read_text(encoding="utf-8"))
         entries = {n: (Path(m["version"]), f"regression run {rep['stamp']}") for n, m in rep["models"].items() if "version" in m}

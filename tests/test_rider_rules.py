@@ -67,3 +67,14 @@ def test_sword_is_textured_not_flat(tmp_path):
     n = Image.open(e["mesh"]["normal"]).convert("RGB")
     assert len(set(d.crop((0, 0, 128, 128)).getdata())) > 20  # worn, not one flat colour
     assert len(set(n.getdata())) > 20  # a normal map with detail
+
+
+def test_mirror_part_into_the_other_hand(tmp_path):
+    g = {"p": [1.0, 2.0, -3.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0], "tri": [0, 1, 2], "uv": [0, 0, 1, 0, 0, 1]}
+    (tmp_path / "g.json").write_text(json.dumps(g))
+    a = {"out": [1.0, 0, 0], "up": [0, 1.0, 0], "forward": [0, 0, -1.0]}
+    b = {"out": [-1.0, 0, 0], "up": [0, 1.0, 0], "forward": [0, 0, -1.0]}
+    trellis.mirror_part(tmp_path / "g.json", a, b, tmp_path / "m.json")
+    m = json.loads((tmp_path / "m.json").read_text())
+    assert m["p"][:3] == [-1.0, 2.0, -3.0]  # outward stays outward, on the other side
+    assert m["tri"] == [0, 2, 1] and m["uv"] == g["uv"]  # the mirror's winding reversed

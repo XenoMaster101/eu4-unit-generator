@@ -15,7 +15,31 @@
     "iou_front34": 0.732,
     "iou_rear34": 0.74,
     "uv_used": 0.5176,
-    "ref_iou": 0.641
+    "ref_iou": 0.641,
+    "bake_reached": 1.0,
+    "gloss_silver": 0.016,
+    "gloss_gold": 0.001,
+    "seat_gap": 0.075,
+    "side_ratio": 1.231,
+    "silver_cap": 0.85,
+    "head_band": false,
+    "head_marks": 0,
+    "reins": true,
+    "tail": true
+   },
+   "added": {
+    "20261024-203217": [
+     "bake_reached",
+     "gloss_gold",
+     "gloss_silver",
+     "head_band",
+     "head_marks",
+     "reins",
+     "seat_gap",
+     "side_ratio",
+     "silver_cap",
+     "tail"
+    ]
    }
   },
   "cataphract_horse": {
@@ -33,7 +57,33 @@
     "iou_front34": 0.779,
     "iou_rear34": 0.785,
     "uv_used": 0.6068,
-    "ref_iou": 0.658
+    "ref_iou": 0.658,
+    "bake_reached": 1.0,
+    "gloss_silver": 0.079,
+    "gloss_gold": 0.033,
+    "seat_gap": 0.084,
+    "side_ratio": 1.309,
+    "silver_cap": 0.85,
+    "head_band": true,
+    "head_marks": 5,
+    "emblem_texels": 14644,
+    "reins": true,
+    "tail": true
+   },
+   "added": {
+    "20261024-203217": [
+     "bake_reached",
+     "emblem_texels",
+     "gloss_gold",
+     "gloss_silver",
+     "head_band",
+     "head_marks",
+     "reins",
+     "seat_gap",
+     "side_ratio",
+     "silver_cap",
+     "tail"
+    ]
    }
   },
   "cataphract_rider": {
@@ -51,6 +101,34 @@
      "lance",
      "plume",
      "shield"
+    ],
+    "bake_reached": 1.0,
+    "gloss_silver": 0.039,
+    "gloss_gold": 0.063,
+    "group_flips_head": 1,
+    "group_flips_arms": 13,
+    "group_flips_legs": 9,
+    "group_flips_torso": 19,
+    "locate_fit": 0.744,
+    "part_iou_shield": 0.837,
+    "part_de_shield": 12.5,
+    "part_method_shield": "trellis",
+    "ref_iou": 0.569
+   },
+   "added": {
+    "20261024-203217": [
+     "bake_reached",
+     "gloss_gold",
+     "gloss_silver",
+     "group_flips_arms",
+     "group_flips_head",
+     "group_flips_legs",
+     "group_flips_torso",
+     "locate_fit",
+     "part_de_shield",
+     "part_iou_shield",
+     "part_method_shield",
+     "ref_iou"
     ]
    }
   }
