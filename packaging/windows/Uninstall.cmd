@@ -1,3 +1,3 @@
 @echo off
-rem EU4 Unit Generator: double-click to remove the app (settings, runs and the AI setup are kept).
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall.ps1" %*
+rem EU4 Unit Generator: removes the app (asks before deleting your work or the AI parts). Also in Windows Settings > Apps.
+start "" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0uninstall.ps1" %*
