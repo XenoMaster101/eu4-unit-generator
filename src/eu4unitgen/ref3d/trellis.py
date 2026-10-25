@@ -3,7 +3,7 @@
   run      the whole chain for one image, into ``assets_in/<name>/trellis/``:
              1. cut-out: the horse masked by BiRefNet (ai job ref3d_mask, the Windows AI environment), RGBA;
              2. TRELLIS.2 in WSL2 (ai job trellis2_generate in ``~/eu4unitgen_ai/trellis2_env``, built by
-                tools/wsl/trellis2_setup.sh; the weights read from the AI root through /mnt): ``raw.glb``;
+                setup_scripts/trellis2_setup.sh; the weights read from the AI root through /mnt): ``raw.glb``;
              3. ``process`` below;
            and with ``--test`` the game version staged alone (tier 1, vanilla next).
   process  a TRELLIS.2 .glb into ``<out>/vNNN``:

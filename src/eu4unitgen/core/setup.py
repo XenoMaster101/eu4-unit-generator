@@ -7,7 +7,7 @@ Pinned to what works on the author's machine (2026-10-24):
   * the Windows AI environment: Python 3.10 (uv), torch 2.14.1+cu126, torchvision 0.29.1, transformers 5.20.1,
     rembg 2.0.69, onnxruntime 1.23.2, scipy 1.15.3, opencv-python 5.0.0, numpy 2.2.6, huggingface_hub 1.33.0;
   * TRELLIS.2 at commit 75fbf0183001ed9876c8dbb35de6b68552ee08bd, its environment in WSL from
-    tools/wsl/trellis2_setup.sh (CUDA 12.9, torch 2.7.0 cu128);
+    setup_scripts/trellis2_setup.sh (CUDA 12.9, torch 2.7.0 cu128);
   * the weights: microsoft/TRELLIS.2-4B, microsoft/TRELLIS-image-large, facebook/dinov3-vitl16-pretrain-lvd1689m
     (gated), facebook/sam2.1-hiera-large; BiRefNet-general (rembg fetches it on first use).
 
@@ -65,7 +65,7 @@ def steps() -> list[Step]:
              "Windows (TRELLIS.2 peaks near 19 GB).", "", 1),
         Step("code", "Get TRELLIS.2", f"Downloads Microsoft's TRELLIS.2 code (commit {TRELLIS_COMMIT[:7]}) into the AI folder.", "", 3),
         Step("trellis_env", "Set up TRELLIS.2 in WSL", "Installs CUDA 12.9 and builds TRELLIS.2's environment in Ubuntu "
-             "(tools/wsl/trellis2_setup.sh).", "your Linux password once; about 40 minutes", 40),
+             "(setup_scripts/trellis2_setup.sh).", "your Linux password once; about 40 minutes", 40),
         Step("ai_env", "Set up the Windows AI environment", "A Python environment for the cut-out (BiRefNet) and the part "
              "crops (SAM 2).", "about 10 minutes, 5 GB", 10),
         Step("weights", "Download the AI weights", "TRELLIS.2, its decoder, DINOv3 and SAM 2.1 (about 20 GB).",
@@ -91,7 +91,6 @@ def command(key: str, token: str | None = None) -> list[str]:
     """The argv for a step (Windows); started in a new console window by the Setup screen."""
     cfg = config.load()
     root = ai_root()
-    repo = config.checkout_root() or Path(sys.prefix)
     wsl = " ".join(cfg.wsl_base())
     if key == "wsl":
         return _ps("wsl --install --no-distribution; Read-Host Done. Press Enter, then restart Windows and open the app again",
@@ -108,7 +107,7 @@ def command(key: str, token: str | None = None) -> list[str]:
                    f"{wsl} -e bash -lc \"cd '{wsl_path(root)}' && ([ -d TRELLIS.2 ] || git clone {TRELLIS_REPO} TRELLIS.2) && "
                    f"cd TRELLIS.2 && git fetch -q origin && git checkout -q {TRELLIS_COMMIT} && echo TRELLIS.2 ready\"")
     if key == "trellis_env":
-        tools = wsl_path(Path(repo) / "tools" / "wsl")
+        tools = wsl_path(Path(__file__).resolve().parents[1] / "setup_scripts")
         root_step = ("sudo apt-get update && sudo apt-get install -y build-essential gcc-13 g++-13 git libjpeg-dev curl && "
                      "(dpkg -s cuda-keyring >/dev/null 2>&1 || (curl -fsSLo /tmp/cuda-keyring.deb "
                      "https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb && "

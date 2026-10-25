@@ -1,7 +1,7 @@
 """AI job (M19 bake-off): one image -> a textured mesh with TRELLIS.2 (microsoft/TRELLIS.2-4B, MIT).
 
 Runs in its own environment (Python 3.11, torch 2.7 cu128; inside WSL2, ``~/eu4unitgen_ai/trellis2_env`` from
-``tools/wsl/trellis2_setup.sh``) on local weights only:
+``setup_scripts/trellis2_setup.sh``) on local weights only:
   * the cut-out is ours (BiRefNet, ref3d_mask): the image comes in RGBA, so TRELLIS.2's own background
     remover (briaai/RMBG-2.0, non-commercial) is never loaded (a stand-in takes its place);
   * the pipeline config is rewritten to local folders: TRELLIS.2-4B, the sparse-structure decoder from

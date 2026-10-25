@@ -191,6 +191,16 @@ class MainWindow(QMainWindow):
 
     show_horse = show_unit  # the Home screen's older link
 
+    def first_screen(self) -> None:
+        """The unit screen (Track P: the app's one flow); Setup first while the machine isn't set up (no EU4 install
+        or AI environment in the settings file). The nation wizard stays behind Home."""
+        from eu4unitgen.core import checks
+        quick = {c.key: c for c in checks.run_all(quick=True)}
+        if not (quick["eu4_path"].ok and quick["ai_env"].ok and quick["blender"].ok):
+            self.show_setup()
+        else:
+            self.show_unit()
+
     def show_setup(self) -> None:
         self.views.setCurrentWidget(self.setup_page)
 
@@ -922,4 +932,5 @@ def main(argv: list[str] | None = None) -> int:
     window = MainWindow(store=QSettings("eu4unitgen", "eu4unitgen"))
     window.show()
     window.auto_setup()
+    window.first_screen()
     return app.exec()

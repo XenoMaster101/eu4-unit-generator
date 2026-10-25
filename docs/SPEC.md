@@ -506,6 +506,38 @@ Edited meshes keep the vanilla skeleton, so they **reuse vanilla animation types
 - Prefer references to vanilla names and paths over copying base-game files. Generated entities restate a vanilla entity's fields (names of pdxmeshes, animations, attach targets), which copies no Paradox asset; `clone =` can't be used on vanilla parents from a mod file that sorts first (§3).
 - Not legal advice. Paradox can remove mods at its discretion.
 
+### Models and tools (Track P3.5; the list is `core/licences.py`, also the app's About page)
+
+| Model or tool | Licence | What it does here | In the package |
+|---|---|---|---|
+| eu4unitgen (this app) | GPL-3.0 | the app | yes |
+| Python packages: PySide6 | LGPL-3.0 | the window (Qt) (installed from PyPI by the installer) | no |
+| Pillow | MIT-CMU (HPND) | images and DDS (installed from PyPI) | no |
+| Jinja2 | BSD-3-Clause | script templates (installed from PyPI) | no |
+| Blender 4.2 LTS | GPL-2.0-or-later | mesh jobs, run only as a separate program (the user installs it) | no |
+| io_pdx_mesh 0.91 (ross-g) | GPL-3.0-or-later | reads and writes EU4 .mesh files inside Blender (Blender extension) | no |
+| TRELLIS.2 code (Microsoft) | MIT | image to 3D model, in WSL | no |
+| TRELLIS.2-4B weights | MIT | the 3D model (downloaded by the user) | no |
+| TRELLIS-image-large (sparse-structure decoder) | MIT | part of TRELLIS.2 (downloaded by the user) | no |
+| DINOv3 ViT-L/16 (Meta) | DINOv3 License (2025-08-19) | TRELLIS.2's image encoder (gated: each user accepts it on Hugging Face; use and derivatives allowed, outputs are the user's (SPEC M21)) | no |
+| SAM 2.1 hiera-large (Meta) | Apache-2.0 | cuts parts out of the reference (downloaded by the user) | no |
+| BiRefNet-general (through rembg) | MIT | cuts the subject out of the image (downloaded by the user) | no |
+| rembg | MIT | runs BiRefNet | no |
+| PyTorch, torchvision | BSD-3-Clause | runs the AI models | no |
+| transformers (Hugging Face) | Apache-2.0 | runs SAM 2 | no |
+| xformers | BSD-3-Clause | attention in TRELLIS.2 | no |
+| CuMesh, FlexGEMM (J. Xiang) | MIT | TRELLIS.2's mesh and sparse ops | no |
+| o-voxel (TRELLIS.2) | MIT | TRELLIS.2's export (Eigen inside it: MPL-2.0) | no |
+| our UV rasteriser (ai/jobs/_uv_raster.py) | GPL-3.0 | replaces nvdiffrast in TRELLIS.2's texture bake (nvdiffrast and nvdiffrec (NVIDIA, research or evaluation only) are never installed) | yes |
+| CUDA toolkit 12.9 (NVIDIA) | NVIDIA CUDA EULA | builds TRELLIS.2's extensions inside WSL (installed by the setup script from NVIDIA's own repository) | no |
+| WSL2 and Ubuntu | Microsoft / various open-source | where TRELLIS.2 runs | no |
+| TripoSG (VAST, optional) | MIT | the old hand-built pipeline only (archived) (not needed by the app) | no |
+| SigLIP 2 (Google, optional) | Apache-2.0 | the old self-reading pipeline only (archived) | no |
+| texconv (Microsoft DirectXTex, optional) | MIT | DDS encoding on Windows if present | no |
+| Europa Universalis IV files (Paradox) | the game's EULA | read from your own install at run time (never copied into the app or the repo (rule 1); DLC files never redistributed) | no |
+
+Not used: briaai/RMBG-2.0 (CC BY-NC 4.0 (non-commercial)): TRELLIS.2's default background remover: replaced by BiRefNet; nvdiffrast, nvdiffrec (NVIDIA Source Code License (research or evaluation only)): replaced by our rasteriser.
+
 ---
 
 ## 10. Roadmap
@@ -2941,3 +2973,88 @@ The user's brief after test 35: turn every lesson into a built-in rule, give it 
   - the horse-girl foot unit;
   - infantry;
   - other unit types.
+
+#### Track P: results (2026-10-24)
+- **P1.1-1.3: the audit and the known fixes.** Every fix from M15-M24 is a general rule in code, each with the case that taught it, its code and its test (`core/known_fixes.py`, 46 rules; `tests/test_known_fixes.py`). One-offs made general:
+  - the cloth, head band, emblem panel, country mask and crest found by the subject's own dominant colour (`blender/jobs/_colour.py`), not a fixed red; a horse's coat kept apart from its cloth;
+  - the shield, plume and helmet gold read from the reference (`ref3d/part_gen.py`); the cataphract's colours (`KITE_COLOURS`, `FINIAL_GOLD`, `PLUME_DARK/LIGHT`) are only defaults;
+  - parts' colours moved onto the unit's palette (`core/palette.py`: the horse's gold, cloth, steel);
+  - the reins rebuilt (`_reins.py`, on vanilla's `Rem` bone) instead of lost;
+  - every part with a normal map; the sword textured; the flat-colour tuft dropped;
+  - the rider's legs moved out by the horse's extra barrel width (`trellis.leg_spread`): seated, the cataphract rider's lower body inside the horse went 23% -> 10% (vanilla 9%), measured from the gallery's posed meshes (`quality.legs_clear`);
+  - shield side, plume and tassels as options; one settings file for every path (`core/config.py`).
+- **P1.2: parts from the reference.** Each part is located in the reference (the split part projected, mirrored or not; the cataphract: fit 0.744), cut out with SAM 2, its occluders trimmed (a gripping hand) and filled from the mirror side, stood upright. TRELLIS.2 makes it from the crop (one model load, cached by the crop's hash: 3.4 minutes for the shield). Blender `fresh_part` faces a flat part along its thinnest axis, painted side out, wide end up as in the crop. Then it is baked, its colours put on the palette, and its emblem projected crisp from the crop's view. The check is the part drawn next to its crop: the cataphract's TRELLIS.2 shield scored outline 0.837-0.845, colour distance 12.5-13.5, and passed. The fallback is the procedural shield traced from the crop (outline, emblem, colours: 0.886 / 18.8). Plumes stay horsehair blades, coloured from their crop; the helmet's finial, brow band, nasal and ribs are read from its crop.
+- **P1.4: the regression set** (`ref3d/regress.py`, `regression/baseline.json`; test 35 and horse 2's untouched run as the baseline). Run 1 (2026-10-24): nothing worse; the new measures added to the baseline.
+- **P1.5: the quality report** (`ref3d/quality.py`). Six measures, each with a verdict:
+  - the outline against the reference, relative to TRELLIS.2's own model's overlap (a rider's on its central band, with its parts masked out);
+  - deformation against vanilla;
+  - parts kept, rebuilt or lost;
+  - texture use;
+  - brightness and contrast at map zoom;
+  - seated clearance.
+- **P2: the app.**
+  - `gui/unit_page.py`: the one flow, image -> name and rights -> horse or rider and slot -> Generate -> staged progress with estimates -> the result sheet next to the reference -> the quality report -> edits -> Add to mod.
+  - The run engine (`ref3d/flow.py`) runs detached and resumes; GPU stages wait while EU4 runs. Edits re-run only build (TRELLIS.2 never) or only finish: on horse 2, brightness re-ran finish in 0.1 s and the preview, keeping its 80 s build.
+  - Pre-run checks (`core/checks.py`), the input guide (`core/guide.py`), plain errors with the details behind a button (`core/errors.py`).
+  - **Add to mod** (`export/modexport.py`):
+    - normal: its own mod named after the unit, 46 files, 16 of them in checksummed folders;
+    - achievement-safe: only gfx/interface, the culture's cavalry entity and rider rewritten from the unit's own entities with `version` 20, 0 checksummed files. UNVERIFIED in game: a mod entity with a higher version replacing a base-game culture's.
+    - The checksum folders and extensions are read from the install's `checksum_manifest.txt` (13 entries: common, events, missions, decisions, history, map, map/random).
+  - Setup and About screens (`gui/setup_page.py`, `core/setup.py`, `core/licences.py`); the io_pdx_mesh download URL checked against its 0.91 release (`blender-io_pdx_mesh.zip`, an extension package).
+  - Horse 2 ran end to end through the new flow: cut-out 41 s, build 80 s, preview 4 minutes (TRELLIS.2 reused).
+- **P3: cleanliness.**
+  - The abandoned approaches moved to `archive/`: the hand-built master (E-A/E-B/E-C/E-D, the master assembly), the self-reading and cloak pipelines (`auto`, `parts`, `s1`, `game`, `job`), TripoSG, 15 AI jobs, 12 Blender jobs and helpers, and the M19 horse screen. `fresh_horse.py`'s procedural, anatomy and fitted-model sources are gone too (2,029 -> 1,318 lines). The live pieces were extracted first (`ref3d/runstate.py`; `trellis.next_version`, `ai_paths`, `stage`; `unitstage.TEST`).
+  - Data: old tests, bake-offs and scratch moved to `D:\eu4unitgen_archive\2026-10-24` (14 GB); 13.5 GB freed on C:. Kept: the references, the regression set, test 35 (its build and source versions) and horse 2's app run.
+  - The WSL setup scripts moved into the package (`setup_scripts/`).
+  - The user README and `docs/DEVELOPER.md` were rewritten.
+
+#### Known fixes (Track P1.3; generated from `core/known_fixes.py`)
+
+| Rule | The case that taught it | Where | Checked by |
+|---|---|---|---|
+| TRELLIS.2's mesh is welded at its UV seams before anything else, and only its largest piece is kept | M21: the mesh comes split at its seams; a collapse on it stalls at 36-61k triangles | `blender/jobs/fresh_horse.py:merge_seams` | regress:tris |
+| the model is turned to face -Z: its long axis, the end that reaches higher holds the head | M21: TRELLIS.2 picks its own facing (the cataphract 90 degrees off horse 2) | `blender/jobs/fresh_horse.py:face_forward` | regress:iou_side |
+| a closed solid before decimation: flood fill (closing 0.2 kept only where thick), voxel remesh, relaxed | M21: the cataphract's open surface became a hollow shell that collapsed to lace | `blender/jobs/fresh_horse.py:solid_fill` | regress:iou_front34; regress:tris |
+| quadric collapse straight to the budget (2,800 body triangles), degenerate edges dissolved; the close retried coarser if it stalls | M21: an even remesh lost the silhouette; collapses stalled on sheets | `blender/jobs/fresh_horse.py:collapse_to` | regress:tris; regress:flips_idle |
+| region UV islands (legs, head, trunk, main panels, tail), borders straightened, panels at 2x density | M21: Smart UV's many islands packed at 45-59% | `blender/jobs/fresh_horse.py:region_uv` | regress:uv_used |
+| the colour is baked from the raw model itself (selected to active), misses and gutters filled from the nearest reached texel | M21 v001: a projected/painted colour read blurry | `blender/jobs/bake_colour.py:main` | regress:bake_reached |
+| the bake's colour matched in Lab to the raw model's lit render, lightness half way, spread capped | test 26: the raw base colour read orange and flat next to the approved raw render | `blender/jobs/bake_colour.py:colour_transfer` | regress:bake_reached; regress:silver_cap |
+| bright metal is held under the raw model's own: silver at 0.85 of its luminance | test 26: the scale rendered nearly white; test 12: bright metals read pale in game | `blender/jobs/bake_colour.py:silver_mask` | regress:silver_cap |
+| gloss by colour class in the specular alpha: silver 14, gold 12, cloth and coat matte 5 | M21: TRELLIS.2's metallic map covered coat and hair alike (0.65 on horse 2) | `blender/jobs/bake_colour.py:gloss_map` | regress:gloss_gold; regress:gloss_silver |
+| the cloth is the subject's own dominant saturated non-gold colour, not a fixed red; a horse's coat is told apart from it | Track P1 audit: the country mask, head band, emblem and crest only worked on red | `blender/jobs/_colour.py:cloth_and_coat` | test_rule[cloth_hue_blue]; test_rule[coat_kept_apart_from_cloth] |
+| with the option on, the cloth is the country colour's mask (a grey times the primary); the set's tags without colours of their own get the cloth's colour | test 28: Byzantium took its map purple | `blender/jobs/bake_colour.py:cloth_mask` | test_horse_unit_colours_fill_tags_without_their_own |
+| emblems are crisp decals: a mask painted over the blurred bake (horse panels) or traced from the reference's crop and projected from its view (shields) | M21: the caparison's crosses were blurred | `ref3d/part_gen.py:project_emblem` | test_tetragrammatic_decal; test_two_colours_traces_the_emblem; test_project_emblem_paints_front_faces_only; regress:emblem_texels |
+| what the reference hides is filled from matching visible parts: texels from the nearest reached ones, a part's hidden bits from its mirror side inside its hull | M20: hidden areas were smeared | `ref3d/part_gen.py:fill_occlusion` | test_fill_occlusion_fills_a_bite_from_the_mirror_side |
+| parts take the unit's palette: their colours moved onto the horse's red, gold and steel | test 34: the shield must use the caparison's red and the chanfron's gold | `core/palette.py:classes` | test_palette_classes_by_specular; test_finish_texture_moves_colours_onto_the_palette_and_masks_the_cloth |
+| one uniform scale (proportions kept): the croup, then the seat at vanilla's (rays at Saddle_Node) | M21: the rider sits on Saddle_Node | `blender/jobs/fresh_horse.py:direct_fit` | regress:seat_gap |
+| a horse whose side silhouette is over 1.15x vanilla's is slimmed about the seat, legs stretched to the ground | test 26: 1.44-1.65x vanilla's slim horse | `blender/jobs/fresh_horse.py:slim` | regress:side_ratio |
+| the head is found before the slim and its poll carried through | test 26: after it the cataphract's chest was taken for its head | `blender/jobs/fresh_horse.py:direct` | regress:iou_side |
+| minimal posing: only the lower legs slide under vanilla's heels; head and neck keep their shape (put on vanilla's poll only for the weights) | test 25 v001: the reshape bent the neck into a goose curve | `blender/jobs/fresh_horse.py:direct_pose` | regress:iou_front34; regress:iou_side |
+| the fitted head pitch is kept (no repose onto vanilla's 40 degrees) | M20: the game head drooped, long and thin | `blender/jobs/fresh_horse.py:head_shift` | regress:iou_side |
+| the tail is found by its own colour, cut off and replaced by our tube on vanilla's tail bones, painted from it; the body's tail weights cleared | M21: the strands tore in idle; the rump swung with the tail | `blender/jobs/fresh_horse.py:hair` | regress:tail; regress:flips_idle |
+| the mane's voxels are smoothed hard into one solid crest; an opening on head and neck removes flaps | test 25: mane slabs and flaps | `blender/jobs/fresh_horse.py:smooth_region` | regress:flips_moving |
+| with a chanfron, a clean band of the head's cloth behind its rear edge | test 26: the red blobs by the eyes | `blender/jobs/bake_colour.py:head_band` | regress:head_band |
+| tassels and a horse's plume too small for geometry are painted marks where the reference has them | test 27: the tassels sat on the ears like hairpins | `blender/jobs/bake_colour.py:head_marks` | regress:head_marks |
+| thin parts are rebuilt, not lost: the reins as straps from the bit to vanilla's Rem bone, coloured from the raw model's, when it shows them | M22's known limit: the reins were lost to the budget | `blender/jobs/_reins.py:build` | test_rule[reins_found_when_the_raw_shows_them]; test_rule[reins_weights_head_to_rem]; regress:reins |
+| chain weights along vanilla's bones; the tail along its own chain | M21 | `blender/jobs/fresh_horse.py:transfer_weights` | regress:flips_attack |
+| the lance and shield are split off the body (the column beside it; the plate on the other side) | M23: the weapons came fused to the hands | `blender/jobs/fresh_rider.py:split` | regress:parts |
+| the rider is scaled by its helmet's top (not the crest's) | M23: the crest was taken for the head | `blender/jobs/fresh_rider.py:place` | regress:ref_iou |
+| x and z slimmed towards vanilla's rider (at least 0.75); arms shift whole | test 29: bulkier than vanilla's rider | `blender/jobs/fresh_rider.py:slim_body` | regress:group_flips_torso |
+| each arm is turned about its shoulder onto its hand node, not slid | M23: sliding the hands 4.6 and 5.9 units stretched the arms | `blender/jobs/fresh_rider.py:swing_arm` | regress:max_idle; regress:group_flips_arms |
+| the cloak on the spine by height, the skirt halves on the legs, a slot between the legs, the cloth under the arms cut | M23: one skirt block tore when the seated legs spread; the cloak hung from the shield arm | `blender/jobs/fresh_rider.py:rider_weights` | regress:group_flips_legs; regress:flips_moving |
+| the collar is cut round the helmet so the head shows clean steel | test 30: the head read as a hooded blob | `blender/jobs/fresh_rider.py:main` | regress:ref_iou |
+| the helmet is pinned to the head bone | test 35: the dome was 70% on the head; the finial floated | `ref3d/trellis.py:pin_head` | test_pin_head; regress:group_flips_head |
+| the rider's legs move out by how much wider its horse is than vanilla at the seated thighs' height | Track P1 audit: the cataphract's caparison swallowed 23% of the rider's lower body (vanilla: 9%) | `ref3d/trellis.py:leg_spread` | test_leg_spread_is_the_extra_width_at_the_same_height; test_spread_legs_moves_only_leg_weighted_vertices_outward; test_legs_clear_and_verdict |
+| the shield is strapped to the forearm (Left_hand_node in the seated pose: half way to the elbow, out 1.2, up 0.3), face out, top up | test 29: on the rein hand it sat over the horse's neck | `ref3d/trellis.py:strap` | test_shield_strapped_half_way_to_the_elbow_out_and_up |
+| head parts are scaled by the rider animation's 0.805 | test 35: tier 1 (scaled) approved in game | `ref3d/trellis.py:plume_part` | test_head_part_scaled_for_the_rider_animation |
+| parts are never placeholders: each is cut out of the reference (SAM 2), made by TRELLIS.2 from its crop, decimated, baked (colour and normal), attached to its bone, and checked against the crop; else procedural, still traced and coloured from the crop | the user, 2026-10-24 (after test 35) | `ref3d/trellis.py:shield_from_reference` | test_check_scores_a_matching_part_high_and_a_wrong_one_low; regress:part_iou_shield; regress:part_de_shield |
+| each part is found in the reference by projecting the model's split part onto it (mirrored or not) | Track P1.2 | `ref3d/part_gen.py:locate` | test_locate_projects_parts_onto_the_reference; regress:locate_fit |
+| what covers a part's edge (a gripping hand) is trimmed by colour, and leaning crops are stood upright | Track P1.2: the cataphract's shield crop came with the gauntlet | `ref3d/part_gen.py:trim_foreign` | test_deskew_stands_a_leaning_part_upright |
+| a flat part faces along its thinnest axis, its painted side out, its wide end up as in the crop | Track P1.2: the first TRELLIS.2 shield came out edge-on | `blender/jobs/_part_view.py:flat_view` | test_rule[flat_part_faces_its_painted_side]; test_rule[flat_part_wide_end_up] |
+| a procedural shield's outline, emblem and colours come from its crop (the kite and cross are only the default) | test 32: the reference's kite; Track P1: any shield | `core/gear.py:kite_shield` | test_outline_is_the_crop_silhouette; test_kite_shield_shape_and_mask |
+| the shield belongs to the design: palette colours, worn and shaded, studs all round, 12% darker | test 34: a clean sticker | `ref3d/trellis.py:shield_from_reference` | test_kite_shield_worn_and_darker; test_finish_texture_moves_colours_onto_the_palette_and_masks_the_cloth |
+| plumes, crests and manes are flat horsehair blades with a jagged top and strand texture, coloured from their crop | test 32: a round tube read as a sausage | `core/gear.py:horsehair_blade` | test_horsehair_blade_flat_and_jagged; test_strand_texture_streaks_along_u; test_hair_colours_dark_and_light |
+| small decorations keep their attachment point and stay separate: the plume rises from a gold finial, a rigid head part clear of helmet, mail and cloak | tests 29 and 31: merged into the helmet | `ref3d/trellis.py:plume_part` | test_plume_takes_the_units_gold_and_a_ridged_normal; regress:parts |
+| the crest is found by its own colour over the helmet, whatever it is | Track P1 audit: a fixed red | `blender/jobs/_colour.py:crest_colour` | test_rule[crest_any_colour] |
+| the helmet's gold (finial, brow band, nasal, ribs) is built where the reference's helmet shows it, in the unit's gold | test 34: the reference's tall finial and bands | `ref3d/part_gen.py:read_helmet` | test_read_helmet_finds_its_gold |
+| every part carries a normal map (baked from its model, or from its height) | M24's known limit: the parts' normal maps were flat | `ref3d/trellis.py:process_rider` | test_sword_is_textured_not_flat; test_normal_from_height_signs |

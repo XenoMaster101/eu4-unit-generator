@@ -26,6 +26,7 @@ where = ["src"]
 "eu4unitgen.blender" = ["jobs/*.py"]
 "eu4unitgen.ref3d" = ["templates/*.json"]
 "eu4unitgen.ai" = ["jobs/*.py"]
+"eu4unitgen.setup_scripts" = ["*.sh"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
