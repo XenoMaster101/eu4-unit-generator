@@ -121,13 +121,21 @@ def test_errors_in_plain_words():
     assert "building the game model" in errors.explain("weird", "build")["what"]
 
 
-def test_setup_steps_have_commands():
+def test_setup_plans_need_no_terminal(tmp_path):
     for st in setup.steps():
-        cmd = setup.command(st.key, token="hf_x")
-        assert cmd[0] == "powershell" and isinstance(cmd[-1], str)
-    assert "blender-io_pdx_mesh.zip" in setup.IO_PDX_MESH
-    assert "HF_TOKEN='hf_x'" in setup.command("weights", token="hf_x")[-1]
-    assert setup.TRELLIS_COMMIT in setup.command("code")[-1]
+        if st.key == "ai_folder":
+            continue
+        cmds = setup.plan(st.key, token="hf_x", root=tmp_path / "ai")
+        assert cmds and all(c.download or c.argv for c in cmds)
+        for c in cmds:  # no step waits on a prompt in a console: no -NoExit, no sudo
+            assert "-NoExit" not in c.argv and not any("sudo" in a for a in c.argv)
+    ub = setup.plan("ubuntu", root=tmp_path)
+    assert any(c.argv[-3:] == ["root", "-e", "true"] for c in ub)  # set up as root: no Linux user to make
+    assert any(c.admin for c in setup.plan("wsl")) and any(c.admin for c in setup.plan("blender"))
+    w = setup.plan("weights", token="hf_x", root=tmp_path)
+    assert w[0].download[0] == setup.BIREFNET and w[1].env == {"HF_TOKEN": "hf_x"}
+    assert setup.TRELLIS_COMMIT in setup.plan("trellis_env", root=tmp_path)[0].argv[-1]
+    assert setup.drives() and setup.default_ai_root().name
 
 
 def test_guide_warns_on_the_wrong_view(tmp_path):

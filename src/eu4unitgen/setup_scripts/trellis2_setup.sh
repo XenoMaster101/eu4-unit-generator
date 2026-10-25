@@ -63,7 +63,7 @@ done
 
 echo "== import check"
 cd "$AI_WIN/TRELLIS.2"
-JOBS=$(dirname "$(readlink -f "$0")")/../../src/eu4unitgen/ai/jobs   # run from the repo (*.sh are LF)
+JOBS=$(dirname "$(readlink -f "$0")")/../ai/jobs   # the package's own jobs (setup_scripts sits beside ai/)
 ATTN_BACKEND=xformers "$ENV/bin/python" -c "import sys; sys.path.insert(0, '$JOBS'); import _uv_raster; \
 _uv_raster.install(); import torch, o_voxel, cumesh, flex_gemm; \
 from trellis2.pipelines import Trellis2ImageTo3DPipeline; print('ok', torch.__version__, torch.cuda.get_device_name(0))"

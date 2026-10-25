@@ -7,9 +7,6 @@ stored). The paths are ``core.config``'s settings file. Also the About page: the
 """
 from __future__ import annotations
 
-import subprocess
-import sys
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QTextBrowser,
@@ -114,28 +111,15 @@ class SetupPage(Page):
         again.clicked.connect(self.run_checks)
         cl.addWidget(again, 0, Qt.AlignLeft)
         lay.addWidget(cbox)
-        # the steps
-        from eu4unitgen.core import setup
-        sbox = QGroupBox("Set up the AI side (once per computer; each step opens its own window)")
-        sg = QGridLayout(sbox)
-        self.step_state: dict[str, QLabel] = {}
-        for r, st in enumerate(setup.steps()):
-            title = QLabel(f"<b>{st.title}</b><br>{st.what}" + (f"<br><i>Needs: {st.needs}</i>" if st.needs else ""))
-            title.setWordWrap(True)
-            title.setTextFormat(Qt.RichText)
-            state = QLabel("–")
-            self.step_state[st.key] = state
-            go = QPushButton("Run")
-            go.clicked.connect(lambda _=False, k=st.key: self.run_step(k))
-            sg.addWidget(title, r, 0)
-            sg.addWidget(state, r, 1)
-            sg.addWidget(go, r, 2)
-        self.token = QLineEdit()
-        self.token.setEchoMode(QLineEdit.Password)
-        self.token.setPlaceholderText("Hugging Face token (for DINOv3; used for the download only, not stored)")
-        sg.addWidget(QLabel(f"DINOv3: accept its licence at {setup.GATED['dinov3-vitl16-pretrain-lvd1689m']}, then paste a "
-                            "read token here:"), len(setup.steps()), 0, 1, 3)
-        sg.addWidget(self.token, len(setup.steps()) + 1, 0, 1, 3)
+        # the setup wizard (the big pieces: Blender, WSL, TRELLIS.2, the AI environment and weights)
+        sbox = QGroupBox("Set up the AI side and Blender (once per computer)")
+        sg = QVBoxLayout(sbox)
+        self.steps_state = QLabel()
+        self.steps_state.setWordWrap(True)
+        sg.addWidget(self.steps_state)
+        wiz = QPushButton("Open the setup wizard")
+        wiz.clicked.connect(self.open_wizard)
+        sg.addWidget(wiz, 0, Qt.AlignLeft)
         lay.addWidget(sbox)
         lay.addWidget(self.message)
         lay.addStretch(1)
@@ -190,22 +174,15 @@ QGroupBox::title {{ subcontrol-origin: margin; left: 10px; }}
         from eu4unitgen.core import setup
         try:
             done = setup.state()
-        except Exception:  # noqa: BLE001 - a check that can't run shows as unknown
+        except Exception:  # noqa: BLE001 - a check that can't run shows as to do
             done = {}
-        for k, lab in self.step_state.items():
-            lab.setText("done" if done.get(k) else "to do")
+        self.steps_state.setText("   ".join(f"{'✔' if done.get(s.key) else '○'} {s.title}" for s in setup.steps()))
 
-    def run_step(self, key: str) -> None:
-        from eu4unitgen.core import setup
-        if sys.platform != "win32":
-            return self.show_message("On Linux, follow docs/DEVELOPER.md's setup (TRELLIS.2 runs natively).")
-        cmd = setup.command(key, self.token.text().strip() or None)
-        subprocess.Popen(cmd, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-        if key == "ai_env":
-            self.show_message("The AI environment is being set up in its own window. When it says it's ready, press "
-                              "\"Check again\" (the app then uses it).")
-        else:
-            self.show_message("Started in its own window. When it finishes, press \"Check again\".")
+    def open_wizard(self) -> None:
+        from eu4unitgen.gui.setup_wizard import open_wizard
+        open_wizard(self)
+        self.refresh_steps()
+        self.run_checks()
 
 
 class AboutPage(Page):

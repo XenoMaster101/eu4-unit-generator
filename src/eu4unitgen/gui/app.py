@@ -198,6 +198,8 @@ class MainWindow(QMainWindow):
         quick = {c.key: c for c in checks.run_all(quick=True)}
         if not (quick["eu4_path"].ok and quick["ai_env"].ok and quick["blender"].ok):
             self.show_setup()
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(400, self.setup_page.open_wizard)  # the big pieces, step by step
         else:
             self.show_unit()
 
