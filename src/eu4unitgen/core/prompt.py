@@ -36,10 +36,9 @@ class VocabularyError(ValueError):
 
 
 def config_dir() -> Path:
-    """The user's config folder: %APPDATA%\\eu4unitgen on Windows, else $XDG_CONFIG_HOME or ~/.config."""
-    if os.name == "nt" and os.environ.get("APPDATA"):
-        return Path(os.environ["APPDATA"]) / "eu4unitgen"
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "eu4unitgen"
+    """The settings folder (core.config: the root's ``settings``, else the user's config folder)."""
+    from eu4unitgen.core import config
+    return config.config_dir()
 
 
 def entry_id(e: dict) -> str:

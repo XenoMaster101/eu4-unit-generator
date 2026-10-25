@@ -30,6 +30,7 @@ import io
 import json
 import math
 import os
+import shlex
 import struct
 import subprocess
 import time
@@ -77,6 +78,17 @@ def wsl_path(p: Path) -> str:
     return "/mnt/" + w.drive[0].lower() + w.as_posix()[2:]
 
 
+def sh_python(python: str) -> str:
+    """The WSL python for a bash command line, quoted (a leading ``~/`` stays the home folder)."""
+    return '"$HOME"/' + shlex.quote(python[2:]) if python.startswith("~/") else shlex.quote(python)
+
+
+def wsl_job_cmd(python: str, job: Path, args_path: Path, log: Path) -> str:
+    """The bash command that runs one TRELLIS.2 job in WSL, every path quoted (the root may have spaces in it)."""
+    return (f"cd /tmp && {sh_python(python)} {shlex.quote(wsl_path(job))} {shlex.quote(wsl_path(args_path))} "
+            f"> {shlex.quote(wsl_path(log))} 2>&1")
+
+
 def eu4() -> Path:
     from eu4unitgen.core import config
     p = config.load().eu4()
@@ -116,7 +128,7 @@ def generate(rgba: Path, glb: Path, ai_root: Path, wsl: dict | None = None) -> d
     args_path = glb.with_suffix(".args.json")
     args_path.write_text(json.dumps(args, indent=1), encoding="utf-8")
     log = glb.with_suffix(".log")
-    cmd = f"cd /tmp && {w['python']} {wsl_path(job)} {wsl_path(args_path)} > {wsl_path(log)} 2>&1"
+    cmd = wsl_job_cmd(w["python"], job, args_path, log)
     rc = subprocess.run(cfg.wsl_base() + ["-e", "bash", "-lc", cmd]).returncode
     if rc != 0 or not result.is_file():
         raise SystemExit(f"TRELLIS.2 failed (exit {rc}); see {log}")
@@ -141,7 +153,7 @@ def generate_candidates(rgba: Path, out_dir: Path, ai_root: Path, seeds=SEEDS) -
     args_path = out_dir / "candidates.args.json"
     args_path.write_text(json.dumps(args, indent=1), encoding="utf-8")
     log = out_dir / "candidates.log"
-    cmd = f"cd /tmp && {w['python']} {wsl_path(job)} {wsl_path(args_path)} > {wsl_path(log)} 2>&1"
+    cmd = wsl_job_cmd(w["python"], job, args_path, log)
     rc = subprocess.run(cfg.wsl_base() + ["-e", "bash", "-lc", cmd]).returncode
     if rc != 0 or not result.is_file():
         raise SystemExit(f"TRELLIS.2 failed (exit {rc}); see {log}")

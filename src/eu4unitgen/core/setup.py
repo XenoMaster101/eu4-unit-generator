@@ -1,35 +1,43 @@
-"""Setting up a new machine (Track P4): the steps the first-launch setup wizard runs (gui/setup_wizard.py), each a
+"""Setting up a new machine (Track P4/P5): the steps the first-launch setup wizard runs (gui/setup_wizard.py), each a
 list of commands with a plain title, run with their output shown in the wizard: nothing is typed in a terminal.
 
-  blender      Blender 4.2 LTS: found, or its official installer downloaded and run (Windows asks for administrator
-               rights)
-  io_pdx_mesh  the Blender extension that reads and writes EU4 .mesh files, downloaded and installed into Blender
-  ai_folder    where the AI parts go (~60 GB): the drive with the most free space by default
+With a root (core.layout: the installed app), everything goes inside it:
+  blender      portable Blender 4.2 LTS: its official zip (checksum checked) unpacked into ``tools\\blender`` with a
+               ``portable`` folder, so its settings and add-ons stay there too
+  io_pdx_mesh  the Blender extension that reads and writes EU4 .mesh files, installed into that Blender
   wsl          Windows' Linux layer (administrator rights; Windows restarts afterwards)
-  ubuntu       Ubuntu 26.04 in WSL, set up to run as its root user (no Linux user or password to make)
-  trellis_env  TRELLIS.2's code (commit 75fbf01) and its environment in Ubuntu: CUDA 12.9, then
-               setup_scripts/trellis2_setup.sh (about 40 minutes)
-  ai_env       the Windows AI environment (BiRefNet, SAM 2), made with the app's own Python
-  weights      the AI weights (TRELLIS.2, its decoder, DINOv3 with the user's Hugging Face token, SAM 2.1) and
-               BiRefNet (the URL rembg's own code downloads)
+  ubuntu       Ubuntu 26.04 installed into ``wsl\\`` as the distribution ``EU4UnitGen``, set up to run as its root user
+               (no Linux user or password to make)
+  trellis_env  TRELLIS.2's code (commit 75fbf01) into ``ai\\`` and its environment inside that distribution: CUDA 12.9,
+               then setup_scripts/trellis2_setup.sh (about 40 minutes)
+  ai_env       the Windows AI environment (BiRefNet, SAM 2) in ``ai\\ai_env``, made with the app's own Python
+  weights      the AI weights into ``ai\\weights`` (TRELLIS.2, its decoder, DINOv3 with the user's Hugging Face token,
+               SAM 2.1; Hugging Face's cache in ``ai\\hf_home``) and BiRefNet (the URL rembg's own code downloads)
+Without a root (a source checkout with no ``.eu4unitgen-root``) the older choices stay: Blender's MSI, an AI folder
+picked in the wizard (``ai_folder``), WSL's ``Ubuntu-26.04``.
 
 Pinned to what works on the author's machine (2026-10-25): Ubuntu 26.04, CUDA 12.9, TRELLIS.2 75fbf01, torch 2.14.1
 cu126 for the Windows AI environment, Blender 4.2.23 LTS, io_pdx_mesh 0.91.
+
+``python -m eu4unitgen.core.setup unzip-blender <zip> <dest>`` and ``... wslconfig`` are the wizard's own helper steps.
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import shlex
 import shutil
 import string
 import sys
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from eu4unitgen.core import config
+from eu4unitgen.core import config, layout
 
 TRELLIS_REPO = "https://github.com/microsoft/TRELLIS.2.git"
 TRELLIS_COMMIT = "75fbf0183001ed9876c8dbb35de6b68552ee08bd"
-DISTRO = "Ubuntu-26.04"
+DISTRO = "Ubuntu-26.04"  # WSL's name for the image; installed under layout.DISTRO when there is a root
 WEIGHTS = {"TRELLIS.2-4B": "microsoft/TRELLIS.2-4B", "TRELLIS-image-large": "microsoft/TRELLIS-image-large",
            "dinov3-vitl16-pretrain-lvd1689m": "facebook/dinov3-vitl16-pretrain-lvd1689m",
            "sam2.1-hiera-large": "facebook/sam2.1-hiera-large"}
@@ -40,6 +48,8 @@ AI_PACKAGES_PLAIN = ["transformers==5.20.1", "rembg==2.0.69", "onnxruntime-gpu==
                      "opencv-python-headless==5.0.0.93", "numpy==2.2.6", "pillow", "huggingface_hub==1.33.0"]
 TORCH_INDEX = "https://download.pytorch.org/whl/cu126"
 BLENDER_MSI = "https://download.blender.org/release/Blender4.2/blender-4.2.23-windows-x64.msi"  # checked 2026-10-25
+BLENDER_ZIP = "https://download.blender.org/release/Blender4.2/blender-4.2.23-windows-x64.zip"  # checked 2026-10-25
+BLENDER_ZIP_SHA256 = "82e791475779a7342424a480bdde9a20b43710da9264c60346125aa16cd910cb"  # blender-4.2.23.sha256
 IO_PDX_MESH = "https://github.com/ross-g/io_pdx_mesh/releases/download/0.91/blender-io_pdx_mesh.zip"  # checked
 WSLCONFIG = "[wsl2]\nmemory=20GB\nswap=16GB\n\n[experimental]\nautoMemoryReclaim=dropCache\n"
 ENV_NAME = "ai_env"
@@ -82,10 +92,12 @@ def drives() -> list[tuple[Path, float]]:
 
 
 def default_ai_root() -> Path:
-    """The AI folder: the settings', else ``eu4unitgen_ai`` on the drive with the most free space."""
+    """The AI folder: the settings', else the root's ``ai``, else ``eu4unitgen_ai`` on the drive with most free space."""
     r = config.load().ai_root_path()
     if r:
         return r
+    if layout.root() is not None:
+        return layout.root() / "ai"
     d = drives()
     return (d[0][0] if d else Path.home()) / "eu4unitgen_ai"
 
@@ -94,16 +106,27 @@ def ai_root() -> Path:
     return default_ai_root()
 
 
+def distro() -> str:
+    """The WSL distribution the AI side uses: the settings', the root's (``EU4UnitGen``), else ``Ubuntu-26.04``."""
+    cfg = config.load()
+    if cfg.wsl_distro:
+        return cfg.wsl_distro
+    if layout.root() is not None:
+        return layout.marker().get("wsl_distro") or layout.DISTRO
+    return DISTRO
+
+
 def steps() -> list[Step]:
-    return [
+    rooted = layout.root() is not None
+    out = [
         Step("blender", "Blender 4.2 LTS", "The free 3D program the app runs in the background for every mesh step.",
-             "administrator rights if it has to be installed (about 400 MB)", 5),
+             "about 380 MB to download" if rooted else "administrator rights if it has to be installed (about 400 MB)", 5),
         Step("io_pdx_mesh", "The io_pdx_mesh add-on", "Lets Blender read and write EU4's .mesh files.", "", 1),
         Step("ai_folder", "Where the AI parts go", f"About {NEED_GB} GB: TRELLIS.2, its weights, DINOv3, SAM 2.1.", "", 0),
         Step("wsl", "Windows Subsystem for Linux", "Windows' own Linux layer; TRELLIS.2 runs in it.",
              "administrator rights; Windows restarts afterwards", 5, restart=True),
         Step("ubuntu", "Ubuntu in WSL", "Ubuntu 26.04, set up to run as its own administrator: no Linux user or "
-             "password to make.", "about 1 GB", 5),
+             "password to make." + (" It goes in the app's wsl folder." if rooted else ""), "about 1 GB", 5),
         Step("trellis_env", "TRELLIS.2", "Downloads TRELLIS.2 and builds its environment in Ubuntu (CUDA 12.9, PyTorch, "
              "its GPU extensions).", "about 40 minutes, 16 GB", 40),
         Step("ai_env", "The Windows AI environment", "Runs the cut-out (BiRefNet) and the part cut-outs (SAM 2).",
@@ -111,6 +134,7 @@ def steps() -> list[Step]:
         Step("weights", "The AI weights", "TRELLIS.2, its decoder, DINOv3, SAM 2.1 and BiRefNet (about 20 GB).",
              "DINOv3 is gated: accept its licence on Hugging Face and paste a read token", 30),
     ]
+    return [s for s in out if not (rooted and s.key == "ai_folder")]  # with a root the AI folder is fixed: ai\
 
 
 def wsl_path(p: Path) -> str:
@@ -127,26 +151,47 @@ def app_python() -> str:
 
 
 def blender_installed() -> Path | None:
+    b = layout.blender_exe()
+    if b is not None and b.is_file():
+        return b
     from eu4unitgen.core import install
     exe, _ = install.find_blender()
     return exe if exe and Path(exe).is_file() else None
+
+
+def io_pdx_mesh_dir() -> Path:
+    """Where Blender keeps io_pdx_mesh: inside the portable Blender's ``portable`` folder, else the user's profile."""
+    b = layout.blender_exe()
+    if b is not None and b.is_file():
+        return b.parent / "portable" / "extensions" / "user_default" / "io_pdx_mesh"
+    return Path(os.environ.get("APPDATA", "")) / "Blender Foundation" / "Blender" / "4.2" / "extensions" / "user_default" / "io_pdx_mesh"
+
+
+def _helper(*args: str) -> list[str]:
+    return [app_python(), "-m", "eu4unitgen.core.setup", *args]
 
 
 def plan(key: str, token: str | None = None, root: Path | None = None) -> list[Cmd]:
     """The commands for one step (Windows)."""
     cfg = config.load()
     root = Path(root or default_ai_root())
+    top = layout.root()
     tmp = Path(os.environ.get("TEMP") or "/tmp")
-    distro = cfg.wsl_distro or DISTRO
-    wsl = ["wsl.exe", "-d", distro]
+    d = distro()
+    wsl = ["wsl.exe", "-d", d]
     scripts = Path(__file__).resolve().parents[1] / "setup_scripts"
+    q = shlex.quote
     if key == "blender":
+        if top is not None:
+            z = top / "settings" / "tmp" / "blender-4.2.23-windows-x64.zip"
+            return [Cmd("Download Blender 4.2.23 LTS (portable)", download=(BLENDER_ZIP, str(z))),
+                    Cmd("Unpack it into the app's tools folder", _helper("unzip-blender", str(z), str(top / "tools" / "blender")))]
         msi = tmp / "blender-4.2.23-windows-x64.msi"
         return [Cmd("Download Blender 4.2.23 LTS", download=(BLENDER_MSI, str(msi))),
                 Cmd("Install Blender (Windows asks for permission)", ["msiexec", "/i", str(msi), "/passive", "/norestart"],
                     admin=True)]
     if key == "io_pdx_mesh":
-        z = tmp / "blender-io_pdx_mesh.zip"
+        z = (top / "settings" / "tmp" if top is not None else tmp) / "blender-io_pdx_mesh.zip"
         b = cfg.blender() or blender_installed()
         return [Cmd("Download io_pdx_mesh 0.91", download=(IO_PDX_MESH, str(z))),
                 Cmd("Install it into Blender", [str(b), "--background", "--command", "extension", "install-file", "-r",
@@ -154,12 +199,14 @@ def plan(key: str, token: str | None = None, root: Path | None = None) -> list[C
     if key == "wsl":
         return [Cmd("Install WSL (Windows asks for permission)", ["wsl.exe", "--install", "--no-distribution"], admin=True)]
     if key == "ubuntu":
-        p = Path.home() / ".wslconfig"
-        cmds = [Cmd(f"Install {distro}", ["wsl.exe", "--install", "-d", distro, "--no-launch"]),
+        if top is not None:
+            install = ["wsl.exe", "--install", "-d", DISTRO, "--location", str(top / "wsl"), "--name", d, "--no-launch"]
+        else:
+            install = ["wsl.exe", "--install", "-d", d, "--no-launch"]
+        cmds = [Cmd(f"Install Ubuntu 26.04 as {d}", install),
                 Cmd("Start it as its administrator (no user to make)", wsl + ["-u", "root", "-e", "true"])]
-        if not p.is_file():
-            cmds.insert(0, Cmd("Give WSL 20 GB of memory (.wslconfig)", ["powershell", "-NoProfile", "-Command",
-                               f"Set-Content -Path '{p}' -Value \"{WSLCONFIG.replace(chr(10), '`n')}\""]))
+        if not (Path.home() / ".wslconfig").is_file():
+            cmds.insert(0, Cmd("Give WSL 20 GB of memory (.wslconfig)", _helper("wslconfig")))
         return cmds
     if key == "trellis_env":
         r = wsl_path(root)
@@ -167,13 +214,13 @@ def plan(key: str, token: str | None = None, root: Path | None = None) -> list[C
                      "(dpkg -s cuda-keyring >/dev/null 2>&1 || (curl -fsSLo /tmp/cuda-keyring.deb "
                      "https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb && "
                      "dpkg -i /tmp/cuda-keyring.deb && apt-get update)) && apt-get install -y cuda-toolkit-12-9 && "
-                     f"bash '{wsl_path(scripts)}/cuda_glibc_patch.sh'")
+                     f"bash {q(wsl_path(scripts) + '/cuda_glibc_patch.sh')}")
         return [Cmd("Download TRELLIS.2 (commit 75fbf01)", wsl + ["-u", "root", "-e", "bash", "-lc",
-                    f"mkdir -p '{r}' && cd '{r}' && ([ -d TRELLIS.2 ] || git clone {TRELLIS_REPO} TRELLIS.2) && cd TRELLIS.2 "
+                    f"mkdir -p {q(r)} && cd {q(r)} && ([ -d TRELLIS.2 ] || git clone {TRELLIS_REPO} TRELLIS.2) && cd TRELLIS.2 "
                     f"&& git fetch -q origin && git checkout -q {TRELLIS_COMMIT} && echo TRELLIS.2 ready"]),
                 Cmd("Install the build tools and CUDA 12.9", wsl + ["-u", "root", "-e", "bash", "-lc", root_step]),
                 Cmd("Build the TRELLIS.2 environment (about 40 minutes)", wsl + ["-e", "bash", "-lc",
-                    f"AI_WIN='{r}' bash '{wsl_path(scripts)}/trellis2_setup.sh'"])]
+                    f"AI_WIN={q(r)} bash {q(wsl_path(scripts) + '/trellis2_setup.sh')}"])]
     if key == "ai_env":
         env = root / ENV_NAME
         py = env / "Scripts" / "python.exe"
@@ -185,10 +232,12 @@ def plan(key: str, token: str | None = None, root: Path | None = None) -> list[C
     if key == "weights":
         py = Path(cfg.ai() or root / ENV_NAME / "Scripts" / "python.exe")
         job = Path(__file__).resolve().parents[1] / "ai" / "jobs" / "download_weights.py"
+        env = {"HF_HOME": str(root / "hf_home")}
+        if token:
+            env["HF_TOKEN"] = token
         return [Cmd("Download BiRefNet (the cut-out model)", download=(BIREFNET, str(root / "rembg_models" / "birefnet-general.onnx"))),
                 Cmd("Download TRELLIS.2, its decoder, DINOv3 and SAM 2.1 (about 19 GB)",
-                    [str(py), str(job), str(root)] + [f"{n}={r}" for n, r in WEIGHTS.items()],
-                    env={"HF_TOKEN": token} if token else None)]
+                    [str(py), str(job), str(root)] + [f"{n}={r}" for n, r in WEIGHTS.items()], env=env)]
     raise KeyError(key)
 
 
@@ -200,9 +249,8 @@ def state() -> dict[str, bool]:
     out = {}
     b = cfg.blender() or blender_installed()
     out["blender"] = bool(b) and Path(b).is_file()
-    ext = Path(os.environ.get("APPDATA", "")) / "Blender Foundation" / "Blender" / "4.2" / "extensions" / "user_default" / "io_pdx_mesh"
-    out["io_pdx_mesh"] = ext.is_dir()
-    out["ai_folder"] = bool(cfg.ai_root)
+    out["io_pdx_mesh"] = io_pdx_mesh_dir().is_dir()
+    out["ai_folder"] = bool(cfg.ai_root) or layout.root() is not None
     wsl = checks.check_wsl()
     out["wsl"] = "isn't installed" not in wsl.what
     out["ubuntu"] = wsl.ok or "environment isn't set up" in wsl.what
@@ -214,7 +262,8 @@ def state() -> dict[str, bool]:
 
 
 def adopt(root: Path) -> dict:
-    """After a step: what it made written into the settings (the AI folder, its environment, Blender)."""
+    """After a step: what it made written into the settings (the AI folder, its environment, Blender) and, with a
+    root, the WSL distribution into the marker (the uninstaller removes only what the app registered)."""
     found = {"ai_root": str(root)}
     py = root / ENV_NAME / "Scripts" / "python.exe"
     if py.is_file() and not config.load().ai():
@@ -223,7 +272,21 @@ def adopt(root: Path) -> dict:
     if b and not config.load().blender_path:
         found["blender_path"] = str(b)
     config.update(**found)
+    if layout.root() is not None and not layout.marker().get("wsl_distro") and _registered(distro()):
+        layout.update_marker(wsl_distro=distro())
     return found
+
+
+def _registered(name: str) -> bool:
+    if os.name != "nt":
+        return False
+    import subprocess
+    try:
+        out = subprocess.run(["wsl.exe", "-l", "-q"], capture_output=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    text = out.decode("utf-16-le", errors="ignore") if b"\x00" in out[:40] else out.decode(errors="ignore")
+    return name in {ln.strip() for ln in text.splitlines()}
 
 
 def adopt_ai_env() -> str | None:
@@ -233,3 +296,57 @@ def adopt_ai_env() -> str | None:
         config.update(ai_python=str(py), ai_root=str(default_ai_root()))
         return str(py)
     return None
+
+
+# ---------------------------------------------------------------------------- the wizard's helper steps
+def unzip_blender(zip_path: Path, dest: Path) -> Path:
+    """Blender's portable zip -> ``dest`` (its one top folder flattened), checksum checked, with a ``portable``
+    folder so Blender keeps its settings and add-ons beside itself. -> blender.exe"""
+    h = hashlib.sha256()
+    with open(zip_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest() != BLENDER_ZIP_SHA256:
+        raise SystemExit(f"{zip_path.name}: the checksum doesn't match Blender's published one; download it again")
+    dest = Path(dest)
+    stage = dest.with_name(dest.name + ".unpacking")
+    shutil.rmtree(stage, ignore_errors=True)
+    with zipfile.ZipFile(zip_path) as z:
+        z.extractall(stage)
+    inner = [p for p in stage.iterdir()]
+    src = inner[0] if len(inner) == 1 and inner[0].is_dir() else stage
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.move(str(src), str(dest))
+    shutil.rmtree(stage, ignore_errors=True)
+    (dest / "portable").mkdir(exist_ok=True)
+    Path(zip_path).unlink(missing_ok=True)
+    print(f"Blender unpacked into {dest}")
+    return dest / "blender.exe"
+
+
+def write_wslconfig() -> Path:
+    """``%USERPROFILE%\\.wslconfig`` (WSL reads it only there), when there is none; recorded so uninstall removes it."""
+    p = Path.home() / ".wslconfig"
+    if p.exists():
+        print(f"{p} is already there: left as it is")
+        return p
+    p.write_text(WSLCONFIG, encoding="utf-8")
+    layout.update_marker(wslconfig=True)
+    print(f"wrote {p}")
+    return p
+
+
+def main(argv: list[str]) -> int:
+    if argv[:1] == ["unzip-blender"] and len(argv) == 3:
+        unzip_blender(Path(argv[1]), Path(argv[2]))
+        return 0
+    if argv[:1] == ["wslconfig"]:
+        write_wslconfig()
+        return 0
+    print("usage: python -m eu4unitgen.core.setup unzip-blender <zip> <dest> | wslconfig")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

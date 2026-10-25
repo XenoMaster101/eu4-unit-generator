@@ -133,7 +133,7 @@ def test_setup_plans_need_no_terminal(tmp_path):
     assert any(c.argv[-3:] == ["root", "-e", "true"] for c in ub)  # set up as root: no Linux user to make
     assert any(c.admin for c in setup.plan("wsl")) and any(c.admin for c in setup.plan("blender"))
     w = setup.plan("weights", token="hf_x", root=tmp_path)
-    assert w[0].download[0] == setup.BIREFNET and w[1].env == {"HF_TOKEN": "hf_x"}
+    assert w[0].download[0] == setup.BIREFNET and w[1].env["HF_TOKEN"] == "hf_x"
     assert setup.TRELLIS_COMMIT in setup.plan("trellis_env", root=tmp_path)[0].argv[-1]
     assert setup.drives() and setup.default_ai_root().name
 

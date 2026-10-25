@@ -1,19 +1,22 @@
 """One settings file for every path the app and its pipelines use (SPEC Track P3.3).
 
-``settings.json`` in the config folder: ``%APPDATA%\\eu4unitgen`` on Windows, ``$XDG_CONFIG_HOME/eu4unitgen``
-(``~/.config/eu4unitgen``) on Linux; ``EU4UNITGEN_CONFIG_DIR`` points elsewhere (a fresh-user test, the tests).
+``settings.json`` in the config folder: the root's ``settings`` (core.layout: the installed app keeps everything under
+one folder), else ``%APPDATA%\\eu4unitgen`` on Windows, ``$XDG_CONFIG_HOME/eu4unitgen`` (``~/.config/eu4unitgen``) on
+Linux; ``EU4UNITGEN_CONFIG_DIR`` points elsewhere (a fresh-user test, the tests).
 Environment variables still win over the file for the paths they name (``EU4_PATH``, ``BLENDER_PATH``,
 ``EU4UNITGEN_AI_PYTHON``, ``EU4UNITGEN_WORKSPACE``), so scripts and the test suite keep working unchanged.
 
 Keys (all optional; an unset one falls back to its default or detection):
   eu4_path      the EU4 install (read at run time, never copied: rule 1)
   mod_dir       the EU4 user mod folder ("Add to mod" writes there; default: Documents/Paradox Interactive/...)
-  workspace     your work (default: the checkout when run from one, else ``Documents\\eu4unitgen``):
+  workspace     your work (default: the checkout when run from one, the root's ``work``, else
+                ``Documents\\eu4unitgen``):
                 ``references`` (your images, copied in), ``projects`` (one folder per unit), ``result sheets``,
                 ``exported mods``; a checkout keeps its own layout (``assets_in``, ``build``)
   ai_python     the Windows AI environment's python (cut-out and SAM 2); its AI root holds the weights
   ai_root       the folder holding the weights and the TRELLIS.2 checkout (default: from ai_python)
-  wsl_distro    the WSL distribution TRELLIS.2 runs in ("" = the default one)
+  wsl_distro    the WSL distribution TRELLIS.2 runs in ("" = the root's EU4UnitGen when the app registered it, else
+                WSL's default one)
   wsl_python    the TRELLIS.2 environment's python inside WSL
   blender_path  Blender 4.2 LTS (only ever run as a subprocess)
   owned_dlc     DLC folder names the user owns
@@ -32,9 +35,14 @@ ENV = {"eu4_path": "EU4_PATH", "blender_path": "BLENDER_PATH", "ai_python": "EU4
 
 
 def config_dir() -> Path:
+    """``EU4UNITGEN_CONFIG_DIR``, else the root's ``settings`` folder (core.layout), else the user's config folder."""
     env = os.environ.get("EU4UNITGEN_CONFIG_DIR")
     if env:
         return Path(env)
+    from eu4unitgen.core import layout
+    r = layout.root()
+    if r is not None:
+        return r / "settings"
     if os.name == "nt":
         return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "eu4unitgen"
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "eu4unitgen"
@@ -48,9 +56,13 @@ def checkout_root() -> Path | None:
 
 
 def default_workspace() -> Path:
+    """A checkout's own folder; the root's ``work`` (core.layout); else ``Documents/eu4unitgen``."""
     root = checkout_root()
     if root is not None:
         return root
+    from eu4unitgen.core import layout
+    if layout.root() is not None:
+        return layout.root() / "work"
     from eu4unitgen.core.project import documents_dir
     return documents_dir() / "eu4unitgen"
 
@@ -116,18 +128,32 @@ class Config:
         if self.ai_root:
             return Path(self.ai_root)
         from eu4unitgen.ref3d.writeguard import ai_root
-        return ai_root(self.ai()) if self.ai() else None
+        if self.ai():
+            return ai_root(self.ai())
+        from eu4unitgen.core import layout
+        return layout.folder("ai")
 
     def blender(self) -> Path | None:
         v = self._env("blender_path")
         if v:
             return Path(v)
+        from eu4unitgen.core import layout
+        b = layout.blender_exe()
+        if b is not None and b.is_file():
+            return b
         from eu4unitgen.core.project import default_blender_path
         return default_blender_path()
 
     def wsl_base(self) -> list[str]:
         """``wsl.exe`` with the distribution, for ``subprocess`` (``-e bash -lc <cmd>`` follows)."""
-        return ["wsl.exe"] + (["-d", self.wsl_distro] if self.wsl_distro else [])
+        d = self.wsl_distro or layout_distro()
+        return ["wsl.exe"] + (["-d", d] if d else [])
+
+
+def layout_distro() -> str:
+    """The distribution the root's app registered (core.layout's marker), or "" (WSL's default one)."""
+    from eu4unitgen.core import layout
+    return layout.marker().get("wsl_distro") or "" if layout.root() is not None else ""
 
 
 def load() -> Config:

@@ -928,6 +928,8 @@ def _install_error_reporting() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from eu4unitgen.core import layout
+    layout.use_root_temp()  # temp files and caches inside the app's root, not the user profile
     _install_error_reporting()
     app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
     from PySide6.QtGui import QIcon
@@ -938,7 +940,8 @@ def main(argv: list[str] | None = None) -> int:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("eu4unitgen.app")
         except (AttributeError, OSError):
             pass
-    window = MainWindow(store=QSettings("eu4unitgen", "eu4unitgen"))
+    from eu4unitgen.core import config
+    window = MainWindow(store=QSettings(str(config.config_dir() / "gui.ini"), QSettings.IniFormat))  # not the registry
     window.show()
     window.auto_setup()
     window.first_screen()

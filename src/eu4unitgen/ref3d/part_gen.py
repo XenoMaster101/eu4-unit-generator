@@ -335,7 +335,7 @@ def generate(items: dict, cache: Path, ai_root: Path) -> dict:
         args_path = stem.with_suffix(".args.json")
         args_path.write_text(json.dumps(args, indent=1), encoding="utf-8")
         log = stem.with_suffix(".log")
-        cmd = f"cd /tmp && {w['python']} {trellis.wsl_path(job)} {trellis.wsl_path(args_path.resolve())} > {trellis.wsl_path(log.resolve())} 2>&1"
+        cmd = trellis.wsl_job_cmd(w["python"], job, args_path.resolve(), log.resolve())
         rc = subprocess.run(cfg.wsl_base() + ["-e", "bash", "-lc", cmd]).returncode
         if rc != 0 or not result.is_file():
             raise RuntimeError(f"TRELLIS.2 failed on the part crops (exit {rc}); see {log}")

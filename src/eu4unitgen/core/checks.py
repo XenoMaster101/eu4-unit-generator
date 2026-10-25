@@ -160,6 +160,7 @@ def check_ai() -> list[Check]:
 
 
 def check_wsl() -> Check:
+    from eu4unitgen.ref3d.trellis import sh_python
     if sys.platform != "win32":
         return Check("wsl", True, "Linux: TRELLIS.2 runs natively.", blocks=False)
     cfg = config.load()
@@ -168,7 +169,7 @@ def check_wsl() -> Check:
         return Check("wsl", False, "WSL isn't installed.",
                      "Open the Setup screen and press \"Install WSL\" (it asks for administrator rights; Windows then "
                      "needs a restart).")
-    rc, out = _run(cfg.wsl_base() + ["-e", "bash", "-lc", f"test -x {cfg.wsl_python} && echo ok"], 60)
+    rc, out = _run(cfg.wsl_base() + ["-e", "bash", "-lc", f"test -x {sh_python(cfg.wsl_python)} && echo ok"], 60)
     if "ok" not in out:
         return Check("wsl", False, "WSL is there, but the TRELLIS.2 environment isn't set up in it.",
                      "Open the Setup screen and press \"Set up TRELLIS.2\" (about 40 minutes; it asks for your Linux "

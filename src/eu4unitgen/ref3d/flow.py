@@ -406,6 +406,8 @@ def start(folder: Path) -> subprocess.Popen:
 
 
 def main(argv=None):
+    from eu4unitgen.core import layout
+    layout.use_root_temp()
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("go")
