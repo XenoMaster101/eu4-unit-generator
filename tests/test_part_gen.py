@@ -197,3 +197,13 @@ def test_drop_specks():
     out = part_gen.drop_specks(m, 0.01)
     assert out.getpixel((2, 2)) == 0 and out.getpixel((20, 20)) == 255
     assert math.isclose(out.histogram()[255], 31 * 31)
+
+
+def test_emblem_match_tells_a_crisp_emblem_from_a_broken_one():
+    crisp = _kite_crop()
+    assert part_gen.emblem_match(crisp, crisp) > 0.9
+    broken = _kite_crop(emblem=False)
+    d = ImageDraw.Draw(broken)
+    for y in range(50, 200, 30):  # the cross in scattered blobs
+        d.ellipse([110 + (y % 40), y, 126 + (y % 40), y + 10], fill=GOLD + (255,))
+    assert part_gen.emblem_match(broken, crisp) < part_gen.EMBLEM_MIN

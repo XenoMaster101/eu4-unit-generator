@@ -773,6 +773,10 @@ def shield_from_reference(br, parts_dir: Path, frame: dict, tall: float, crop: d
                                         [int(v * (1 - SHIELD_DARKEN)) for v in gold],
                                         [int(v * (1 - SHIELD_DARKEN)) for v in cloth], Path(fin["diffuse"]))
                 r, front = part_gen.check_turned(geo, Image.open(fin["diffuse"]), look)
+            if tc:  # the emblem crisp (the user, 2026-10-25)
+                r["emblem_iou"] = part_gen.emblem_match(front, look)
+                if r["emblem_iou"] is not None and r["emblem_iou"] < part_gen.EMBLEM_MIN:
+                    r["ok"] = False
             record["tried"].append({"method": "trellis", **r, "view": built["view"], "tris": built["tris"], "cached": g.get("cached")})
             rows.append(("shield: TRELLIS.2 from its crop", cim, front, r))
             if r["ok"]:
@@ -806,8 +810,10 @@ def shield_from_reference(br, parts_dir: Path, frame: dict, tall: float, crop: d
     geo0, tex0 = gear.kite_shield(tall, [0, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], primary=primary, **kw)
     entry = kite_part(parts_dir, frame, tall, primary=primary, cfg={"kite_kw": kw})
     if cim is not None:
-        r, front = part_gen.check_turned({"p": geo0["p"], "tri": geo0["tri"], "uv": geo0["uv"]}, tex0["diffuse"],
-                                         part_gen.palette_crop(cim, mapping, SHIELD_DARKEN))
+        look = part_gen.palette_crop(cim, mapping, SHIELD_DARKEN)
+        r, front = part_gen.check_turned({"p": geo0["p"], "tri": geo0["tri"], "uv": geo0["uv"]}, tex0["diffuse"], look)
+        if tc:
+            r["emblem_iou"] = part_gen.emblem_match(front, look)
         record["tried"].append({"method": "procedural (from the crop)", **r})
         rows.append(("shield: procedural, traced from its crop", cim, front, r))
         part_gen.check_sheet(rows, parts_dir / "part_checks.png")

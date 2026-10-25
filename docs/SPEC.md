@@ -3123,3 +3123,7 @@ The user's brief after test 35: turn every lesson into a built-in rule, give it 
 | texconv (DirectXTex) | optional DDS encoder (Pillow writes the DDS files) | `-` | - | MIT | never installed | no |
 
 Safe to remove in all: about 27.1 GB (nothing is removed until the user confirms).
+- **The emblem-crispness check (the user, 2026-10-25).** A shield passes only if its emblem, traced from its own front view, overlaps the crop's emblem by at least 0.5 (`part_gen.emblem_match`, the best over small shifts and scales).
+  - The cataphract's TRELLIS.2 shield scored 0.41 and is rejected. The crop-traced kite scores 0.53 and is what the pipeline now builds; it looks like test 35's kite (sheet `build/shield_compare_traced.png`).
+  - Its colour distance (24.7) is over 18, so it shows as flagged in the report.
+  - The approved cataphract keeps test 35's own kite. The baseline's shield measures were moved to the traced kite.

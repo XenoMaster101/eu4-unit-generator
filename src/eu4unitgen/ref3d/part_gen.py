@@ -35,6 +35,9 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 from eu4unitgen.core import palette as pal
 
 CHECK = {"iou": 0.78, "colour_de": 18.0}  # a part under these (IoU at least, Lab distance at most) is flagged
+# the emblem crisp enough (the user, 2026-10-25: the TRELLIS.2 shield passed shape and colour with a broken-up cross):
+# the emblem traced from the part's front view against the crop's, overlap at least this
+EMBLEM_MIN = 0.5
 PART_TRIS = {"shield": 600, "sword": 300, "helmet": 600}
 
 
@@ -476,6 +479,47 @@ def check_turned(geometry: dict, diffuse: Image.Image, crop: Image.Image, yaws=r
         if best is None or r["iou"] - r["colour_de"] / 100 > best[0]["iou"] - best[0]["colour_de"] / 100:
             best = ({**r, "yaw": yaw}, im)
     return best
+
+
+def _part_frame(mask: Image.Image, part_alpha: Image.Image, size: int = 256) -> Image.Image:
+    """``mask`` (L) cropped to the part's box (``part_alpha``) and set in a square, aspect kept."""
+    box = part_alpha.point(lambda v: 255 if v > 127 else 0).getbbox()
+    if box is None:
+        return Image.new("L", (size, size))
+    c = mask.convert("L").crop(box)
+    k = size * 0.96 / max(c.size)
+    c = c.resize((max(1, round(c.width * k)), max(1, round(c.height * k))), Image.NEAREST)
+    out = Image.new("L", (size, size))
+    out.paste(c, ((size - c.width) // 2, (size - c.height) // 2))
+    return out
+
+
+def emblem_match(front: Image.Image, crop: Image.Image) -> float | None:
+    """How well the part's emblem matches the crop's: each traced (``two_colours``) and framed by its part's box;
+    their overlap (IoU). None when the crop shows no emblem."""
+    b = two_colours(crop)
+    a = two_colours(front)
+    if b is None or a is None:
+        return None
+    ma = _part_frame(a[2], front.getchannel("A"))
+    mb = _part_frame(b[2], crop.getchannel("A"))
+    if not mb.getbbox() or not ma.getbbox():
+        return None
+    # the best over small shifts and scales: an emblem placed a little differently is still crisp; a broken one
+    # never lines up
+    best = 0.0
+    S = ma.width
+    for k in (0.9, 0.95, 1.0, 1.05, 1.1):
+        m = ma.resize((round(S * k), round(S * k)), Image.NEAREST)
+        base = Image.new("L", (S, S))
+        base.paste(m, ((S - m.width) // 2, (S - m.height) // 2))
+        for dx in range(-16, 17, 4):
+            for dy in range(-16, 17, 4):
+                sh = ImageChops.offset(base, dx, dy)
+                inter = ImageChops.multiply(sh, mb).histogram()[255]
+                union = ImageChops.lighter(sh, mb).histogram()[255]
+                best = max(best, inter / max(union, 1))
+    return round(best, 3)
 
 
 def check_sheet(rows: list, path: Path) -> Path:

@@ -116,9 +116,9 @@
     "group_flips_legs": 9,
     "group_flips_torso": 19,
     "locate_fit": 0.744,
-    "part_iou_shield": 0.837,
-    "part_de_shield": 12.5,
-    "part_method_shield": "trellis",
+    "part_iou_shield": 0.889,
+    "part_de_shield": 24.7,
+    "part_method_shield": "procedural (from the crop)",
     "ref_iou": 0.569,
     "cloth_primary": [
      255,
@@ -141,6 +141,9 @@
      "part_iou_shield",
      "part_method_shield",
      "ref_iou"
+    ],
+    "20261025": [
+     "the shield's part metrics from runs/v007: the emblem check now picks the crop-traced kite (the user, 2026-10-25)"
     ]
    }
   }
