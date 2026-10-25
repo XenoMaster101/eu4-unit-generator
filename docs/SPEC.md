@@ -3083,3 +3083,8 @@ The user's brief after test 35: turn every lesson into a built-in rule, give it 
   - The regression set now measures the country colour (Lab, within 8) and the mask's share (within 0.04) against test 35's.
 - **Hem length:** first try left shards at the legs (any grey texel counted as cloth: the silver scale and the legs too). Now: the country mask, and only whole cloth triangles. The effect is subtle on a caparison that is one shape with the legs.
 - **Shield side:** right forearm works, the lance mirrored into the left hand. The cavalry animations raise the right arm, so a right-side shield sits high behind the shoulder (said in its tooltip).
+- **Regression run 2026-10-25 (all fixes):** nothing worse than test 35 or horse 2. The cataphract's country colour is 255 79 72 (test 35: 255 77 70); the rider's is 255 105 92 as before.
+- **The shield (the user's decision, 2026-10-25): test 35's kite stays.** Sheet: `build/shield_cmp/shield_compare.png` (close-up, game camera, map zoom).
+  - The TRELLIS.2 shield passed its crop check (outline 0.84, colour 12.5) but is not better. Its projected emblem breaks up close, its rim is plain, and it reads the same at the game camera and map zoom.
+  - The check doesn't measure emblem crispness yet: a next step.
+- **Package rebuilt** with every fix: `dist/eu4unitgen-0.1.0-windows.zip`.
