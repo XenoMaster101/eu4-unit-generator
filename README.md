@@ -7,26 +7,51 @@ It never copies Paradox files: everything from the game is read from your own EU
 ## What you need
 
 - Windows 10 or 11 (64-bit) with an NVIDIA graphics card (8 GB or more; tested on an RTX 3060 12 GB) and 32 GB of RAM.
-- About 60 GB of free disk space (the AI weights and the WSL environment).
+- About 60 GB of free disk space on one drive: everything the app needs goes in one folder.
 - Europa Universalis IV installed (Steam).
-- [Blender 4.2 LTS](https://www.blender.org/download/lts/4-2/) (the free 3D program; the app runs it in the background).
+- An internet connection for the setup (about 25 GB of downloads) and a free Hugging Face account (for one AI model's licence).
+
+Nothing else: the app brings its own Python, and its setup wizard fetches Blender, Linux (WSL) and the AI models for you.
 
 ## Install
 
-1. If you downloaded the zip, right-click it first, choose **Properties**, tick **Unblock**, and press **OK**. Windows marks downloaded files, and that mark can stop the installer script. Then unzip `eu4unitgen-<version>-windows.zip` anywhere.
-2. Double-click **Install.cmd**. It finds Python 3.11 or newer (or offers to install Python 3.12 for you), installs the app in `%LOCALAPPDATA%\eu4unitgen\app`, and puts **EU4 Unit Generator** on your Desktop and in the Start menu.
-3. The app opens on its **Setup** screen the first time. Work down the list; each step opens its own window and says when it's done, then press **Check again**:
-   - **Install WSL**: asks for administrator rights; Windows restarts afterwards.
-   - **Install Ubuntu**: a window asks you to make up a Linux user name and password.
-   - **Give WSL enough memory**.
-   - **Get TRELLIS.2**.
-   - **Set up TRELLIS.2 in WSL**: about 40 minutes; it asks for your Linux password once.
-   - **Set up the Windows AI environment**: about 10 minutes.
-   - **Download the AI weights**: about 20 GB. One of them, DINOv3, needs you to accept its licence on Hugging Face first. The screen has the link; then paste a Hugging Face read token in the box.
-   - **Install the io_pdx_mesh add-on** (after Blender is installed).
-4. At the top of Setup, set the **EU4 install** folder and your **EU4 mod folder** (usually found for you). Press **Save settings**.
+The download is one zip. Unzip it anywhere; the folder holds:
 
-Nothing is typed in a terminal except the Linux password Ubuntu asks for.
+- **Install EU4 Unit Generator**: the one thing to click.
+- **README.txt**: this text.
+- **LICENSE.txt**: the GNU General Public License v3.
+- **files**: everything the installer uses. Leave it next to the installer.
+
+1. Double-click **Install EU4 Unit Generator**. If Windows asks whether to run it, choose **Run**.
+2. The installer's window opens: read the licence, press **Next**, choose the folder (default `D:\EU4 Unit Generator`; it shows the free space), keep or untick the Start-menu and Desktop shortcuts, and press **Install**. It takes a minute or two (about 260 MB to download), then **Finish** starts the app.
+3. The first time, the app opens its **setup wizard**. Work down the list; each step has a button, a progress bar and plain instructions, and nothing is typed in a terminal:
+   1. **Blender 4.2 LTS**: downloaded into the app's folder (about 380 MB).
+   2. **The io_pdx_mesh add-on**: lets Blender read and write EU4's mesh files.
+   3. **Windows Subsystem for Linux**: Windows asks for permission; restart Windows afterwards and open the app again.
+   4. **Ubuntu in WSL**: installed into the app's folder; no Linux user or password to make.
+   5. **TRELLIS.2**: downloads it and builds its environment (about 40 minutes).
+   6. **The Windows AI environment**: about 10 minutes.
+   7. **The AI weights**: about 20 GB. One of them, DINOv3, needs you to accept its licence on Hugging Face first: the step's buttons open its page and the token page; paste a read token in the box (it's used for that download only and never saved).
+4. On the **Setup** screen, check the **EU4 install** and the **EU4 mod folder** (usually found for you) and press **Save settings**.
+
+Everything lives in the folder you chose:
+
+| Folder | What's in it |
+|---|---|
+| `app` | the program and its own Python |
+| `tools` | Blender 4.2 and io_pdx_mesh |
+| `ai` | the AI environment, models and weights |
+| `wsl` | the Linux (Ubuntu) disk TRELLIS.2 runs in |
+| `work` | your references, projects, result sheets and exported mods |
+| `settings` | settings, logs and temporary files |
+
+Outside that folder the app adds only its shortcuts and its entry in Windows' Apps list. Two Windows features are system-wide by nature: WSL itself, and `.wslconfig` in your user folder (WSL's memory setting; the wizard writes it only if you have none).
+
+There is also **eu4unitgen-setup.exe**, a classic installer that does the same. It isn't code-signed, so on a PC with Smart App Control turned on Windows refuses to run it; use the zip there.
+
+## Uninstall
+
+Windows **Settings > Apps > Installed apps > EU4 Unit Generator > Uninstall**. It removes the whole folder (the app, Blender, the AI parts, the Linux disk, the settings), the shortcuts, the Apps entry and the Linux distribution it installed. It asks first whether to delete your work (`work`); by default your work is kept.
 
 ## Making a unit
 

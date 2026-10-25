@@ -1,13 +1,15 @@
-"""Build the Windows package (Track P4): ``dist/eu4unitgen-<version>-windows.zip``.
+"""Build the Windows downloads (Track P5): ``dist/eu4unitgen-<version>-windows.zip`` and ``dist/eu4unitgen-setup.exe``.
 
-Inside: the app's wheel (PySide6, Jinja2 and Pillow come from PyPI at install time), python.org's signed NuGet Python
-(the app's own Python: none needed on the PC), Install.cmd and install.ps1 (a wizard window: licence, location,
-shortcuts, progress, an entry in Windows' Apps list), Uninstall.cmd and uninstall.ps1 (asks before deleting your work
-or the AI parts), the icon, README.txt and LICENSE.txt (GPL-3.0). No Paradox files, no AI weights.
+The zip unzips to one folder holding only:
+  Install EU4 Unit Generator.cmd   the one thing to click (opens files\\install.ps1's wizard window)
+  README.txt                       the README
+  LICENSE.txt                      GPL-3.0
+  files\\                           the app's wheel, python.org's signed NuGet Python (the app's own: none needed on the
+                                   PC), install.ps1, uninstall.ps1, the icon
+No Paradox files, no AI weights.
 
-Why not one setup.exe: a self-built .exe is unsigned, and Smart App Control (on, on the author's PC) refuses
-unsigned programs; PowerShell and python.org's Python are signed. The PyInstaller/Inno Setup scripts for a signed
-build are in packaging/windows/exe/ (SPEC: the signing options).
+eu4unitgen-setup.exe: Inno Setup's wizard around the same files and install.ps1 (setup.iss); built when Inno Setup's
+ISCC is found (``.tools/innosetup`` in the checkout, or on PATH). It isn't code-signed: Smart App Control refuses it.
 
 usage: python packaging/windows/build_package.py
 """
@@ -23,6 +25,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
+TOP = "EU4 Unit Generator"  # the folder the zip unzips to
+CLICK = "Install EU4 Unit Generator.cmd"
 PYTHON = "3.12.10"  # python.org's NuGet build: signed by the Python Software Foundation, with venv and pip
 PYTHON_URL = f"https://api.nuget.org/v3-flatcontainer/python/{PYTHON}/python.{PYTHON}.nupkg"
 
@@ -32,12 +36,9 @@ def version() -> str:
 
 
 def readme_txt(v: str) -> str:
+    """The README as plain text (it is written to read well as is), with the version on top."""
     md = (ROOT / "README.md").read_text(encoding="utf-8")
-    install = md.split("## Install", 1)[1].split("\n## ", 1)[0].strip()
-    need = md.split("## What you need", 1)[1].split("\n## ", 1)[0].strip()
-    return (f"EU4 Unit Generator {v}\n\nWhat you need\n-------------\n{need}\n\nInstall\n-------\n" + install
-            + "\n\nTo remove the app: Windows Settings > Apps > EU4 Unit Generator > Uninstall. It asks before deleting "
-            "your work or the AI parts.\n\nMore: the app's About and licences page; docs/DEVELOPER.md in the source.\n")
+    return f"EU4 Unit Generator {v}\n\n" + md.split("\n", 1)[1].lstrip()
 
 
 def python_package(dist: Path) -> Path:
@@ -60,13 +61,21 @@ def python_package(dist: Path) -> Path:
     return p
 
 
-def main() -> Path:
+def iscc() -> Path | None:
+    for c in (ROOT / ".tools" / "innosetup" / "ISCC.exe", shutil.which("ISCC") and Path(shutil.which("ISCC"))):
+        if c and Path(c).is_file():
+            return Path(c)
+    return None
+
+
+def main() -> dict:
     v = version()
     dist = ROOT / "dist"
-    stage = dist / f"eu4unitgen-{v}-windows"
-    if stage.exists():
-        shutil.rmtree(stage)
-    stage.mkdir(parents=True)
+    stage = dist / "stage" / TOP
+    if stage.parent.exists():
+        shutil.rmtree(stage.parent)
+    files = stage / "files"
+    files.mkdir(parents=True)
     wheels = dist / "wheel"
     if wheels.exists():
         shutil.rmtree(wheels)
@@ -76,24 +85,35 @@ def main() -> Path:
         names = z.namelist()
     for must in ("eu4unitgen/setup_scripts/trellis2_setup.sh", "eu4unitgen/ai/jobs/trellis2_generate.py",
                  "eu4unitgen/blender/jobs/fresh_horse.py", "eu4unitgen/library/base_models.json",
-                 "eu4unitgen/gui/icon.png", "eu4unitgen/gui/eu4unitgen.ico"):
+                 "eu4unitgen/gui/icon.png", "eu4unitgen/gui/eu4unitgen.ico", "eu4unitgen/core/layout.py"):
         assert must in names, f"{must} is missing from the wheel"
     assert not any(n.lower().endswith((".dds", ".mesh", ".anim")) for n in names), "game files in the wheel"
-    shutil.copy(wheel, stage / wheel.name)
-    for f in ("Install.cmd", "install.ps1", "Uninstall.cmd", "uninstall.ps1"):
-        shutil.copy(HERE / f, stage / f)
-    shutil.copy(ROOT / "src" / "eu4unitgen" / "gui" / "eu4unitgen.ico", stage / "eu4unitgen.ico")
-    shutil.copy(python_package(dist), stage / f"python.{PYTHON}.nupkg")
+    shutil.copy(wheel, files / wheel.name)
+    for f in ("install.ps1", "uninstall.ps1"):
+        shutil.copy(HERE / f, files / f)
+    shutil.copy(ROOT / "src" / "eu4unitgen" / "gui" / "eu4unitgen.ico", files / "eu4unitgen.ico")
+    shutil.copy(ROOT / "src" / "eu4unitgen" / "gui" / "icon.png", files / "icon.png")
+    shutil.copy(python_package(dist), files / f"python.{PYTHON}.nupkg")
+    shutil.copy(HERE / CLICK, stage / CLICK)
     shutil.copy(ROOT / "LICENSE", stage / "LICENSE.txt")
     (stage / "README.txt").write_text(readme_txt(v), encoding="utf-8")
+    assert sorted(p.name for p in stage.iterdir()) == sorted([CLICK, "README.txt", "LICENSE.txt", "files"])
     out = dist / f"eu4unitgen-{v}-windows.zip"
-    if out.exists():
-        out.unlink()
+    out.unlink(missing_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for p in sorted(stage.rglob("*")):
-            z.write(p, Path(stage.name) / p.relative_to(stage))
-    print(out, f"{out.stat().st_size / 2 ** 20:.1f} MB", [p.name for p in stage.iterdir()])
-    return out
+            z.write(p, Path(TOP) / p.relative_to(stage))
+    built = {"zip": out}
+    print(out, f"{out.stat().st_size / 2 ** 20:.1f} MB")
+    exe = iscc()
+    if exe is None:
+        print("Inno Setup's ISCC not found: eu4unitgen-setup.exe not built")
+    else:
+        subprocess.run([str(exe), "/Q", f"/DAppVersion={v}", f"/DFilesDir={files}", f"/DLicense={stage / 'LICENSE.txt'}",
+                        f"/DOutDir={dist}", str(HERE / "setup.iss")], check=True)
+        built["setup"] = dist / "eu4unitgen-setup.exe"
+        print(built["setup"], f"{built['setup'].stat().st_size / 2 ** 20:.1f} MB")
+    return built
 
 
 if __name__ == "__main__":

@@ -1,37 +1,67 @@
-# EU4 Unit Generator installer (Track P4): a wizard window, no terminal. Started by "Install EU4 Unit Generator.cmd".
-# What it does:
-#   1. the app's own Python: python.org's signed NuGet build (python-3.12.10, in this folder), unpacked into
-#      <location>\python (no Python needed on the PC; Smart App Control lets signed Python run);
-#   2. the app (the wheel in this folder) with PySide6, Jinja2 and Pillow from PyPI (about 260 MB);
-#   3. Start-menu and Desktop shortcuts with the app's icon; an entry in Windows' Apps list with its uninstaller.
-# The app's files go in -Prefix (default %LOCALAPPDATA%\Programs\eu4unitgen: no administrator rights needed). Your
-# work goes in Documents\eu4unitgen, settings and logs in %APPDATA%\eu4unitgen; the AI parts where you choose in the
-# app's setup wizard. -Quiet installs with the defaults and no window (tests).
+# EU4 Unit Generator installer (Track P5): a wizard window, no terminal. Started by "Install EU4 Unit Generator.cmd"
+# (or by eu4unitgen-setup.exe, which passes -Quiet -Root).
+# Everything goes under ONE folder (default D:\EU4 Unit Generator):
+#   app\       the program and its own Python: python.org's signed NuGet build of Python 3.12 (no Python needed on
+#              the PC; Smart App Control lets signed Python run), with the app, PySide6, Pillow and Jinja2
+#   tools\     portable Blender 4.2 (the app's setup wizard puts it there)
+#   ai\        the AI environment, models and weights (setup wizard)
+#   wsl\       the Ubuntu distribution TRELLIS.2 runs in (setup wizard)
+#   work\      references, projects, result sheets, exported mods
+#   settings\  settings, logs, temp files
+# Outside it: only the Start-menu and Desktop shortcuts and the entry in Windows' Apps list (with the uninstaller).
+# -Quiet installs with no window (tests, setup.exe); -NoSystem skips the shortcuts and the Apps entry (tests on a used PC).
 param(
-    [string]$Prefix = "$env:LOCALAPPDATA\Programs\eu4unitgen",
+    [string]$Root = "",
     [switch]$Quiet,
     [switch]$NoLaunch,
-    [switch]$NoSystem  # tests on a used PC: no shortcuts, no Apps-list entry
+    [switch]$NoDesktop,
+    [switch]$NoStartMenu,
+    [switch]$NoSystem
 )
 $ErrorActionPreference = "Stop"
 $Here = $PSScriptRoot
 $AppName = "EU4 Unit Generator"
+$Folders = "app", "tools", "ai", "wsl", "work", "settings"
 $Version = (Get-ChildItem $Here -Filter "eu4unitgen-*.whl" | Select-Object -First 1).Name -replace '^eu4unitgen-([^-]+)-.*$', '$1'
 
-function Install-App($prefix, $desktop, $startMenu, $log) {
-    $log.Invoke("Installing $AppName $Version into $prefix")
+function Default-Root {
+    if (Test-Path "D:\") { return "D:\$AppName" }
+    $best = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 } | Sort-Object Free -Descending | Select-Object -First 1
+    return "$($best.Root)$AppName"
+}
+if (-not $Root) { $Root = Default-Root }
+
+function Check-Root($root) {
+    if (-not (Test-Path $root)) { return $null }
+    if (Test-Path (Join-Path $root "app\layout.json")) { return $null }  # ours: an update
+    if (@(Get-ChildItem $root -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+        return "$root already has other files in it. Choose an empty folder or a new one."
+    }
+    return $null
+}
+
+function Install-App($root, $desktop, $startMenu, $system, $log) {
+    $bad = $(if ($script:LogFile) { $null } else { Check-Root $root })  # quiet mode checked before making its log
+    if ($bad) { throw $bad }
+    $log.Invoke("Installing $AppName $Version into $root")
     $wheel = Get-ChildItem $Here -Filter "eu4unitgen-*.whl" | Select-Object -First 1
     $nupkg = Get-ChildItem $Here -Filter "python.*.nupkg" | Select-Object -First 1
     if (-not $wheel -or -not $nupkg) { throw "The download is incomplete: unzip the whole folder and run the installer from it." }
-    New-Item -ItemType Directory -Force $prefix | Out-Null
-    $py = Join-Path $prefix "python\python.exe"
+    foreach ($f in $Folders) { New-Item -ItemType Directory -Force (Join-Path $root $f) | Out-Null }
+    $app = Join-Path $root "app"
+    $tmp = Join-Path $root "settings\tmp"
+    New-Item -ItemType Directory -Force $tmp | Out-Null
+    $env:PIP_CACHE_DIR = Join-Path $tmp "pip"   # nothing in the user profile
+    $env:PYTHONNOUSERSITE = "1"
+    $env:TEMP = $tmp; $env:TMP = $tmp
+    $py = Join-Path $app "python\python.exe"
     if (-not (Test-Path $py)) {
         $log.Invoke("Unpacking the app's own Python ($($nupkg.Name))")
-        $tmp = Join-Path $env:TEMP ("eu4unitgen_py_" + [guid]::NewGuid())
+        $x = Join-Path $tmp ("python_" + [guid]::NewGuid())
         Add-Type -AssemblyName System.IO.Compression.FileSystem
-        [System.IO.Compression.ZipFile]::ExtractToDirectory($nupkg.FullName, $tmp)
-        Move-Item (Join-Path $tmp "tools") (Join-Path $prefix "python")
-        Remove-Item -Recurse -Force $tmp
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($nupkg.FullName, $x)
+        Move-Item (Join-Path $x "tools") (Join-Path $app "python")
+        Remove-Item -Recurse -Force $x
         $sig = Get-AuthenticodeSignature $py
         if ($sig.Status -ne "Valid") { throw "The bundled Python isn't validly signed ($($sig.Status)); the download may be damaged." }
         $log.Invoke("Python is signed by: " + $sig.SignerCertificate.Subject.Split(",")[0])
@@ -41,46 +71,54 @@ function Install-App($prefix, $desktop, $startMenu, $log) {
               "--force-reinstall", "--no-deps", $wheel.FullName) $log "Installing the app"
     Run $py @("-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location", $wheel.FullName) $log `
         "Installing its libraries (PySide6, Pillow, Jinja2; about 260 MB to download)"
-    Run $py @("-c", "import eu4unitgen, PySide6; print('eu4unitgen', eu4unitgen.__version__)") $log "Checking it starts"
-    foreach ($f in "eu4unitgen.ico", "uninstall.ps1", "Uninstall.cmd", "LICENSE.txt") {
-        if (Test-Path (Join-Path $Here $f)) { Copy-Item (Join-Path $Here $f) $prefix -Force }
+    Remove-Item -Recurse -Force (Join-Path $tmp "pip") -ErrorAction SilentlyContinue
+    foreach ($f in "eu4unitgen.ico", "uninstall.ps1", "LICENSE.txt", "..\LICENSE.txt") {
+        if (Test-Path (Join-Path $Here $f)) { Copy-Item (Join-Path $Here $f) $app -Force }
     }
-    $pyw = Join-Path $prefix "python\pythonw.exe"
-    $icon = Join-Path $prefix "eu4unitgen.ico"
-    $shell = New-Object -ComObject WScript.Shell
-    $places = @()
-    if ($startMenu) { $places += [Environment]::GetFolderPath("Programs") }
-    if ($desktop) { $places += [Environment]::GetFolderPath("Desktop") }
-    foreach ($d in $places) {
-        $lnk = $shell.CreateShortcut((Join-Path $d "$AppName.lnk"))
-        $lnk.TargetPath = $pyw
-        $lnk.Arguments = "-m eu4unitgen.gui"
-        $lnk.WorkingDirectory = $prefix
-        $lnk.IconLocation = "$icon,0"
-        $lnk.Description = "Make Europa Universalis IV units from your images"
-        $lnk.Save()
-        $log.Invoke("Shortcut: " + (Join-Path $d "$AppName.lnk"))
+    # the marker: this folder is the app's root (core/layout.py); what the app later makes outside is recorded here
+    $markerPath = Join-Path $app "layout.json"
+    $m = if (Test-Path $markerPath) { Get-Content $markerPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+    $m | Add-Member -NotePropertyName version -NotePropertyValue $Version -Force
+    $m | Add-Member -NotePropertyName installed -NotePropertyValue (Get-Date -Format s) -Force
+    [IO.File]::WriteAllText($markerPath, ($m | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+    Run $py @("-c", "from eu4unitgen.core import layout, config; import eu4unitgen, PySide6; print('eu4unitgen', eu4unitgen.__version__, 'root', layout.root(), 'settings', config.config_dir())") $log "Checking it starts"
+    $pyw = Join-Path $app "python\pythonw.exe"
+    if ($system) {
+        $icon = Join-Path $app "eu4unitgen.ico"
+        $shell = New-Object -ComObject WScript.Shell
+        $places = @()
+        if ($startMenu) { $places += [Environment]::GetFolderPath("Programs") }
+        if ($desktop) { $places += [Environment]::GetFolderPath("Desktop") }
+        foreach ($d in $places) {
+            $lnk = $shell.CreateShortcut((Join-Path $d "$AppName.lnk"))
+            $lnk.TargetPath = $pyw
+            $lnk.Arguments = "-m eu4unitgen.gui"
+            $lnk.WorkingDirectory = $root
+            $lnk.IconLocation = "$icon,0"
+            $lnk.Description = "Make Europa Universalis IV units from your images"
+            $lnk.Save()
+            $log.Invoke("Shortcut: " + (Join-Path $d "$AppName.lnk"))
+        }
+        # Windows' Apps list: this user's (no administrator rights needed)
+        $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\eu4unitgen"
+        New-Item -Path $key -Force | Out-Null
+        $size = [int]((Get-ChildItem $app -Recurse -File | Measure-Object Length -Sum).Sum / 1KB)
+        $values = @{ DisplayName = $AppName; DisplayVersion = $Version; Publisher = "eu4unitgen (GPL-3.0)";
+                     DisplayIcon = $icon; InstallLocation = $root; EstimatedSize = $size; NoModify = 1; NoRepair = 1;
+                     UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$app\uninstall.ps1`"" }
+        foreach ($k in $values.Keys) {
+            $type = if ($values[$k] -is [int]) { "DWord" } else { "String" }
+            New-ItemProperty -Path $key -Name $k -Value $values[$k] -PropertyType $type -Force | Out-Null
+        }
+        $log.Invoke("Added to Windows' Apps list (with its uninstaller).")
     }
-    # Windows' Apps list: this user's (no administrator rights needed)
-    if ($NoSystem) { $log.Invoke("Installed (no shortcuts or Apps-list entry: -NoSystem)."); return $pyw }
-    $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\eu4unitgen"
-    New-Item -Path $key -Force | Out-Null
-    $size = [int]((Get-ChildItem $prefix -Recurse -File | Measure-Object Length -Sum).Sum / 1KB)
-    $values = @{ DisplayName = $AppName; DisplayVersion = $Version; Publisher = "eu4unitgen (GPL-3.0)";
-                 DisplayIcon = $icon; InstallLocation = $prefix; EstimatedSize = $size; NoModify = 1; NoRepair = 1;
-                 UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$prefix\uninstall.ps1`"" }
-    foreach ($k in $values.Keys) {
-        $type = if ($values[$k] -is [int]) { "DWord" } else { "String" }
-        New-ItemProperty -Path $key -Name $k -Value $values[$k] -PropertyType $type -Force | Out-Null
-    }
-    $log.Invoke("Added to Windows' Apps list (with its uninstaller).")
     $log.Invoke("Installed.")
     return $pyw
 }
 
 function Run($exe, $argv, $log, $title) {
     $log.Invoke($title + "...")
-    $out = Join-Path $env:TEMP "eu4unitgen_install_step.log"
+    $out = Join-Path $env:TEMP "install_step.log"
     $p = Start-Process -FilePath $exe -ArgumentList ($argv | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) `
         -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError "$out.err"
     $null = $p.Handle  # without this, PowerShell loses the exit code
@@ -96,15 +134,25 @@ function Run($exe, $argv, $log, $title) {
     }
     $p.WaitForExit()
     if (Test-Path $out) { $lines = @(Get-Content $out); for ($i = $seen; $i -lt $lines.Count; $i++) { $log.Invoke("   " + $lines[$i]) } }
-    if ($p.ExitCode -ne 0) {
-        $err = if (Test-Path "$out.err") { (Get-Content "$out.err" | Select-Object -Last 5) -join " " } else { "" }
-        throw "$title failed (exit $($p.ExitCode)). $err"
-    }
+    $err = if (Test-Path "$out.err") { (Get-Content "$out.err" | Select-Object -Last 5) -join " " } else { "" }
+    Remove-Item $out, "$out.err" -ErrorAction SilentlyContinue
+    if ($p.ExitCode -ne 0) { throw "$title failed (exit $($p.ExitCode)). $err" }
 }
 
 if ($Quiet) {
-    $pyw = Install-App $Prefix (-not $NoSystem) (-not $NoSystem) { param($m) Write-Host $m }
-    if (-not $NoLaunch) { Start-Process $pyw -ArgumentList "-m", "eu4unitgen.gui" -WorkingDirectory $Prefix }
+    $bad = Check-Root $Root
+    if ($bad) { Write-Host $bad; exit 1 }
+    $logDir = Join-Path $Root "settings\logs"
+    New-Item -ItemType Directory -Force $logDir | Out-Null
+    $script:LogFile = Join-Path $logDir "install.log"
+    $log = { param($m) Write-Host $m; Add-Content -LiteralPath $script:LogFile -Value $m }
+    try {
+        $pyw = Install-App $Root (-not $NoDesktop) (-not $NoStartMenu) (-not $NoSystem) $log
+    } catch {
+        $log.Invoke("The installation stopped: " + $_.Exception.Message)
+        exit 1
+    }
+    if (-not $NoLaunch) { Start-Process $pyw -ArgumentList "-m", "eu4unitgen.gui" -WorkingDirectory $Root }
     exit 0
 }
 
@@ -118,8 +166,7 @@ $Form.StartPosition = "CenterScreen"
 $Form.FormBorderStyle = "FixedDialog"
 $Form.MaximizeBox = $false
 if (Test-Path "$Here\eu4unitgen.ico") { $Form.Icon = New-Object System.Drawing.Icon("$Here\eu4unitgen.ico") }
-$font = New-Object System.Drawing.Font("Segoe UI", 10)
-$Form.Font = $font
+$Form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 
 $pages = @()
 function New-Page { $p = New-Object System.Windows.Forms.Panel; $p.Location = '20,20'; $p.Size = '590,340'; $Form.Controls.Add($p); $p.Visible = $false; $script:pages += $p; return $p }
@@ -131,30 +178,33 @@ function Add-Label($page, $text, $y, $h = 24, $bold = $false) {
 
 # 1. welcome and licence
 $p1 = New-Page
-if (Test-Path "$Here\eu4unitgen.ico") {
-    $pic = New-Object System.Windows.Forms.PictureBox; $pic.Image = (New-Object System.Drawing.Icon("$Here\eu4unitgen.ico", 64, 64)).ToBitmap()
-    $pic.Location = '0,0'; $pic.Size = '64,64'; $p1.Controls.Add($pic)
+if (Test-Path "$Here\icon.png") {  # the PNG: the .ico's sizes are PNG-compressed, which Icon.ToBitmap can't draw
+    $pic = New-Object System.Windows.Forms.PictureBox; $pic.Image = [System.Drawing.Image]::FromFile("$Here\icon.png")
+    $pic.SizeMode = "Zoom"; $pic.Location = '0,0'; $pic.Size = '64,64'; $p1.Controls.Add($pic)
 }
 $t = Add-Label $p1 "Welcome to $AppName" 8 32 $true; $t.Location = '80,14'; $t.Size = '500,32'
-Add-Label $p1 "Makes Europa Universalis IV units from your own images. This installs the app; the first time it starts, its setup wizard walks you through the AI side (WSL, TRELLIS.2, the weights) and Blender." 80 60 | Out-Null
+Add-Label $p1 "Makes Europa Universalis IV units from your own images. This installs the app; the first time it starts, its setup wizard adds Blender, WSL with TRELLIS.2 and the AI weights, all in the same folder." 80 60 | Out-Null
 Add-Label $p1 "The app is free software under the GNU General Public License v3:" 150 | Out-Null
 $lic = New-Object System.Windows.Forms.TextBox; $lic.Multiline = $true; $lic.ReadOnly = $true; $lic.ScrollBars = "Vertical"
 $lic.Location = '0,176'; $lic.Size = '590,160'; $lic.Font = New-Object System.Drawing.Font("Consolas", 8)
-$lic.Text = if (Test-Path "$Here\LICENSE.txt") { (Get-Content "$Here\LICENSE.txt" -Raw) -replace "`r?`n", "`r`n" } else { "GPL-3.0" }
+$licFile = @("$Here\LICENSE.txt", "$Here\..\LICENSE.txt") | Where-Object { Test-Path $_ } | Select-Object -First 1
+$lic.Text = if ($licFile) { (Get-Content $licFile -Raw) -replace "`r?`n", "`r`n" } else { "GPL-3.0" }
 $p1.Controls.Add($lic)
 
 # 2. where and shortcuts
 $p2 = New-Page
 Add-Label $p2 "Where to install" 0 32 $true | Out-Null
-Add-Label $p2 "The app's own files (about 700 MB with its Python and libraries):" 44 | Out-Null
-$loc = New-Object System.Windows.Forms.TextBox; $loc.Text = $Prefix; $loc.Location = '0,72'; $loc.Size = '480,26'; $p2.Controls.Add($loc)
-$browse = New-Object System.Windows.Forms.Button; $browse.Text = "Browse..."; $browse.Location = '490,70'; $browse.Size = '100,30'; $p2.Controls.Add($browse)
+Add-Label $p2 "Everything goes in this one folder: the app, Blender, the AI parts and Linux (about 60 GB in all), your work and the settings." 40 44 | Out-Null
+$loc = New-Object System.Windows.Forms.TextBox; $loc.Text = $Root; $loc.Location = '0,90'; $loc.Size = '480,26'; $p2.Controls.Add($loc)
+$browse = New-Object System.Windows.Forms.Button; $browse.Text = "Browse..."; $browse.Location = '490,88'; $browse.Size = '100,30'; $p2.Controls.Add($browse)
+$free = Add-Label $p2 "" 124
+function Show-Free { try { $drv = Get-PSDrive ([IO.Path]::GetPathRoot($loc.Text).Substring(0, 1)); $free.Text = "Free on that drive: {0:N0} GB" -f ($drv.Free / 1GB) } catch { $free.Text = "" } }
+$loc.Add_TextChanged({ Show-Free }); Show-Free
 $browse.Add_Click({ $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.SelectedPath = $loc.Text
-    if ($d.ShowDialog() -eq "OK") { $loc.Text = Join-Path $d.SelectedPath "eu4unitgen" } })
-$docs = [Environment]::GetFolderPath("MyDocuments")
-Add-Label $p2 "Your work goes in $docs\eu4unitgen (references, projects, result sheets, exported mods); settings and logs in $env:APPDATA\eu4unitgen. You choose where the AI parts go (about 60 GB) in the app's setup wizard." 116 70 | Out-Null
-$cbStart = New-Object System.Windows.Forms.CheckBox; $cbStart.Text = "Start-menu shortcut"; $cbStart.Checked = $true; $cbStart.Location = '0,200'; $cbStart.Size = '300,26'; $p2.Controls.Add($cbStart)
-$cbDesk = New-Object System.Windows.Forms.CheckBox; $cbDesk.Text = "Desktop shortcut"; $cbDesk.Checked = $true; $cbDesk.Location = '0,230'; $cbDesk.Size = '300,26'; $p2.Controls.Add($cbDesk)
+    if ($d.ShowDialog() -eq "OK") { $loc.Text = Join-Path $d.SelectedPath $AppName } })
+Add-Label $p2 "Inside it: app, tools, ai, wsl, work (your references, projects, result sheets, exported mods) and settings. Nothing else is put on your PC except the shortcuts below and the entry in Windows' Apps list." 156 64 | Out-Null
+$cbStart = New-Object System.Windows.Forms.CheckBox; $cbStart.Text = "Start-menu shortcut"; $cbStart.Checked = $true; $cbStart.Location = '0,236'; $cbStart.Size = '300,26'; $p2.Controls.Add($cbStart)
+$cbDesk = New-Object System.Windows.Forms.CheckBox; $cbDesk.Text = "Desktop shortcut"; $cbDesk.Checked = $true; $cbDesk.Location = '0,266'; $cbDesk.Size = '300,26'; $p2.Controls.Add($cbDesk)
 
 # 3. progress
 $p3 = New-Page
@@ -189,11 +239,13 @@ $back.Add_Click({ Show-Page ($script:page - 1) })
 $next.Add_Click({
     if ($script:page -eq 0) { Show-Page 1; return }
     if ($script:page -eq 1) {
+        $bad = Check-Root $loc.Text
+        if ($bad) { [System.Windows.Forms.MessageBox]::Show($bad, $AppName, "OK", "Warning") | Out-Null; return }
         Show-Page 2
         $log = { param($m) $box.AppendText($m + "`r`n"); [System.Windows.Forms.Application]::DoEvents() }
         try {
-            $script:pyw = Install-App $loc.Text $cbDesk.Checked $cbStart.Checked $log
-            $doneText.Text = "$AppName is installed in $($loc.Text).`r`n`r`nTo remove it later: Windows Settings > Apps > $AppName > Uninstall. Your work and the AI parts are only deleted if you say so then."
+            $script:pyw = Install-App $loc.Text $cbDesk.Checked $cbStart.Checked $true $log
+            $doneText.Text = "$AppName is installed in $($loc.Text).`r`n`r`nTo remove it later: Windows Settings > Apps > $AppName > Uninstall. It asks before deleting your work."
             $bar.Style = "Continuous"; $bar.Value = 100
             Show-Page 3
         } catch {
@@ -210,4 +262,5 @@ $next.Add_Click({
     }
 })
 Show-Page 0
+$Form.Add_Shown({ $lic.SelectionLength = 0; $next.Focus() })
 [void]$Form.ShowDialog()

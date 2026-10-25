@@ -19,3 +19,5 @@ assets_in/
 
 # a checkout pointing at the installed app's root (core.layout)
 .eu4unitgen-root
+# build tools (Inno Setup, portable)
+.tools/
