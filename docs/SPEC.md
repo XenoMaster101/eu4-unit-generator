@@ -3089,12 +3089,48 @@ The user's brief after test 35: turn every lesson into a built-in rule, give it 
   - The check doesn't measure emblem crispness yet: a next step.
 - **Package rebuilt** with every fix: `dist/eu4unitgen-0.1.0-windows.zip`.
 
+#### Track P4b: the packaging upgrade (2026-10-25)
+- **Why no single setup.exe (yet):** Smart App Control is on and enforcing on the author's PC (`VerifiedAndReputablePolicyState=1`); it refuses any unsigned `.exe`, which is what PyInstaller and Inno Setup produce. The user's decision: polish the PowerShell installer now; keep the `.exe` build scripts ready for a signed build later.
+- **Signing options (for a later signed `.exe`):**
+  - **Azure Trusted Signing** (Microsoft's signing service, about $10 a month): the cheapest path. It needs an identity check, and individuals must have a few years of verifiable history.
+  - **A classic OV code-signing certificate** (about $200-400 a year, hardware token or cloud HSM since 2023): works anywhere, and builds reputation with SmartScreen over time.
+  - **EV certificates** no longer skip SmartScreen's reputation check (Microsoft changed this in 2024), so they aren't worth the extra cost here.
+  - With either: sign `eu4unitgen.exe` and `eu4unitgen-setup.exe` (signtool, SHA-256, timestamped).
+- **The `.exe` scripts (not run; PyInstaller and Inno Setup aren't installed):** `packaging/windows/exe/eu4unitgen.spec` (a one-folder build, no console, the icon, the job scripts collected as files) and `eu4unitgen.iss` (per-user install, Start menu and optional Desktop, licence page, an uninstaller that asks about your work). TODO before use: `core/setup.app_python()` makes the AI venv from `sys.executable`, which in a frozen build is the `.exe`; ship the NuGet Python beside it.
+- **The installer today** (`Install.cmd` -> `install.ps1`, a WinForms wizard; nothing typed):
+  - pages: welcome and the GPL-3.0 text, location (default `%LOCALAPPDATA%\Programs\eu4unitgen`, no admin rights) with Start-menu and Desktop shortcut boxes, progress with live output, finish (start the app).
+  - **No Python needed:** python.org's NuGet build of Python 3.12.10 is in the package (14.5 MB). It is unpacked into `<app>\python`; its `python.exe` must be validly signed by the PSF (checked when the package is built and again at install), which Smart App Control accepts. pip then installs the app's wheel and PySide6, Pillow and Jinja2 (about 260 MB download, 693 MB on disk).
+  - shortcuts start `pythonw.exe -m eu4unitgen.gui` with the app's icon. An entry in Windows' Apps list (this user's: HKCU) carries the name, version, icon, size and the uninstaller.
+  - **The uninstaller** (Settings > Apps > Uninstall, or Uninstall.cmd) removes the app, its shortcuts and its Apps entry. It asks, each unticked by default, before deleting your work (with its size), the AI folder (with its size), the TRELLIS.2 environment in WSL, and the settings and logs.
+- **The icon** (`packaging/icon/make_icon.py`): a gold helmet with a red horsehair crest on a crimson tile, 16-256 px. Used for the window, the taskbar (its own AppUserModelID), the shortcuts and the Apps list.
+- **The file layout:**
+
+  | What | Where (installed app) | A source checkout |
+  |---|---|---|
+  | the app | `%LOCALAPPDATA%\Programs\eu4unitgen` (`python\`, the icon, the uninstaller) | the repo |
+  | your work | `Documents\eu4unitgen\` with `references\` (each image copied in), `projects\`, `result sheets\`, `exported mods\` | `assets_in/`, `build/` |
+  | settings and logs | `%APPDATA%\eu4unitgen\settings.json`, `logs\` | the same |
+  | AI environment and weights | the folder chosen in the setup wizard (default `eu4unitgen_ai` on the drive with most free space) | `D:\eu4unitgen_ai` |
+- **The first-launch setup wizard** (`gui/setup_wizard.py`; the steps and their commands in `core/setup.py`). It opens by itself while EU4, Blender or the AI environment is missing, and from Setup's "Open the setup wizard". Eight steps, each with a ✔/○ state, a button, a progress bar and live output:
+  1. Blender 4.2 LTS: found, or the official 4.2.23 MSI downloaded in the app and installed through Windows' permission prompt.
+  2. io_pdx_mesh 0.91: downloaded and installed with Blender's own `extension install-file`.
+  3. The AI folder: a folder chooser; free space shown per drive.
+  4. WSL: `wsl --install --no-distribution` through the permission prompt; then a restart.
+  5. Ubuntu 26.04: `--no-launch`, then started as its root user, so there is **no Linux user or password to make** (the old flow asked for one). `.wslconfig` (20 GB) is written if missing.
+  6. TRELLIS.2: the code at commit 75fbf01, the build tools and CUDA 12.9 (as WSL's root), then `trellis2_setup.sh` (~40 min).
+  7. The Windows AI environment: a venv from the app's own Python, PyTorch cu126 and the cut-out/SAM 2 libraries.
+  8. The weights: BiRefNet (the exact URL rembg's own code uses), then TRELLIS.2, its decoder, DINOv3 and SAM 2.1. DINOv3 is gated: buttons open its licence page and Hugging Face's token page; the token is pasted, used for that download only and never stored.
+- **Two TRELLIS.2 candidates per subject** (seeds 42 and 43 in one model load), scored by outline from 12 sides; the better is built and the other can be picked with the "3D model" edit. Horse 2, 2026-10-25: 42 → 0.826, 43 → 0.766; 42 built; the whole run took about 15 minutes. **Limit:** the score is outline only, rendered untextured. Seed 42 alone gave the same outline (0.824) and a near-identical texture (median ΔE to the reference 12.6 vs 11.6), but its mane was a shade darker and closer to the reference's near-black. A colour term in the score is a next step.
+- **Tests:** `test_setup_plans_need_no_terminal` (every step has commands or a download, no `-NoExit`, no `sudo`, Ubuntu set up as root, admin steps marked, BiRefNet's URL, the pinned TRELLIS.2 commit).
+- **Fresh-user test:** the package installed quietly into a new folder (`install.ps1 -Quiet -NoSystem`, which skips the shortcuts and the Apps entry on the author's PC): Python unpacked and its signature checked, pip, the app, the libraries and the start check all passed, in 30 s with pip's cache. **Not yet:** the wizard window, the shortcuts, the Apps entry and the uninstaller on a clean Windows. They wait for Windows Sandbox, which is enabled but needs a restart. The Sandbox has no GPU and no WSL, so the AI steps can't be tested there.
+
 ### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
 
 | Tool, model or library | For | Where | Size | Licence | Status | Safe to remove |
 |---|---|---|---|---|---|---|
 | Python 3.14 (python.org) | runs the app from the source checkout (the installed app brings its own Python) | `C:\Python314` | 174 MB | PSF | required | no |
-| PySide6 6.12, Pillow, Jinja2 | the app's window, images and DDS, script templates | `<app>\venv (dev: .venv)` | 717 MB | LGPL-3.0 / MIT-CMU / BSD-3 | required | no |
+| Python 3.12.10 (python.org NuGet build, signed) | the installed app's own Python; also makes the Windows AI environment (installed by install.ps1) | `<app>\python` | 41 MB | PSF | required | no |
+| PySide6 6.12, Pillow, Jinja2 | the app's window, images and DDS, script templates | `<app>\python\Lib\site-packages (dev: .venv)` | 717 MB | LGPL-3.0 / MIT-CMU / BSD-3 | required | no |
 | Blender 4.2 LTS | every mesh job, run as a separate program | `C:\Program Files\Blender Foundation\Blender 4.2` | 973 MB | GPL-2.0-or-later | required | no |
 | io_pdx_mesh 0.91 (Blender extension) | reads and writes EU4 .mesh files | `%APPDATA%\Blender Foundation\Blender\4.2\extensions\user_default\io_pdx_mesh` | 2 MB | GPL-3.0-or-later | required | no |
 | WSL2 + Ubuntu 26.04 | where TRELLIS.2 runs (the 38 GB disk holds the three items below; it doesn't shrink by itself when files inside are deleted) | `%LOCALAPPDATA%\wsl\...\ext4.vhdx` | 38.0 GB | Microsoft / open source | required | no |

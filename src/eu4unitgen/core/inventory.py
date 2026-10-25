@@ -28,7 +28,10 @@ ITEMS = (
     # ---------------------------------------------------------------- the app itself
     Item("Python 3.14 (python.org)", "runs the app from the source checkout", r"C:\Python314", 0.17, "PSF", "required",
          note="the installed app brings its own Python"),
-    Item("PySide6 6.12, Pillow, Jinja2", "the app's window, images and DDS, script templates", r"<app>\venv (dev: .venv)",
+    Item("Python 3.12.10 (python.org NuGet build, signed)", "the installed app's own Python; also makes the Windows AI "
+         "environment", r"<app>\python", 0.04, "PSF", "required", note="installed by install.ps1"),
+    Item("PySide6 6.12, Pillow, Jinja2", "the app's window, images and DDS, script templates",
+         r"<app>\python\Lib\site-packages (dev: .venv)",
          0.70, "LGPL-3.0 / MIT-CMU / BSD-3", "required"),
     Item("Blender 4.2 LTS", "every mesh job, run as a separate program", r"C:\Program Files\Blender Foundation\Blender 4.2",
          0.95, "GPL-2.0-or-later", "required"),
