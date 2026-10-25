@@ -9,6 +9,7 @@
   brightness    a factor on every diffuse texture (1 = as built)            finish
   shield_side   "auto", "left", "right" (a rider: the weapon to the other hand, mirrored)
                                                                             build
+  candidate     1 or 2: which of the two TRELLIS.2 models to build (None: the better-scored)  build
   hem           1 = as built; under 1 shortens the cloth's hang below the body (a horse's caparison skirt, a rider's
                 skirt and cloak)                                            finish
 
@@ -25,8 +26,8 @@ from pathlib import Path
 from PIL import Image
 
 DEFAULTS = {"plume": True, "tassels": True, "emblem": None, "country_mask": None, "cloth_colour": None,
-            "brightness": 1.0, "shield_side": "auto", "hem": 1.0}
-BUILD = ("tassels", "emblem", "country_mask", "shield_side")
+            "brightness": 1.0, "shield_side": "auto", "hem": 1.0, "candidate": None}
+BUILD = ("tassels", "emblem", "country_mask", "shield_side", "candidate")
 FINISH = ("plume", "cloth_colour", "brightness", "hem")
 
 

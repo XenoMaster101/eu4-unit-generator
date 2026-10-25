@@ -123,6 +123,47 @@ def generate(rgba: Path, glb: Path, ai_root: Path, wsl: dict | None = None) -> d
     return json.loads(result.read_text(encoding="utf-8"))
 
 
+SEEDS = (42, 43)  # two TRELLIS.2 candidates per subject (the user's decision); the better outline is built
+
+
+def generate_candidates(rgba: Path, out_dir: Path, ai_root: Path, seeds=SEEDS) -> list[dict]:
+    """TRELLIS.2 on one image with several seeds in one model load -> [{"seed", "glb", ...}] (``raw_s<seed>.glb``)."""
+    from eu4unitgen.core import config
+    cfg = config.load()
+    w = {**WSL, "python": cfg.wsl_python or WSL["python"]}
+    job = Path(__file__).resolve().parents[1] / "ai" / "jobs" / "trellis2_generate.py"
+    out_dir = Path(out_dir).resolve()
+    result = out_dir / "candidates.result.json"
+    items = [{"image": wsl_path(Path(rgba).resolve()), "output": wsl_path(out_dir / f"raw_s{s}.glb"), "seed": s} for s in seeds]
+    args = {"batch": items, "result_path": wsl_path(result), "repo": wsl_path(ai_root / w["repo"]),
+            "weights": wsl_path(ai_root / w["weights"]), "ss_decoder": wsl_path(ai_root / w["ss_decoder"]),
+            "dinov3": wsl_path(ai_root / w["dinov3"]), "pipeline_type": w["pipeline_type"]}
+    args_path = out_dir / "candidates.args.json"
+    args_path.write_text(json.dumps(args, indent=1), encoding="utf-8")
+    log = out_dir / "candidates.log"
+    cmd = f"cd /tmp && {w['python']} {wsl_path(job)} {wsl_path(args_path)} > {wsl_path(log)} 2>&1"
+    rc = subprocess.run(cfg.wsl_base() + ["-e", "bash", "-lc", cmd]).returncode
+    if rc != 0 or not result.is_file():
+        raise SystemExit(f"TRELLIS.2 failed (exit {rc}); see {log}")
+    r = json.loads(result.read_text(encoding="utf-8"))
+    return [{"seed": s, "glb": str(out_dir / f"raw_s{s}.glb"), **{k: it.get(k) for k in ("seconds", "faces", "peak_vram_gb")}}
+            for s, it in zip(seeds, r["items"])]
+
+
+def score_candidate(br, glb: Path, reference_fg: Path, out: Path, views: int = 12) -> dict:
+    """How well a raw model's outline matches the reference: rendered every 360/``views`` degrees round the
+    vertical (TRELLIS.2 picks its own facing), the best overlap with the reference's mask (mirror-free: quality's
+    silhouette_iou also tries the mirror). -> {"iou", "azimuth"}."""
+    from PIL import Image
+
+    from eu4unitgen.ref3d.quality import silhouette_iou
+    r = br.run_job("render_model", {"model": str(Path(glb).resolve()), "out_dir": str(Path(out).resolve()), "name": "cand",
+                                    "size": 320, "views": {f"a{a}": [a, 0] for a in range(0, 360, 360 // views)}}).result
+    fg = Image.open(reference_fg)
+    best = max(((silhouette_iou(Image.open(p), fg), v) for v, p in r["images"].items()), key=lambda t: t[0])
+    return {"iou": best[0], "azimuth": int(best[1][1:])}
+
+
 def glb_basecolor(glb: Path, out: Path) -> Path:
     """The base-colour image of a .glb's first material (TRELLIS.2 writes one), as a png."""
     from PIL import Image

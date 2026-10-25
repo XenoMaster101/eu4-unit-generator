@@ -27,12 +27,12 @@ import traceback
 from pathlib import Path
 
 STAGES = ("cutout", "trellis", "build", "finish", "preview")
-LABELS = {"cutout": "Cut the subject out of the image", "trellis": "Make the 3D model (TRELLIS.2)",
+LABELS = {"cutout": "Cut the subject out of the image", "trellis": "Make two 3D models (TRELLIS.2) and pick the better",
           "build": "Build the game model (shape, parts, textures, checks)", "finish": "Apply your edits",
           "preview": "Stage it and draw the result sheet"}
 GPU = {"trellis", "build"}
 # horse 2's and the cataphract rider's runs (2026-10-23/24) until this machine has its own
-DEFAULT_SECONDS = {"cutout": 45, "trellis": 620, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150}
+DEFAULT_SECONDS = {"cutout": 45, "trellis": 820, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150}
 KINDS = ("horse", "rider")  # the foot soldier is on the roadmap (SPEC Track P)
 EU4_POLL = 20.0
 
@@ -146,13 +146,36 @@ def stage_cutout(folder: Path, req: dict, cfg) -> dict:
 
 
 def stage_trellis(folder: Path, req: dict, cfg) -> dict:
+    """Two TRELLIS.2 candidates (seeds 42 and 43, one model load), each scored by its outline against the reference;
+    the better one becomes ``raw.glb`` (an edit can pick the other: ``candidate``)."""
+    from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.ref3d import trellis
-    glb = folder / "trellis" / "raw.glb"
-    if glb.is_file():
+    tr = folder / "trellis"
+    cj = tr / "candidates.json"
+    if (tr / "raw.glb").is_file() and cj.is_file():
         return {"kept": True}
-    r = trellis.generate((folder / "trellis" / "input" / "input_rgba.png").resolve(), glb.resolve(), cfg.ai_root_path())
+    cands = trellis.generate_candidates((tr / "input" / "input_rgba.png").resolve(), tr, cfg.ai_root_path())
+    br = BlenderRunner(cfg.blender(), log_dir=tr / "logs", timeout=1200)
+    for c in cands:
+        c.update(trellis.score_candidate(br, Path(c["glb"]), tr / "input" / "input_fg.png", tr / f"cand_s{c['seed']}"))
+    best = max(range(len(cands)), key=lambda i: cands[i]["iou"])
+    cj.write_text(json.dumps({"candidates": cands, "best": best}, indent=1), encoding="utf-8")
+    use_candidate(folder, best)
     # TRELLIS.2's own timings under their own name: the stage's "seconds" is its wall time
-    return {"trellis_seconds": r.get("seconds"), **{k: r.get(k) for k in ("faces", "peak_vram_gb", "pipeline_type")}}
+    return {"candidates": [{"seed": c["seed"], "iou": c["iou"]} for c in cands], "chosen": best + 1}
+
+
+def candidates(folder: Path) -> dict | None:
+    p = Path(folder) / "trellis" / "candidates.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+
+
+def use_candidate(folder: Path, index: int) -> None:
+    """Candidate ``index`` (0-based) copied to ``raw.glb``, the model every later stage builds from."""
+    c = candidates(folder)
+    if c is None:
+        return
+    shutil.copyfile(c["candidates"][index]["glb"], Path(folder) / "trellis" / "raw.glb")
 
 
 def horse_textures(name: str | None) -> dict | None:
@@ -171,6 +194,10 @@ def horse_textures(name: str | None) -> dict | None:
 def stage_build(folder: Path, req: dict, cfg) -> dict:
     from eu4unitgen.ref3d import edits as ed
     from eu4unitgen.ref3d import trellis
+    c = candidates(folder)
+    if c is not None:  # the candidate asked for (an edit), else the better-scored one
+        pick = (req.get("edits") or {}).get("candidate")
+        use_candidate(folder, (int(pick) - 1) if pick else c["best"])
     opts = ed.build_options(req.get("edits"), req["kind"])
     glb = folder / "trellis" / "raw.glb"
     if req["kind"] == "horse":

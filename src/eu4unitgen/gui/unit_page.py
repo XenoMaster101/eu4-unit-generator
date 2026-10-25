@@ -258,7 +258,11 @@ class UnitPage(Page):
         self.e_hem.setValue(100)
         self.e_hem.setToolTip("How far the cloth hangs below the body: 50-100% of what was built. Subtle on a caparison "
                               "that is one shape with the legs: only the cloth's own lower edge rises")
-        rows = [(self.e_plume, self.e_tassels), (QLabel("Emblem"), self.e_emblem), (self.e_mask, self.e_colour),
+        self.e_cand = QComboBox()
+        self.e_cand.setToolTip("TRELLIS.2 makes two models from your image; the one whose outline matches the reference "
+                               "better is built. Pick the other here to compare.")
+        rows = [(QLabel("3D model"), self.e_cand), (self.e_plume, self.e_tassels), (QLabel("Emblem"), self.e_emblem),
+                (self.e_mask, self.e_colour),
                 (QLabel("Brightness"), self.e_bright), (QLabel("Shield side"), self.e_side), (QLabel("Hem length"), self.e_hem)]
         for r, (a, b) in enumerate(rows):
             g.addWidget(a, r, 0)
@@ -437,7 +441,8 @@ QListWidget {{ background: {t['surface']}; color: {t['text']}; border: 1px solid
     def current_edits(self) -> dict:
         e = {"plume": self.e_plume.isChecked(), "tassels": self.e_tassels.isChecked(),
              "country_mask": self.e_mask.isChecked(), "brightness": self.e_bright.value() / 100.0,
-             "shield_side": self.e_side.currentData(), "hem": self.e_hem.value() / 100.0, "cloth_colour": self.cloth}
+             "shield_side": self.e_side.currentData(), "hem": self.e_hem.value() / 100.0, "cloth_colour": self.cloth,
+             "candidate": self.e_cand.currentData()}
         em = self.e_emblem.currentData()
         e["emblem"] = self.emblem_upload if em == "__upload__" else em
         return e
@@ -566,6 +571,19 @@ QListWidget {{ background: {t['surface']}; color: {t['text']}; border: 1px solid
         self.e_side.setEnabled(req["kind"] == "rider")
         self.e_tassels.setVisible(req["kind"] == "horse")
         e = req.get("edits") or {}
+        from eu4unitgen.ref3d import flow as _flow
+        cands = _flow.candidates(Path(folder))
+        self.e_cand.blockSignals(True)
+        self.e_cand.clear()
+        if cands:
+            for i, c in enumerate(cands["candidates"]):
+                tag = " (best outline)" if i == cands["best"] else ""
+                self.e_cand.addItem(f"candidate {i + 1}: outline {c['iou']:.0%}{tag}", None if i == cands["best"] else i + 1)
+            pick = e.get("candidate")
+            self.e_cand.setCurrentIndex((int(pick) - 1) if pick else cands["best"])
+        else:
+            self.e_cand.addItem("one model (from before candidates)", None)
+        self.e_cand.blockSignals(False)
         self.e_plume.setChecked(e.get("plume", True))
         self.e_tassels.setChecked(e.get("tassels", True))
         self.e_mask.setChecked(bool(e.get("country_mask", (req.get("options") or {}).get("country_mask"))))

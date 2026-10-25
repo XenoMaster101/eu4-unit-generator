@@ -169,3 +169,20 @@ def test_inventory_lists_every_piece_and_what_is_safe():
     assert all(not i.safe_to_remove for i in inventory.ITEMS if i.status == "required")
     assert 20 < inventory.freed_gb() < 40
     assert "| Status |" in inventory.markdown() and "<table" in inventory.html()
+
+
+def test_candidates_pick_and_switch(tmp_path, monkeypatch):
+    monkeypatch.setenv("EU4UNITGEN_WORKSPACE", str(tmp_path))
+    img = tmp_path / "ref.png"
+    Image.new("RGB", (64, 64), (200, 200, 200)).save(img)
+    f = flow.new_request("two", img, "mine", "horse")
+    for s, body in ((42, b"model-42"), (43, b"model-43")):
+        (f / "trellis" / f"raw_s{s}.glb").write_bytes(body)
+    (f / "trellis" / "candidates.json").write_text(json.dumps({"candidates": [
+        {"seed": 42, "glb": str(f / "trellis" / "raw_s42.glb"), "iou": 0.70},
+        {"seed": 43, "glb": str(f / "trellis" / "raw_s43.glb"), "iou": 0.74}], "best": 1}))
+    flow.use_candidate(f, flow.candidates(f)["best"])
+    assert (f / "trellis" / "raw.glb").read_bytes() == b"model-43"
+    flow.use_candidate(f, 0)
+    assert (f / "trellis" / "raw.glb").read_bytes() == b"model-42"
+    assert edits.stage_for({}, {"candidate": 1}) == "build"
