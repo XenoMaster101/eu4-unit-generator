@@ -12,8 +12,8 @@ import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout,
-    QWidget,
+    QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QTextBrowser,
+    QVBoxLayout, QWidget,
 )
 
 from eu4unitgen.gui.home_page import css
@@ -45,6 +45,31 @@ def _top(page: Page, window, title: str) -> None:
     top.addWidget(h)
     top.addStretch(1)
     page.layout_.addLayout(top)
+
+
+def detect() -> dict:
+    """What a new machine's settings can be filled with by themselves (an empty setting only): the EU4 install from
+    Steam's library list, Blender 4.2, the EU4 mod folder, the AI environment the setup step made. Saved. -> what was
+    found."""
+    from eu4unitgen.core import config, install, setup
+    c = config.load()
+    found = {}
+    if not c.eu4():
+        p = install.find_eu4()
+        if p:
+            found["eu4_path"] = str(p)
+    if not c.blender_path:
+        exe, _ = install.find_blender()
+        if exe:
+            found["blender_path"] = str(exe)
+    if not c.mod_dir and c.mods().is_dir():
+        found["mod_dir"] = str(c.mods())
+    if found:
+        config.update(**found)
+    py = setup.adopt_ai_env()
+    if py:
+        found["ai_python"] = py
+    return found
 
 
 class SetupPage(Page):
@@ -81,9 +106,9 @@ class SetupPage(Page):
         # the checks
         cbox = QGroupBox("Checks")
         cl = QVBoxLayout(cbox)
-        self.checks = QLabel("Press \"Check again\".")
-        self.checks.setWordWrap(True)
-        self.checks.setTextFormat(Qt.RichText)
+        self.checks = QTextBrowser()
+        self.checks.setHtml("Press \"Check again\".")
+        self.checks.setMinimumHeight(190)
         cl.addWidget(self.checks)
         again = QPushButton("Check again")
         again.clicked.connect(self.run_checks)
@@ -127,10 +152,15 @@ QGroupBox::title {{ subcontrol-origin: margin; left: 10px; }}
     def showEvent(self, e):  # noqa: N802 - Qt name
         super().showEvent(e)
         from eu4unitgen.core import config
+        found = detect()
+        if found:
+            self.show_message("Found and saved: " + "; ".join(f"{k.replace('_', ' ')} {v}" for k, v in found.items()) + ".")
         c = config.load()
         for key, e2 in self.edits.items():
             e2.setText(str(getattr(c, key) or ""))
         self.where.setText(f"Settings file: {config.config_dir() / config.FILE}")
+        self.edits["workspace"].setPlaceholderText(str(config.default_workspace()))
+        self.edits["mod_dir"].setPlaceholderText(str(c.mods()))
         self.refresh_steps()
 
     def _browse(self, key: str, folder: bool) -> None:
@@ -153,7 +183,7 @@ QGroupBox::title {{ subcontrol-origin: margin; left: 10px; }}
             col = t["ok"] if c.ok else (t["error"] if c.blocks else t["warn"])
             rows.append(f"<span style='color:{col}'>{'✔' if c.ok else '✖'}</span> {c.what}"
                         + ("" if c.ok else f"<br>&nbsp;&nbsp;&nbsp;→ {c.fix}"))
-        self.checks.setText("<br>".join(rows))
+        self.checks.setHtml("<br>".join(rows))
         self.refresh_steps()
 
     def refresh_steps(self) -> None:
