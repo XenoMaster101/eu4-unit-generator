@@ -75,3 +75,30 @@ def test_unit_names_and_spec():
     assert sp["set"]["unit_names"]["cavalry"] == "Cataphract Rider Cavalry"
     only_rider = unitstage.spec("x", 2, None, ({"base": "b"}, []), names, test)
     assert "horses" not in only_rider["loadout"] and "slots" not in only_rider["loadout"]
+
+
+def _cube(c, h):
+    x, y, z = c
+    p = [x + dx * h for dx in (-1, 1) for _ in (0, 1) for _ in (0, 1)]
+    pts = [[x + sx * h, y + sy * h, z + sz * h] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
+    faces = [(0, 1, 3), (0, 3, 2), (4, 6, 7), (4, 7, 5), (0, 4, 5), (0, 5, 1), (2, 3, 7), (2, 7, 6), (0, 2, 6), (0, 6, 4),
+             (1, 5, 7), (1, 7, 3)]
+    del p
+    return [v for q in pts for v in q], [i for f in faces for i in f]
+
+
+def test_inside_count_on_a_closed_box():
+    p, tri = _cube((0, 0, 0), 1.0)
+    pts = [[0, 0, 0], [0.5, 0.3, -0.2], [2, 0, 0], [0, 3, 0], [-0.99, 0.99, 0.5]]
+    assert quality.inside_count(pts, p, tri) == 3
+
+
+def test_legs_clear_and_verdict(tmp_path):
+    hp, ht = _cube((0, 10, 0), 2.0)  # the horse's barrel: y 8-12, the saddle's top at 12
+    legs_in = [[0.5, 11.0, 0.0], [1.5, 10.0, 0.5], [3.0, 10.0, 0.0], [-3.0, 9.0, 0.0]]
+    d = {"cavalry_horse": {"p": hp, "tri": ht}, "x_rider": {"p": [v for q in legs_in for v in q], "tri": [0, 1, 2]}}
+    (tmp_path / "posed.json").write_text(json.dumps(d))
+    r = quality.legs_clear(tmp_path / "posed.json")
+    assert r["inside"] == 2 and r["points"] == 4 and r["share"] == 0.5
+    assert quality.clearance(r, {"share": 0.05})["verdict"] == "check"
+    assert quality.clearance({"share": 0.06, "inside": 3, "points": 50}, {"share": 0.05})["verdict"] == "good"

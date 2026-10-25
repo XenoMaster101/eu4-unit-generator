@@ -182,7 +182,8 @@ def map_zoom(ours: Path | None, vanilla: Path | None) -> dict:
 
 
 def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path | None,
-           map_ours: Path | None = None, map_vanilla: Path | None = None, raw_view: Path | None = None) -> dict:
+           map_ours: Path | None = None, map_vanilla: Path | None = None, raw_view: Path | None = None,
+           legs: dict | None = None) -> dict:
     """The five measures (module doc). ``game_view``: the game version rendered from the reference's view
     (compare/game_side.png for a horse, compare/game_front.png for a rider); ``raw_view``: TRELLIS.2's own model
     from the same camera. The outline's verdict is relative to the raw model's own overlap (the approved horses'
@@ -205,6 +206,8 @@ def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path
     m["parts"] = parts_summary(manifest, kind)
     m["texture"] = texture(manifest, kind)
     m["map_zoom"] = map_zoom(map_ours, map_vanilla)
+    if kind == "rider" or legs:
+        m["seating"] = clearance((legs or {}).get("ours"), (legs or {}).get("vanilla"))
     order = {GOOD: 0, OK: 1, CHECK: 2}
     worst = max((x["verdict"] for x in m.values()), key=lambda v: order[v])
     summary = {GOOD: "Looks good.", OK: "Usable; see the notes.", CHECK: "Check the flagged items before using it."}[worst]
@@ -212,7 +215,7 @@ def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path
 
 
 TITLES = {"silhouette": "Outline vs the reference", "deformation": "Deformation vs vanilla", "parts": "Parts",
-          "texture": "Texture", "map_zoom": "At map zoom"}
+          "texture": "Texture", "map_zoom": "At map zoom", "seating": "Seated on the horse"}
 
 
 def markdown(rep: dict) -> str:
@@ -229,3 +232,68 @@ def save(rep: dict, folder: Path) -> Path:
     p.write_text(json.dumps(rep, indent=1), encoding="utf-8")
     (Path(folder) / "quality.md").write_text(markdown(rep), encoding="utf-8")
     return p
+
+
+# ------------------------------------------------------------------ the rider's legs clear of the horse
+def inside_count(points: list, tris_p: list, tri: list, cell: float = 0.5) -> int:
+    """How many ``points`` lie inside the closed mesh (``tris_p`` flat xyz, ``tri`` indices): rays along +x, the
+    crossings counted (odd: inside); triangles bucketed by their (y, z) box so each ray meets few of them."""
+    P = [tris_p[i:i + 3] for i in range(0, len(tris_p), 3)]
+    buckets: dict = {}
+    faces = []
+    for t in range(0, len(tri), 3):
+        a, b, c = P[tri[t]], P[tri[t + 1]], P[tri[t + 2]]
+        faces.append((a, b, c))
+        y0, y1 = min(a[1], b[1], c[1]), max(a[1], b[1], c[1])
+        z0, z1 = min(a[2], b[2], c[2]), max(a[2], b[2], c[2])
+        for iy in range(int(y0 // cell), int(y1 // cell) + 1):
+            for iz in range(int(z0 // cell), int(z1 // cell) + 1):
+                buckets.setdefault((iy, iz), []).append(len(faces) - 1)
+    n = 0
+    for x, y, z in points:
+        y, z = y + 1.2345e-6, z + 2.3456e-6  # off any shared edge (a ray along one would cross twice)
+        crossings = 0
+        for fi in buckets.get((int(y // cell), int(z // cell)), ()):
+            a, b, c = faces[fi]
+            # where the line (y, z) meets the triangle's projection onto the y-z plane (barycentric)
+            d = (b[1] - a[1]) * (c[2] - a[2]) - (c[1] - a[1]) * (b[2] - a[2])
+            if abs(d) < 1e-12:
+                continue
+            u = ((y - a[1]) * (c[2] - a[2]) - (c[1] - a[1]) * (z - a[2])) / d
+            v = ((b[1] - a[1]) * (z - a[2]) - (y - a[1]) * (b[2] - a[2])) / d
+            if u < 0 or v < 0 or u + v > 1:
+                continue
+            xs = a[0] + u * (b[0] - a[0]) + v * (c[0] - a[0])
+            if xs > x:
+                crossings += 1
+        n += crossings % 2
+    return n
+
+
+def legs_clear(posed: Path, below: float = 1.5) -> dict | None:
+    """A unit's rider against its horse in the posed meshes (``Session.gallery(dump_dir=)``): the rider's points
+    lower than ``below`` over the saddle's top that are inside the horse. -> {"inside", "points", "share"} or None
+    when the dump has no rider."""
+    d = json.loads(Path(posed).read_text(encoding="utf-8"))
+    horse = next((v for k, v in d.items() if "rider" not in k.lower()), None)
+    rider = next((v for k, v in d.items() if "rider" in k.lower()), None)
+    if horse is None or rider is None:
+        return None
+    hp = horse["p"]
+    rp = [rider["p"][i:i + 3] for i in range(0, len(rider["p"]), 3)]
+    near = [hp[i + 1] for i in range(0, len(hp), 3) if abs(hp[i]) < 0.6 and abs(hp[i + 2]) < 1.0]
+    seat = max(near) if near else max(hp[1::3])
+    legs = [q for q in rp if q[1] < seat + below]
+    n = inside_count(legs, hp, horse["tri"])
+    return {"inside": n, "points": len(legs), "share": round(n / max(len(legs), 1), 3), "seat": round(seat, 2)}
+
+
+def clearance(ours: dict | None, vanilla: dict | None) -> dict:
+    """The verdict for ``legs_clear`` against vanilla's rider on vanilla's horse."""
+    if not ours:
+        return {"verdict": OK, "text": "Not measured (no rider)."}
+    vs = (vanilla or {}).get("share", 0.0)
+    v = GOOD if ours["share"] <= vs + 0.03 else OK if ours["share"] <= vs + 0.1 else CHECK
+    text = (f"Seated, {ours['share']:.0%} of the rider's lower body is inside the horse (vanilla's rider: {vs:.0%})"
+            + ("." if v != CHECK else ": the legs cut into the horse's barrel."))
+    return {"verdict": v, "text": text, "ours": ours, "vanilla": vanilla}

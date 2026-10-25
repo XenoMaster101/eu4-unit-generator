@@ -181,9 +181,6 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     return manifest
 
 
-# the plume's replacement (the user, test 29): a crest part's short arc, a tuft upright on the helmet's top
-PLUME = {"height": 1.3, "radius": 0.6, "span_deg": 12.0, "thickness": 0.5, "orientation": "fore_aft"}
-PLUME_RED = (128, 22, 22)
 # the rider (M23, test 30 round): slimmed to at least 0.75 of its width towards vanilla's rider, the low mesh evened
 # (3 passes) and its weights smoothed 24 times: flips idle 30 / moving 29 / attack 41 (12 / 0 / 12 for vanilla's)
 RIDER = {"target_tris": 2600, "part_tris": {"lance": 200, "shield": 400}, "close_voxel": 0.1, "slim_low": 0.75,
@@ -194,7 +191,7 @@ SWORD_COLOURS = {"gold": (200, 160, 70), "grip": (60, 38, 26), "scabbard": (150,
 SWORD_GLOSS = {"gold": 12, "grip": 4, "scabbard": 4, "steel": 14}
 
 
-def sword_part(out: Path, frame: dict, hip_half_width: float, cfg: dict | None = None) -> dict:
+def sword_part(out: Path, frame: dict, hip_half_width: float, cfg: dict | None = None, gold=None) -> dict:
     """M23: a sword in its scabbard as a rigid belt part (``mesh_belt``, the pelvis bone): our own geometry, plain
     boxes (pommel, grip, crossguard, a tapered scabbard with a gold locket and chape) on a four-swatch texture in
     the reference's colours (gold hilt, dark grip, dark red scabbard). Placed with ``frame`` (rider_frames on
@@ -241,14 +238,21 @@ def sword_part(out: Path, frame: dict, hip_half_width: float, cfg: dict | None =
     box(L - 0.6, L, 0.2, 0.12, 0.12, "gold")  # chape
     out.mkdir(parents=True, exist_ok=True)
     (out / "sword_part.json").write_text(json.dumps({"p": [round(x, 5) for x in p], "tri": tri, "uv": uv}), encoding="utf-8")
-    diff, spec = Image.new("RGBA", (64, 64)), Image.new("RGBA", (64, 64))
+    # Track P1: no flat-colour placeholders: each swatch worn (grime and grain) with a normal map from the grain;
+    # the gold the unit's own (``gold``: the palette's)
+    from eu4unitgen.core import gear
+    colours = dict(SWORD_COLOURS, **({"gold": tuple(int(v) for v in gold)} if gold else {}))
+    S = 256
+    diff, spec = Image.new("RGB", (S, S)), Image.new("RGBA", (S, S))
     for zone, (u0, v0) in swatch.items():
-        box_px = (u0 * 32, v0 * 32, u0 * 32 + 32, v0 * 32 + 32)
-        diff.paste(SWORD_COLOURS[zone] + (255,), box_px)
+        box_px = (u0 * S // 2, v0 * S // 2, u0 * S // 2 + S // 2, v0 * S // 2 + S // 2)
+        diff.paste(colours[zone], box_px)
         spec.paste((0, 0, 0, SWORD_GLOSS[zone]), box_px)
-    diff.save(out / "sword_diffuse.png")
+    grain = gear._noise(S, 48, 3, 0.82, 1.0)
+    diff = gear._shade(gear._shade(diff, gear._noise(S, 6, 4, 0.8, 1.0)), grain)
+    diff.convert("RGBA").save(out / "sword_diffuse.png")
     spec.save(out / "sword_specular.png")
-    Image.new("RGBA", (64, 64), (128, 128, 255, 255)).save(out / "sword_normal.png")
+    gear.normal_from_height(grain, 1.5).save(out / "sword_normal.png")
     return {"kind": "mesh_belt", "mesh": {"geometry": str(out / "sword_part.json"), "diffuse": str(out / "sword_diffuse.png"),
                                           "normal": str(out / "sword_normal.png"), "specular": str(out / "sword_specular.png")}}
 
@@ -291,6 +295,50 @@ def pin_head(geometry: Path, y0: float = HEAD_PIN[0], y1: float = HEAD_PIN[1]) -
         new = {k: w * (1 - f) for k, w in row.items()}
         new["head"] = new.get("head", 0.0) + f
         g["weights"][i] = {k: w for k, w in new.items() if w > 1e-4}
+        n += 1
+    Path(geometry).write_text(json.dumps(g), encoding="utf-8")
+    return n
+
+
+# the rider's legs clear of the horse's barrel (Track P1: "rider seating and legs clear"; measured on the seated unit,
+# quality.legs_clear): the legs were fitted to vanilla's horse; on a wider one (the cataphract's caparison: 0.6-1.05
+# wider at the thighs' heights) they sank into it (23% of the lower body inside against vanilla's 9%)
+SEAT_BAND = (10.5, 11.5)  # the horse's heights where the seated thighs lie
+LEG_BONES = ("L_thigh", "L_knee", "L_foot", "L_toe", "R_thigh", "R_knee", "R_foot", "R_toe")
+
+
+def barrel_half(p: list, ys=SEAT_BAND, z=(-2.5, 2.5)) -> list[float]:
+    """A horse's half-width at each of the seated thighs' heights: the 95th percentile of |x| in a band 1 tall."""
+    out = []
+    for y in ys:
+        xs = sorted(abs(p[i]) for i in range(0, len(p), 3) if y - 0.5 < p[i + 1] < y + 0.5 and z[0] < p[i + 2] < z[1])
+        out.append(xs[int(len(xs) * 0.95)] if xs else 0.0)
+    return out
+
+
+def leg_spread(horse_p: list, vanilla_p: list, cap: float = 1.5) -> float:
+    """How far the rider's legs move out for this horse: its barrel's largest extra half-width over vanilla's at
+    the same height (0 if nowhere wider), at most ``cap``."""
+    d = max(a - b for a, b in zip(barrel_half(horse_p), barrel_half(vanilla_p)))
+    return round(max(0.0, min(cap, d)), 3)
+
+
+def spread_legs(geometry: Path, d: float) -> int:
+    """The rider's legs moved out sideways by ``d`` (``low_geometry.json`` in place): each vertex by ``d`` times its
+    legs' share of its weights, away from the centre line. -> the vertices moved."""
+    if d <= 0:
+        return 0
+    g = json.loads(Path(geometry).read_text(encoding="utf-8"))
+    n = 0
+    for i, row in enumerate(g["weights"]):
+        w = sum(v for k, v in row.items() if k in LEG_BONES)
+        if w <= 0:
+            continue
+        x = g["p"][3 * i]
+        side = 1.0 if (sum(v for k, v in row.items() if k.startswith("L_")) >= sum(v for k, v in row.items() if k.startswith("R_"))) else -1.0
+        if abs(x) > 1e-6 and (x > 0) != (side > 0):
+            side = 1.0 if x > 0 else -1.0
+        g["p"][3 * i] = x + side * d * min(1.0, w)
         n += 1
     Path(geometry).write_text(json.dumps(g), encoding="utf-8")
     return n
@@ -572,12 +620,16 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                                     body={"geometry": str(out / "low_geometry.json"), "head": base_arrays(base)["bones"]["head"]}
                                     if (helmet is None or helmet.get("gold_share", 0) > 0.03) else None,
                                     scale=RIDER_ANIM_SCALE, gold=gold, cfg={"shows": shows} if shows else None)
-    if fr.get("plume_voxels_cut") and plume == "tuft":  # the earlier option: a small upright tuft (crest part)
-        parts["plume"] = {"kind": "crest", "params": dict(PLUME), "colours": {"hair": list(PLUME_RED)}}
     if sword:  # on the side the shield doesn't cover (the reference hangs it on the shield's side; the user, test 30)
         hip_frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": "hip",
                                                 "elbow": "R_thigh", "shoulder": "R_shoulder", "bind": node_bind(base, "hip")}).result
-        parts["sword"] = sword_part(out / "parts", hip_frame, float(fr.get("slim", {}).get("hip_half", 1.9)))
+        parts["sword"] = sword_part(out / "parts", hip_frame, float(fr.get("slim", {}).get("hip_half", 1.9)),
+                                    gold=(pal.get("gold") or {}).get("colour"))
+    if palette_from and palette_from.get("geometry"):  # the legs clear of the horse it rides
+        hp = json.loads(Path(palette_from["geometry"]).read_text(encoding="utf-8"))["p"]
+        vp = base_arrays((eu4() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes())["p"]
+        d = leg_spread(hp, vp)
+        fr["leg_spread"] = {"by": d, "vertices": spread_legs(out / "low_geometry.json", d)}
     dd = out / "deform"
     dd.mkdir()
     (dd / "rider.mesh").write_bytes(write_fresh(base, geometry_from_job(out / "low_geometry.json")))

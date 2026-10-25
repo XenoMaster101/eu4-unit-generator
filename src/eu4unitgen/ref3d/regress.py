@@ -179,7 +179,7 @@ def build(name: str, built: dict, blender: str | None = None) -> Path:
         if s.get("palette_from") and s["palette_from"] in built:
             hm = json.loads((built[s["palette_from"]] / "manifest.json").read_text(encoding="utf-8"))
             pf = {"diffuse": hm["textures"]["diffuse"], "specular": hm["textures"]["specular"],
-                  "primary": (hm.get("colour") or {}).get("default_primary")}
+                  "primary": (hm.get("colour") or {}).get("default_primary"), "geometry": hm["geometry"]}
         m = trellis.process_rider(src / "raw.glb", src / "runs", blender=blender, palette_from=pf,
                                   reference={"image": str(src / "input" / "input_rgb.png"), "fg": str(src / "input" / "input_fg.png")},
                                   part_cache=src / "parts_cache")
