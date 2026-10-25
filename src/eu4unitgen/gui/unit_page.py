@@ -251,10 +251,13 @@ class UnitPage(Page):
         self.e_side = QComboBox()
         for label, key in (("as in the image", "auto"), ("left forearm", "left"), ("right forearm", "right")):
             self.e_side.addItem(label, key)
+        self.e_side.setToolTip("Which forearm carries the shield; the weapon moves to the other hand. The cavalry "
+                               "animations raise the right arm, so a shield there sits high, behind the shoulder.")
         self.e_hem = QSlider(Qt.Horizontal)
         self.e_hem.setRange(50, 100)
         self.e_hem.setValue(100)
-        self.e_hem.setToolTip("How far the cloth hangs below the body: 50-100% of what was built")
+        self.e_hem.setToolTip("How far the cloth hangs below the body: 50-100% of what was built. Subtle on a caparison "
+                              "that is one shape with the legs: only the cloth's own lower edge rises")
         rows = [(self.e_plume, self.e_tassels), (QLabel("Emblem"), self.e_emblem), (self.e_mask, self.e_colour),
                 (QLabel("Brightness"), self.e_bright), (QLabel("Shield side"), self.e_side), (QLabel("Hem length"), self.e_hem)]
         for r, (a, b) in enumerate(rows):

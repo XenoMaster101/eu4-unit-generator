@@ -29,7 +29,9 @@ def _version(tmp_path, kind="rider"):
     d.save(v / "d.png")
     Image.new("RGBA", (16, 16), (0, 0, 0, 5)).save(v / "s.png")
     Image.new("RGBA", (16, 16), (128, 128, 255, 255)).save(v / "n.png")
-    geo = {"p": [0.0, 5.0, 0.0, 0.0, 12.0, 0.0, 1.0, 5.0, 0.0], "tri": [0, 1, 2], "u0": [0.1, 0.5, 0.9, 0.5, 0.1, 0.5]}
+    # one triangle all on the red cloth (u under 0.5), one reaching the grey (a leg): only the first's lift
+    geo = {"p": [0.0, 5.0, 0.0, 0.0, 12.0, 0.0, 1.0, 5.0, 0.0, 2.0, 5.0, 0.0], "tri": [0, 1, 2, 2, 1, 3],
+           "u0": [0.1, 0.5, 0.2, 0.5, 0.3, 0.5, 0.9, 0.5]}
     (v / "g.json").write_text(json.dumps(geo))
     parts = {"plume": {"kind": "mesh_head", "mesh": {"geometry": str(v / "g.json"), "diffuse": str(v / "d.png")}},
              "lance": {"kind": "mesh_weapon", "mesh": {"geometry": str(v / "g.json"), "diffuse": str(v / "d.png")}}}
@@ -51,6 +53,7 @@ def test_finish_applies_brightness_plume_hem_and_colour(tmp_path):
     assert b > r  # the red cloth moved to the blue asked for
     p = json.loads(open(m["geometry"]).read())["p"]
     assert p[1] == 9.0 - (9.0 - 5.0) * 0.5 and p[4] == 12.0  # the cloth under the hips lifted, the top untouched
+    assert p[7] == 5.0 and p[10] == 5.0  # a vertex whose triangle reaches the leg stays (no shards)
     assert json.loads((v / "manifest.json").read_text())["parts"].get("plume")  # the built version untouched
 
 
@@ -139,3 +142,19 @@ def test_licences_list():
     md = licences.markdown()
     assert "TRELLIS.2-4B weights | MIT" in md and "DINOv3" in md and "RMBG-2.0" in md
     assert "<table" in licences.html()
+
+
+def test_setup_detects_and_saves_paths(tmp_path, monkeypatch):
+    from eu4unitgen.core import config, install
+    from eu4unitgen.gui import setup_page
+    monkeypatch.setenv("EU4UNITGEN_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("EU4_PATH", raising=False)
+    monkeypatch.delenv("BLENDER_PATH", raising=False)
+    monkeypatch.setattr(install, "find_eu4", lambda: tmp_path / "eu4")
+    monkeypatch.setattr(install, "find_blender", lambda: (tmp_path / "blender.exe", "found"))
+    monkeypatch.setattr("eu4unitgen.core.setup.adopt_ai_env", lambda: None)
+    found = setup_page.detect()
+    assert found["eu4_path"] == str(tmp_path / "eu4") and found["blender_path"] == str(tmp_path / "blender.exe")
+    c = config.load()
+    assert c.eu4() == tmp_path / "eu4"
+    assert setup_page.detect() == {}  # set already: nothing overwritten

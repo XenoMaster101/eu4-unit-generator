@@ -36,6 +36,11 @@ check("gold_is_never_cloth", cc.dominant_hue(c, np.ones(len(c), dtype=bool))[0] 
 win = cc.cloth_window(None)
 check("default_window_is_the_old_red", bool(win(np.array([340.0]))[0]) and bool(win(np.array([15.0]))[0])
       and not bool(win(np.array([40.0]))[0]))
+# the cataphract's red cloth (3.5) never takes the copper trim (hue 22), an orange cloth keeps its own hues
+w = cc.cloth_window(3.5)
+check("red_cloth_window_skips_copper", bool(w(np.array([350.0]))[0]) and bool(w(np.array([15.0]))[0])
+      and not bool(w(np.array([22.0]))[0]))
+check("orange_cloth_keeps_orange", bool(cc.cloth_window(25.0)(np.array([22.0]))[0]))
 # a horse whose head and neck are bay: the coat; the cloth is the other colour (a blue pad)
 H = 64
 pos = np.zeros((H, H, 3))

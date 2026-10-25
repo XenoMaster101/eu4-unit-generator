@@ -68,7 +68,13 @@
     "head_marks": 5,
     "emblem_texels": 14644,
     "reins": true,
-    "tail": true
+    "tail": true,
+    "cloth_primary": [
+     255,
+     77,
+     70
+    ],
+    "mask_share": 0.355
    },
    "added": {
     "20261024-203217": [
@@ -113,7 +119,13 @@
     "part_iou_shield": 0.837,
     "part_de_shield": 12.5,
     "part_method_shield": "trellis",
-    "ref_iou": 0.569
+    "ref_iou": 0.569,
+    "cloth_primary": [
+     255,
+     105,
+     92
+    ],
+    "mask_share": 0.391
    },
    "added": {
     "20261024-203217": [

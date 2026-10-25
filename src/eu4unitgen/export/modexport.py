@@ -166,7 +166,7 @@ def add_to_mod(preview_spec: Path, subject: str, mode: str, tag: str, gfx: str, 
     from eu4unitgen.core.character import CharacterSpec
     from eu4unitgen.export import testmod
     from eu4unitgen.export.pipeline import Session, Settings
-    from eu4unitgen.export.writer import apply_export, check_writable, stage_plan
+    from eu4unitgen.export.writer import ExportError, apply_export, check_writable, stage_plan
     from eu4unitgen.ref3d.unitstage import unit_names
     if mode not in ("normal", "achievement_safe"):
         raise ValueError("mode is normal or achievement_safe")
@@ -228,7 +228,7 @@ def add_to_mod(preview_spec: Path, subject: str, mode: str, tag: str, gfx: str, 
         check_writable(Path(mod_dir))
         apply_export(plan)
         out.written_to = Path(mod_dir) / name
-    except OSError:
+    except (OSError, ExportError):  # Controlled Folder Access: staged, with the copy steps
         staged = stage_plan(plan, work / "stage", require_empty=False)
         apply_export(staged)
         out.staged_at = work / "stage"

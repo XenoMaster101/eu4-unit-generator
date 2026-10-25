@@ -189,7 +189,7 @@ def texel_positions(geo, size):
     return pos, hit
 
 
-def head_band(px, posmap, hit, poll, axis, width=0.6, radius=3.0):
+def head_band(px, posmap, hit, poll, axis, width=0.6, radius=3.0, cloth_hue=None):
     """M21 (the user, the cataphract: the red blobs by the eyes are a red cloth band round the head behind
     the gold chanfron): a clean red stripe all the way round the head, ``width`` wide, just behind the
     chanfron's rear edge (where its gold texels start along the head's axis, poll to muzzle), in the
@@ -207,9 +207,10 @@ def head_band(px, posmap, hit, poll, axis, width=0.6, radius=3.0):
     rad = np.linalg.norm(rel - t[..., None] * axis, axis=-1)
     near = hit & (rad < radius)
     gold = near & (t > -0.5) & (hue > 28) & (hue < 58) & (chroma > 0.3) & (lum > 0.25)
-    # the band's cloth: the head's own dominant saturated colour (Track P1: it was a fixed red window, 340 to 15)
-    band_h, _ = cc.dominant_hue(c, near & (t > -1.5), chroma_min=0.45)
-    red = near & (t > -1.5) & cc.near_hue(hue, 357.5 if band_h is None else band_h, 17.5) & (chroma > 0.45)
+    # the band's cloth: the subject's cloth colour, its trim-safe window (Track P1: it was a fixed red window, 340 to
+    # 15; the head's own dominant hue leaned into the chanfron's copper and turned the panels' red orange)
+    band_h = cloth_hue
+    red = near & (t > -1.5) & cc.cloth_window(band_h, 17.5)(hue) & (chroma > 0.45)
     if gold.sum() < 200 or red.sum() < 50:
         return {"band": False, "gold_texels": int(gold.sum()), "red_texels": int(red.sum())}
     t0, t1 = float(np.percentile(t[gold], 5)), float(np.percentile(t[gold], 99)) + 0.3  # the chanfron's ends
@@ -482,7 +483,8 @@ def main():
     cloth_h = result["classes"]["cloth"]
     if a.get("head_band"):
         hb_ = a["head_band"]
-        result["head_band"] = head_band(px, posmap, hit & filled, hb_["poll"], hb_["axis"], float(hb_.get("width", 0.6)))
+        result["head_band"] = head_band(px, posmap, hit & filled, hb_["poll"], hb_["axis"], float(hb_.get("width", 0.6)),
+                                        cloth_hue=cloth_h)
     g = None
     if a.get("gloss") is not None:  # from the colour as baked (before any transfer); written at the end
         g, result["gloss_shares"] = gloss_map(px, filled, a["gloss"])

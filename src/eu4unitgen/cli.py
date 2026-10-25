@@ -34,7 +34,7 @@ NATIVE_TECH = {"north_american", "mesoamerican", "south_american", "andean", "hi
 
 
 def _common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--eu4", type=Path, help="EU4 install (default: $EU4_PATH)")
+    p.add_argument("--eu4", type=Path, help="EU4 install (default: the settings file, or $EU4_PATH)")
     p.add_argument("--owned-dlc", nargs="*", default=[], help="dlc folder names you own")
 
 
@@ -343,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "eu4", None) is None:
         project = Project(mod_root=Path("."))
         if project.eu4_path is None:
-            ap.error("pass --eu4 or set EU4_PATH")
+            ap.error("pass --eu4, or set the EU4 install in the app's Setup (or EU4_PATH)")
         args.eu4 = project.eu4_path
     from eu4unitgen.core.loadout import LoadoutError
     from eu4unitgen.core.recipe import RecipeError

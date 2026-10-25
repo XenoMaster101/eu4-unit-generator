@@ -53,7 +53,9 @@ FIXES: tuple[Fix, ...] = (
     Fix("cloth_any_colour", "the cloth is the subject's own dominant saturated non-gold colour, not a fixed red; a horse's "
         "coat is told apart from it", "Track P1 audit: the country mask, head band, emblem and crest only worked on red",
         J + "_colour.py:cloth_and_coat", ("tests/test_blender_rules.py::test_rule[cloth_hue_blue]",
-                                          "tests/test_blender_rules.py::test_rule[coat_kept_apart_from_cloth]"), "model"),
+                                          "tests/test_blender_rules.py::test_rule[coat_kept_apart_from_cloth]",
+                                          "tests/test_blender_rules.py::test_rule[red_cloth_window_skips_copper]",
+                                          "regress:cloth_primary", "regress:mask_share"), "model"),
     Fix("country_colour", "with the option on, the cloth is the country colour's mask (a grey times the primary); the set's "
         "tags without colours of their own get the cloth's colour", "test 28: Byzantium took its map purple",
         J + "bake_colour.py:cloth_mask", ("tests/test_trellis_pipeline.py::test_horse_unit_colours_fill_tags_without_their_own",),

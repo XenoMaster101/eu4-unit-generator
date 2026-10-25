@@ -2,7 +2,7 @@
 
 Inside: the app's wheel (pip wheel, no dependencies: PySide6, Jinja2 and Pillow come from PyPI at install time),
 Install.cmd and install.ps1 (Python found or installed, a venv, shortcuts), Uninstall.cmd and uninstall.ps1,
-README.txt (the install steps) and LICENSE (GPL-3.0). No Paradox files, no AI weights, no third-party binaries.
+README.txt (the install steps) and LICENSE when the project has one. No Paradox files, no AI weights, no third-party binaries.
 
 usage: python packaging/windows/build_package.py
 """
@@ -28,8 +28,7 @@ def readme_txt(v: str) -> str:
     install = md.split("## Install", 1)[1].split("\n## ", 1)[0].strip()
     need = md.split("## What you need", 1)[1].split("\n## ", 1)[0].strip()
     return (f"EU4 Unit Generator {v}\n\nWhat you need\n-------------\n{need}\n\nInstall\n-------\n"
-            "0. If Windows marks the download as from the internet: right-click the zip, Properties, tick Unblock, OK "
-            "(before unzipping).\n" + install + "\n\nTo remove the app: Uninstall.cmd (in %LOCALAPPDATA%\\eu4unitgen\\app, or "
+            + install + "\n\nTo remove the app: Uninstall.cmd (in %LOCALAPPDATA%\\eu4unitgen\\app, or "
             "in this folder). Your settings, runs and the AI setup are kept.\n\nMore: README.md in the source, "
             "docs/DEVELOPER.md, and the app's About and licences page.\n")
 
@@ -56,7 +55,8 @@ def main() -> Path:
     shutil.copy(wheel, stage / wheel.name)
     for f in ("Install.cmd", "install.ps1", "Uninstall.cmd", "uninstall.ps1"):
         shutil.copy(HERE / f, stage / f)
-    shutil.copy(ROOT / "LICENSE", stage / "LICENSE.txt")
+    if (ROOT / "LICENSE").is_file():  # the project's licence isn't decided yet (the user, 2026-10-25)
+        shutil.copy(ROOT / "LICENSE", stage / "LICENSE.txt")
     (stage / "README.txt").write_text(readme_txt(v), encoding="utf-8")
     out = dist / f"eu4unitgen-{v}-windows.zip"
     if out.exists():

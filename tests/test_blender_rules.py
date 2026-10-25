@@ -26,6 +26,7 @@ def results():
                                   "default_window_is_the_old_red", "coat_kept_apart_from_cloth", "crest_any_colour",
                                   "flat_part_faces_its_painted_side", "flat_part_wide_end_up", "crop_profile_wider_top",
                                   "reins_two_straps_within_budget", "reins_weights_head_to_rem",
-                                  "reins_found_when_the_raw_shows_them", "reins_not_built_when_the_low_kept_them"])
+                                  "reins_found_when_the_raw_shows_them", "reins_not_built_when_the_low_kept_them",
+                                  "red_cloth_window_skips_copper", "orange_cloth_keeps_orange"])
 def test_rule(results, name):
     assert results[name]["ok"], results[name]

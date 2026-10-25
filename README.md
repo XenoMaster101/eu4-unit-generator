@@ -13,7 +13,7 @@ It never copies Paradox files: everything from the game is read from your own EU
 
 ## Install
 
-1. Unzip `eu4unitgen-<version>-windows.zip` anywhere.
+1. If you downloaded the zip, right-click it first, choose **Properties**, tick **Unblock**, and press **OK**. Windows marks downloaded files, and that mark can stop the installer script. Then unzip `eu4unitgen-<version>-windows.zip` anywhere.
 2. Double-click **Install.cmd**. It finds Python 3.11 or newer (or offers to install Python 3.12 for you), installs the app in `%LOCALAPPDATA%\eu4unitgen\app`, and puts **EU4 Unit Generator** on your Desktop and in the Start menu.
 3. The app opens on its **Setup** screen the first time. Work down the list; each step opens its own window and says when it's done, then press **Check again**:
    - **Install WSL**: asks for administrator rights; Windows restarts afterwards.

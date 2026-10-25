@@ -151,7 +151,8 @@ def stage_trellis(folder: Path, req: dict, cfg) -> dict:
     if glb.is_file():
         return {"kept": True}
     r = trellis.generate((folder / "trellis" / "input" / "input_rgba.png").resolve(), glb.resolve(), cfg.ai_root_path())
-    return {k: r.get(k) for k in ("seconds", "faces", "peak_vram_gb", "pipeline_type")}
+    # TRELLIS.2's own timings under their own name: the stage's "seconds" is its wall time
+    return {"trellis_seconds": r.get("seconds"), **{k: r.get(k) for k in ("faces", "peak_vram_gb", "pipeline_type")}}
 
 
 def horse_textures(name: str | None) -> dict | None:
@@ -303,6 +304,8 @@ def go(folder: Path) -> dict:
     for s in stages.values():  # a stage cut off by the stop runs again
         if s.get("state") in ("running", "waiting_eu4"):
             s["state"] = "waiting"
+        if not isinstance(s.get("seconds", 0), (int, float)):  # a time recorded wrongly (0.1.0's trellis stage)
+            s.pop("seconds")
     st = _Status(folder, {"name": req["name"], "kind": req["kind"], "pid": os.getpid(), "started": (old or {}).get("started", time.time()),
                           "resumed": bool(old), "stages": stages, "error": None, "trace": None, "done": False,
                           "sheet": (old or {}).get("sheet")})

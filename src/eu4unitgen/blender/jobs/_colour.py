@@ -75,10 +75,29 @@ def cloth_and_coat(c, cov, posmap=None, bones=None):
     return out
 
 
+TRIM_BAND = (18.0, 60.0)  # orange to gold: trim and copper, never a red or blue cloth
+
+
 def cloth_window(h0, tol=25.0):
-    """The cloth test every bake rule uses: hues within ``tol`` of the cloth's (the old fixed red window, 330 to 20,
-    is 355 +- 25)."""
-    return lambda hue: near_hue(hue, 355.0 if h0 is None else h0, tol)
+    """The cloth test every bake rule uses: hues within ``tol`` of the cloth's (``tol`` + 10 on the side away from
+    the orange-to-gold band), but never into the orange-to-gold
+    band unless the cloth itself is orange or gold (the old fixed red window was 330 to 20; a plain +- 25 round the
+    cataphract's red, 3.5, took its copper trim: its country colour went orange, 255 155 112, against test 35's
+    255 77 70)."""
+    c = 355.0 if h0 is None else h0
+    keep_band = TRIM_BAND[0] <= c <= TRIM_BAND[1]
+    # wider on the side away from the trim band (a red cloth's deep crimson shades, 330-338, are cloth: leaving them
+    # out tipped the cataphract's colour to 255 128 104)
+    away = -1.0 if ((TRIM_BAND[0] - c) % 360) < 180 else 1.0
+    lo, hi = (tol + 10, tol) if away < 0 else (tol, tol + 10)
+
+    def test(hue):
+        d = (np.asarray(hue) - c + 180.0) % 360.0 - 180.0
+        m = (d >= -lo) & (d <= hi)
+        if not keep_band:
+            m = m & ~((hue >= TRIM_BAND[0]) & (hue <= TRIM_BAND[1]))
+        return m
+    return test
 
 
 def crest_colour(co, rgb, keep, above):

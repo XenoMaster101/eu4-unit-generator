@@ -45,10 +45,12 @@ class Settings:
     tag_pack_order: int = DEFAULT_TAG_PACK_ORDER
 
     def __post_init__(self) -> None:
-        if self.eu4_path is None and os.environ.get("EU4_PATH"):
-            self.eu4_path = Path(os.environ["EU4_PATH"])
+        from eu4unitgen.core import config
+        cfg = config.load()
+        if self.eu4_path is None:  # the settings file (EU4_PATH wins over it)
+            self.eu4_path = cfg.eu4()
         if self.blender_path is None:
-            self.blender_path = default_blender_path()
+            self.blender_path = cfg.blender()
         for name in ("eu4_path", "output_dir", "mod_folder", "stage_dir", "mod_dir", "blender_path"):
             value = getattr(self, name)
             if value is not None and not isinstance(value, Path):

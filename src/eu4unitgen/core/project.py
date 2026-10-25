@@ -33,8 +33,9 @@ class Project:
 
     def __post_init__(self) -> None:
         self.mod_root = Path(self.mod_root)
-        if self.eu4_path is None and os.environ.get("EU4_PATH"):
-            self.eu4_path = Path(os.environ["EU4_PATH"])
+        if self.eu4_path is None:  # the settings file (EU4_PATH wins over it: core.config)
+            from eu4unitgen.core import config
+            self.eu4_path = config.load().eu4()
         elif self.eu4_path is not None:
             self.eu4_path = Path(self.eu4_path)
         self.naming = Naming(self.prefix)

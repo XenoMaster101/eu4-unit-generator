@@ -33,6 +33,8 @@ RULES = {"flips": ("lower", lambda b: max(6.0, 0.25 * b)), "max": ("lower", lamb
          "gloss_gold": ("higher", lambda b: max(0.01, 0.4 * b)), "gloss_silver": ("higher", lambda b: max(0.01, 0.4 * b)),
          "head_marks": ("higher", lambda b: 0.5), "emblem_texels": ("higher", lambda b: 0.25 * b),
          "locate_fit": ("higher", lambda b: 0.05), "group_flips": ("lower", lambda b: max(5.0, 0.3 * b))}
+# colours: compared by distance from the baseline, either way (Lab for colours, plain for shares)
+NEAR = {"cloth_primary": 8.0, "mask_share": 0.04}
 # measures that are there or not (True in the baseline, False now: worse)
 FLAGS = ("head_band", "reins", "mane", "tail")
 # every measure ``metrics`` can return (the known-fixes registry names them as tests: "regress:<name>")
@@ -40,7 +42,7 @@ METRICS = ("tris", "flips_idle", "flips_moving", "flips_attack", "max_idle", "ma
            "iou_front34", "iou_rear34", "uv_used", "ref_iou", "parts", "part_iou_shield", "part_de_shield",
            "part_method_shield", "seat_gap", "side_ratio", "bake_reached", "silver_cap", "gloss_gold", "gloss_silver",
            "head_band", "head_marks", "emblem_texels", "reins", "mane", "tail", "locate_fit", "group_flips_head",
-           "group_flips_arms", "group_flips_legs", "group_flips_torso")
+           "group_flips_arms", "group_flips_legs", "group_flips_torso", "cloth_primary", "mask_share")
 NOTE_ONLY = {"tris": 0.03}  # changes reported, never flagged
 
 
@@ -75,6 +77,10 @@ def metrics(manifest: dict, kind: str, quality: dict | None = None) -> dict:
         m[f"flips_{anim}"] = x.get("flips")
         m[f"max_{anim}"] = x.get("max")
     col = manifest.get("colour") or {}
+    if col.get("default_primary"):  # the country colour the cloth's mask carries (test 35: 255 77 70)
+        m["cloth_primary"] = list(col["default_primary"])
+    if col.get("country_mask_share") is not None:
+        m["mask_share"] = col["country_mask_share"]
     if col.get("reached") is not None:
         m["bake_reached"] = col["reached"]
     for k, v in (col.get("gloss_shares") or {}).items():
@@ -140,6 +146,12 @@ def compare(new: dict, base: dict) -> dict:
         if k.startswith("part_method_"):
             if n != b:
                 out["notes"].append(f"{k[12:]} now built by {n} (was {b})")
+            continue
+        if k in NEAR:
+            from eu4unitgen.core.palette import delta_e
+            d = delta_e(n, b) if isinstance(b, list) else abs(n - b)
+            if d > NEAR[k]:
+                out["worse"].append(f"{k}: {b} -> {n} (off by {d:.2f})")
             continue
         if k in FLAGS:
             if b and not n:

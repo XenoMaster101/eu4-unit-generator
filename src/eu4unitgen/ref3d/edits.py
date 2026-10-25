@@ -86,23 +86,44 @@ def _recolour(path: Path, cloth, target, out: Path) -> None:
     snap_image(Image.open(path), [(tuple(cloth), tuple(target))], radius=26.0).save(out)
 
 
-def _hem(geometry: Path, diffuse: Path, cloth, k: float, line: float, out: Path) -> int:
-    """Cloth below ``line`` (its texel's colour near ``cloth``, or on the country mask's grey) lifted towards it:
-    y' = line - (line - y) * k. -> vertices moved."""
+def _hem(geometry: Path, diffuse: Path, cloth, k: float, line: float, out: Path, specular: Path | None = None) -> int:
+    """Cloth below ``line`` lifted towards it: y' = line - (line - y) * k. Cloth: on the country mask (the specular
+    map's red) when there is one, else its texel's colour near ``cloth``; a vertex counts only when its neighbours
+    in the same triangles are cloth too (the hem, not the legs it meets). -> vertices moved."""
     from eu4unitgen.core import palette as pal
     g = json.loads(Path(geometry).read_text(encoding="utf-8"))
     im = Image.open(diffuse).convert("RGB")
     W, H = im.size
     px = im.load()
+    sp = Image.open(specular).convert("RGBA").resize((W, H)).load() if specular else None
     uv = g.get("u0") or g.get("uv")
+    nv = len(g["p"]) // 3
+
+    def is_cloth(i):
+        x, y = min(W - 1, int(uv[2 * i] * W)), min(H - 1, int(uv[2 * i + 1] * H))
+        if sp is not None and sp[x, y][0] > 127:
+            return True
+        return sp is None and cloth is not None and pal.delta_e(px[x, y], cloth) < 22
+    cl = [is_cloth(i) for i in range(nv)]
+    # the same point split at UV seams: cloth if any copy is
+    key = {}
+    for i in range(nv):
+        key.setdefault(tuple(round(v, 4) for v in g["p"][3 * i:3 * i + 3]), []).append(i)
+    for ids in key.values():
+        if any(cl[i] for i in ids):
+            for i in ids:
+                cl[i] = True
+    ok = cl[:]
+    t = g["tri"]
+    for j in range(0, len(t), 3):
+        tri = t[j:j + 3]
+        if not all(cl[i] for i in tri):
+            for i in tri:
+                ok[i] = False
     n = 0
-    for i in range(len(g["p"]) // 3):
+    for i in range(nv):
         y = g["p"][3 * i + 1]
-        if y >= line:
-            continue
-        c = px[min(W - 1, int(uv[2 * i] * W)), min(H - 1, int(uv[2 * i + 1] * H))]
-        grey = abs(c[0] - c[1]) < 6 and abs(c[1] - c[2]) < 6 and 40 < c[0] < 230
-        if (cloth is not None and pal.delta_e(c, cloth) < 22) or grey:
+        if y < line and ok[i]:
             g["p"][3 * i + 1] = line - (line - y) * k
             n += 1
     Path(out).write_text(json.dumps(g), encoding="utf-8")
@@ -148,7 +169,8 @@ def finish(vdir: Path, edits: dict | None, kind: str, out: Path) -> Path:
     geo = out / "low_geometry.json"
     shutil.copyfile(m["geometry"], geo)
     if float(e["hem"]) < 0.999:
-        log["hem_vertices"] = _hem(geo, Path(m["textures"]["diffuse"]), cloth, float(e["hem"]), HEM_LINE[kind], geo)
+        log["hem_vertices"] = _hem(geo, Path(m["textures"]["diffuse"]), cloth, float(e["hem"]), HEM_LINE[kind], geo,
+                                   Path(m["textures"]["specular"]) if masked else None)
     parts = {}
     for key, p in (m.get("parts") or {}).items():
         if key == "plume" and not e["plume"]:
