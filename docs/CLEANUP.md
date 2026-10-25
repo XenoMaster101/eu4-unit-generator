@@ -10,13 +10,14 @@ Nothing has been deleted. Each line says whether it's safe to delete; tell me wh
 | `assets_in\regression` | 1.6 GB | the regression set: 3 raw models and inputs (~90 MB) plus every rebuild under `runs\` | the inputs: **no**. `runs\` except the newest version of each model: **yes**, about 1.3 GB |
 | `assets_in\cataphract_budget` | 227 MB | test 35's horse v001 and riders v004/v005: the approved reference result and the baseline's source | **no** |
 | `assets_in\horse2_flow` | 111 MB | horse 2 run through the new app flow (in the app's list) | yes, if you don't want it in the list |
+| `assets_in\horse2_cands` | 165 MB | horse 2 with two TRELLIS.2 candidates (2026-10-25; both raw models kept) | yes, once you've seen its sheet |
 | `assets_in\new_refs` | 9 MB | your reference images | **no** |
 | `build\test35` | 30 MB | test 35's staged mod and gallery | **no** (the approved result) |
 | `build\side_try`, `build\side_unit` | 102 MB | the shield-side test | **yes** |
 | `build\shield_cmp` | 17 MB | the kite vs TRELLIS.2 shield comparison sheet | yes once you've seen it |
 | `build\hem_try` | 13 MB | the hem-length test | **yes** |
 | `build\lib`, `build\*.png`, `build\*.bak`, `build\LICENSE.gpl3.txt`, `build\regression` | 3 MB | build leftovers, screenshots, regression reports | **yes** (the reports are small; keep them if you like) |
-| `dist` | 1.6 MB | the built package | yes (rebuilt by `build_package.py`) |
+| `dist` | 44 MB | the built package, the cached signed Python and the Sandbox results folder | yes after the Sandbox test (rebuilt by `build_package.py`) |
 | `output` | 0.4 MB | old wizard output | yes |
 | `.git`, `src`, `tests`, `docs`, `archive`, `packaging` | 37 MB | the project | **no** |
 
