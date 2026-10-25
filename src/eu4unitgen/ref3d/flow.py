@@ -38,8 +38,9 @@ EU4_POLL = 20.0
 
 
 def root() -> Path:
+    """The projects folder (one folder per unit)."""
     from eu4unitgen.core import config
-    return config.load().work() / "assets_in"
+    return config.load().projects()
 
 
 def folder_of(name: str) -> Path:
@@ -56,6 +57,7 @@ def new_request(name: str, image: Path, rights: str, kind: str, tier: int = 1, h
     if f.exists():
         raise FileExistsError(f"a run called {name} exists already")
     (f / "trellis").mkdir(parents=True)
+    image = keep_reference(Path(image))
     req = {"schema": 1, "name": name, "image": str(Path(image).resolve()), "rights": rights, "kind": kind, "tier": int(tier),
            "horse": horse, "options": options or {}, "edits": {}, "created": time.time()}
     (f / "request.json").write_text(json.dumps(req, indent=1), encoding="utf-8")
@@ -63,6 +65,28 @@ def new_request(name: str, image: Path, rights: str, kind: str, tier: int = 1, h
                "pipeline": "trellis", "written_by": "ref3d.flow (the app)"}
     (f / "subject.json").write_text(json.dumps(subject, indent=1), encoding="utf-8")
     return f
+
+
+def keep_reference(image: Path) -> Path:
+    """The reference copied into the references folder (unless it's already there), so a project never depends on
+    a file that may move; the same image twice is kept once. -> the copy."""
+    import hashlib
+
+    from eu4unitgen.core import config
+    refs = config.load().references()
+    image = Path(image).resolve()
+    if refs.resolve() in image.parents:
+        return image
+    refs.mkdir(parents=True, exist_ok=True)
+    data = image.read_bytes()
+    q = refs / image.name
+    n = 1
+    while q.exists() and hashlib.sha256(q.read_bytes()).digest() != hashlib.sha256(data).digest():
+        q = refs / f"{image.stem}_{n}{image.suffix}"
+        n += 1
+    if not q.exists():
+        q.write_bytes(data)
+    return q
 
 
 def request(folder: Path) -> dict:
@@ -305,6 +329,10 @@ def result_sheet(folder: Path, req: dict, gallery: dict, rep: dict) -> Path:
             ln, y = ln[150:], y + 24
     out = Path(folder) / "preview" / "result_sheet.png"
     sheet.save(out)
+    from eu4unitgen.core import config  # and a copy among the result sheets
+    sheets = config.load().sheets()
+    sheets.mkdir(parents=True, exist_ok=True)
+    sheet.save(sheets / f"{req['name']}.png")
     return out
 
 

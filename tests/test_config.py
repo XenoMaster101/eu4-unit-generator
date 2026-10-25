@@ -30,3 +30,26 @@ def test_unknown_keys_ignored_and_refused(tmp_path, monkeypatch):
 def test_workspace_defaults_to_the_checkout(monkeypatch):
     monkeypatch.delenv("EU4UNITGEN_WORKSPACE", raising=False)
     assert config.default_workspace() == config.checkout_root()
+
+
+def test_installed_layout_is_in_documents(tmp_path, monkeypatch):
+    monkeypatch.setenv("EU4UNITGEN_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setenv("EU4UNITGEN_WORKSPACE", str(tmp_path / "Documents" / "eu4unitgen"))
+    c = config.load()
+    assert c.projects() == tmp_path / "Documents" / "eu4unitgen" / "projects"
+    assert c.references().name == "references" and c.sheets().name == "result sheets"
+    assert c.exports().name == "exported mods"
+    assert config.logs_dir() == tmp_path / "cfg" / "logs"
+
+
+def test_a_reference_is_kept_once(tmp_path, monkeypatch):
+    from PIL import Image
+
+    from eu4unitgen.ref3d import flow
+    monkeypatch.setenv("EU4UNITGEN_WORKSPACE", str(tmp_path / "w"))
+    img = tmp_path / "horse.png"
+    Image.new("RGB", (8, 8), (1, 2, 3)).save(img)
+    a = flow.keep_reference(img)
+    assert a == tmp_path / "w" / "references" / "horse.png" and flow.keep_reference(img) == a
+    Image.new("RGB", (8, 8), (9, 9, 9)).save(img)  # another image, same name
+    assert flow.keep_reference(img).name == "horse_1.png"

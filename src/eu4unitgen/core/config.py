@@ -8,8 +8,9 @@ Environment variables still win over the file for the paths they name (``EU4_PAT
 Keys (all optional; an unset one falls back to its default or detection):
   eu4_path      the EU4 install (read at run time, never copied: rule 1)
   mod_dir       the EU4 user mod folder ("Add to mod" writes there; default: Documents/Paradox Interactive/...)
-  workspace     where runs keep their files: ``assets_in/<name>`` and ``build/`` (default: the checkout when run
-                from one, else ``%LOCALAPPDATA%\\eu4unitgen\\work``)
+  workspace     your work (default: the checkout when run from one, else ``Documents\\eu4unitgen``):
+                ``references`` (your images, copied in), ``projects`` (one folder per unit), ``result sheets``,
+                ``exported mods``; a checkout keeps its own layout (``assets_in``, ``build``)
   ai_python     the Windows AI environment's python (cut-out and SAM 2); its AI root holds the weights
   ai_root       the folder holding the weights and the TRELLIS.2 checkout (default: from ai_python)
   wsl_distro    the WSL distribution TRELLIS.2 runs in ("" = the default one)
@@ -50,8 +51,13 @@ def default_workspace() -> Path:
     root = checkout_root()
     if root is not None:
         return root
-    base = os.environ.get("LOCALAPPDATA") if os.name == "nt" else os.environ.get("XDG_DATA_HOME")
-    return Path(base or Path.home() / ".local" / "share") / "eu4unitgen" / "work"
+    from eu4unitgen.core.project import documents_dir
+    return documents_dir() / "eu4unitgen"
+
+
+def logs_dir() -> Path:
+    """Logs live beside the settings: ``%APPDATA%\\eu4unitgen\\logs``."""
+    return config_dir() / "logs"
 
 
 @dataclass
@@ -81,6 +87,27 @@ class Config:
     def work(self) -> Path:
         v = self._env("workspace")
         return Path(v) if v else default_workspace()
+
+    def _layout(self) -> dict:
+        """The workspace's folders: a checkout's own (assets_in, build) or the installed app's (Documents)."""
+        w = self.work()
+        if checkout_root() is not None and w == checkout_root():
+            return {"projects": w / "assets_in", "references": w / "assets_in" / "new_refs",
+                    "sheets": w / "build" / "result_sheets", "exports": w / "build" / "add_to_mod"}
+        return {"projects": w / "projects", "references": w / "references", "sheets": w / "result sheets",
+                "exports": w / "exported mods"}
+
+    def projects(self) -> Path:
+        return self._layout()["projects"]
+
+    def references(self) -> Path:
+        return self._layout()["references"]
+
+    def sheets(self) -> Path:
+        return self._layout()["sheets"]
+
+    def exports(self) -> Path:
+        return self._layout()["exports"]
 
     def ai(self) -> str:
         return self._env("ai_python")

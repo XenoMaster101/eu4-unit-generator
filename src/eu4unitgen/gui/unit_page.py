@@ -479,7 +479,7 @@ QListWidget {{ background: {t['surface']}; color: {t['text']}; border: 1px solid
 
         def work():
             return modexport.add_to_mod(folder / "preview" / "preview.json", req["name"], mode, tag, gfx, int(req["tier"]),
-                                        mod_dir, cfg.eu4(), cfg.work() / "build" / "add_to_mod")
+                                        mod_dir, cfg.eu4(), cfg.exports())
 
         def done(r) -> None:
             if r.notes and any(n.startswith("validation") for n in r.notes):

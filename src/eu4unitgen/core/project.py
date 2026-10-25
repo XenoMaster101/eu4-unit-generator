@@ -62,6 +62,24 @@ def default_blender_path() -> Path | None:
     return Path(found) if found else None
 
 
+def documents_dir() -> Path:
+    """The user's Documents folder (on Windows often redirected, e.g. to OneDrive: asked of the shell)."""
+    docs = Path.home() / "Documents"
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0:  # CSIDL_PERSONAL
+                docs = Path(buf.value)
+        except (AttributeError, OSError):
+            pass
+    elif os.environ.get("XDG_DOCUMENTS_DIR"):
+        docs = Path(os.environ["XDG_DOCUMENTS_DIR"])
+    return docs
+
+
 def default_mod_dir() -> Path:
     """The EU4 user mod folder: Documents/Paradox Interactive/Europa Universalis IV/mod.
 

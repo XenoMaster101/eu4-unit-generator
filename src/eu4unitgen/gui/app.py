@@ -902,9 +902,8 @@ class MainWindow(QMainWindow):
 
 def log_path() -> Path:
     """Where the GUI writes errors when it has no console (pythonw.exe, the desktop shortcut)."""
-    import os
-    base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".local" / "state")
-    return base / "eu4unitgen" / "gui.log"
+    from eu4unitgen.core import config
+    return config.logs_dir() / "gui.log"
 
 
 def _install_error_reporting() -> None:

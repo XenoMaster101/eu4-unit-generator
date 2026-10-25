@@ -185,14 +185,14 @@ def test_no_console_errors_go_to_a_log(monkeypatch, tmp_path):
     """pythonw.exe (the desktop shortcut) has no stdout/stderr: they go to the GUI log instead."""
     import sys
     from eu4unitgen.gui import app as app_mod
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("EU4UNITGEN_CONFIG_DIR", str(tmp_path / "eu4unitgen"))
     monkeypatch.setattr(sys, "stderr", None)
     monkeypatch.setattr(sys, "stdout", None)
     monkeypatch.setattr(sys, "excepthook", sys.__excepthook__)
     app_mod._install_error_reporting()
     print("hello from pythonw", file=sys.stderr)
     sys.stderr.flush()
-    assert app_mod.log_path() == tmp_path / "eu4unitgen" / "gui.log"
+    assert app_mod.log_path() == tmp_path / "eu4unitgen" / "logs" / "gui.log"  # beside the settings
     assert "hello from pythonw" in app_mod.log_path().read_text(encoding="utf-8")
     sys.stderr.close()
 
