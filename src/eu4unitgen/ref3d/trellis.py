@@ -35,8 +35,6 @@ import subprocess
 import time
 from pathlib import Path, PureWindowsPath
 
-from eu4unitgen.ref3d import s1
-
 # TRELLIS.2 in WSL (SPEC M21): the environment on the Linux disk, the checkout and weights on the AI root via /mnt
 WSL = {"python": "~/eu4unitgen_ai/trellis2_env/bin/python", "repo": "TRELLIS.2", "weights": "weights/TRELLIS.2-4B",
        "ss_decoder": "weights/TRELLIS-image-large", "dinov3": "weights/dinov3-vitl16-pretrain-lvd1689m",
@@ -48,6 +46,27 @@ PROCESS = {"target_tris": 2800, "smooth": 12, "influences": 3, "chain_weights": 
            "gloss": {"silver": 14, "gold": 12, "matte": 5},
            "bake": {"cage": 0.3, "distance": 0.6, "margin": 8},
            "normal": {"cage": 0.1, "distance": 0.35, "high_smooth": 0, "strength": 0.6, "samples": 32, "ao_strength": 0.35}}
+
+
+def next_version(folder: Path) -> Path:
+    """The next ``vNNN`` folder under ``folder`` (made)."""
+    n = 1
+    while (folder / f"v{n:03d}").exists():
+        n += 1
+    out = folder / f"v{n:03d}"
+    out.mkdir(parents=True)
+    return out
+
+
+def ai_paths(ai_python: str | None = None) -> dict:
+    """The model folders under the AI root (the settings', else the AI environment's)."""
+    from eu4unitgen.core import config
+    from eu4unitgen.ref3d.writeguard import ai_root
+    root = config.load().ai_root_path() if ai_python is None else ai_root(ai_python)
+    if root is None:
+        raise SystemExit("the AI environment isn't set (Settings, or Setup)")
+    return {"root": root, "u2net": os.environ.get("U2NET_HOME") or str(root / "rembg_models"),
+            "sam2": str(root / "weights" / "sam2.1-hiera-large")}
 
 
 def wsl_path(p: Path) -> str:
@@ -71,7 +90,6 @@ def cutout(image: Path, out: Path, ai_python: str) -> Path:
     from PIL import Image
 
     from eu4unitgen.ai.env import AIJobRunner
-    from eu4unitgen.ref3d.auto import ai_paths
     out.mkdir(parents=True, exist_ok=True)
     rgb = out / "input_rgb.png"
     Image.open(image).convert("RGB").save(rgb)
@@ -129,7 +147,7 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.fresh_mesh import base_arrays
     from eu4unitgen.core.project import default_blender_path
-    out = s1.next_version(Path(root)).resolve()
+    out = next_version(Path(root)).resolve()
     br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=3600)
     base = (eu4() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes()
     van = base_arrays(base)
@@ -563,7 +581,7 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.fresh_mesh import base_arrays, geometry_from_job, write_fresh
     from eu4unitgen.core.project import default_blender_path
-    out = s1.next_version(Path(root)).resolve()
+    out = next_version(Path(root)).resolve()
     (out / "parts").mkdir(parents=True)
     br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=3600)
     base_file = eu4() / "gfx" / "models" / "Units" / "western_generic_01_type1.mesh"
@@ -618,7 +636,6 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     ai_py = ai_python or _config().ai()
     if part_method != "procedural" and ref and ai_py and (out / "parts" / "fitted_points.json").is_file():
         try:
-            from eu4unitgen.ref3d.auto import ai_paths
             loc = part_gen.locate(json.loads((out / "parts" / "fitted_points.json").read_text(encoding="utf-8")),
                                   Image.open(ref["fg"]).convert("L"))
             checks["locate"] = {"mirror": loc["mirror"], "fit_iou": loc["fit_iou"]}
@@ -851,27 +868,27 @@ def deform(br, out: Path, base: bytes) -> dict:
 
 
 def stage(test: str, entries: list[tuple[Path, Path]], names: str) -> dict:
-    """Game versions (``(version dir, subject.json)``) as tiers 1, 2, ... of ``test``; unit names ``<names> ...``;
-    the first's cloth red as the tag's primary when it has a country-colour mask."""
-    from eu4unitgen.ref3d import game
-    horses, prim = [], None
+    """Game versions (``(version dir, subject.json)``: horses) as tiers 1, 2, ... of a new ``build/<test>`` (the next
+    tier vanilla); unit names ``<names> ...``; the first's cloth red as the tag's primary when it has a mask."""
+    from eu4unitgen.core import config
+    from eu4unitgen.ref3d import unitstage
+    folder = config.load().work() / "build" / test
+    if folder.exists():
+        raise SystemExit(f"build/{test} exists: pick a new test name")
+    horses = {}
+    colours = list(unitstage.TEST["unit_colours"])
     for k, (vd, subj) in enumerate(entries):
-        m = json.loads((Path(vd) / "manifest.json").read_text(encoding="utf-8"))
-        s = json.loads(Path(subj).read_text(encoding="utf-8"))
-        horses.append({"base": "cavalry_horse", "geometry": str(Path(m["geometry"]).resolve()),
-                       "textures": {k2: str(Path(v).resolve()) for k2, v in m["textures"].items()},
-                       "rights": s["rights"], "source": f"TRELLIS.2 (M21) from {s.get('original', '?')}, {Path(vd).name}",
-                       "_name": s["name"]})
-        if m["colour"].get("default_primary"):  # its cloth is the country colour's mask: the colours that keep its look
-            horses[-1]["unit_colours"] = [m["colour"]["default_primary"], list(BYZ_GOLD), list(BYZ_WHITE)]
-        if k == 0:
-            prim = m["colour"].get("default_primary")
-    cfg = dict(game.GAME_DEFAULTS)
-    t = dict(cfg["test"], unit_names={u: f"{names} {u.title()}" for u in ("cavalry", "infantry", "artillery")})
-    if prim:
-        t["unit_colours"] = [prim] + t["unit_colours"][1:]
-    cfg["test"] = t
-    return game.stage_test(test, horses, cfg)
+        h = unitstage.horse_entry(Path(vd), json.loads(Path(subj).read_text(encoding="utf-8")))
+        horses[str(k + 1)] = h
+        if k == 0 and h.get("unit_colours"):
+            colours = h["unit_colours"]
+    t = unitstage.TEST
+    sp = {"schema": 1, "name": f"{test}: game horses at tiers 1-{len(horses)}; vanilla at tier {len(horses) + 1}",
+          "set": {"tags": [t["tag"]], "gfx": t["gfx"], "set_name": t["set_name"], "base_gfx": t["base_gfx"],
+                  "unit_colours": {t["tag"]: colours},
+                  "unit_names": {u: f"{names} {u.title()}" for u in ("cavalry", "infantry", "artillery")}},
+          "loadout": {"schema": 1, "horses": horses}, "test": {"sprite_techs": t["sprite_techs"]}}
+    return unitstage.stage(folder, sp, test)
 
 
 def run(image: Path, name: str, rights: str, ai_python: str, emblem: Path | None = None, country_mask: bool = False,

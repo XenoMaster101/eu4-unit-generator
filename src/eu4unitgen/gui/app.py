@@ -28,7 +28,8 @@ from eu4unitgen.core.finishes import FinishError
 from eu4unitgen.core.history import History, Snapshot
 from eu4unitgen.gui.character_page import CharacterPage
 from eu4unitgen.gui.home_page import HomePage
-from eu4unitgen.gui.horse_page import HorsePage
+from eu4unitgen.gui.setup_page import AboutPage, SetupPage
+from eu4unitgen.gui.unit_page import UnitPage
 from eu4unitgen.gui.result_page import ResultPage
 from eu4unitgen.gui.pages import GeneratePage, SettingsPage, TestModPage, UnitSetPage, ValidatePage
 from eu4unitgen.gui.parts_page import PartsPage
@@ -145,13 +146,12 @@ class MainWindow(QMainWindow):
         self.views.addWidget(self.home)
         self.views.addWidget(advanced)
         self.views.addWidget(self.result_page)
-        # M19: a horse from one image (its runs live under the workspace: assets_in/, build/)
-        self.horse_workspace = str(store.value("horse_workspace", "") or Path.cwd()) if store is not None else str(Path.cwd())
-        self.horse_page = HorsePage(self)
-        if store is not None:
-            import os
-            self.horse_page.ai.setText(str(store.value("ai_python", "") or os.environ.get("EU4UNITGEN_AI_PYTHON", "")))
-        self.views.addWidget(self.horse_page)
+        # Track P: a unit from one image (its runs live under the workspace in the settings file), Setup, About
+        self.unit_screen = UnitPage(self)
+        self.setup_page = SetupPage(self)
+        self.about_page = AboutPage(self)
+        for w in (self.unit_screen, self.setup_page, self.about_page):
+            self.views.addWidget(w)
         from eu4unitgen.core.army import Army
 
         self.army = Army()
@@ -177,7 +177,8 @@ class MainWindow(QMainWindow):
         self.theme_mode = apply_theme(app, choice)
         self.home.restyle()
         self.result_page.restyle()
-        self.horse_page.restyle()
+        for w in (self.unit_screen, self.setup_page, self.about_page):
+            w.restyle()
         if self.store is not None:
             self.store.setValue("theme", choice)
 
@@ -185,15 +186,16 @@ class MainWindow(QMainWindow):
     def show_home(self) -> None:
         self.views.setCurrentIndex(0)
 
-    def show_horse(self) -> None:
-        self.views.setCurrentWidget(self.horse_page)
+    def show_unit(self) -> None:
+        self.views.setCurrentWidget(self.unit_screen)
 
-    def store_horse(self, **values) -> None:
-        """Remember the Horse screen's settings (the AI python; the workspace its runs were started in)."""
-        if self.store is not None:
-            self.store.setValue("horse_workspace", self.horse_workspace)
-            for k, v in values.items():
-                self.store.setValue(k, v)
+    show_horse = show_unit  # the Home screen's older link
+
+    def show_setup(self) -> None:
+        self.views.setCurrentWidget(self.setup_page)
+
+    def show_about(self) -> None:
+        self.views.setCurrentWidget(self.about_page)
 
     def show_advanced(self, page=None) -> None:
         self.views.setCurrentIndex(1)

@@ -53,6 +53,29 @@ def _run(cmd: list[str], timeout: float = 20) -> tuple[int, str]:
     return r.returncode, text
 
 
+def top_programs(n: int) -> list[tuple[str, float]]:
+    """The ``n`` programs using the most RAM (summed by name), or [] if the system won't say."""
+    use: dict[str, float] = {}
+    try:
+        if sys.platform == "win32":
+            r = subprocess.run(["tasklist", "/fo", "csv", "/nh"], capture_output=True, text=True, timeout=20,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            for line in r.stdout.splitlines():
+                f = [c.strip('"') for c in line.split('","')]
+                if len(f) >= 5:
+                    kb = int("".join(ch for ch in f[4] if ch.isdigit()) or 0)
+                    use[f[0]] = use.get(f[0], 0) + kb / 2 ** 20
+        else:
+            r = subprocess.run(["ps", "-eo", "rss=,comm="], capture_output=True, text=True, timeout=20)
+            for line in r.stdout.splitlines():
+                kb, _, name = line.strip().partition(" ")
+                if kb.isdigit():
+                    use[name] = use.get(name, 0) + int(kb) / 2 ** 20
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    return sorted(use.items(), key=lambda kv: -kv[1])[:n]
+
+
 def eu4_running() -> bool:
     if sys.platform == "win32":
         _, out = _run(["tasklist", "/fo", "csv", "/nh"])
@@ -62,11 +85,11 @@ def eu4_running() -> bool:
 
 
 def check_ram() -> Check:
-    from eu4unitgen.ref3d import job, memory
+    from eu4unitgen.ref3d import memory
     total, free = memory.ram_gb()
     if free >= NEED_RAM_GB:
         return Check("ram", True, f"{free:.1f} of {total:.1f} GB RAM free.")
-    top = ", ".join(f"{n} ({gb:.1f} GB)" for n, gb in job.top_programs(4))
+    top = ", ".join(f"{n} ({gb:.1f} GB)" for n, gb in top_programs(4))
     return Check("ram", False, f"Only {free:.1f} of {total:.1f} GB RAM is free; a run needs about {NEED_RAM_GB:.0f} GB.",
                  "Close programs you don't need" + (f" (the largest now: {top})" if top else "") + ", then check again.",
                  blocks=False)

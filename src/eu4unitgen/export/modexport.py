@@ -106,13 +106,31 @@ def keep_graphics(paths: list[str], name: str, gfx: str, tier: int, rules) -> tu
     return keep, rewrite, notes
 
 
-def entities_only(data: bytes, gfx: str, tier: int) -> tuple[bytes | None, int, int]:
-    """An .asset file cut down to ``gfx``'s cavalry entity at ``tier`` and its rider. -> (the text or None, kept,
-    of how many)."""
-    wanted = {f"{gfx}_CAVALRY_{tier}".lower(), f"{gfx}_CAVALRY_{tier}_rider".lower()}
-    blocks = _entity_blocks(data.decode("utf-8-sig"))
-    chosen = [b for n, b in blocks if n.lower() in wanted]
-    return (("\n".join(chosen) + "\n").encode("utf-8") if chosen else None), len(chosen), len(blocks)
+def entities_only(data: bytes, gfx: str, tier: int, tag: str) -> tuple[bytes | None, int, int]:
+    """Entity definitions (the set's .asset files joined) cut down to the tag's cavalry at ``tier``, its rider and
+    every entity they attach (the parts), the first two renamed to the culture's own (``<gfx>_CAVALRY_<tier>`` and its
+    ``_rider``), which the culture's countries without a pack of their own show. -> (the text or None, kept, of how
+    many)."""
+    blocks = dict(_entity_blocks(data.decode("utf-8-sig")))
+    horse, rider = f"{tag}_CAVALRY_{tier}", f"{tag}_CAVALRY_{tier}_rider"
+    if horse not in blocks:
+        return None, 0, len(blocks)
+    keep, todo = [], [horse]
+    while todo:
+        n = todo.pop()
+        if n in keep or n not in blocks:
+            continue
+        keep.append(n)
+        for target in re.findall(r'\b\w+\s*=\s*"([^"]+)"', " ".join(re.findall(r"attach\s*=\s*\{[^}]*\}", blocks[n]))):
+            todo.append(target)
+    rename = {horse: f"{gfx}_CAVALRY_{tier}", rider: f"{gfx}_CAVALRY_{tier}_rider"}
+    out = []
+    for n in keep:
+        b = blocks[n]
+        for old, new_name in rename.items():
+            b = b.replace(f'"{old}"', f'"{new_name}"')
+        out.append(b)
+    return ("\n".join(out) + "\n").encode("utf-8"), len(keep), len(blocks)
 
 
 def _entity_blocks(text: str) -> list[tuple[str, str]]:
@@ -175,17 +193,24 @@ def add_to_mod(preview_spec: Path, subject: str, mode: str, tag: str, gfx: str, 
     out = AddResult(mode, name, None)
     if mode == "achievement_safe":
         keep, _, _ = keep_graphics([f.path for f in plan.files], name, gfx, tier, rules)
-        files = []
+        files, assets = [], []
         for f in plan.files:
             if f.path not in keep:
                 continue
             if f.path.lower().endswith(".asset") and "/gfx/entities/" in f.path.lower():
-                data, k, n = entities_only(f.data, gfx, tier)
-                if data is None:
-                    continue
-                f.data = data
-                out.notes.append(f"{f.path}: {k} of {n} entities kept (the {gfx} cavalry at tier {tier} and its rider)")
+                assets.append(f)
+                continue
             files.append(f)
+        if assets:  # every entity file joined, cut down to the unit, written as one file
+            joined = b"\n".join(a.data for a in assets)
+            data, k, n = entities_only(joined, gfx, tier, tag)
+            if data is None:
+                out.notes.append(f"validation: no {tag}_CAVALRY_{tier} entity was generated")
+                return out
+            assets[0].data = data
+            assets[0].path = f"{name}/gfx/entities/{name}_{gfx}.asset"
+            files.append(assets[0])
+            out.notes.append(f"{k} of {n} entities kept: the unit as {gfx}_CAVALRY_{tier}, its rider and parts")
         plan.files = files
         plan.manifest["files"] = {p: e for p, e in plan.manifest.get("files", {}).items() if p in {f.path for f in files}}
         # the validation ran on the whole set: its errors about what this mode leaves out don't apply (the sprite

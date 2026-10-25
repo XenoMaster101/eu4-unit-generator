@@ -19,6 +19,9 @@ import sys
 from pathlib import Path
 
 GOLD, WHITE = (212, 175, 55), (230, 225, 210)  # a masked unit's secondary and tertiary colours
+# the preview's test mod: HDA, the only 1444 tag no sprite pack touches (in-game tests 3-35), on a new culture
+TEST = {"tag": "HDA", "gfx": "hellenicgfx", "set_name": "cataphract_test", "base_gfx": "westerngfx",
+        "sprite_techs": [2, 3, 4], "unit_colours": [[40, 60, 160], [220, 190, 40], [230, 225, 210]]}
 ROWS = {"close": {}, "near": {"ortho_k": 0.6, "target": [0, 0, 4.5]},
         "map": {"ortho_k": 3.0, "width": 600, "height": 420}}
 VIEWS = {"side": (-1.0, 0.0), "three_quarter": (-0.7071, 0.7071), "front": (0.0, 1.0)}

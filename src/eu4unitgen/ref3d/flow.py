@@ -88,13 +88,13 @@ def set_edits(folder: Path, edits: dict) -> str | None:
 
 # ------------------------------------------------------------------ status
 def read_status(folder: Path) -> dict | None:
-    from eu4unitgen.ref3d import job
-    return job.read_status(folder)
+    from eu4unitgen.ref3d import runstate
+    return runstate.read_status(folder)
 
 
 def status(folder: Path) -> dict | None:
-    from eu4unitgen.ref3d import job
-    return job.status(folder)
+    from eu4unitgen.ref3d import runstate
+    return runstate.status(folder)
 
 
 def _write(folder: Path, st: dict) -> None:
@@ -195,7 +195,7 @@ def stage_finish(folder: Path, req: dict, cfg) -> dict:
 def stage_preview(folder: Path, req: dict, cfg) -> dict:
     """Staged with vanilla at the next tier, the gallery (close, near, map zoom), the seated clearance, the quality
     report and the result sheet."""
-    from eu4unitgen.ref3d import game, quality, unitstage
+    from eu4unitgen.ref3d import quality, unitstage
     fin = folder / "finished"
     m = json.loads((fin / "manifest.json").read_text(encoding="utf-8"))
     subj = json.loads((folder / "subject.json").read_text(encoding="utf-8"))
@@ -214,7 +214,7 @@ def stage_preview(folder: Path, req: dict, cfg) -> dict:
         shutil.rmtree(pv)
     names = unitstage.unit_names(req["name"])
     sp = unitstage.spec(f"{req['name']}: preview (tier {tier}; vanilla at tier {tier + 1})", tier, horse, rider, names,
-                        game.GAME_DEFAULTS["test"])
+                        unitstage.TEST)
     st = unitstage.stage(pv, sp, "preview")
     if st["exit"] != 0:
         raise RuntimeError(f"staging the preview failed; see {pv / 'log.txt'}")
@@ -292,7 +292,7 @@ RUN = {"cutout": stage_cutout, "trellis": stage_trellis, "build": stage_build, "
 # ------------------------------------------------------------------ the run (a detached process)
 def go(folder: Path) -> dict:
     from eu4unitgen.core import checks, config
-    from eu4unitgen.ref3d.job import _Status
+    from eu4unitgen.ref3d.runstate import Status as _Status
     folder = Path(folder)
     req = request(folder)
     cfg = config.load()
