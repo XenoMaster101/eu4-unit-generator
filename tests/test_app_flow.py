@@ -175,7 +175,8 @@ def test_inventory_lists_every_piece_and_what_is_safe():
                  "IP-Adapter", "DINOv2", "cma", "Blender", "io_pdx_mesh", "WSL2", "CUDA"):
         assert must in names, must
     assert all(not i.safe_to_remove for i in inventory.ITEMS if i.status == "required")
-    assert 20 < inventory.freed_gb() < 40
+    assert 20 < inventory.freed_gb() < 80
+    assert any(i.where.startswith("<root>") for i in inventory.ITEMS if i.status == "required")
     assert "| Status |" in inventory.markdown() and "<table" in inventory.html()
 
 

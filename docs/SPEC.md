@@ -3124,41 +3124,71 @@ The user's brief after test 35: turn every lesson into a built-in rule, give it 
 - **Tests:** `test_setup_plans_need_no_terminal` (every step has commands or a download, no `-NoExit`, no `sudo`, Ubuntu set up as root, admin steps marked, BiRefNet's URL, the pinned TRELLIS.2 commit).
 - **Fresh-user test:** the package installed quietly into a new folder (`install.ps1 -Quiet -NoSystem`, which skips the shortcuts and the Apps entry on the author's PC): Python unpacked and its signature checked, pip, the app, the libraries and the start check all passed, in 30 s with pip's cache. **Not yet:** the wizard window, the shortcuts, the Apps entry and the uninstaller on a clean Windows. They wait for Windows Sandbox, which is enabled but needs a restart. The Sandbox has no GPU and no WSL, so the AI steps can't be tested there.
 
+#### Track P5: one self-contained folder (the user, 2026-10-25)
+- **The layout** (`core/layout.py`): everything under ONE folder chosen at install, default `D:\EU4 Unit Generator` (no D: drive: the fixed drive with most free space):
+
+  | Folder | What |
+  |---|---|
+  | `app` | the program, its own signed Python (python.org NuGet 3.12.10), `layout.json` (the marker), the uninstaller, the icon, LICENSE |
+  | `tools` | portable Blender 4.2.23 with a `portable` folder: its settings and io_pdx_mesh stay inside (verified: `resource_path('USER')` is `tools\blender\portable`) |
+  | `ai` | the Windows AI environment (`ai_env`), the TRELLIS.2 code, `weights\`, `rembg_models\`, `hf_home\` (Hugging Face's cache) |
+  | `wsl` | the Linux disk, registered as the WSL distribution `EU4UnitGen` |
+  | `work` | `references\`, `projects\`, `result sheets\`, `exported mods\` |
+  | `settings` | `settings.json`, `gui.ini` (the window's state: no longer the registry), `logs\`, `tmp\` |
+- **How the root is found:** `EU4UNITGEN_ROOT`; else the installed app's own folder (a parent holding `app\layout.json`); else a checkout's `.eu4unitgen-root` file (git-ignored: the developer's checkout uses the installed tools, AI parts and settings; its work stays in `assets_in`/`build`). No root: the older paths (`%APPDATA%`, Documents).
+- **Nothing else on the PC** but the shortcuts and the Apps entry. At start the app points TEMP/TMP, pip's cache and `HF_HOME` into the root (`layout.use_root_temp`; day-old leftovers in `settings\tmp` are cleared). Two exceptions are Windows' own: the WSL feature, and `%USERPROFILE%\.wslconfig` (WSL reads it only there; written only if missing). The marker records whether the app registered the distribution and wrote `.wslconfig`, so the uninstaller removes only those.
+- **WSL commands quote every path** (`trellis.wsl_job_cmd`; the root has spaces). The wizard installs Ubuntu with `wsl --install -d Ubuntu-26.04 --location <root>\wsl --name EU4UnitGen` (WSL 3.0.3 supports both flags).
+- **The download** (`build_package.py`): one zip unzipping to `EU4 Unit Generator\` with only `Install EU4 Unit Generator.cmd`, `README.txt`, `LICENSE.txt` and `files\`. Downloaded (internet-marked) scripts still run in PowerShell's full language mode under Smart App Control (tested with a hand-set Zone.Identifier), so the Windows Forms installer works there.
+- **eu4unitgen-setup.exe:** Inno Setup 6.7.3 (portable, in the checkout's `.tools\`) builds a classic wizard (licence, folder, shortcuts) around the same `install.ps1`: one install logic, one uninstaller. It isn't signed, so Smart App Control refuses it; it's for PCs with Smart App Control off. (The PyInstaller spec in `packaging/windows/exe/` is no longer needed: the embedded Python replaces a frozen build.)
+- **What signing would cost and change:**
+  - **Azure Trusted Signing**, about $10 a month (Basic). It signs with a Microsoft-issued certificate, so Smart App Control and SmartScreen accept the exe once it has reputation. It needs an identity check: organisations with 3+ years of history, or individuals in supported countries (US/Canada as of 2025; check the current terms before buying).
+  - **A classic OV code-signing certificate**, about $200-400 a year, on a hardware token or cloud HSM (required since 2023). It works the same way, and SmartScreen reputation builds with downloads.
+  - **What changes:** with a signed setup.exe (and signed `install.ps1`/`uninstall.ps1`), Smart App Control users could use the exe; the zip stays as a fallback. Nothing in the layout or the app changes. Add the `SignTool=` line in `setup.iss` and sign at build time.
+- **The uninstaller** (`<root>\app\uninstall.ps1`, from Windows' Apps list): refuses while the app runs. It asks once (work kept unless ticked), then removes the shortcuts, the Apps entry, `wsl --unregister EU4UnitGen` (only if the marker says the app registered it), `.wslconfig` (same rule), and everything in the root except `work\` if kept.
+- **The author's PC migrated** (2026-10-25), by moving, not downloading again:
+  - the app installed into `D:\EU4 Unit Generator`; the shortcuts and Apps entry now point there;
+  - Blender 4.2 copied from Program Files into `tools\blender` (6 s); io_pdx_mesh copied and enabled in its portable preferences;
+  - the AI parts moved within D: (renames): TRELLIS.2, the four weights, BiRefNet, CPython 3.10, the environment (`triposg_env` renamed `ai_env`, its `pyvenv.cfg` repointed); torch 2.14.1 and CUDA work from there;
+  - the distribution "Ubuntu" exported as a VHD into `wsl\` (37.4 GB, 59 s) and registered in place as `EU4UnitGen`: the same user (`/etc/wsl.conf`), the TRELLIS.2 environment and the GPU work;
+  - the settings written into `settings\`; the marker records `EU4UnitGen` and `.wslconfig` (written for this project in October) as the app's;
+  - **the regression set through the new root: nothing got worse** (run 20261025-102411).
+- **Tests:** `tests/test_layout.py` (every path inside the root, Blender and the distribution from the root, temp and caches inside it, the plans stay inside it, WSL commands quote spaces, the Blender zip's checksum).
+
 ### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
 
 | Tool, model or library | For | Where | Size | Licence | Status | Safe to remove |
 |---|---|---|---|---|---|---|
-| Python 3.14 (python.org) | runs the app from the source checkout (the installed app brings its own Python) | `C:\Python314` | 174 MB | PSF | required | no |
-| Python 3.12.10 (python.org NuGet build, signed) | the installed app's own Python; also makes the Windows AI environment (installed by install.ps1) | `<app>\python` | 41 MB | PSF | required | no |
-| PySide6 6.12, Pillow, Jinja2 | the app's window, images and DDS, script templates | `<app>\python\Lib\site-packages (dev: .venv)` | 717 MB | LGPL-3.0 / MIT-CMU / BSD-3 | required | no |
-| Blender 4.2 LTS | every mesh job, run as a separate program | `C:\Program Files\Blender Foundation\Blender 4.2` | 973 MB | GPL-2.0-or-later | required | no |
-| io_pdx_mesh 0.91 (Blender extension) | reads and writes EU4 .mesh files | `%APPDATA%\Blender Foundation\Blender\4.2\extensions\user_default\io_pdx_mesh` | 2 MB | GPL-3.0-or-later | required | no |
-| WSL2 + Ubuntu 26.04 | where TRELLIS.2 runs (the 38 GB disk holds the three items below; it doesn't shrink by itself when files inside are deleted) | `%LOCALAPPDATA%\wsl\...\ext4.vhdx` | 38.0 GB | Microsoft / open source | required | no |
-| CUDA toolkit 12.9 | builds TRELLIS.2's GPU extensions (needed to rebuild the extensions; whether TRELLIS.2 needs it while running is UNVERIFIED, so keep it) | `WSL /usr/local/cuda-12.9` | 7.3 GB | NVIDIA CUDA EULA | required | no |
-| TRELLIS.2 environment (torch 2.7 cu128, xformers, transformers 4.57.1, CuMesh, FlexGEMM, o-voxel, utils3d) | image to 3D model | `WSL ~/eu4unitgen_ai/trellis2_env` | 7.2 GB | BSD / MIT / Apache-2.0 | required | no |
-| TRELLIS.2 extension build tree | the sources CuMesh, FlexGEMM and o-voxel were built from (installed as copies: only a rebuild needs it (setup re-downloads it)) | `WSL ~/eu4unitgen_ai/ext` | 1.1 GB | MIT / MPL-2.0 (Eigen) | optional | yes |
-| uv cache in WSL | package download cache (frees space inside the WSL disk, not on C: until the disk is compacted) | `WSL ~/eu4unitgen_ai/uv_cache` | 778 MB | - | optional | yes |
-| TRELLIS.2 code (commit 75fbf01) | TRELLIS.2's model code, read by the WSL environment | `D:\eu4unitgen_ai\TRELLIS.2` | 41 MB | MIT | required | no |
-| TRELLIS.2-4B weights | the 3D model | `D:\eu4unitgen_ai\weights\TRELLIS.2-4B` | 16.0 GB | MIT | required | no |
-| TRELLIS-image-large (decoder) | TRELLIS.2's sparse-structure decoder | `D:\eu4unitgen_ai\weights\TRELLIS-image-large` | 143 MB | MIT | required | no |
-| DINOv3 ViT-L/16 | TRELLIS.2's image encoder | `D:\eu4unitgen_ai\weights\dinov3-vitl16-pretrain-lvd1689m` | 1.2 GB | DINOv3 License (gated) | required | no |
-| SAM 2.1 hiera-large | cuts each part out of the reference | `D:\eu4unitgen_ai\weights\sam2.1-hiera-large` | 881 MB | Apache-2.0 | required | no |
-| BiRefNet-general (ONNX, via rembg) | cuts the subject out of the image | `D:\eu4unitgen_ai\rembg_models` | 952 MB | MIT | required | no |
-| Windows AI environment "triposg_env" (torch 2.14 cu126, transformers 5.20, rembg, onnxruntime-gpu, scipy, opencv) | runs BiRefNet and SAM 2 (misnamed: made for TripoSG; it also carries packages only TripoSG used (diffusers, peft, pymeshlab, numba, accelerate). A clean environment would be ~3 GB) | `D:\eu4unitgen_ai\triposg_env` | 5.1 GB | BSD / Apache-2.0 / MIT | required | no |
-| CPython 3.10 (uv) | the base Python of the Windows AI environment | `D:\eu4unitgen_ai\python\cpython-3.10.19-windows-x86_64-none` | 72 MB | PSF | required | no |
-| uv | makes Python environments (setup) | `D:\eu4unitgen_ai\tools\uv` | 61 MB | MIT / Apache-2.0 | optional | no |
-| uv cache (Windows) | package download cache | `D:\eu4unitgen_ai\uv_cache` | 184 MB | - | optional | yes |
+| Python 3.12.10 (python.org NuGet build, signed) | the app's own Python; also makes the Windows AI environment (installed by the installer) | `<root>\app\python` | 41 MB | PSF | required | no |
+| PySide6 6.12, Pillow, Jinja2 | the app's window, images and DDS, script templates | `<root>\app\python\Lib\site-packages` | 717 MB | LGPL-3.0 / MIT-CMU / BSD-3 | required | no |
+| Blender 4.2.23 LTS (portable) | every mesh job, run as a separate program (its settings and add-ons in tools\blender\portable) | `<root>\tools\blender` | 963 MB | GPL-2.0-or-later | required | no |
+| io_pdx_mesh 0.91 (Blender extension) | reads and writes EU4 .mesh files | `<root>\tools\blender\portable\extensions\user_default\io_pdx_mesh` | 2 MB | GPL-3.0-or-later | required | no |
+| WSL2 + Ubuntu 26.04 (distribution EU4UnitGen) | where TRELLIS.2 runs (the disk holds the five items below; it doesn't shrink by itself when files inside are deleted) | `<root>\wsl\ext4.vhdx` | 37.4 GB | Microsoft / open source | required | no |
+| CUDA toolkit 12.9 | builds TRELLIS.2's GPU extensions; they load its runtime | `Linux disk /usr/local/cuda-12.9` | 7.3 GB | NVIDIA CUDA EULA | required | no |
+| CUDA toolkit 12.8 | an earlier install; nothing links to it (/usr/local/cuda points at 12.9) | `Linux disk /usr/local/cuda-12.8` | 6.7 GB | NVIDIA CUDA EULA | unused | yes |
+| TRELLIS.2 environment (torch 2.7 cu128, xformers, transformers 4.57.1, CuMesh, FlexGEMM, o-voxel, utils3d) | image to 3D model | `Linux disk ~/eu4unitgen_ai/trellis2_env` | 7.2 GB | BSD / MIT / Apache-2.0 | required | no |
+| TRELLIS.2 extension build tree | the sources CuMesh, FlexGEMM and o-voxel were built from (installed as copies: only a rebuild needs it (setup re-downloads it)) | `Linux disk ~/eu4unitgen_ai/ext` | 1.1 GB | MIT / MPL-2.0 (Eigen) | optional | yes |
+| uv cache in WSL | package download cache | `Linux disk ~/eu4unitgen_ai/uv_cache` | 7.8 GB | - | optional | yes |
+| TRELLIS.2 code (commit 75fbf01) | TRELLIS.2's model code, read by the WSL environment | `<root>\ai\TRELLIS.2` | 41 MB | MIT | required | no |
+| TRELLIS.2-4B weights | the 3D model | `<root>\ai\weights\TRELLIS.2-4B` | 16.0 GB | MIT | required | no |
+| TRELLIS-image-large (decoder) | TRELLIS.2's sparse-structure decoder | `<root>\ai\weights\TRELLIS-image-large` | 143 MB | MIT | required | no |
+| DINOv3 ViT-L/16 | TRELLIS.2's image encoder | `<root>\ai\weights\dinov3-vitl16-pretrain-lvd1689m` | 1.2 GB | DINOv3 License (gated) | required | no |
+| SAM 2.1 hiera-large | cuts each part out of the reference | `<root>\ai\weights\sam2.1-hiera-large` | 881 MB | Apache-2.0 | required | no |
+| BiRefNet-general (ONNX, via rembg) | cuts the subject out of the image | `<root>\ai\rembg_models` | 952 MB | MIT | required | no |
+| Windows AI environment (torch 2.14 cu126, transformers 5.20, rembg, onnxruntime-gpu, scipy, opencv) | runs BiRefNet and SAM 2 (the author's was made for TripoSG and still carries packages only TripoSG used (diffusers, peft, pymeshlab, numba, accelerate); a new install's is ~3 GB) | `<root>\ai\ai_env` | 5.1 GB | BSD / Apache-2.0 / MIT | required | no |
+| CPython 3.10 (uv's build) | the base Python of the author's AI environment (a new install bases it on the app's own Python instead) | `<root>\ai\python\cpython-3.10.19-windows-x86_64-none` | 72 MB | PSF | required | no |
 | Windows TRELLIS.2 environment | the first TRELLIS.2 build, on Windows (blocked by Smart App Control) (also holds nvdiffrast and nvdiffrec (NVIDIA: research or evaluation only), which the pipeline never uses) | `D:\eu4unitgen_ai\trellis2_env` | 6.6 GB | mixed | unused | yes |
-| CPython 3.11 (uv) | base of the Windows TRELLIS.2 environment | `D:\eu4unitgen_ai\python\cpython-3.11.14-windows-x86_64-none` | 82 MB | PSF | unused | yes |
-| TRELLIS.2 Windows wheels | the Windows build's wheels | `D:\eu4unitgen_ai\wheels` | 6 MB | MIT | unused | yes |
+| uv and its cache (Windows) | made the first Python environments | `D:\eu4unitgen_ai\tools, D:\eu4unitgen_ai\uv_cache` | 11.8 GB | MIT / Apache-2.0 | unused | yes |
+| CPython 3.11 (uv) and the TRELLIS.2 Windows wheels | base of the Windows TRELLIS.2 environment | `D:\eu4unitgen_ai\python, D:\eu4unitgen_ai\wheels` | 92 MB | PSF / MIT | unused | yes |
 | TripoSG weights and code | the hand-built master pipeline's 3D shells (archived) | `D:\eu4unitgen_ai\weights\TripoSG, D:\eu4unitgen_ai\TripoSG` | 7.5 GB | MIT | unused | yes |
 | SDXL inpainting | filled hidden views for the master pipeline (archived) | `D:\eu4unitgen_ai\weights\sdxl_inpaint` | 6.5 GB | CreativeML Open RAIL++-M | unused | yes |
 | SigLIP 2 so400m | labelled parts for the self-reading pipeline (archived) | `D:\eu4unitgen_ai\weights\siglip2-so400m-patch14-384` | 4.3 GB | Apache-2.0 | unused | yes |
+| Python 3.14 (python.org) | runs the app and tests from the source checkout | `C:\Python314` | 174 MB | PSF | development | no |
+| Inno Setup 6.7.3 (portable) | builds eu4unitgen-setup.exe (portable: no Apps entry, no registry) | `<checkout>\.tools\innosetup` | 20 MB | Inno Setup License (free) | development | no |
 | LPIPS | perceptual metric, in TRELLIS.2's requirement list (not found in either environment) | `not in any environment now` | - | BSD-2 | unused | no |
 | ControlNet depth SDXL, IP-Adapter SDXL, DINOv2, cma (CMA-ES) | proposed for the master pipeline (SPEC M1-M2) | `-` | - | RAIL++ / Apache-2.0 / Apache-2.0 / BSD | never installed | no |
 | texconv (DirectXTex) | optional DDS encoder (Pillow writes the DDS files) | `-` | - | MIT | never installed | no |
 
-Safe to remove in all: about 27.1 GB (nothing is removed until the user confirms).
+Safe to remove in all: about 52.4 GB (nothing is removed until the user confirms).
 - **The emblem-crispness check (the user, 2026-10-25).** A shield passes only if its emblem, traced from its own front view, overlaps the crop's emblem by at least 0.5 (`part_gen.emblem_match`, the best over small shifts and scales).
   - The cataphract's TRELLIS.2 shield scored 0.41 and is rejected. The crop-traced kite scores 0.53 and is what the pipeline now builds; it looks like test 35's kite (sheet `build/shield_compare_traced.png`).
   - Its colour distance (24.7) is over 18, so it shows as flagged in the report.
