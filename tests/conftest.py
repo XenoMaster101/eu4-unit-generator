@@ -44,3 +44,7 @@ def _private_config(tmp_path, monkeypatch):
     """Tests never read or write the user's real config folder (their own vocabulary.json)."""
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    # nor the installed app's root (core.layout): the checkout's .eu4unitgen-root points at the real one
+    from eu4unitgen.core import layout
+    monkeypatch.delenv("EU4UNITGEN_ROOT", raising=False)
+    monkeypatch.setattr(layout, "_checkout", lambda: None)
