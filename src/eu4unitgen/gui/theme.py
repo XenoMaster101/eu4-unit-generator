@@ -1,32 +1,68 @@
-"""The app's own look (Track F): Qt's Fusion style with a full palette from named colour tokens,
-light or dark, so the Windows theme (dark mode, accent colours) can't leak into a widget. Every
-stylesheet in the GUI takes its colours from ``tokens()``; nothing relies on the system's
-defaults. "system" picks light or dark once, at start-up, from the OS colour scheme.
+"""The app's own look: Qt's Fusion style with a full palette from named colour tokens, so the Windows theme (dark
+mode, accent colours) can't leak into a widget. Every stylesheet in the GUI takes its colours from ``tokens()``;
+nothing relies on the system's defaults.
+
+Two designs, both dark and warm, for a game about historical warfare (the user picks one; SPEC Track L design pass):
+  campaign   deep charcoal-brown with a faint grain, gold accents, parchment cards, Palatino headings
+  admiralty  deep navy with a faint grain, bronze accents, parchment cards, Georgia headings
+Each has its own status colours for the dark ground and for the parchment cards (``card_ok`` etc.), every pair
+checked for contrast (tests/test_theme.py). "system", "light" and "dark" (older settings) mean the default design.
 """
 from __future__ import annotations
+
+import tempfile
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QStyleFactory
 
-THEMES = ("system", "light", "dark")
-LIGHT = {
-    "window": "#f6f5f2", "surface": "#ffffff", "alt": "#efece6", "text": "#1f1f1f", "muted": "#555555",
-    "placeholder": "#6f6f6f", "border": "#bdb6a8", "chip": "#ece7dc", "chip_border": "#cfc6b3",
-    "image_chip": "#dfeaf6", "image_border": "#a9c1dc", "left_chip": "#fbe4dd", "left_border": "#e2b2a4",
-    "accent": "#b0412b", "accent_text": "#ffffff", "accent_off": "#c8a59d", "accent_fg": "#a33a25", "link": "#1f56a8",
-    "ok": "#1f6b2c", "warn": "#9a4d00", "error": "#b3261e", "highlight": "#2a5fb0", "highlight_text": "#ffffff",
-    "disabled": "#8e8e8e", "tooltip": "#fffbe6",
+DESIGNS = ("campaign", "admiralty")
+DEFAULT = "campaign"
+THEMES = DESIGNS  # what Help offers
+
+CAMPAIGN = {
+    # the ground: charcoal-brown, a top-to-bottom gradient with grain (``backdrop``)
+    "window": "#221c17", "window_top": "#2e251e", "window_bottom": "#17120e", "grain": "#000000",
+    "surface": "#2c241d", "alt": "#372d24", "text": "#efe6d2", "muted": "#c2b296", "placeholder": "#a8987c",
+    "border": "#5e4c38", "topbar": "#15110d", "topbar_line": "#8a6d3b",
+    # gold: the one primary action, the selected item, focus
+    "accent": "#c9a14a", "accent_hover": "#dcb55e", "accent_text": "#1d160e", "accent_off": "#6b5a3a",
+    "accent_fg": "#e3c172", "link": "#e3c172", "secondary": "#e3c172",
+    "ok": "#93cf7a", "warn": "#f0b85a", "error": "#f08a7a", "danger": "#e7826f",
+    "highlight": "#8a6d3b", "highlight_text": "#fff8e8", "disabled": "#8c7f6a", "tooltip": "#372d24",
+    # parchment panels and cards
+    "card": "#ecdfc4", "card_hover": "#f3e8d1", "card_text": "#2a2016", "card_muted": "#5c4a35",
+    "card_border": "#b99c69", "card_selected": "#e2cf9f",
+    "card_ok": "#2f6a26", "card_warn": "#8a5400", "card_error": "#9c2b1f",
+    "chip": "#d9c69e", "chip_text": "#3a2c1c", "chip_border": "#b99c69",
+    "image_chip": "#d2dbc2", "image_border": "#a8b48c", "left_chip": "#e8c7b4", "left_border": "#c59577",
+    # thumbnails: a lit parchment well
+    "thumb_inner": "#f6eedd", "thumb_outer": "#c9b38a",
+    "serif": "Palatino Linotype|Book Antiqua|Palatino|URW Palladio L|Georgia|DejaVu Serif|serif",
 }
-DARK = {
-    "window": "#1f2023", "surface": "#2a2b2f", "alt": "#323338", "text": "#ececec", "muted": "#b4b4b4",
-    "placeholder": "#ababab", "border": "#55565c", "chip": "#3a3b40", "chip_border": "#5a5b62",
-    "image_chip": "#23384f", "image_border": "#3f6390", "left_chip": "#4a2b25", "left_border": "#83493c",
-    "accent": "#b84a32", "accent_text": "#ffffff", "accent_off": "#6e4d46", "accent_fg": "#ff9a80", "link": "#8ab4f8",
-    "ok": "#7fd18b", "warn": "#f0b45a", "error": "#ff8a80", "highlight": "#3d6fc4", "highlight_text": "#ffffff",
-    "disabled": "#7c7c7c", "tooltip": "#3a3b40",
+ADMIRALTY = {
+    "window": "#141c29", "window_top": "#1c2738", "window_bottom": "#0d131c", "grain": "#000000",
+    "surface": "#1b2535", "alt": "#233046", "text": "#e9edf3", "muted": "#b5bfcd", "placeholder": "#93a0b3",
+    "border": "#3e4e66", "topbar": "#0b1018", "topbar_line": "#9a6b3c",
+    "accent": "#c48a4c", "accent_hover": "#d69e60", "accent_text": "#1a1009", "accent_off": "#5d4a38",
+    "accent_fg": "#e2ad72", "link": "#e2ad72", "secondary": "#e2ad72",
+    "ok": "#8fd19a", "warn": "#f0bc66", "error": "#f2958a", "danger": "#ee8a7d",
+    "highlight": "#855a30", "highlight_text": "#fff7ee", "disabled": "#7c8799", "tooltip": "#233046",
+    "card": "#ebe3d1", "card_hover": "#f3ede0", "card_text": "#1f2530", "card_muted": "#4c5566",
+    "card_border": "#b39a74", "card_selected": "#e0d0ad",
+    "card_ok": "#2a6630", "card_warn": "#855400", "card_error": "#9a2c24",
+    "chip": "#d7cbb1", "chip_text": "#2b3240", "chip_border": "#b39a74",
+    "image_chip": "#cdd8d0", "image_border": "#9fb2a6", "left_chip": "#e6c9b8", "left_border": "#c4977b",
+    "thumb_inner": "#f4eee2", "thumb_outer": "#bdae90",
+    "serif": "Georgia|Constantia|Cambria|DejaVu Serif|Liberation Serif|serif",
 }
-_current = dict(LIGHT)
+_DESIGN = {"campaign": CAMPAIGN, "admiralty": ADMIRALTY}
+# the older names, kept so tests and settings that ask for them still work: both mean the default design
+LIGHT = CAMPAIGN
+DARK = CAMPAIGN
+_current = dict(CAMPAIGN)
+_name = "campaign"
 
 
 def tokens() -> dict[str, str]:
@@ -34,15 +70,51 @@ def tokens() -> dict[str, str]:
     return _current
 
 
+def design() -> str:
+    return _name
+
+
 def resolve(choice: str) -> str:
-    """"light" or "dark": a choice of "system" asks the OS once."""
-    if choice in ("light", "dark"):
-        return choice
-    app = QApplication.instance()
-    try:
-        return "dark" if app is not None and app.styleHints().colorScheme() == Qt.ColorScheme.Dark else "light"
-    except AttributeError:  # Qt before 6.5: no colour scheme
-        return "light"
+    """The design for a choice: a design's name, else the default."""
+    return choice if choice in DESIGNS else DEFAULT
+
+
+def serif(t: dict[str, str] | None = None) -> str:
+    """The first heading font of the design's list that this computer has."""
+    from PySide6.QtGui import QFontDatabase
+    have = set(QFontDatabase.families())
+    names = (t or _current)["serif"].split("|")
+    return next((n for n in names if n in have), "serif")
+
+
+def backdrop(t: dict[str, str] | None = None) -> str:
+    """The pages' ground: the design's vertical gradient with a faint grain and a soft vignette, drawn once per design
+    into the temp folder (a stylesheet stretches it to the page)."""
+    t = t or _current
+    key = t["window_top"].lstrip("#") + t["window_bottom"].lstrip("#")
+    path = Path(tempfile.gettempdir()) / f"eu4unitgen_ground_{key}.png"
+    if not path.is_file():
+        import random
+
+        from PIL import Image, ImageFilter
+
+        w, h = 640, 400
+        top, bot = QColor(t["window_top"]), QColor(t["window_bottom"])
+        im = Image.new("RGB", (w, h))
+        px = im.load()
+        rnd = random.Random(7)
+        for y in range(h):
+            f = y / (h - 1)
+            base = [top.red() + (bot.red() - top.red()) * f, top.green() + (bot.green() - top.green()) * f,
+                    top.blue() + (bot.blue() - top.blue()) * f]
+            for x in range(w):
+                dx, dy = (x - w / 2) / (w / 2), (y - h * 0.4) / (h / 2)
+                v = max(0.0, 1.0 - 0.18 * (dx * dx + dy * dy))  # the vignette
+                n = rnd.uniform(-4.0, 4.0)  # the grain
+                px[x, y] = tuple(max(0, min(255, int(c * v + n))) for c in base)
+        im = im.filter(ImageFilter.GaussianBlur(0.4))
+        im.save(path)
+    return path.as_posix()
 
 
 def palette(t: dict[str, str]) -> QPalette:
@@ -65,27 +137,29 @@ def palette(t: dict[str, str]) -> QPalette:
 
 
 def base_css(t: dict[str, str]) -> str:
-    """App-wide: popups, menus and tooltips (drawn outside any page's own stylesheet)."""
+    """App-wide: popups, menus, tooltips and dialogs (drawn outside any page's own stylesheet)."""
     return f"""
-QToolTip {{ background: {t['tooltip']}; color: {t['text']}; border: 1px solid {t['border']}; padding: 4px; }}
+QToolTip {{ background: {t['tooltip']}; color: {t['text']}; border: 1px solid {t['accent']}; padding: 5px; }}
 QMenu {{ background: {t['surface']}; color: {t['text']}; border: 1px solid {t['border']}; }}
 QMenu::item:selected {{ background: {t['highlight']}; color: {t['highlight_text']}; }}
 QMenu::item:disabled {{ color: {t['disabled']}; }}
-QComboBox QAbstractItemView {{ background: {t['surface']}; color: {t['text']};
-    selection-background-color: {t['highlight']}; selection-color: {t['highlight_text']}; }}
+QComboBox QAbstractItemView {{ background: {t['surface']}; color: {t['text']}; border: 1px solid {t['accent']};
+    selection-background-color: {t['highlight']}; selection-color: {t['highlight_text']}; outline: 0; }}
+QDialog, QMessageBox {{ background: {t['window']}; color: {t['text']}; }}
 """
 
 
-def apply_theme(app: QApplication, choice: str = "system") -> str:
-    """Fusion + the chosen palette, app-wide. Returns "light" or "dark"."""
-    global _current
+def apply_theme(app: QApplication, choice: str = DEFAULT) -> str:
+    """Fusion + the chosen design's palette, app-wide. Returns the design's name."""
+    global _current, _name
     mode = resolve(choice)
     if getattr(app, "_eu4unitgen_theme", None) == mode:  # already on: re-styling every live widget is slow
         return mode
     app._eu4unitgen_theme = mode
-    _current = dict(DARK if mode == "dark" else LIGHT)
+    _name = mode
+    _current = dict(_DESIGN[mode])
     try:
-        app.styleHints().setColorScheme(Qt.ColorScheme.Dark if mode == "dark" else Qt.ColorScheme.Light)
+        app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
     except AttributeError:  # Qt before 6.8
         pass
     app.setStyle(QStyleFactory.create("Fusion"))

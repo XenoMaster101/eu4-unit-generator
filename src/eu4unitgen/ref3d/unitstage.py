@@ -161,7 +161,7 @@ TURNTABLE_SCALE = 11.0  # the view's width in game units: a unit (about 8-10 tal
 def turntable(folder: Path, name: str, tier: int, eu4: Path, utype: str = "cavalry", frames: int = TURNTABLE_FRAMES,
               size: int = 480) -> list[str]:
     """The staged unit at ``tier`` turned round once, as the game draws it (lit, its idle pose, the game's close
-    camera's elevation): ``frames`` images under ``folder/turntable``, for My units' rotating preview."""
+    camera's elevation): ``frames`` images under ``folder/turntable``, for the Library's rotating preview."""
     from eu4unitgen.core.character import CharacterSpec
     from eu4unitgen.export.gallery import GAME_CLOSE
     from eu4unitgen.export.pipeline import Session, Settings

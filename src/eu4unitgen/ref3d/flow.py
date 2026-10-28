@@ -36,7 +36,7 @@ STAGES = ("cutout", "trellis", "build", "finish", "preview")
 LABELS = {"cutout": "Cut the subject out of the image", "trellis": "Make two 3D models (TRELLIS.2) and pick the better",
           "build": "Build the game model (shape, parts, textures, checks)", "finish": "Apply your edits",
           "preview": "Stage it and draw the result sheet"}
-# what each stage does and why, in plain words (the Make it step and My units show these)
+# what each stage does and why, in plain words (the Make it step and the Library show these)
 EXPLAIN = {"cutout": "The background is removed so only the subject becomes part of the model.",
            "trellis": "An AI (TRELLIS.2) guesses the 3D shape and colours from your one picture. It makes two "
                       "versions; the app keeps the one whose outline, colours and movement come out best.",
@@ -234,7 +234,7 @@ def stage_trellis(folder: Path, req: dict, cfg) -> dict:
 
 
 def candidate_text(c: dict) -> str:
-    """One candidate's scores in plain words (the edits' 3D model list, the Example, My units)."""
+    """One candidate's scores in plain words (the edits' 3D model list, the Example, the Library)."""
     bits = [f"outline {c['iou']:.0%}"] if c.get("iou") is not None else []
     if c.get("colour_de") is not None:
         bits.append(f"colour distance {c['colour_de']:.0f}")
@@ -365,7 +365,7 @@ def stage_preview(folder: Path, req: dict, cfg) -> dict:
                          on_foot=req["kind"] == "soldier")
     quality.save(rep, pv)
     sheet = result_sheet(folder, req, g, rep)
-    try:  # My units' rotating preview; the unit is usable without it
+    try:  # the Library's rotating preview; the unit is usable without it
         frames = len(unitstage.turntable(pv, "preview", tier, cfg.eu4(), utype))
     except Exception as exc:  # noqa: BLE001 - recorded, not fatal
         frames = f"failed: {type(exc).__name__}: {exc}"
@@ -470,7 +470,7 @@ def go(folder: Path) -> dict:
             while waiting_for(request(folder)):  # a cavalry unit: its horse and soldier first
                 broken = [n for n in waiting_for(request(folder)) if (status(folder_of(n)) or {}).get("state") == "failed"]
                 if broken:
-                    raise RuntimeError(f"{' and '.join(broken)} stopped with an error: open it in My units and resume it first")
+                    raise RuntimeError(f"{' and '.join(broken)} stopped with an error: open it in the Library and resume it first")
                 st.stage(s, "waiting_units")
                 time.sleep(EU4_POLL)
             if s in GPU:

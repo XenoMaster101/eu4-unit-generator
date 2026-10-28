@@ -82,7 +82,13 @@ def qapp():
 def test_contrast_maths():
     assert round(theme.contrast((0, 0, 0), (255, 255, 255)), 1) == 21.0
     assert theme.contrast((246, 245, 242), (255, 255, 255)) < 1.1  # the bug: white text on cream
-    for t in (theme.LIGHT, theme.DARK):
-        for fg, bg in (("text", "window"), ("text", "surface"), ("muted", "window"), ("placeholder", "surface"),
-                       ("text", "chip"), ("accent_text", "accent"), ("link", "window"), ("error", "window")):
-            assert theme.contrast(QColor(t[fg]), QColor(t[bg])) >= MIN, (fg, bg, t is theme.DARK)
+    for name in theme.DESIGNS:  # every pair the stylesheet puts together, in both designs
+        t = theme._DESIGN[name]
+        for fg, bg in (("text", "window"), ("text", "window_top"), ("text", "window_bottom"), ("muted", "window_top"),
+                       ("muted", "window_bottom"), ("text", "surface"), ("muted", "surface"), ("placeholder", "surface"),
+                       ("accent_text", "accent"), ("link", "window"), ("error", "window"), ("ok", "window"),
+                       ("warn", "window"), ("danger", "window"), ("secondary", "surface"), ("text", "topbar"),
+                       ("accent_fg", "topbar"), ("card_text", "card"), ("card_muted", "card"), ("card_ok", "card"),
+                       ("card_warn", "card"), ("card_error", "card"), ("chip_text", "chip"), ("card_text", "card_hover"),
+                       ("card_text", "card_selected"), ("highlight_text", "highlight"), ("text", "tooltip")):
+            assert theme.contrast(QColor(t[fg]), QColor(t[bg])) >= MIN, (fg, bg, name)

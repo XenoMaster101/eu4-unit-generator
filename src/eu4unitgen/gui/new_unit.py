@@ -3,7 +3,7 @@
   soldier or horse   1 the picture (the guide for its kind: what works, why, good and bad examples, the picture's own
                      checks)   2 name and rights   3 where it goes (the tier, the country colour)   4 make it (the
                      checks, then the run's stages as they go)
-  cavalry            1 the horse   2 the rider (each picked from My units, or made here: that runs the horse's or
+  cavalry            1 the horse   2 the rider (each picked from the Library, or made here: that runs the horse's or
                      soldier's own steps, then comes back)   3 name and tier   4 make it (it waits for the horse and
                      soldier to be ready by itself)
 
@@ -388,7 +388,7 @@ class NewUnitScreen(Page):
         if cav and not self.cav_name.text().strip() and self.picks["soldier"] and self.picks["horse"]:
             self.cav_name.setText(f"{self.picks['soldier']}_on_{self.picks['horse']}"[:40])
         self.use_note.setText({
-            "soldier": "On foot it is your infantry at this tier (and the crew of your guns). From My units you can "
+            "soldier": "On foot it is your infantry at this tier (and the crew of your guns). From the Library you can "
                        "later put it on a horse.",
             "horse": "It replaces the game's horse at this tier; the game's own rider sits on it until you give it one "
                      "of your soldiers (Cavalry on Home).",
@@ -400,7 +400,7 @@ class NewUnitScreen(Page):
         lay = QVBoxLayout(w)
         grid = QGridLayout()
         lay.addLayout(grid)
-        new = ghost(f"＋  Make a new {kind} from a picture", lambda: self._make_child(kind),
+        new = ghost(f"Make a new {kind} from a picture", lambda: self._make_child(kind),
                     f"Runs the {kind}'s own steps (picture, name, make it), then brings you back here")
         lay.addWidget(new, 0, Qt.AlignLeft)
         empty = label("", "explain")
@@ -478,7 +478,7 @@ class NewUnitScreen(Page):
         self.stages.hide()
         lay.addWidget(self.stages)
         after = QHBoxLayout()
-        self.see = primary("See it in My units →", lambda: self.window_.go("units", folder=self.started),
+        self.see = primary("See it in the Library →", lambda: self.window_.go("units", folder=self.started),
                            "Its page: the progress now, then its preview, report, edits and Add to mod")
         self.see.hide()
         after.addWidget(self.see)

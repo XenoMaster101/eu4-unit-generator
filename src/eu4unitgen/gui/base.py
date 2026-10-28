@@ -72,60 +72,102 @@ def arrow(colour: str) -> str:
 
 
 def css(t: dict[str, str]) -> str:
-    """The app's stylesheet: every colour from the theme's tokens (gui.theme)."""
+    """The app's stylesheet: every colour from the design's tokens (gui.theme). Buttons: ``generate`` the one primary
+    action of a screen (filled), ``ghost`` secondary (outlined), ``danger`` (outlined red), ``link`` (text in the
+    accent, never the default blue). Cards and framed panels are parchment."""
+    from eu4unitgen.gui.theme import backdrop, serif
+    sf = serif(t)
     return f"""
-QWidget#front {{ background: {t['window']}; color: {t['text']}; }}
-QWidget#front QLabel {{ color: {t['text']}; background: transparent; }}
-QWidget#front QLabel#brand {{ font-weight: 700; font-size: 15px; }}
-QWidget#front QLabel#h1 {{ font-size: 24px; font-weight: 600; }}
-QWidget#front QLabel#h2 {{ font-size: 17px; font-weight: 600; }}
-QWidget#front QLabel#h3 {{ font-size: 14px; font-weight: 600; }}
-QWidget#front QLabel#step {{ color: {t['accent_fg']}; font-weight: 600; letter-spacing: 1px; }}
+QWidget#front {{ background-color: {t['window']}; border-image: url({backdrop(t)}) 0 0 0 0 stretch stretch;
+                 color: {t['text']}; }}
+QWidget#front QLabel {{ color: {t['text']}; background: transparent; border-image: none; }}
+QWidget#front QLabel#brand {{ font-family: "{sf}"; font-weight: 700; font-size: 17px; color: {t['accent_fg']}; }}
+QWidget#front QLabel#h1 {{ font-family: "{sf}"; font-size: 27px; font-weight: 600; color: {t['text']}; }}
+QWidget#front QLabel#h2 {{ font-family: "{sf}"; font-size: 18px; font-weight: 600; color: {t['accent_fg']}; }}
+QWidget#front QLabel#h3 {{ font-family: "{sf}"; font-size: 15px; font-weight: 600; }}
+QWidget#front QLabel#step {{ color: {t['accent_fg']}; font-weight: 600; letter-spacing: 2px; font-size: 12px; }}
 QWidget#front QLabel#muted {{ color: {t['muted']}; }}
 QWidget#front QLabel#explain {{ color: {t['muted']}; font-size: 13px; }}
-QWidget#front QLabel#status {{ color: {t['ok']}; }}
-QWidget#front QLabel#good {{ color: {t['ok']}; }}
+QWidget#front QLabel#status, QWidget#front QLabel#good {{ color: {t['ok']}; }}
 QWidget#front QLabel#warn {{ color: {t['warn']}; }}
 QWidget#front QLabel#bad, QWidget#front QLabel#hint {{ color: {t['error']}; font-weight: 600; }}
-QPlainTextEdit {{ font-size: 14px; border: 2px solid {t['border']}; border-radius: 12px; padding: 10px;
+QPlainTextEdit {{ font-size: 14px; border: 1px solid {t['border']}; border-radius: 10px; padding: 10px;
                   background: {t['surface']}; color: {t['text']}; }}
 QPlainTextEdit:disabled {{ background: {t['alt']}; color: {t['muted']}; border-style: dashed; }}
 QComboBox, QLineEdit {{ background: {t['surface']}; color: {t['text']}; border: 1px solid {t['border']};
                        border-radius: 6px; padding: 4px 8px; min-height: 24px; }}
+QComboBox:hover, QLineEdit:hover {{ border-color: {t['accent_off']}; }}
+QComboBox:focus, QLineEdit:focus {{ border-color: {t['accent']}; }}
 QLineEdit[bad="true"] {{ border: 2px solid {t['error']}; }}
 QComboBox QLineEdit {{ border: none; padding: 0; background: transparent; }}
 QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right; width: 22px; border: none; }}
-QComboBox::down-arrow {{ image: url({arrow(t['text'])}); width: 10px; height: 6px; }}
-QPushButton#generate {{ background: {t['accent']}; color: {t['accent_text']}; font-size: 15px; font-weight: 600;
-                       border: none; border-radius: 10px; padding: 9px 26px; }}
-QPushButton#generate:disabled {{ background: {t['accent_off']}; color: {t['accent_text']}; }}
-QPushButton#ghost {{ background: {t['surface']}; color: {t['text']}; border: 1px solid {t['border']};
+QComboBox::down-arrow {{ image: url({arrow(t['accent_fg'])}); width: 10px; height: 6px; }}
+QPushButton#generate {{ background: {t['accent']}; color: {t['accent_text']}; font-size: 15px; font-weight: 700;
+                       border: 1px solid {t['accent_hover']}; border-radius: 8px; padding: 9px 26px; }}
+QPushButton#generate:hover {{ background: {t['accent_hover']}; }}
+QPushButton#generate:disabled {{ background: {t['accent_off']}; color: {t['disabled']}; border-color: {t['accent_off']}; }}
+QPushButton#ghost {{ background: transparent; color: {t['secondary']}; border: 1px solid {t['accent']};
                     border-radius: 8px; padding: 6px 14px; }}
-QPushButton#ghost:hover {{ border-color: {t['accent']}; }}
-QPushButton#ghost:disabled {{ color: {t['disabled']}; }}
-QPushButton#danger {{ background: {t['surface']}; color: {t['error']}; border: 1px solid {t['error']};
+QPushButton#ghost:hover {{ background: {t['alt']}; }}
+QPushButton#ghost:checked {{ background: {t['accent']}; color: {t['accent_text']}; }}
+QPushButton#ghost:disabled {{ color: {t['disabled']}; border-color: {t['border']}; }}
+QPushButton#danger {{ background: transparent; color: {t['danger']}; border: 1px solid {t['danger']};
                      border-radius: 8px; padding: 6px 14px; }}
-QPushButton#link {{ border: none; color: {t['link']}; text-decoration: underline; background: transparent; }}
-QPushButton#nav {{ border: none; border-bottom: 3px solid transparent; background: transparent; color: {t['text']};
-                  padding: 8px 12px; font-size: 14px; }}
+QPushButton#danger:hover {{ background: {t['alt']}; }}
+QPushButton#link {{ border: none; color: {t['link']}; background: transparent; text-decoration: none; padding: 2px 4px; }}
+QPushButton#link:hover {{ color: {t['accent_hover']}; }}
+QPushButton#nav {{ border: none; border-bottom: 2px solid transparent; background: transparent; color: {t['text']};
+                  padding: 9px 12px 7px 10px; font-size: 14px; }}
 QPushButton#nav:hover {{ color: {t['accent_fg']}; }}
-QPushButton#nav:checked {{ border-bottom-color: {t['accent']}; font-weight: 600; }}
-QFrame#topbar {{ background: {t['surface']}; border-bottom: 1px solid {t['border']}; }}
+QPushButton#nav:checked {{ border-bottom-color: {t['accent']}; color: {t['accent_fg']}; font-weight: 600; }}
+QFrame#topbar {{ background: {t['topbar']}; border-bottom: 1px solid {t['topbar_line']}; }}
 QFrame#topbar QLabel {{ background: transparent; }}
-QFrame#card, QPushButton#card {{ background: {t['surface']}; border: 1px solid {t['border']}; border-radius: 12px; }}
-QPushButton#card {{ text-align: left; padding: 14px; color: {t['text']}; }}
-QPushButton#card:hover {{ border: 2px solid {t['accent']}; }}
-QPushButton#card:checked {{ border: 2px solid {t['accent']}; background: {t['alt']}; }}
-QPushButton#card:disabled {{ color: {t['disabled']}; background: {t['alt']}; }}
-QLabel#drop {{ background: {t['surface']}; color: {t['muted']}; border: 2px dashed {t['border']}; border-radius: 12px; }}
-QLabel#cardpic {{ background: {t['alt']}; border-radius: 6px; color: {t['muted']}; }}
-QGroupBox {{ color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; margin-top: 14px; padding: 8px; }}
+QFrame#topbar QLabel#muted {{ color: {t['muted']}; }}
+QFrame#topbar QLabel#brand {{ font-family: "{sf}"; font-weight: 700; font-size: 17px; color: {t['accent_fg']}; }}
+QFrame#card, QPushButton#card {{ background: {t['card']}; border: 1px solid {t['card_border']}; border-radius: 10px;
+                                 border-image: none; }}
+QPushButton#card {{ text-align: left; padding: 12px; color: {t['card_text']}; }}
+QPushButton#card:hover {{ background: {t['card_hover']}; border: 2px solid {t['accent']}; }}
+QPushButton#card:checked {{ background: {t['card_selected']}; border: 2px solid {t['accent']}; }}
+QPushButton#card:disabled {{ background: {t['alt']}; border-color: {t['border']}; }}
+QWidget#front QFrame#card QLabel, QWidget#front QPushButton#card QLabel {{ color: {t['card_text']}; }}
+QWidget#front QFrame#card QLabel#muted, QWidget#front QPushButton#card QLabel#muted,
+QWidget#front QFrame#card QLabel#explain {{ color: {t['card_muted']}; }}
+QWidget#front QFrame#card QLabel#h3, QWidget#front QPushButton#card QLabel#cardtitle {{
+    font-family: "{sf}"; font-size: 16px; font-weight: 700; color: {t['card_text']}; }}
+QWidget#front QPushButton#card:disabled QLabel {{ color: {t['disabled']}; }}
+QWidget#front QLabel#chip, QWidget#front QPushButton#card QLabel#chip {{ background: {t['chip']}; color: {t['chip_text']}; border: 1px solid {t['chip_border']};
+                             border-radius: 9px; padding: 1px 8px; font-size: 12px; }}
+QWidget#front QPushButton#card QLabel#dot_ok {{ color: {t['card_ok']}; font-size: 12px; }}
+QWidget#front QPushButton#card QLabel#dot_warn {{ color: {t['card_warn']}; font-size: 12px; }}
+QWidget#front QPushButton#card QLabel#dot_error {{ color: {t['card_error']}; font-size: 12px; }}
+QWidget#front QPushButton#card QLabel#dot_none {{ color: {t['card_muted']}; font-size: 12px; }}
+QFrame#card QComboBox, QFrame#card QLineEdit {{ background: #fffaf0; color: {t['card_text']}; border-color: {t['card_border']}; }}
+QFrame#card QComboBox::down-arrow {{ image: url({arrow(t['card_muted'])}); }}
+QFrame#sticky {{ background: {t['topbar']}; border-top: 1px solid {t['topbar_line']}; border-image: none; }}
+QLabel#drop {{ background: {t['surface']}; color: {t['muted']}; border: 2px dashed {t['accent_off']}; border-radius: 12px; }}
+QLabel#cardpic, QWidget#front QLabel#cardpic {{ background: {t['thumb_inner']}; border-radius: 8px;
+                                               color: {t['card_muted']}; }}
+QPushButton#filter {{ background: transparent; color: {t['muted']}; border: 1px solid {t['border']}; border-radius: 14px;
+                     padding: 4px 14px; }}
+QPushButton#filter:hover {{ color: {t['accent_fg']}; border-color: {t['accent_off']}; }}
+QPushButton#filter:checked {{ color: {t['accent_fg']}; border-color: {t['accent']}; background: {t['alt']}; font-weight: 600; }}
+QGroupBox {{ color: {t['accent_fg']}; border: 1px solid {t['border']}; border-radius: 8px; margin-top: 14px; padding: 8px;
+            font-family: "{sf}"; font-size: 14px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; }}
 QProgressBar {{ border: 1px solid {t['border']}; border-radius: 6px; background: {t['alt']}; color: {t['text']};
                text-align: center; min-height: 18px; }}
 QProgressBar::chunk {{ background: {t['accent']}; border-radius: 5px; }}
-QScrollArea {{ background: transparent; border: none; }}
-QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QScrollArea {{ background: transparent; border: none; border-image: none; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; border-image: none; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: {t['border']}; border-radius: 4px; min-height: 30px; }}
+QScrollBar::handle:vertical:hover {{ background: {t['accent_off']}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+QCheckBox {{ color: {t['text']}; background: transparent; }}
+QSlider::groove:horizontal {{ height: 4px; background: {t['border']}; border-radius: 2px; }}
+QSlider::handle:horizontal {{ background: {t['accent']}; width: 14px; margin: -6px 0; border-radius: 7px; }}
 """
 
 
@@ -135,6 +177,21 @@ def pixmap(path: Path | str | None, w: int, h: int) -> QPixmap:
         return QPixmap()
     pix = QPixmap(str(path))
     return pix.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation) if not pix.isNull() else pix
+
+
+def thumb(path: Path | str | None, w: int, h: int) -> QPixmap:
+    """A render as a thumbnail: lifted onto the design's lit backdrop (core.thumbs), made once and cached in the
+    projects folder; the plain picture if that fails."""
+    from eu4unitgen.core import thumbs
+    t = tokens()
+    try:
+        from eu4unitgen.ref3d import flow
+        p = thumbs.cache(path, (w * 2, h * 2), t["thumb_inner"], t["thumb_outer"], flow.root() / ".thumbs")
+    except Exception:  # noqa: BLE001 - a thumbnail is a nicety: the picture as it is
+        p = path
+    pix = pixmap(p, w * 2, h * 2)
+    pix.setDevicePixelRatio(2.0)
+    return pix
 
 
 def pil_pixmap(im, w: int, h: int) -> QPixmap:
@@ -219,7 +276,7 @@ class Turntable(QLabel):
             self.setPixmap(self.frames[0])
             self.timer.start()
         else:
-            pix = pixmap(still, self.size_ - 8, self.size_ - 8)
+            pix = thumb(still, self.size_ - 8, self.size_ - 8)
             self.setPixmap(pix)
             if pix.isNull():
                 self.setText("No preview yet")
@@ -237,9 +294,12 @@ class Turntable(QLabel):
 
 
 class Card(QPushButton):
-    """A large choice button: an optional picture, a bold title and a wrapped plain sentence under it."""
+    """A large choice button on parchment: an optional picture (or an icon), a serif title, tags as small chips, a
+    wrapped plain sentence and a status dot ("ok", "warn", "error" or "none" with its words)."""
 
-    def __init__(self, title: str, text: str, tip: str = "", checkable: bool = False, picture: QPixmap | None = None):
+    def __init__(self, title: str, text: str, tip: str = "", checkable: bool = False, picture: QPixmap | None = None,
+                 chips: list[str] | None = None, status: tuple[str, str] | None = None, icon: str | None = None,
+                 vertical: bool = False):
         from PySide6.QtWidgets import QHBoxLayout
         super().__init__()
         self.setObjectName("card")
@@ -247,41 +307,80 @@ class Card(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip(tip or text)
         self.setMinimumHeight(84)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(14, 10, 14, 10)
+        row = QVBoxLayout(self) if vertical else QHBoxLayout(self)
+        row.setContentsMargins(12, 10, 12, 10)
+        row.setSpacing(12)
         self.pic = QLabel()
+        self.pic.setAlignment(Qt.AlignCenter)
+        if icon and (picture is None or picture.isNull()):
+            from eu4unitgen.gui.icons import pixmap as icon_pixmap
+            picture = icon_pixmap(icon, tokens()["card_text"], 40, 1.5)
+        else:
+            self.pic.setObjectName("cardpic")
         self.pic.setVisible(picture is not None and not picture.isNull())
         if picture is not None:
             self.pic.setPixmap(picture)
-        row.addWidget(self.pic, 0, Qt.AlignTop)
+        row.addWidget(self.pic, 0, Qt.AlignTop | (Qt.AlignHCenter if vertical else Qt.AlignLeft))
         col = QVBoxLayout()
+        col.setSpacing(4)
         self.title_label = QLabel(title)
-        self.title_label.setStyleSheet("font-weight: 600; font-size: 14px; background: transparent;")
+        self.title_label.setObjectName("cardtitle")
+        self.title_label.setWordWrap(True)
+        col.addWidget(self.title_label)
+        from eu4unitgen.gui.widgets import FlowLayout
+        chip_box = QWidget()
+        chip_box.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.chip_row = FlowLayout(chip_box, spacing=4)
+        self.chips = []
+        for c in chips or []:
+            ch = QLabel(c)
+            ch.setObjectName("chip")
+            ch.setMinimumWidth(ch.fontMetrics().horizontalAdvance(c) + 20)  # its padding counted: never clipped
+            self.chips.append(ch)
+            self.chip_row.addWidget(ch)
+        if chips:
+            col.addWidget(chip_box)
         self.text_label = QLabel(text)
+        self.text_label.setObjectName("muted")
         self.text_label.setWordWrap(True)
-        self.text_label.setStyleSheet("background: transparent;")
-        for lab in (self.title_label, self.text_label):
-            lab.setAttribute(Qt.WA_TransparentForMouseEvents)
-            col.addWidget(lab)
+        self.text_label.setVisible(bool(text))
+        col.addWidget(self.text_label)
+        self.status_label = QLabel()
+        self.status_label.setWordWrap(True)
+        if status:
+            kind, words = status
+            self.status_label.setObjectName(f"dot_{kind}")
+            self.status_label.setText(f"●  {words}")
+        self.status_label.setVisible(bool(status))
+        col.addWidget(self.status_label)
         col.addStretch(1)
-        self.pic.setAttribute(Qt.WA_TransparentForMouseEvents)
+        for lab in (self.title_label, self.text_label, self.status_label, self.pic, *self.chips):
+            lab.setAttribute(Qt.WA_TransparentForMouseEvents)
         row.addLayout(col, 1)
 
     def set_text(self, title: str, text: str) -> None:
         self.title_label.setText(title)
         self.text_label.setText(text)
+        self.text_label.setVisible(bool(text))
 
     def changeEvent(self, e):  # noqa: N802 - Qt name: the labels follow the button's enabled state
         super().changeEvent(e)
-        for lab in (self.title_label, self.text_label):
+        for lab in (self.title_label, self.text_label, self.status_label):
             lab.setEnabled(self.isEnabled())
 
     def sizeHint(self):  # noqa: N802 - Qt name
         return self.layout().sizeHint()
 
 
-def card(title: str, text: str, tip: str = "", checkable: bool = False, picture: QPixmap | None = None) -> Card:
-    return Card(title, text, tip, checkable, picture)
+def card(title: str, text: str, tip: str = "", checkable: bool = False, picture: QPixmap | None = None,
+         **kw) -> Card:
+    return Card(title, text, tip, checkable, picture, **kw)
+
+
+def danger(text: str, fn=None, tip: str = "") -> QPushButton:
+    b = ghost(text, fn, tip)
+    b.setObjectName("danger")
+    return b
 
 
 def framed(*widgets, name: str = "card") -> QFrame:

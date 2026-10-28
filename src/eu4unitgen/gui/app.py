@@ -1,6 +1,6 @@
-"""The app's window: a top bar on every screen (Home · New unit · Library · Setup · Help, the status ticks for EU4,
-Blender and the AI, the version) over one screen at a time. New unit builds a unit from library parts
-(``gui.builder``); New part (from Home and the Library) makes a part from a picture (``gui.new_unit``).
+"""The app's window: a top bar on every screen (Home · Build a unit · Make a part · Library · Setup · Help, the
+status ticks for EU4, Blender and the AI, the version) over one screen at a time. Build a unit puts a unit together
+from library parts (``gui.builder``); Make a part makes a part from a picture (``gui.new_unit``).
 
 Thin by design (CLAUDE.md): screens collect input and show results; runs are ``ref3d.flow`` in their own detached
 process; checks are ``core.checks``; Add to mod is ``export.modexport``. Short jobs (Add to mod) run on a worker
@@ -22,11 +22,13 @@ from PySide6.QtWidgets import (
 from eu4unitgen import __version__
 from eu4unitgen.gui.theme import tokens
 
-NAV = (("home", "Home", "The start: pick what to make, or watch the example"),
-       ("build", "New unit", "Build a unit (infantry, cavalry, artillery) from the parts in your library, tier by tier"),
-       ("units", "Library", "Your parts (horses, soldiers, guns) and units: previews, tags, edits, Add to mod"),
-       ("setup", "Setup", "Paths, checks and the one-time setup of Blender and the AI"),
-       ("help", "Help", "The tour, the example, the picture guide, questions and answers, updates"))
+NAV = (("home", "Home", "home", "The start: build a unit, make a part, or watch the example"),
+       ("build", "Build a unit", "build", "Put a unit (infantry, cavalry, artillery) together from the parts in your "
+                                          "library, tier by tier. No AI needed."),
+       ("new", "Make a part", "part", "Make a soldier, a horse or a gun from a picture, step by step (needs the AI)"),
+       ("units", "Library", "library", "Your parts (horses, soldiers, guns) and units: previews, tags, edits, Add to mod"),
+       ("setup", "Setup", "setup", "Paths, checks and the one-time setup of Blender and the AI"),
+       ("help", "Help", "help", "The tour, the example, the picture guide, questions and answers, updates"))
 STATUS_MS = 30000
 
 
@@ -55,7 +57,11 @@ class TopBar(QFrame):
         self.setObjectName("topbar")
         lay = QHBoxLayout(self)
         lay.setContentsMargins(16, 4, 16, 0)
-        brand = QLabel("⚔ EU4 Unit Generator")
+        from eu4unitgen.gui import icons
+        crest = QLabel()
+        crest.setPixmap(icons.pixmap("build", tokens()["accent_fg"], 22, 1.8))
+        lay.addWidget(crest)
+        brand = QLabel("EU4 Unit Generator")
         brand.setObjectName("brand")
         brand.setToolTip("Makes Europa Universalis IV units from your pictures")
         lay.addWidget(brand)
@@ -65,8 +71,9 @@ class TopBar(QFrame):
         lay.addWidget(ver)
         lay.addSpacing(18)
         self.buttons: dict[str, QPushButton] = {}
-        for key, text, tip in NAV:
+        for key, text, ic, tip in NAV:
             b = QPushButton(text)
+            b.setIcon(icons.icon(ic, tokens()["accent_fg"], 18))
             b.setObjectName("nav")
             b.setCheckable(True)
             b.setToolTip(tip)
@@ -166,7 +173,7 @@ class MainWindow(QMainWindow):
         go to its ``enter``."""
         w = self.screens[key]
         self.stack.setCurrentWidget(w)
-        self.bar.select({"about": "help", "new": "units"}.get(key, key))
+        self.bar.select({"about": "help"}.get(key, key))
         if hasattr(w, "enter"):
             w.enter(**kw)
 

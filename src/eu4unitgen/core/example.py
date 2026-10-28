@@ -83,7 +83,7 @@ def steps(root: Path | None = None) -> list[Step] | None:
     out.append(Step("3. Two 3D models each, and the better one kept",
                     "TRELLIS.2 guesses a 3D model from each picture. It makes two versions; the app scores each on how "
                     "well its outline and colours match the picture and how much it stretches when it moves on the "
-                    "game's skeleton, and keeps the better one. You can pick the other later in My units.",
+                    "game's skeleton, and keeps the better one. You can pick the other later in the Library.",
                     _have(imgs), lines))
     # fitted onto the game's skeleton (the raw model against the game version, one camera)
     fitted = []
@@ -128,7 +128,7 @@ def steps(root: Path | None = None) -> list[Step] | None:
                     _have([("the result sheet", f["cavalry"] / "preview" / "result_sheet.png")]),
                     [q.get("summary", "")] + [f"{TITLES.get(k, k)}: {x.get('text', '')}" for k, x in (q.get("measures") or {}).items()]))
     out.append(Step("9. Turn it round",
-                    "My units shows every finished unit turning round, as the game draws it.",
+                    "The Library shows every finished unit turning round, as the game draws it.",
                     frames=[str(p) for p in flow.turntable_frames(f["cavalry"])]))
     out.append(Step("10. Add to mod",
                     "Last, Add to mod writes the unit into a mod folder you choose: either a normal mod (a new unit for "

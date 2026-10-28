@@ -1,4 +1,4 @@
-"""A run's progress (New unit's last step and My units): each of its stages with what it does and why, its state
+"""A run's progress (Make a part's last step and the Library): each of its stages with what it does and why, its state
 and time, an overall bar and the time left; a stopped or failed run says what happened and what to do, in plain
 words (core.errors), with the details behind a button."""
 from __future__ import annotations
@@ -116,7 +116,7 @@ class StageList(QFrame):
         self.bar.setValue(100 if st.get("done") else int(100 * done_s / max(total_s, 1)))
         if state == "running":
             self.left.setText(f"About {minutes(max(0.0, total_s - done_s))} left. You can close the app or use it "
-                              "for something else: the run keeps going, and My units shows it when you come back.")
+                              "for something else: the run keeps going, and the Library shows it when you come back.")
         elif state == "stopped":
             self.left.setText("Paused: the app or the computer was closed while it ran. Resume carries on from the "
                               "last finished step.")

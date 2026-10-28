@@ -45,29 +45,28 @@ def _soldier_png(path):
 
 
 def test_top_bar_on_every_screen(win):
-    assert [b.text() for b in win.bar.buttons.values()] == ["Home", "New unit", "Library", "Setup", "Help"]
+    assert [b.text() for b in win.bar.buttons.values()] == ["Home", "Build a unit", "Make a part", "Library", "Setup",
+                                                            "Help"]
+    assert all(not b.icon().isNull() for b in win.bar.buttons.values())  # one icon set
     assert all(b.toolTip() for b in win.bar.buttons.values())
     assert __version__ in win.windowTitle()
     win.refresh_status()
     assert [t.text() for t in win.bar.ticks.values()] == ["✓ EU4", "✓ Blender", "✓ AI ready"]
-    for key in ("home", "build", "units", "setup", "help"):
+    for key in ("home", "build", "new", "units", "setup", "help"):
         win.go(key)
         assert win.bar.buttons[key].isChecked() and win.stack.currentWidget() is win.screens[key]
         assert win.bar.isVisibleTo(win)
-    win.go("new")  # New part is the Library's
-    assert win.bar.buttons["units"].isChecked() and win.stack.currentWidget() is win.new_unit
 
 
 def test_home_leads_into_the_picture_flow(win, tmp_path):
     home = win.home
-    assert not home.describe.isEnabled() and "coming later" in home.describe.placeholderText()
-    assert not home.cards["gun"].isEnabled() and home.cards["soldier"].isEnabled()
-    home.cards["horse"].click()
-    assert win.stack.currentWidget() is win.new_unit and win.new_unit.kind == "horse"
-    assert "NEW PART: HORSE" in win.new_unit.step_label.text()
+    assert set(home.cards) == {"build", "new"} and not hasattr(home, "describe") and not hasattr(home, "drop")
+    home.cards["new"].click()
+    assert win.stack.currentWidget() is win.new_unit
     win.go("home")
     home.build_card.click()
     assert win.stack.currentWidget() is win.builder
+    win.go("home")
     win.go("home")
     home.picture(_soldier_png(tmp_path / "guard.png"))  # a tall picture: a soldier
     assert win.new_unit.kind == "soldier" and win.new_unit.image.name == "guard.png"
@@ -156,7 +155,11 @@ def test_my_units_gallery_and_page(win, tmp_path):
     assert mu.flow_layout.count() == 1 and not mu.empty.isVisibleTo(mu)
     mu.open(str(f))
     d = mu.detail
-    assert d.title.text() == "guard" and d.ride_btn.text() == "Use in a unit" and d.add_btn.isEnabled()
+    assert d.title.text() == "guard" and d.ride_btn.text() == "Use in a unit"
+    assert d.ride_btn.objectName() == "generate" and d.del_btn.objectName() == "danger"  # one primary; Delete danger
+    assert not d.add_btn.isVisibleTo(d)  # a part goes into a unit first; units go into mods
+    assert "Made by you" in d.state.text() and "mine" not in d.state.text() or "mine" in d.rights_full.text()
+    assert not d.details_box.isVisibleTo(d)  # the numbers behind Details
     assert not d.stages.isVisibleTo(d)  # finished: no progress
     d.ride_btn.click()
     b = win.builder
@@ -236,7 +239,7 @@ def test_build_a_unit_per_tier_with_suggestions(win, tmp_path, monkeypatch):
     assert req["kind"] == "unit" and req["type"] == "cavalry" and req["country"] == "BYZ"
     assert req["tiers"] == {"1": {"horse": "run:bay", "soldier": "run:cata"}, "3": {"horse": "run:cata_horse",
                                                                                      "soldier": "run:cata"}}
-    assert win.stack.currentWidget() is win.my_units and "not built yet" in win.my_units.detail.state.text()
+    assert win.stack.currentWidget() is win.my_units and "Not built yet" in win.my_units.detail.summary.text()
     b.set_type("artillery")
     assert "no gun" in b.no_part.text()
 
@@ -254,6 +257,49 @@ def test_library_suggestions_follow_the_country():
     with pytest.raises(ValueError):
         library.new_unit("x", "cavalry", {1: {"horse": "run:bay"}})  # a rider too
 
+
+def test_builder_name_follows_the_type_and_country(win, monkeypatch):
+    from eu4unitgen.core import library
+    monkeypatch.setattr(library, "country", lambda tag, eu4: library.Country(
+        "BYZ", "ByzantineEmpire", "easterngfx", "eastern", "greek", "byzantine"))
+    b = win.builder
+    win.go("build")
+    b.set_type("cavalry")
+    assert b.name.text() == "my_cavalry"
+    b.tag.setText("BYZ")
+    b.look_up()
+    assert b.name.text() == "byzantine_cavalry"
+    for utype in ("infantry", "artillery"):  # the default follows the type (it said byzantine_cavalry everywhere)
+        b.set_type(utype)
+        assert b.name.text() == f"byzantine_{utype}"
+        assert b.copy_btn.isVisibleTo(b) and b.clear_btn.isVisibleTo(b)
+    b.name.setText("my_own")
+    b.set_type("cavalry")
+    assert b.name.text() == "my_own"  # typed by the user: kept
+
+
+def test_plain_words_for_rights_and_quality():
+    from eu4unitgen.core import library
+    r = ("generated with ChatGPT; the user owns the output and authorises its use as a reference (declared by the "
+         "user, 2026-10-21; CLAUDE.md rule 8); bundling with the app allowed under CC BY 4.0 (declared 2026-10-28)")
+    assert library.rights_text(r) == "Made by you with ChatGPT · CC BY 4.0 · bundling allowed"
+    assert library.rights_text(r, starter=True).startswith("Made by the app's author with ChatGPT")
+    assert "rule" not in library.rights_text(r) and "2026" not in library.rights_text(r)
+    assert library.summary({"verdict": "ok"}) == ("warn", "Usable: a few things to look at in game")
+    assert library.summary(None)[0] == "none"
+
+
+def test_thumbnails_lift_a_render_onto_the_backdrop(tmp_path):
+    from eu4unitgen.core import thumbs
+    im = Image.new("RGB", (200, 200), (189, 189, 189))  # a render's flat grey ground
+    ImageDraw.Draw(im).rectangle([80, 40, 120, 180], fill=(30, 30, 34))  # a dark model
+    im.save(tmp_path / "r.png")
+    p = thumbs.cache(tmp_path / "r.png", (120, 100), "#f6eedd", "#c9b38a", tmp_path / "cache")
+    out = Image.open(p).convert("RGB")
+    assert out.size == (120, 100) and out.getpixel((4, 4)) != (189, 189, 189)  # the grey is gone
+    assert thumbs.cache(tmp_path / "r.png", (120, 100), "#f6eedd", "#c9b38a", tmp_path / "cache") == p  # cached
+    assert thumbs.cache(None, (10, 10), "#000000", "#000000", tmp_path) is None
+
 def test_every_option_has_a_tooltip(win):
     missing = []
     for key in ("home", "new", "build", "units", "help"):
@@ -262,7 +308,7 @@ def test_every_option_has_a_tooltip(win):
             if not isinstance(w, kinds) or (isinstance(w, QtWidgets.QLineEdit) and isinstance(w.parent(), QtWidgets.QComboBox)):
                 continue
             text = w.text() if isinstance(w, QtWidgets.QAbstractButton) else ""
-            plain = text in ("← Back", "Next →", "Close", "Details", "← Library")  # says what it does
+            plain = text in ("← Back", "Next →", "Close", "← Library")  # says what it does
             if not w.toolTip() and not plain:
                 missing.append(f"{key}: {type(w).__name__} {text!r}")
     assert not missing, missing
@@ -353,7 +399,7 @@ def test_guide_checks_adapt_to_the_kind(tmp_path):
     assert guide.VIEW["horse"] == "side view" and guide.WHY["soldier"]
 
 
-@pytest.mark.parametrize("choice", ["light", "dark"])
+@pytest.mark.parametrize("choice", ["campaign", "admiralty"])
 def test_screens_are_readable(win, tmp_path, choice):
     """Every text on Home, the first New unit step and Help reads against its background (WCAG 4.5:1)."""
     from test_theme import MIN, _text_contrast, _texts, _window_image

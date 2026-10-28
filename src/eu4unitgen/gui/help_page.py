@@ -28,7 +28,7 @@ FAQ = (
     ("Windows says it blocked the app from the mod folder.", "That's Windows' Controlled Folder Access. The app saves "
      "the mod elsewhere and tells you exactly what to copy; or allow the app in Windows Security → Ransomware "
      "protection."),
-    ("A run stopped or failed.", "Open it in My units: it says what happened and what to do, and Resume carries on "
+    ("A run stopped or failed.", "Open it in the Library: it says what happened and what to do, and Resume carries on "
      "from the last finished step. The 3D steps wait while EU4 is open (it holds the graphics card)."),
     ("Which pictures may I use?", "Your own, ones you made with an AI tool whose output you own, or ones licensed for "
      "this use. Don't use characters, uniforms or logos you don't have the rights to. Each unit keeps your rights "
@@ -45,18 +45,19 @@ class HelpPage(Page):
         lay = QVBoxLayout(inner)
         lay.addWidget(label("Help", "h1"))
         grid = QGridLayout()
-        items = (("▶  Show me an example", "A finished unit (the cataphract), step by step, with its real results.",
-                  self.show_example),
-                 ("🎞  Take the tour", "The app's screens in two minutes, with captions. Can be saved as a video.",
+        items = (("example", "Show me an example", "A finished unit (the cataphract), step by step, with its real "
+                  "results.", self.show_example),
+                 ("tour", "Take the tour", "The app's screens in two minutes, with captions. Can be saved as a video.",
                   self.show_tour),
-                 ("🖼  The picture guide", "What makes a good picture for a soldier, a horse or a gun, with good and bad "
-                  "examples.", self.show_guide),
-                 ("⟳  Check for updates", "Looks for a newer version on GitHub Releases.", self.check_updates),
-                 ("ⓘ  About and licences", "The version, the licences of every model and tool, what is installed.",
+                 ("part", "The picture guide", "What makes a good picture for a soldier, a horse or a gun, with good and "
+                  "bad examples.", self.show_guide),
+                 ("refresh", "Check for updates", "Looks for a newer version (not set up yet: the app has no download "
+                  "page).", self.check_updates),
+                 ("info", "About and licences", "The version, the licences of every model and tool, what is installed.",
                   lambda: window.go("about")),
-                 ("📁  Open the logs", "The app's log files, to send with a problem report.", self._logs))
-        for i, (title, text, fn) in enumerate(items):
-            c = card(title, text)
+                 ("folder", "Open the logs", "The app's log files, to send with a problem report.", self._logs))
+        for i, (ic, title, text, fn) in enumerate(items):
+            c = card(title, text, icon=ic)
             c.clicked.connect(lambda _=False, f=fn: f())
             grid.addWidget(c, i // 3, i % 3)
         lay.addLayout(grid)
@@ -66,9 +67,9 @@ class HelpPage(Page):
         for q, a in FAQ:
             lay.addWidget(label(f"<b>{q}</b><br>{a}", rich=True))
         theme = QHBoxLayout()
-        theme.addWidget(label("Colours:", wrap=False))
-        for key, text in (("system", "like Windows"), ("light", "light"), ("dark", "dark")):
-            theme.addWidget(ghost(text, lambda k=key: window.set_theme(k), f"The app's colours: {text}"))
+        theme.addWidget(label("Design:", wrap=False))
+        for key, text in (("campaign", "Campaign (charcoal and gold)"), ("admiralty", "Admiralty (navy and bronze)")):
+            theme.addWidget(ghost(text, lambda k=key: window.set_theme(k), f"The app's look: {text}"))
         theme.addStretch(1)
         lay.addLayout(theme)
         lay.addWidget(self.message)

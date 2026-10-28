@@ -80,7 +80,7 @@ def make(out: Path | None = None) -> list[tuple[str, str]]:
         shot("Step 4: the app checks your computer, then “Make my soldier” starts it. It takes 15 to 30 minutes and "
              "keeps going if you close the app.")
         w.go("units")
-        shot("My units: everything you've made, with its picture and state.")
+        shot("The Library: everything you've made, with its picture and state.")
         if example.available():
             w.my_units.open(str(flow.folder_of(example.RUNS["cavalry"])))
             app.processEvents()

@@ -66,6 +66,35 @@ class Part:
         return ", ".join(bits)
 
 
+def rights_text(rights: str, starter: bool = False) -> str:
+    """A rights record in a few plain words for the main view ("Made by you with ChatGPT · bundling allowed"); the
+    full record stays behind Details."""
+    r = (rights or "").lower()
+    if not r:
+        return "No rights given"
+    who = "the app's author" if starter else "you" if any(w in r for w in ("the user owns", "i own", "user's original",
+                                                                          "by the user", "mine", "drawn by me")) else ""
+    how = "with ChatGPT" if "chatgpt" in r else "from a photo" if "photo" in r else ""
+    bits = [" ".join(x for x in ("Made", f"by {who}" if who else "", how) if x)] if (who or how) else [rights.split(";")[0]]
+    if "cc by 4.0" in r or "cc-by 4.0" in r:
+        bits.append("CC BY 4.0")
+    if "bundl" in r and "never bundled" not in r:
+        bits.append("bundling allowed")
+    return " · ".join(bits)
+
+
+VERDICT_TEXT = {"good": ("ok", "Good: ready to use"), "ok": ("warn", "Usable: a few things to look at in game"),
+                "check": ("error", "Look at it in game first")}
+
+
+def summary(report: dict | None) -> tuple[str, str]:
+    """A quality report as one dot and one line: ("ok"|"warn"|"error"|"none", words)."""
+    if not report:
+        return "none", "Not checked yet"
+    kind, words = VERDICT_TEXT.get(report.get("verdict"), ("none", report.get("summary") or "Checked"))
+    return kind, words
+
+
 def starter_root() -> Path:
     """The starter parts that come with the app."""
     return Path(__file__).resolve().parents[1] / "library" / "starter"
@@ -96,6 +125,23 @@ def run_thumb(r: dict) -> str | None:
     return r.get("image")
 
 
+def part_render(r: dict) -> str | None:
+    """The picture of a part run alone (never with the game's rider or anything else of the game's): a horse's game
+    version from three-quarter front, a soldier on foot from its preview, else the game version from the front."""
+    f = Path(r["folder"])
+    if r.get("kind") == "soldier":
+        g = f / "preview" / "gallery" / f"close_three_quarter_{r.get('tier', 1)}.png"
+        if g.is_file():
+            return str(g)
+    versions = sorted((f / "trellis" / "game").glob("v[0-9][0-9][0-9]/manifest.json"))
+    m = _json(f / "finished" / "manifest.json") or (_json(versions[-1]) if versions else {})
+    imgs = ((m.get("compare") or {}).get("images") or {}).get("game") or {}
+    for view in ("front34", "side", "front"):
+        if imgs.get(view) and Path(imgs[view]).is_file():
+            return imgs[view]
+    return r.get("image")
+
+
 def starter_parts(root: Path | None = None) -> list[Part]:
     root = Path(root) if root else starter_root()
     out = []
@@ -119,7 +165,7 @@ def parts(kind: str | None = None, starter: Path | None = None) -> list[Part]:
             continue
         st = r.get("status") or {}
         out.append(Part(f"run:{r['name']}", r["name"], r["kind"], Path(r["folder"]), False, r.get("tags") or {},
-                        r.get("image"), run_thumb(r), r.get("rights", ""), bool(st.get("done")), r.get("state", "new")))
+                        r.get("image"), part_render(r), r.get("rights", ""), bool(st.get("done")), r.get("state", "new")))
     mine = {p.name for p in out}
     out += [p for p in starter_parts(starter) if p.name not in mine]  # your own run of a starter part replaces it
     return [p for p in out if kind is None or p.kind == kind]
@@ -259,6 +305,31 @@ def new_unit(name: str, utype: str, tiers: dict, country_tag: str = "", gfx: str
            "created": time.time()}
     (f / "request.json").write_text(json.dumps(req, indent=1), encoding="utf-8")
     return f
+
+
+def unit_preview(utype: str, slots: dict[str, str]) -> tuple[str | None, bool]:
+    """A picture of the whole unit at a tier (horse with rider, gun with crew): (path, True) when one has been drawn
+    for these parts (an assembled unit's preview, or an older cavalry run of the same horse and soldier), else its
+    main part's picture and False. (None, False) for the game's own."""
+    from eu4unitgen.ref3d import flow
+    if not slots:
+        return None, False
+    for r in flow.runs():
+        if not (r.get("status") or {}).get("done"):
+            continue
+        tiers = {}
+        if r.get("kind") == "unit" and r.get("type") == utype:
+            tiers = {int(t): s for t, s in (r.get("tiers") or {}).items()}
+        elif r.get("kind") == "cavalry" and utype == "cavalry":
+            tiers = {int(r.get("tier", 1)): {"horse": f"run:{r.get('horse')}", "soldier": f"run:{r.get('soldier')}"}}
+        for t, s in tiers.items():
+            if s == slots:
+                g = Path(r["folder"]) / "preview" / "gallery" / f"close_three_quarter_{t}.png"
+                if g.is_file():
+                    return str(g), True
+    main = {"infantry": "soldier", "cavalry": "horse", "artillery": "gun"}[utype]
+    p = part(slots.get(main) or next(iter(slots.values())))
+    return ((p.thumb or p.image) if p else None), False
 
 
 def uses(ref: str) -> list[str]:
