@@ -71,6 +71,11 @@ def test_soldier_steps_open_one_at_a_time(win, tmp_path):
     win.go("new", kind="soldier")
     assert "STEP 1 OF 4" in nu.step_label.text() and not nu.next.isEnabled() and "picture" in nu.next_why.text()
     assert nu.examples.count() == 5  # the guide's good and bad pictures
+    win.go("home")
+    win.go("new", kind="soldier")  # opened again: the old cells are gone, not left drawn over the drop box
+    cells = [c for c in nu.steps["picture"].findChildren(QtWidgets.QWidget) if c.layout() is not None
+             and c.layout().count() == 2 and isinstance(c.layout().itemAt(0).widget(), QtWidgets.QLabel)]
+    assert nu.examples.count() == 5 and len(cells) == 5
     nu.set_picture(_soldier_png(tmp_path / "Royal Guard.png"))
     assert nu.next.isEnabled() and "✓" in nu.checks_out.text()
     nu.go_next()

@@ -34,7 +34,9 @@ image ──cut-out──> RGBA ──TRELLIS.2 (WSL)──> raw.glb ──build
 | quality report | `ref3d/quality.py` (pure Python) | |
 | Add to mod | `export/modexport.py` (normal or achievement-safe; the checksum from the install's `checksum_manifest.txt`) on `export/testmod.py`, `export/writer.py` | |
 | checks, guide, errors, setup | `core/checks.py`, `core/guide.py`, `core/errors.py`, `core/setup.py` | |
-| GUI | `gui/unit_page.py` (the flow), `gui/setup_page.py` (Setup, About), `gui/app.py`; the nation wizard behind Home | |
+| GUI | `gui/app.py` (window, top bar), `gui/home.py`, `gui/new_unit.py` (the guided flow), `gui/progress.py`, `gui/my_units.py`, `gui/help_page.py` (example, guide, updates), `gui/tour.py`, `gui/setup_page.py` (Setup, About), `gui/base.py` | |
+| runs | `ref3d/flow.py` (kinds horse, soldier, cavalry; stages, resume, waiting for units and the GPU) | |
+| example, picture guide, updates | `core/example.py`, `core/guide_pictures.py`, `core/updates.py` (GitHub Releases; `update_repo` in the settings) | |
 
 The app's own process has no numpy: everything it runs directly is pure Python + Pillow. numpy code lives in Blender jobs (`blender/jobs/`) and AI jobs (`ai/jobs/`). Blender is never imported into the app (CLAUDE.md).
 
@@ -60,9 +62,13 @@ Inputs: `assets_in/regression/<name>/` (raw.glb, input/, subject.json; the rider
 
 `core/licences.py` lists every model and tool (shown on the About page and in SPEC §9). No Paradox file is ever copied into the repo or the package (rule 1).
 
-## The nation wizard and the command line
+## The command line
 
-The older Track F/Phase 1-3 tools are behind **Home** → **Advanced editor** (Settings, Unit set, Textures, Parts, Validate, Generate, Test mod) and on the command line: `python -m eu4unitgen.cli --help` (`generate`, `test-mod`, `pick-test-tag`, `parts-preview`). SPEC §10 describes them.
+The keyword/vanilla-parts builder's screens (Track F) moved to `archive/src/gui_nation_wizard/` on 2026-10-28. Its `core` modules and the command line stay: `python -m eu4unitgen.cli --help` (`generate`, `test-mod`, `pick-test-tag`, `parts-preview`). SPEC §10 describes them.
+
+## The tour
+
+`python -m eu4unitgen.gui.tour` drives a hidden window through every screen, grabs each one and writes the frames, `frames.json` and `tour.gif` into the settings folder (`tour/<version>`); **Help > Watch the tour** plays them.
 
 ## Archive
 

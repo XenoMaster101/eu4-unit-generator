@@ -216,10 +216,16 @@ class NewUnitScreen(Page):
     def _enter_picture(self) -> None:
         from eu4unitgen.core import guide, guide_pictures
         self.rules.setText("<ul>" + "".join(f"<li>{x}</li>" for x in guide.GUIDE[self.kind] + guide.GUIDE["all"]) + "</ul>")
+        if getattr(self, "_examples_kind", None) == self.kind:
+            return
+        self._examples_kind = self.kind
         while self.examples.count():
             it = self.examples.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+            old = it.widget()
+            if old:  # off screen now: deleteLater alone leaves it drawn until the event loop runs
+                old.hide()
+                old.setParent(None)
+                old.deleteLater()
         for i, (good, caption, im) in enumerate(guide_pictures.examples(self.kind)):
             pic = label("")
             pic.setPixmap(pil_pixmap(im, 120, 120))

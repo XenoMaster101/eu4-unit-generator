@@ -193,3 +193,10 @@ class TourDialog(QDialog):
             src = tour_dir() / "tour.gif"
             Path(dst).write_bytes(src.read_bytes())
             open_file(Path(dst))
+
+
+if __name__ == "__main__":
+    import sys
+    _app = QApplication.instance() or QApplication(sys.argv)
+    _app.setStyle("Fusion")
+    print(len(make()), "frames in", tour_dir())
