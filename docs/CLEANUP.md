@@ -1,7 +1,25 @@
 # Cleanup report (2026-10-25)
 
-Nothing has been deleted or uninstalled. Tell me which lines to remove. After the move into `D:\EU4 Unit Generator`
-(SPEC Track P5), everything the app needs is in that one folder; the rest below are old copies, caches and test output.
+## Done (the user's go-ahead, 2026-10-25; checked 2026-10-28)
+
+Everything marked delete below is gone: #2-#7, #9-#16 and #18. The old `Ubuntu` distribution was unregistered; inside
+`EU4UnitGen`, CUDA 12.8, uv's cache and the build tree were removed, and TRELLIS.2's imports still work. The Linux disk
+was compacted with diskpart: 37.5 GB -> 22.0 GB. Windows Sandbox (#21) is switched off and finishes at the next
+restart. Blender 5.2 (#8) is kept (no choice was given). In the project, `build\`, `dist\`, `output\`, the
+`horse2_*` and `cataphract_budget` runs and the regression set's `runs\` are gone (3.6 GB -> 0.87 GB); `work\` keeps
+only the reference images.
+
+What's left of the project's data: the regression baseline, 95 MB: `regression\baseline.json` and
+`assets_in\regression\{cataphract_horse, cataphract_rider, horse2}` (each `raw.glb`, `subject.json`, `input\`; the
+rider's cached shield in `parts_cache\`), and `assets_in\new_refs\` (your reference images).
+
+Free space after: C: 281.9 GB, D: 840.3 GB. Still yours to do: revoke the old Hugging Face token on huggingface.co if
+you don't use it elsewhere (the saved copy is deleted).
+
+## The list as it was before the cleanup
+
+After the move into `D:\EU4 Unit Generator` (SPEC Track P5), everything the app needs is in that one folder; the rest
+below were old copies, caches and test output.
 
 ## The whole PC, outside the project folder
 
