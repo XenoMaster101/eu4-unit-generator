@@ -155,10 +155,11 @@ def gallery(folder: Path, name: str, tiers: list[int], labels: dict, eu4: Path, 
 
 
 TURNTABLE_FRAMES = 12
+TURNTABLE_SCALE = 11.0  # the view's width in game units: a unit (about 8-10 tall, a spear more) fills the square
 
 
 def turntable(folder: Path, name: str, tier: int, eu4: Path, utype: str = "cavalry", frames: int = TURNTABLE_FRAMES,
-              size: int = 360) -> list[str]:
+              size: int = 480) -> list[str]:
     """The staged unit at ``tier`` turned round once, as the game draws it (lit, its idle pose, the game's close
     camera's elevation): ``frames`` images under ``folder/turntable``, for My units' rotating preview."""
     from eu4unitgen.core.character import CharacterSpec
@@ -174,7 +175,7 @@ def turntable(folder: Path, name: str, tier: int, eu4: Path, utype: str = "caval
     paths = []
     for i in range(frames):
         a = math.radians(180 - 360 * i / frames)  # from the side (VIEWS) round past the three-quarter and the front
-        cam = dict(GAME_CLOSE, width=size, height=size, view=[math.cos(a) * math.cos(el), math.sin(a) * math.cos(el), -math.sin(el)])
+        cam = dict(GAME_CLOSE, width=size, height=size, ortho_scale=TURNTABLE_SCALE, view=[math.cos(a) * math.cos(el), math.sin(a) * math.cos(el), -math.sin(el)])
         g = s.gallery(ch.set_spec(), units=[(utype, tier)], camera=cam, lit={"normal_maps": True})
         for im in g.images.values():
             p = out / f"frame_{i:02d}.png"

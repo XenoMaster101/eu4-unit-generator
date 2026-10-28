@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QGridLayout, QHBoxLayout, QScrollArea, QTabWidget, QVBoxLayout, QWidget
 
-from eu4unitgen.gui.base import Page, Turntable, card, ghost, label, open_folder, pil_pixmap, pixmap, primary
+from eu4unitgen.gui.base import Page, Turntable, card, clear_layout, ghost, label, open_folder, pil_pixmap, pixmap, primary
 
 FAQ = (
     ("How long does a unit take?", "About 15 to 30 minutes for a soldier or a horse (most of it is the AI making the "
@@ -152,10 +152,7 @@ class ExampleDialog(QDialog):
         self.step.setText(f"STEP {i + 1} OF {len(self.steps)}")
         self.title.setText(s.title.split(". ", 1)[-1])
         self.text.setText(s.text)
-        while self.pics.count():
-            it = self.pics.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+        clear_layout(self.pics)
         if s.frames:
             t = Turntable(420)
             t.set_frames(s.frames)

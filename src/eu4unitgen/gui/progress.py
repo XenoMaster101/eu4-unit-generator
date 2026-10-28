@@ -9,7 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QMessageBox, QProgressBar, QVBoxLayout
 
-from eu4unitgen.gui.base import ghost, label, minutes
+from eu4unitgen.gui.base import clear_layout, ghost, label, minutes
 
 STATE_TEXT = {"running": "being made", "done": "ready", "failed": "stopped with an error", "stopped": "paused",
               "new": "not started"}
@@ -63,10 +63,7 @@ class StageList(QFrame):
 
     def _build(self, kind: str) -> None:
         from eu4unitgen.ref3d import flow
-        while self.grid.count():
-            it = self.grid.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+        clear_layout(self.grid)
         self.rows = {}
         for r, key in enumerate(flow.stages_of(kind)):
             name = label(f"<b>{r + 1}. {flow.LABELS[key]}</b><br><span style='font-size:12px'>{flow.EXPLAIN[key]}</span>",

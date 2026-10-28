@@ -181,6 +181,17 @@ class DropImage(QLabel):
             self.setPixmap(pix)
 
 
+def clear_layout(lay) -> None:
+    """Every widget out of ``lay`` at once: hidden and unparented, then deleted (deleteLater alone leaves it drawn
+    where it was until the event loop runs)."""
+    while lay.count():
+        w = lay.takeAt(0).widget()
+        if w is not None:
+            w.hide()
+            w.setParent(None)
+            w.deleteLater()
+
+
 class Turntable(QLabel):
     """A unit turning round: its turntable frames played in a loop (click to pause); a still image when there are
     none."""

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QGridLayout, QHBoxLayout, QLineEdit, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from eu4unitgen.gui.base import DropImage, Page, card, ghost, label, pil_pixmap, pixmap, primary
+from eu4unitgen.gui.base import DropImage, Page, card, clear_layout, ghost, label, pil_pixmap, pixmap, primary
 from eu4unitgen.gui.progress import StageList
 
 NAME = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
@@ -219,13 +219,7 @@ class NewUnitScreen(Page):
         if getattr(self, "_examples_kind", None) == self.kind:
             return
         self._examples_kind = self.kind
-        while self.examples.count():
-            it = self.examples.takeAt(0)
-            old = it.widget()
-            if old:  # off screen now: deleteLater alone leaves it drawn until the event loop runs
-                old.hide()
-                old.setParent(None)
-                old.deleteLater()
+        clear_layout(self.examples)
         for i, (good, caption, im) in enumerate(guide_pictures.examples(self.kind)):
             pic = label("")
             pic.setPixmap(pil_pixmap(im, 120, 120))
@@ -376,10 +370,7 @@ class NewUnitScreen(Page):
         from eu4unitgen.gui.my_units import thumb_of
         from eu4unitgen.gui.progress import state_text
         from eu4unitgen.ref3d import flow
-        while w._grid.count():
-            it = w._grid.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+        clear_layout(w._grid)
         for b in w._group.buttons():
             w._group.removeButton(b)
         rs = [r for r in flow.runs() if r["kind"] == w._kind and r["state"] != "failed"]

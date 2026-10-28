@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QPlainTextEdit, QVBoxLayout, QWidget
 
-from eu4unitgen.gui.base import DropImage, Page, card, ghost, label, pixmap, primary
+from eu4unitgen.gui.base import DropImage, Page, card, clear_layout, ghost, label, pixmap, primary
 
 TYPES = (("soldier", "🛡  Soldier", "One person from a front picture. Fights on foot, crews your guns, and can ride.",
           "A soldier from one picture: used as your infantry (foot animations), as the crew of your guns, and as a "
@@ -105,10 +105,7 @@ class HomeScreen(Page):
     def fill_recent(self) -> None:
         from eu4unitgen.gui.my_units import thumb_of
         from eu4unitgen.ref3d import flow
-        while self.recent.count():
-            it = self.recent.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+        clear_layout(self.recent)
         rs = flow.runs()[:4]
         self.recent_title.setVisible(bool(rs))
         for r in rs:

@@ -191,7 +191,7 @@ def test_example_needs_its_runs(tmp_path):
     assert example.steps(tmp_path) is None and not example.available(tmp_path)
 
 
-def test_example_walks_a_finished_cavalry(tmp_path, monkeypatch):
+def test_example_walks_a_finished_cavalry(win, tmp_path, monkeypatch):
     from eu4unitgen.core import example
     monkeypatch.setenv("EU4UNITGEN_WORKSPACE", str(tmp_path / "ws"))
     img = _soldier_png(tmp_path / "s.png")
@@ -204,6 +204,14 @@ def test_example_walks_a_finished_cavalry(tmp_path, monkeypatch):
         "silhouette": {"verdict": "ok", "text": "Its outline overlaps the reference's by 60%."}}}), encoding="utf-8")
     s = example.steps(flow.root())
     assert len(s) == 10 and s[0].images and "Usable" in s[7].lines[0] and "Add to mod" in s[9].title
+    from eu4unitgen.gui.help_page import ExampleDialog
+    monkeypatch.setattr(example, "steps", lambda *a: s)
+    d = ExampleDialog()
+    for i in range(len(s)):  # each step shows its own pictures only, none left over from the one before
+        d.show_step(i)
+        pics = [w for w in d.findChildren(QtWidgets.QLabel) if w.pixmap() is not None and not w.pixmap().isNull()]
+        assert len(pics) == len(s[i].images) + (1 if s[i].frames else 0), i
+    d.close()
 
 
 def test_guide_checks_adapt_to_the_kind(tmp_path):

@@ -185,6 +185,7 @@ class UnitDetail(QWidget):
         rw.setLayout(right)
         sc = QScrollArea()
         sc.setWidgetResizable(True)
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # the text wraps: no sideways scrolling
         sc.setWidget(rw)
         body.addWidget(sc, 1)
         outer.addLayout(body, 1)
