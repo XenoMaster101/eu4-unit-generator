@@ -114,3 +114,56 @@ def test_a_fresh_horse_through_the_generator_and_validator(fake_install, tmp_pat
     with pytest.raises(LoadoutError, match="rights"):
         Loadout.from_json({"schema": 1, "horses": {"1": {**doc["horses"]["1"], "rights": ""}}}, tmp_path)
 
+
+def body_like() -> bytes:
+    """The fake install's infantry body (generic_01: bones root, head, the hand nodes) with one weighted triangle."""
+    from fakes import INF_BONES
+    tree = parse_pdx_mesh(horse_like())
+    shape = tree["children"][0]["children"][0]
+    shape["children"][1]["children"] = [
+        {"name": b, "props": {"ix": [i], **({"pa": [0]} if i else {}), "tx": [1.0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]},
+         "children": []} for i, b in enumerate(INF_BONES)]
+    mat = shape["children"][0]["children"][1]["props"]
+    mat.update({"diff": ["g1_d.dds"], "n": ["g_n.dds"], "spec": ["g_s.dds"]})
+    return write_pdx_mesh(tree)
+
+
+def test_a_fresh_soldier_on_foot(fake_install, tmp_path):
+    """A soldier from a picture as infantry: its body on the infantry entity (so also the gun crew), the infantry's
+    animation ids kept, its textures and .mesh named by naming.py; rule fresh_mesh passes."""
+    import json
+
+    from PIL import Image
+
+    from eu4unitgen.core.loadout import Loadout
+    from eu4unitgen.export.pipeline import Session, Settings, SetSpec
+    from fakes import make_textures_decodable
+
+    make_textures_decodable(fake_install)
+    (fake_install / "gfx/models/Units/generic_01.mesh").write_bytes(body_like())
+    geo = quad([{"head": 1.0}, {"head": 0.5, "root": 0.5}, {"root": 1.0}, {"root": 1.0}])
+    (tmp_path / "geo.json").write_text(json.dumps(geo.__dict__), encoding="utf-8")
+    for kind in ("diffuse", "specular", "normal"):
+        Image.new("RGBA", (64, 64), (40, 60, 160, 255)).save(tmp_path / f"{kind}.png")
+    lo = Loadout.from_json({"schema": 1, "soldiers": {"1": {"base": "generic_01", "geometry": "geo.json",
+                                                            "rights": "original (test)",
+                                                            "textures": {k: f"{k}.png" for k in ("diffuse", "specular", "normal")}}}},
+                           tmp_path)
+    assert lo.to_json()["soldiers"]["1"]["base"] == "generic_01" and lo.changes_anything()
+    s = Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out"))
+    try:
+        res = s.validate(SetSpec(tags=["MAC"], gfx="hellenicgfx", loadout=lo))[0]
+    finally:
+        s.close()
+    assert not res.report.errors, [str(i) for i in res.report.errors]
+    files = res.generated.files
+    assert "gfx/models/units/hr_mac/hr_mac_fresh_soldier_1.mesh" in files
+    assert all(f"gfx/models/units/hr_mac/hr_mac_fresh_soldier_1_{k}.dds" in files for k in ("diffuse", "specular", "normal"))
+    text = "".join(f.text for p, f in files.items() if p.endswith(".asset"))
+    inf = text.split('name = "MAC_INFANTRY_1"', 1)[1]
+    assert inf.split('pdxmesh = "', 1)[1].split('"', 1)[0] == "hr_mac_fresh_soldier_1_mesh"
+    gfx = "".join(f.text for p, f in files.items() if p.endswith(".gfx"))
+    block = gfx.split('name = "hr_mac_fresh_soldier_1_mesh"', 1)[1].split("pdxmesh = {", 1)[0]
+    assert 'id = "walk"' in block and 'id = "horse_idle"' in block
+    assert any(i.rule == "fresh_mesh" and "fresh soldier" in i.message for i in res.report.issues)
+

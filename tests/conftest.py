@@ -1,6 +1,8 @@
 """Shared fixtures: a synthetic EU4 install, a project pointing at a temp mod folder, MAC."""
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 
 import pytest
@@ -46,5 +48,8 @@ def _private_config(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     # nor the installed app's root (core.layout): the checkout's .eu4unitgen-root points at the real one
     from eu4unitgen.core import layout
+    real = layout.blender_exe() if not os.environ.get("BLENDER_PATH") else None
     monkeypatch.delenv("EU4UNITGEN_ROOT", raising=False)
     monkeypatch.setattr(layout, "_checkout", lambda: None)
+    if real is not None and real.is_file():  # its portable Blender only (the tests that run real Blender jobs)
+        monkeypatch.setenv("BLENDER_PATH", str(real))

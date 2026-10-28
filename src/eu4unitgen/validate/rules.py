@@ -576,11 +576,14 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
     from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
 
     res = ctx.generated.loadout
-    if res is None or not (res.horses or getattr(res, "riders", None)):
+    if res is None or not (res.horses or getattr(res, "riders", None) or getattr(res, "soldiers", None)):
         return []
     w, game, out = ctx.world, ctx.world.game, []
-    # M23: fresh riders the same way (on the base infantry body, wearing the cavalry rider entity)
-    every = [(t, r, "horse") for t, r in sorted(res.horses.items())] +         [(t, r, "rider") for t, r in sorted((getattr(res, "riders", None) or {}).items())]
+    # M23: fresh riders the same way (on the base infantry body, wearing the cavalry rider entity); soldiers on foot
+    # too (the same body, wearing the infantry entity)
+    every = ([(t, r, "horse") for t, r in sorted(res.horses.items())]
+             + [(t, r, "rider") for t, r in sorted((getattr(res, "riders", None) or {}).items())]
+             + [(t, r, "soldier") for t, r in sorted((getattr(res, "soldiers", None) or {}).items())])
     for tier, rec, what in every:
         f = ctx.generated.files.get(rec.file)
         if f is None:

@@ -1,5 +1,11 @@
-"""The app's one flow (Track P2): image -> name and rights -> horse or rider, unit slot -> Generate -> stages ->
+"""The app's one flow (Track P2): image -> name and rights -> what it is, unit slot -> Generate -> stages ->
 the result sheet and quality report -> edits -> Add to mod.
+
+Kinds: ``horse`` (from a side view); ``soldier`` (one person from a front view, on the infantry skeleton: on foot it
+is the infantry and the gun crew, and it can ride); ``cavalry`` (a finished horse and a finished soldier put
+together: no picture of its own, so only build, finish and preview: the soldier is built again for that horse, its
+legs clear of the horse's width and its parts on the horse's palette); ``rider`` (older runs: a rider from its own
+picture for a chosen horse).
 
 A run lives in ``<workspace>/assets_in/<name>/``: ``request.json`` (what was asked), ``status.json`` (each stage's
 state and time, a heartbeat), ``trellis/`` (the cut-out, TRELLIS.2's model, the built versions), ``finished/`` (the
@@ -31,9 +37,20 @@ LABELS = {"cutout": "Cut the subject out of the image", "trellis": "Make two 3D 
           "build": "Build the game model (shape, parts, textures, checks)", "finish": "Apply your edits",
           "preview": "Stage it and draw the result sheet"}
 GPU = {"trellis", "build"}
+KIND_STAGES = {"cavalry": ("build", "finish", "preview")}  # the rest run every stage
 # horse 2's and the cataphract rider's runs (2026-10-23/24) until this machine has its own
 DEFAULT_SECONDS = {"cutout": 45, "trellis": 910, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150}
-KINDS = ("horse", "rider")  # the foot soldier is on the roadmap (SPEC Track P)
+KINDS = ("horse", "soldier", "cavalry", "rider")
+FOOT_TYPE = {"horse": "cavalry", "soldier": "infantry", "cavalry": "cavalry", "rider": "cavalry"}  # the unit slot's type
+
+
+def stages_of(kind: str) -> tuple[str, ...]:
+    return KIND_STAGES.get(kind, STAGES)
+
+
+def body_kind(kind: str) -> str:
+    """How the build, edits and quality report treat it: a horse, or a person on the infantry skeleton."""
+    return "horse" if kind == "horse" else "rider"
 EU4_POLL = 20.0
 
 
@@ -48,20 +65,28 @@ def folder_of(name: str) -> Path:
 
 
 # ------------------------------------------------------------------ requests
-def new_request(name: str, image: Path, rights: str, kind: str, tier: int = 1, horse: str | None = None,
-                options: dict | None = None) -> Path:
-    """A new run's folder and request (refused if the name is taken)."""
+def new_request(name: str, image: Path | None, rights: str, kind: str, tier: int = 1, horse: str | None = None,
+                options: dict | None = None, soldier: str | None = None) -> Path:
+    """A new run's folder and request (refused if the name is taken). A cavalry run names its ``horse`` and
+    ``soldier`` (finished runs) instead of an image: the soldier's picture and both rights are recorded."""
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
     f = folder_of(name)
     if f.exists():
         raise FileExistsError(f"a run called {name} exists already")
+    edits = {}
+    if kind == "cavalry":
+        if not (horse and soldier):
+            raise ValueError("a cavalry unit needs a finished horse and a finished soldier")
+        h, sd = request(folder_of(horse)), request(folder_of(soldier))
+        image, rights = Path(sd["image"]), rights or f"horse: {h['rights']}; soldier: {sd['rights']}"
+        edits = {k: v for k, v in (sd.get("edits") or {}).items() if k != "candidate"}  # the soldier's look
     (f / "trellis").mkdir(parents=True)
     image = keep_reference(Path(image))
     req = {"schema": 1, "name": name, "image": str(Path(image).resolve()), "rights": rights, "kind": kind, "tier": int(tier),
-           "horse": horse, "options": options or {}, "edits": {}, "created": time.time()}
+           "horse": horse, "soldier": soldier, "options": options or {}, "edits": edits, "created": time.time()}
     (f / "request.json").write_text(json.dumps(req, indent=1), encoding="utf-8")
-    subject = {"schema": 1, "name": name, "template": kind, "rights": rights, "original": str(Path(image).resolve()),
+    subject = {"schema": 1, "name": name, "template": body_kind(kind), "rights": rights, "original": str(Path(image).resolve()),
                "pipeline": "trellis", "written_by": "ref3d.flow (the app)"}
     (f / "subject.json").write_text(json.dumps(subject, indent=1), encoding="utf-8")
     return f
@@ -150,7 +175,7 @@ def estimates(kind: str) -> dict[str, float]:
         for s, v in (r["status"].get("stages") or {}).items():
             if s in seen and v.get("state") == "done" and v.get("seconds"):
                 seen[s].append(v["seconds"])
-    return {s: statistics.median(v) if v else DEFAULT_SECONDS.get(f"{s}_{kind}", DEFAULT_SECONDS.get(s, 60))
+    return {s: statistics.median(v) if v else DEFAULT_SECONDS.get(f"{s}_{body_kind(kind)}", DEFAULT_SECONDS.get(s, 60))
             for s, v in seen.items()}
 
 
@@ -181,7 +206,7 @@ def stage_trellis(folder: Path, req: dict, cfg) -> dict:
         return {"kept": True}
     cands = trellis.generate_candidates((tr / "input" / "input_rgba.png").resolve(), tr, cfg.ai_root_path())
     br = BlenderRunner(cfg.blender(), log_dir=tr / "logs", timeout=1200)
-    build_kind = "horse" if req["kind"] == "horse" else "rider"
+    build_kind = body_kind(req["kind"])
     for c in cands:
         out = tr / f"cand_s{c['seed']}"
         c.update(trellis.score_candidate(br, Path(c["glb"]), tr / "input" / "input_fg.png", out))
@@ -222,6 +247,14 @@ def use_candidate(folder: Path, index: int) -> None:
     shutil.copyfile(c["candidates"][index]["glb"], Path(folder) / "trellis" / "raw.glb")
 
 
+def soldier_glb(req: dict) -> Path:
+    """The 3D model a person is built from: its own (``raw.glb``, the candidate picked), or for a cavalry unit its
+    soldier's."""
+    if req["kind"] == "cavalry":
+        return folder_of(req["soldier"]) / "trellis" / "raw.glb"
+    return folder_of(req["name"]) / "trellis" / "raw.glb"
+
+
 def horse_textures(name: str | None) -> dict | None:
     """The horse a rider rides (another run's built version): its textures, primary and geometry (palette, legs)."""
     if not name:
@@ -242,16 +275,17 @@ def stage_build(folder: Path, req: dict, cfg) -> dict:
     if c is not None:  # the candidate asked for (an edit), else the better-scored one
         pick = (req.get("edits") or {}).get("candidate")
         use_candidate(folder, (int(pick) - 1) if pick else c["best"])
-    opts = ed.build_options(req.get("edits"), req["kind"])
-    glb = folder / "trellis" / "raw.glb"
+    opts = ed.build_options(req.get("edits"), body_kind(req["kind"]))
+    glb = soldier_glb(req) if req["kind"] != "horse" else folder / "trellis" / "raw.glb"
     if req["kind"] == "horse":
         o = dict(req.get("options") or {})
         emblem = ed.emblem_file(opts.pop("emblem", None) or o.get("emblem"), folder)
         m = trellis.process(glb, folder / "trellis" / "game", emblem=emblem,
                             country_mask=opts.get("country_mask", bool(o.get("country_mask"))), cfg=opts.get("cfg"))
-    else:
+    else:  # a soldier alone has no horse: its own palette, its legs as built
+        cache = glb.parent / "parts_cache"  # a cavalry unit shares its soldier's part models (cached by crop)
         m = trellis.process_rider(glb, folder / "trellis" / "game", palette_from=horse_textures(req.get("horse")),
-                                  part_cache=folder / "trellis" / "parts_cache", **opts)
+                                  part_cache=cache, **opts)
     return {"version": m["version"]}
 
 
@@ -260,7 +294,7 @@ def stage_finish(folder: Path, req: dict, cfg) -> dict:
     v = _latest(folder / "trellis" / "game")
     if v is None:
         raise RuntimeError("there is no built version to finish")
-    ed.finish(v, req.get("edits"), req["kind"], folder / "finished")
+    ed.finish(v, req.get("edits"), body_kind(req["kind"]), folder / "finished")
     return {"from": v.name}
 
 
@@ -272,9 +306,12 @@ def stage_preview(folder: Path, req: dict, cfg) -> dict:
     m = json.loads((fin / "manifest.json").read_text(encoding="utf-8"))
     subj = json.loads((folder / "subject.json").read_text(encoding="utf-8"))
     tier = int(req.get("tier", 1))
-    horse = rider = None
+    horse = rider = soldier = None
+    utype = FOOT_TYPE[req["kind"]]
     if req["kind"] == "horse":
         horse = unitstage.horse_entry(fin, subj)
+    elif req["kind"] == "soldier":
+        soldier = unitstage.rider_entry(fin, subj)
     else:
         rider = unitstage.rider_entry(fin, subj)
         h = horse_textures(req.get("horse"))
@@ -286,13 +323,16 @@ def stage_preview(folder: Path, req: dict, cfg) -> dict:
         shutil.rmtree(pv)
     names = unitstage.unit_names(req["name"])
     sp = unitstage.spec(f"{req['name']}: preview (tier {tier}; vanilla at tier {tier + 1})", tier, horse, rider, names,
-                        unitstage.TEST)
+                        unitstage.TEST, soldier=soldier)
     st = unitstage.stage(pv, sp, "preview")
     if st["exit"] != 0:
         raise RuntimeError(f"staging the preview failed; see {pv / 'log.txt'}")
-    g = unitstage.gallery(pv, "preview", [tier, tier + 1], {tier: req["name"], tier + 1: "vanilla"}, cfg.eu4())
+    g = unitstage.gallery(pv, "preview", [tier, tier + 1], {tier: req["name"], tier + 1: "vanilla"}, cfg.eu4(), utype=utype)
     legs = None
-    if req["kind"] == "rider":
+    if req["kind"] == "soldier":  # on foot: its stance's own animations, not the rider's
+        from eu4unitgen.ref3d import trellis
+        m = {**m, "deform": trellis.foot_deform(fin, pv / "foot", cfg.blender())}
+    if req["kind"] in ("rider", "cavalry"):
         from eu4unitgen.core.character import CharacterSpec
         from eu4unitgen.export.gallery import GAME_CLOSE
         from eu4unitgen.export.pipeline import Session, Settings
@@ -303,13 +343,15 @@ def stage_preview(folder: Path, req: dict, cfg) -> dict:
                 "vanilla": quality.legs_clear(pv / "posed" / f"cavalry_{tier + 1}_posed.json")}
     view = "side" if req["kind"] == "horse" else "front"
     imgs = (m.get("compare") or {}).get("images") or {}
-    rep = quality.report(m, req["kind"], folder / "trellis" / "input" / "input_fg.png",
+    fg = (soldier_glb(req).parent if req["kind"] == "cavalry" else folder / "trellis") / "input" / "input_fg.png"
+    rep = quality.report(m, body_kind(req["kind"]), fg,
                          Path(imgs["game"][view]) if imgs.get("game", {}).get(view) else None,
                          Path(g["images"].get(f"map_three_quarter_{tier}", "")) or None,
                          Path(g["images"].get(f"map_three_quarter_{tier + 1}", "")) or None,
                          Path(imgs["raw"][view]) if imgs.get("raw", {}).get(view) else None, legs,
                          exclude=[Path(m.get("edited_from", fin)) / "parts" / "crops" / f"{k}_mask.png"
-                                  for k in ("lance", "shield", "crest")] if req["kind"] == "rider" else None)
+                                  for k in ("lance", "shield", "crest")] if req["kind"] != "horse" else None,
+                         on_foot=req["kind"] == "soldier")
     quality.save(rep, pv)
     sheet = result_sheet(folder, req, g, rep)
     return {"sheet": str(sheet), "quality": rep["summary"], "verdict": rep["verdict"]}
@@ -376,6 +418,7 @@ def go(folder: Path) -> dict:
     if old and old.get("alive") and old.get("pid") != os.getpid() and old.get("state") == "running":
         raise SystemExit(f"{req['name']} is already running (process {old.get('pid')})")
     stages = (old or {}).get("stages", {})
+    plan = stages_of(req["kind"])
     for s in stages.values():  # a stage cut off by the stop runs again
         if s.get("state") in ("running", "waiting_eu4"):
             s["state"] = "waiting"
@@ -385,7 +428,7 @@ def go(folder: Path) -> dict:
                           "resumed": bool(old), "stages": stages, "error": None, "trace": None, "done": False,
                           "sheet": (old or {}).get("sheet")})
     try:
-        for s in STAGES:
+        for s in plan:
             if (st.d["stages"].get(s) or {}).get("state") == "done":
                 continue
             if s in GPU:

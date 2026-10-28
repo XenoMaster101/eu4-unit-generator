@@ -112,6 +112,8 @@ def test_entities_only_renames_the_tags_unit_to_the_cultures():
     assert 'name = "westerngfx_CAVALRY_1"' in text and 'pdxmesh = "ours_horse"' in text
     assert 'Saddle_Node = "westerngfx_CAVALRY_1_rider"' in text and 'name = "plume_1"' in text
     assert "cavalry_horse" not in text and "BYZ_" not in text
+    data, kept, _ = modexport.entities_only(asset.encode(), "westerngfx", 1, "BYZ", "infantry")  # a soldier on foot
+    assert kept == 1 and 'name = "westerngfx_INFANTRY_1"' in data.decode() and "CAVALRY" not in data.decode()
 
 
 def test_errors_in_plain_words():
@@ -195,6 +197,29 @@ def test_candidates_pick_and_switch(tmp_path, monkeypatch):
     flow.use_candidate(f, 0)
     assert (f / "trellis" / "raw.glb").read_bytes() == b"model-42"
     assert edits.stage_for({}, {"candidate": 1}) == "build"
+
+
+def test_cavalry_joins_a_finished_horse_and_soldier(tmp_path, monkeypatch):
+    monkeypatch.setenv("EU4UNITGEN_WORKSPACE", str(tmp_path))
+    img = tmp_path / "ref.png"
+    Image.new("RGB", (64, 64), (200, 200, 200)).save(img)
+    flow.new_request("bay", img, "my horse picture", "horse")
+    s = flow.new_request("guard", img, "my soldier picture", "soldier", 2)
+    flow.set_edits(s, {"shield_side": "left", "candidate": 2})
+    try:
+        flow.new_request("half", None, "", "cavalry", horse="bay")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("cavalry without a soldier")
+    c = flow.new_request("guard_on_bay", None, "", "cavalry", 2, horse="bay", soldier="guard")
+    req = flow.request(c)
+    assert req["rights"] == "horse: my horse picture; soldier: my soldier picture"
+    assert req["edits"]["shield_side"] == "left" and "candidate" not in req["edits"]  # the soldier's look, its own model
+    assert flow.stages_of("cavalry") == ("build", "finish", "preview") and flow.stages_of("soldier") == flow.STAGES
+    assert flow.soldier_glb(req) == flow.folder_of("guard") / "trellis" / "raw.glb"
+    assert flow.FOOT_TYPE["soldier"] == "infantry" and flow.body_kind("cavalry") == "rider"
+    assert flow.estimates("soldier")["build"] == flow.DEFAULT_SECONDS["build_rider"]
 
 
 def test_pick_weighs_outline_colour_and_stretch():

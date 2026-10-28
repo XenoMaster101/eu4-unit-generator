@@ -106,16 +106,22 @@ def keep_graphics(paths: list[str], name: str, gfx: str, tier: int, rules) -> tu
     return keep, rewrite, notes
 
 
-def entities_only(data: bytes, gfx: str, tier: int, tag: str) -> tuple[bytes | None, int, int]:
-    """Entity definitions (the set's .asset files joined) cut down to the tag's cavalry at ``tier``, its rider and
-    every entity they attach (the parts), the first two renamed to the culture's own (``<gfx>_CAVALRY_<tier>`` and its
-    ``_rider``), which the culture's countries without a pack of their own show. -> (the text or None, kept, of how
-    many)."""
+def entities_only(data: bytes, gfx: str, tier: int, tag: str, utype: str = "cavalry") -> tuple[bytes | None, int, int]:
+    """Entity definitions (the set's .asset files joined) cut down to the tag's unit of type ``utype`` (cavalry or
+    infantry) at ``tier``, a cavalry's rider and every entity they attach (the parts), the unit (and rider) renamed to
+    the culture's own (``<gfx>_CAVALRY_<tier>`` and its ``_rider``; ``<gfx>_INFANTRY_<tier>``, which the culture's
+    guns also take as their crew), which the culture's countries without a pack of their own show. -> (the text or
+    None, kept, of how many)."""
+    from eu4unitgen.core.naming import Naming
+    n = Naming()
     blocks = dict(_entity_blocks(data.decode("utf-8-sig")))
-    horse, rider = f"{tag}_CAVALRY_{tier}", f"{tag}_CAVALRY_{tier}_rider"
-    if horse not in blocks:
+    root = n.unit_entity(tag, utype, tier)
+    if root not in blocks:
         return None, 0, len(blocks)
-    keep, todo = [], [horse]
+    rename = {root: n.unit_entity(gfx, utype, tier)}
+    if utype == "cavalry":
+        rename[n.rider_entity(tag, tier)] = n.rider_entity(gfx, tier)
+    keep, todo = [], [root]
     while todo:
         n = todo.pop()
         if n in keep or n not in blocks:
@@ -123,7 +129,6 @@ def entities_only(data: bytes, gfx: str, tier: int, tag: str) -> tuple[bytes | N
         keep.append(n)
         for target in re.findall(r'\b\w+\s*=\s*"([^"]+)"', " ".join(re.findall(r"attach\s*=\s*\{[^}]*\}", blocks[n]))):
             todo.append(target)
-    rename = {horse: f"{gfx}_CAVALRY_{tier}", rider: f"{gfx}_CAVALRY_{tier}_rider"}
     out = []
     for n in keep:
         b = blocks[n]
@@ -157,10 +162,11 @@ def _entity_blocks(text: str) -> list[tuple[str, str]]:
 
 
 def add_to_mod(preview_spec: Path, subject: str, mode: str, tag: str, gfx: str, tier: int, mod_dir: Path,
-               eu4: Path, stage_root: Path, write: bool = True) -> AddResult:
+               eu4: Path, stage_root: Path, write: bool = True, utype: str = "cavalry") -> AddResult:
     """Write the finished unit (its preview spec: the loadout and set) into ``mod_dir`` as mod ``<subject>_units``.
-    ``mode``: "normal" (for ``tag``, graphical culture ``gfx``) or "achievement_safe" (``gfx``'s cavalry at
-    ``tier``: ``gfx`` an existing culture such as westerngfx). ``write`` False: the plan only."""
+    ``mode``: "normal" (for ``tag``, graphical culture ``gfx``) or "achievement_safe" (``gfx``'s ``utype`` at
+    ``tier``, cavalry or infantry: ``gfx`` an existing culture such as westerngfx). ``write`` False: the plan
+    only."""
     import json
 
     from eu4unitgen.core.character import CharacterSpec
@@ -203,14 +209,14 @@ def add_to_mod(preview_spec: Path, subject: str, mode: str, tag: str, gfx: str, 
             files.append(f)
         if assets:  # every entity file joined, cut down to the unit, written as one file
             joined = b"\n".join(a.data for a in assets)
-            data, k, n = entities_only(joined, gfx, tier, tag)
+            data, k, n = entities_only(joined, gfx, tier, tag, utype)
             if data is None:
-                out.notes.append(f"validation: no {tag}_CAVALRY_{tier} entity was generated")
+                out.notes.append(f"validation: no {utype} entity at tier {tier} was generated for {tag}")
                 return out
             assets[0].data = data
             assets[0].path = f"{name}/gfx/entities/{name}_{gfx}.asset"
             files.append(assets[0])
-            out.notes.append(f"{k} of {n} entities kept: the unit as {gfx}_CAVALRY_{tier}, its rider and parts")
+            out.notes.append(f"{k} of {n} entities kept: the unit as {gfx}'s {utype} at tier {tier}, with its parts")
         plan.files = files
         plan.manifest["files"] = {p: e for p, e in plan.manifest.get("files", {}).items() if p in {f.path for f in files}}
         # the validation ran on the whole set: its errors about what this mode leaves out don't apply (the sprite

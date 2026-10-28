@@ -85,12 +85,14 @@ class RoleLoadout:
         if self.stance != "auto":
             return self.stance
         kinds = {p.kind for p in self.parts}
-        if "hoplon" in kinds:
+        if kinds & {"hoplon", "mesh_shield"}:  # a soldier from a picture with its own shield holds it up too
             return "spear_shield"
         if kinds & {"dory", "sarissa", "xyston"}:
             return "polearm_twohanded"
         if "xiphos" in kinds:
             return "polearm_onehanded"
+        if "mesh_weapon" in kinds:  # its own weapon (a lance or spear) and no shield: in both hands
+            return "polearm_twohanded"
         return "base"
 
     def to_json(self) -> dict:
@@ -179,6 +181,7 @@ class Loadout:
     hair: dict = field(default_factory=dict)  # a character spec's "hair" (swatch colours); empty: the library's
     horses: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh horse (core.fresh_mesh: geometry, textures, rights)
     riders: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh rider (M23; as horses, on the infantry body)
+    soldiers: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh soldier on foot (as riders, on the infantry entity)
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -241,6 +244,10 @@ class Loadout:
             if not str(key).isdigit() or int(key) not in TIERS:
                 raise LoadoutError(f"riders: {key!r} must be a tier {TIERS}")
             out.riders[int(key)] = check_rider(key, raw)
+        for key, raw in (doc.get("soldiers") or {}).items():
+            if not str(key).isdigit() or int(key) not in TIERS:
+                raise LoadoutError(f"soldiers: {key!r} must be a tier {TIERS}")
+            out.soldiers[int(key)] = check_rider(key, raw)
         for role, point in (doc.get("weapon_point") or {}).items():
             if role not in LOADOUT_ROLES or point not in POINTS:
                 raise LoadoutError(f"weapon_point: {role!r} must be one of {LOADOUT_ROLES} and {point!r} one of {POINTS}")
@@ -261,6 +268,8 @@ class Loadout:
             out["horses"] = {str(t): dict(h) for t, h in sorted(self.horses.items())}
         if self.riders:
             out["riders"] = {str(t): dict(h) for t, h in sorted(self.riders.items())}
+        if self.soldiers:
+            out["soldiers"] = {str(t): dict(h) for t, h in sorted(self.soldiers.items())}
         points = {r: p for r, p in sorted(self.points.items()) if p != DEFAULT_POINTS[r]}
         if points:
             out["weapon_point"] = points
@@ -277,7 +286,7 @@ class Loadout:
                 if s.parts or s.resolved_stance() != "base" or k[1] == "crew"}
 
     def changes_anything(self) -> bool:
-        return bool(self.active() or self.bodies or self.derived or self.horses or self.riders)
+        return bool(self.active() or self.bodies or self.derived or self.horses or self.riders or self.soldiers)
 
     def needs_blender(self) -> bool:
         return any(d["add"] for d in self.derived.values()) or any(s.parts for s in self.active().values())
@@ -328,6 +337,7 @@ class LoadoutResult:
     derived: dict[int, "DerivedRecord"] = field(default_factory=dict)  # tier -> its infantry's derived body
     horses: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse (rule fresh_mesh)
     riders: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a fresh rider (rule fresh_mesh)
+    soldiers: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a fresh soldier on foot
     texture_files: list[GeneratedFile] = field(default_factory=list)  # derived bodies' derived textures (Q5)
 
 
@@ -708,6 +718,13 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
 
         files, res.riders, notes = apply_horses(naming, set_name, owner, by_name, pdx.records, pdx.by_name, loadout,
                                                 game, idx, kind="rider")
+        derived_files += files
+        res.notes += notes
+    if loadout.soldiers:  # after the slots too: the stance pdxmesh's animation ids go onto the fresh one
+        from eu4unitgen.core.fresh_mesh import apply_horses
+
+        files, res.soldiers, notes = apply_horses(naming, set_name, owner, by_name, pdx.records, pdx.by_name, loadout,
+                                                  game, idx, kind="soldier")
         derived_files += files
         res.notes += notes
     built = build_parts(runner, naming, set_name, builds, version, cache)

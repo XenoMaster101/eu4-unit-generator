@@ -218,17 +218,23 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
     procedural DDS in the base textures' formats, full mips) beside it in the set's model folder,
     and a pdxmesh with the base horse's animations, scale and keys. With ``kind`` "rider" (M23): each
     tier's fresh rider (``loadout.riders``) on its cavalry rider entity, on the base infantry body's
-    skeleton (the rider plays its horse_* ids). -> (files, records, notes)."""
+    skeleton (the rider plays its horse_* ids). With ``kind`` "soldier": each tier's fresh soldier
+    (``loadout.soldiers``) on its infantry entity, on the same skeleton; its pdxmesh plays the base body's
+    animation ids with the infantry's own on top (its stance, and artillery_attack: the infantry is the gun
+    crew). -> (files, records, notes)."""
     from eu4unitgen.core.generator import OWNED, GeneratedFile, GenerationError
     from eu4unitgen.core.loadout import LoadoutError
     from eu4unitgen.library.scanner import summarize_mesh
     from eu4unitgen.textures.dds import DDSFormat, full_mip_count, read_header, write_dds
 
     files, out, notes = [], {}, []
-    rider = kind == "rider"
-    for tier, h in sorted((loadout.riders if rider else loadout.horses).items()):
-        entity = entities[naming.rider_entity(owner, tier) if rider else naming.unit_entity(owner, "cavalry", tier)]
-        if not rider and entity["pdxmesh"] == naming.pdxmesh(set_name, "horse", tier):
+    rider, soldier = kind == "rider", kind == "soldier"
+    body = rider or soldier
+    source = loadout.riders if rider else getattr(loadout, "soldiers", {}) if soldier else loadout.horses
+    for tier, h in sorted(source.items()):
+        entity = entities[naming.rider_entity(owner, tier) if rider else naming.unit_entity(owner, "infantry", tier)
+                          if soldier else naming.unit_entity(owner, "cavalry", tier)]
+        if not body and entity["pdxmesh"] == naming.pdxmesh(set_name, "horse", tier):
             raise GenerationError(f"tier {tier}: a texture recipe's horse slot and a fresh horse; pick one")
         rec = idx.pdxmesh(h["base"], base_only=True)
         if rec is None or not game.in_base_game(rec.get("file") or ""):
@@ -250,7 +256,8 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
             if w & (w - 1) or hh & (hh - 1):
                 raise GenerationError(f"tier {tier}: the fresh {kind}'s {tex} is {w}x{hh}; sizes must be powers of two")
             fmt = read_header(game.read(f"{folder}/{shape[tex]}"))["format"]
-            names[tex] = (naming.fresh_rider_texture if rider else naming.fresh_horse_texture)(set_name, tier, tex)
+            names[tex] = (naming.fresh_rider_texture if rider else naming.fresh_soldier_texture if soldier
+                          else naming.fresh_horse_texture)(set_name, tier, tex)
             paths[tex] = f"{naming.part_dir(set_name)}/{names[tex]}"
             files.append(GeneratedFile(paths[tex], write_dds(img, DDSFormat(fmt, w, hh, full_mip_count(w, hh))), OWNED,
                                        procedural=True))
@@ -259,16 +266,21 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
         except FreshMeshError as exc:
             raise GenerationError(f"tier {tier}: fresh {kind}: {exc}") from exc
         file, name = ((naming.fresh_rider_file(set_name, tier), naming.fresh_rider_pdxmesh(set_name, tier)) if rider
-                      else (naming.fresh_horse_file(set_name, tier), naming.fresh_horse_pdxmesh(set_name, tier)))
+                      else (naming.fresh_soldier_file(set_name, tier), naming.fresh_soldier_pdxmesh(set_name, tier))
+                      if soldier else (naming.fresh_horse_file(set_name, tier), naming.fresh_horse_pdxmesh(set_name, tier)))
         files.append(GeneratedFile(file, data, OWNED, derived_from=rec["file"]))
-        pdx = {"name": name, "file": file, "base": h["base"], "animations": dict(rec.get("animations") or {}),
+        anims = dict(rec.get("animations") or {})
+        if soldier:  # the infantry's own ids (its stance pdxmesh's, or the culture's) over the body's
+            worn = by_name.get(entity["pdxmesh"]) or idx.pdxmesh(entity["pdxmesh"]) or {}
+            anims.update(worn.get("animations") or {})
+        pdx = {"name": name, "file": file, "base": h["base"], "animations": anims,
                "scale": rec.get("scale"), "extra": dict(rec.get("extra") or {}), "settings": []}
         records.append(pdx)
         by_name[name] = pdx
         entity["pdxmesh"] = name
         out[tier] = FreshHorse(tier, entity["name"], name, file, h["base"], rec["file"], paths, len(geo.tri) // 3,
                                h["rights"], h.get("source", ""))
-        notes.append(f"tier {tier}: {entity['name']} is a fresh {'rider' if rider else 'horse'} ({file}: {len(geo.tri) // 3} triangles on "
+        notes.append(f"tier {tier}: {entity['name']} is a fresh {kind} ({file}:{len(geo.tri) // 3} triangles on "
                      f"{h['base']}'s skeleton and animations); reference {h.get('source') or '(none given)'}, "
                      f"rights: {h['rights']}")
     return files, out, notes

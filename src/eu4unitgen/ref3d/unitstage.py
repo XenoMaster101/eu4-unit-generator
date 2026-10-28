@@ -1,7 +1,8 @@
 """A generated unit staged and shown (Track P2; the general form of the per-test staging scripts tests 25-35 used).
 
-A *unit* is what the app makes from images: a horse (game version), a rider (game version with its parts), or
-both, for one unit slot (cavalry, tier 1-4). The vanilla unit stands at the next tier for comparison.
+A *unit* is what the app makes from images: a horse (game version), a soldier (game version with its parts: on
+foot it is the infantry, and the gun crew; on a horse the rider), or a horse and its rider, for one unit slot
+(infantry or cavalry, tier 1-4). The vanilla unit stands at the next tier for comparison.
 
   entries     a game version folder -> the loadout's horse or rider entry (geometry, textures, rights, source)
   spec        the test-mod spec: the unit at its tier, vanilla next, unit names from the subject's name, colours
@@ -63,11 +64,14 @@ def unit_names(name: str) -> dict:
 
 
 def spec(title: str, tier: int, horse: dict | None, rider: tuple | None, names: dict, test: dict,
-         vanilla_next: bool = True) -> dict:
-    """The test-mod spec: the unit at ``tier`` (its horse and/or rider; the vanilla rest), vanilla at the next tier."""
+         vanilla_next: bool = True, soldier: tuple | None = None) -> dict:
+    """The test-mod spec: the unit at ``tier`` (its horse and/or rider, or its soldier on foot: ``rider_entry``'s
+    pair as the infantry; the vanilla rest), vanilla at the next tier."""
     horses = {str(tier): horse} if horse else {}
     riders = {str(tier): rider[0]} if rider else {}
     slots = {f"{tier}/rider": {"parts": rider[1]}} if rider and rider[1] else {}
+    if soldier and soldier[1]:
+        slots[f"{tier}/infantry"] = {"parts": soldier[1]}
     colours = test["unit_colours"]
     if horse and horse.get("unit_colours"):
         colours = horse["unit_colours"]
@@ -76,6 +80,8 @@ def spec(title: str, tier: int, horse: dict | None, rider: tuple | None, names: 
         loadout["horses"] = horses
     if riders:
         loadout["riders"] = riders
+    if soldier:
+        loadout["soldiers"] = {str(tier): soldier[0]}
     if slots:
         loadout["slots"] = slots
     sprite_techs = [t for t in test["sprite_techs"] if t > tier] or test["sprite_techs"]
@@ -98,7 +104,7 @@ def stage(folder: Path, spec_: dict, name: str) -> dict:
 
 
 def gallery(folder: Path, name: str, tiers: list[int], labels: dict, eu4: Path, rows=("close", "near", "map"),
-            views=("side", "three_quarter", "front")) -> dict:
+            views=("side", "three_quarter", "front"), utype: str = "cavalry") -> dict:
     """The staged units through the game's camera (export.gallery.GAME_CLOSE): each row x view x tier an image
     under ``folder/gallery``, and ``sheet.png``. -> {"sheet", "images": {"<row>_<view>_<tier>": path}}."""
     from PIL import Image, ImageDraw, ImageFont
@@ -121,7 +127,7 @@ def gallery(folder: Path, name: str, tiers: list[int], labels: dict, eu4: Path, 
         for view in views:
             hx, hy = VIEWS[view]
             cam = dict(cam0, view=[hx * math.cos(el), hy * math.cos(el), -math.sin(el)])
-            g = s.gallery(ch.set_spec(), units=[("cavalry", t) for t in tiers], camera=cam, lit={"normal_maps": True})
+            g = s.gallery(ch.set_spec(), units=[(utype, t) for t in tiers], camera=cam, lit={"normal_maps": True})
             for (_, tier), im in g.images.items():
                 p = out / f"{row}_{view}_{tier}.png"
                 im.save(p)

@@ -102,7 +102,8 @@ def deformation(deform: dict, kind: str) -> dict:
         rows.append((anim, f, vf, o.get("max"), v.get("max"), verdict))
         if order[verdict] > order[worst]:
             worst = verdict
-    who = "vanilla's rider" if kind == "rider" else "the vanilla horse"
+    who = (f"vanilla's infantry, {deform['stance'].replace('_', ' ')}" if deform.get("stance")
+           else "vanilla's rider" if kind == "rider" else "the vanilla horse")
     text = ("In idle, moving and attack, " + ", ".join(f"{f}" for _, f, _, _, _, _ in rows)
             + f" triangles fold over ({who}: " + ", ".join(f"{vf}" for _, _, vf, _, _, _ in rows) + "); the worst stretch is "
             + ", ".join(f"{m}" for _, _, _, m, _, _ in rows) + " (" + ", ".join(f"{vm}" for _, _, _, _, vm, _ in rows) + ").")
@@ -190,12 +191,13 @@ def map_zoom(ours: Path | None, vanilla: Path | None) -> dict:
 
 def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path | None,
            map_ours: Path | None = None, map_vanilla: Path | None = None, raw_view: Path | None = None,
-           legs: dict | None = None, exclude: list | None = None) -> dict:
+           legs: dict | None = None, exclude: list | None = None, on_foot: bool = False) -> dict:
     """The five measures (module doc). ``game_view``: the game version rendered from the reference's view
     (compare/game_side.png for a horse, compare/game_front.png for a rider); ``raw_view``: TRELLIS.2's own model
     from the same camera. The outline's verdict is relative to the raw model's own overlap (the approved horses'
     raw models overlap their references by 72-74%: camera and perspective differ from the drawing). ``exclude``:
-    masks of parts cut off the body (a rider's lance, shield, plume) taken out of the reference first."""
+    masks of parts cut off the body (a rider's lance, shield, plume) taken out of the reference first. ``on_foot``:
+    a soldier as infantry (its deformation under its stance's animations; nothing about seating)."""
     m = {}
     if reference_fg and game_view and Path(reference_fg).is_file() and Path(game_view).is_file():
         fg = Image.open(reference_fg).convert("L")
@@ -220,7 +222,7 @@ def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path
     m["parts"] = parts_summary(manifest, kind)
     m["texture"] = texture(manifest, kind)
     m["map_zoom"] = map_zoom(map_ours, map_vanilla)
-    if kind == "rider" or legs:
+    if (kind == "rider" and not on_foot) or legs:
         m["seating"] = clearance((legs or {}).get("ours"), (legs or {}).get("vanilla"))
     order = {GOOD: 0, OK: 1, CHECK: 2}
     worst = max((x["verdict"] for x in m.values()), key=lambda v: order[v])

@@ -219,10 +219,9 @@ def trial_deform(glb: Path, kind: str, out: Path, blender: str | None = None) ->
     -> {"worst_stretch", "vanilla_worst", "flips": {anim: n}}."""
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.fresh_mesh import base_arrays
-    from eu4unitgen.core.project import default_blender_path
     out = Path(out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=1800)
+    br = BlenderRunner(blender or _config().blender(), log_dir=out / "logs", timeout=1800)
     src = {"path": str(Path(glb).resolve()), "merge": 1e-5}
     if kind == "horse":
         base = (eu4() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes()
@@ -286,9 +285,8 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     ``target_tris``). -> the manifest."""
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.fresh_mesh import base_arrays
-    from eu4unitgen.core.project import default_blender_path
     out = next_version(Path(root)).resolve()
-    br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=3600)
+    br = BlenderRunner(blender or _config().blender(), log_dir=out / "logs", timeout=3600)
     base = (eu4() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes()
     van = base_arrays(base)
     t0, P = time.time(), {**PROCESS, **(cfg or {})}
@@ -720,10 +718,9 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
 
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.core.fresh_mesh import base_arrays, geometry_from_job, write_fresh
-    from eu4unitgen.core.project import default_blender_path
     out = next_version(Path(root)).resolve()
     (out / "parts").mkdir(parents=True)
-    br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=3600)
+    br = BlenderRunner(blender or _config().blender(), log_dir=out / "logs", timeout=3600)
     base_file = eu4() / "gfx" / "models" / "Units" / "western_generic_01_type1.mesh"
     base = base_file.read_bytes()
     t0 = time.time()
@@ -853,13 +850,14 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
 
 
 def rider_deform(br, out: Path, base: bytes, base_file: Path, renders: bool = True, prefix: str = "cavalry_rider_",
-                 anims=("idle", "moving", "attack")) -> dict:
-    """The deformation check (check_mesh_deform, per bone group) on the rider's game mesh and vanilla's body under
-    ``<prefix><anim>`` animations (a soldier on foot: ``infantry_`` ones)."""
+                 anims=("idle", "moving", "attack"), geometry: Path | None = None) -> dict:
+    """The deformation check (check_mesh_deform, per bone group) on the rider's game mesh (``geometry``, default
+    ``out/low_geometry.json``) and vanilla's body under ``<prefix><anim>`` animations (a soldier on foot: its
+    stance's, e.g. ``spear_shield_``)."""
     from eu4unitgen.core.fresh_mesh import geometry_from_job, write_fresh
     dd = out / ("deform" if prefix == "cavalry_rider_" else f"deform_{prefix.rstrip('_')}")
-    dd.mkdir(exist_ok=True)
-    (dd / "rider.mesh").write_bytes(write_fresh(base, geometry_from_job(out / "low_geometry.json")))
+    dd.mkdir(parents=True, exist_ok=True)
+    (dd / "rider.mesh").write_bytes(write_fresh(base, geometry_from_job(geometry or out / "low_geometry.json")))
     jobs = [{"id": k, "path": str(eu4() / "gfx" / "models" / "Units" / "animation" / f"{prefix}{k}.anim")} for k in anims]
     res = {name: br.run_job("check_mesh_deform", {"mesh": str(m), "anims": jobs, "groups": RIDER_GROUPS,
                                                   "renders": {"out_dir": str(dd), "name": name, "size": 700} if renders else None}).result
@@ -868,6 +866,26 @@ def rider_deform(br, out: Path, base: bytes, base_file: Path, renders: bool = Tr
     return {who: {k: {"stretch": [round(x["str_p05"], 2), round(x["str_p95"], 2)], "max": round(x["str_max"], 2),
                       "flips": x["flips"], "groups": {g: m.get("flips") for g, m in (x.get("groups") or {}).items()}}
                   for k, x in res[who]["anims"].items()} for who in res}
+
+
+def foot_stance(manifest: dict) -> str:
+    """The infantry animations a soldier on foot plays (``core.loadout``'s auto stance for its own parts): a shield
+    -> spear_shield, a weapon alone -> polearm_twohanded."""
+    parts = manifest.get("parts") or {}
+    kinds = {p.get("kind") for p in parts.values()}
+    return "spear_shield" if "mesh_shield" in kinds else "polearm_twohanded" if "mesh_weapon" in kinds else "spear_shield"
+
+
+def foot_deform(vdir: Path, out: Path, blender: str | None = None) -> dict:
+    """A soldier's game version (``vdir``) checked on foot: its stance's idle, moving and attack (vanilla's files,
+    e.g. spear_shield_idle.anim), against vanilla's body under the same ones. -> rider_deform's summary + stance."""
+    from eu4unitgen.blender.runner import BlenderRunner
+    m = json.loads((Path(vdir) / "manifest.json").read_text(encoding="utf-8"))
+    stance = foot_stance(m)
+    base_file = eu4() / "gfx" / "models" / "Units" / "western_generic_01_type1.mesh"
+    br = BlenderRunner(blender or _config().blender(), log_dir=Path(out) / "logs", timeout=1800)
+    d = rider_deform(br, Path(out), base_file.read_bytes(), base_file, prefix=f"{stance}_", geometry=Path(m["geometry"]))
+    return {**d, "stance": stance}
 
 
 def _config():
