@@ -79,6 +79,7 @@ QWidget#front QLabel {{ color: {t['text']}; background: transparent; }}
 QWidget#front QLabel#brand {{ font-weight: 700; font-size: 15px; }}
 QWidget#front QLabel#h1 {{ font-size: 24px; font-weight: 600; }}
 QWidget#front QLabel#h2 {{ font-size: 17px; font-weight: 600; }}
+QWidget#front QLabel#h3 {{ font-size: 14px; font-weight: 600; }}
 QWidget#front QLabel#step {{ color: {t['accent_fg']}; font-weight: 600; letter-spacing: 1px; }}
 QWidget#front QLabel#muted {{ color: {t['muted']}; }}
 QWidget#front QLabel#explain {{ color: {t['muted']}; font-size: 13px; }}

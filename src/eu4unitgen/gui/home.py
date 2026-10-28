@@ -1,6 +1,7 @@
-"""The Home screen: "What should your soldiers look like?". Pick what to make (a soldier, a cavalry unit, later a
-gun) or drop a picture; watch the example or take the tour. The text box is kept for later (text to image) and is
-off. It leads into the New unit steps (``gui.new_unit``); the old keyword builder is archived."""
+"""The Home screen: "What should your soldiers look like?". Make a part from a picture (a soldier, a horse, later a
+gun) or drop one; build a unit from the library; watch the example or take the tour. The text box is kept for later
+(text to image) and is off. Parts are made in the New part steps (``gui.new_unit``), units in Build a unit
+(``gui.builder``); the old keyword builder is archived."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,13 +11,13 @@ from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QPlainTextEdit, QVBoxLay
 
 from eu4unitgen.gui.base import DropImage, Page, card, clear_layout, ghost, label, pixmap, primary
 
-TYPES = (("soldier", "🛡  Soldier", "One person from a front picture. Fights on foot, crews your guns, and can ride.",
-          "A soldier from one picture: used as your infantry (foot animations), as the crew of your guns, and as a "
-          "rider on any horse you make"),
-         ("cavalry", "🐎  Cavalry", "A horse from a side picture, with one of your soldiers riding it.",
-          "Two steps: the horse (from a side picture), then a soldier from My units (or a new one) riding it"),
-         ("artillery", "💣  Artillery  (coming)", "A gun from a picture, crewed by your soldiers.",
-          "Being planned: the gun from a three-quarter picture, with your soldiers as its crew. Not available yet."))
+TYPES = (("soldier", "🛡  A soldier", "One person from a front picture. Your infantry, your riders and your gun crews.",
+          "A soldier part from one picture: used as infantry (foot animations), as a rider on any horse, and as the "
+          "crew of any gun"),
+         ("horse", "🐎  A horse", "From a side picture. Any of your soldiers can ride it.",
+          "A horse part from one picture, tagged by style (light, barded, steppe, Arab) and region"),
+         ("gun", "💣  A gun  (coming)", "From a three-quarter picture, crewed by your soldiers.",
+          "Being built: a gun from a three-quarter picture, with your soldiers as its crew. Not available yet."))
 
 
 class HomeScreen(Page):
@@ -31,18 +32,25 @@ class HomeScreen(Page):
         sub.setAlignment(Qt.AlignCenter)
         col.addWidget(h1)
         col.addWidget(sub)
+        col.addWidget(label("Make a part from a picture", "h2"))
         grid = QGridLayout()
         self.cards = {}
         for i, (key, title, text, tip) in enumerate(TYPES):
             c = card(title, text, tip)
             c.setMinimumHeight(110)
-            if key == "artillery":
+            if key == "gun":
                 c.setEnabled(False)
             else:
                 c.clicked.connect(lambda _=False, k=key: window.go("new", kind=k))
             grid.addWidget(c, 0, i)
             self.cards[key] = c
         col.addLayout(grid)
+        self.build_card = card("🧩  Build a unit from your library",
+                               "Infantry, cavalry or artillery, put together from your parts tier by tier. The "
+                               "starter parts are already there. No AI needed.",
+                               "Pick the parts for each tier (e.g. tier 1 a light horse, tier 3 a barded one)")
+        self.build_card.clicked.connect(lambda _=False: window.go("build"))
+        col.addWidget(self.build_card)
         row = QHBoxLayout()
         self.drop = DropImage("…or drop a picture here\n(a soldier from the front, or a horse from the side)", 300, 150)
         self.drop.picked.connect(self.picture)
@@ -66,12 +74,12 @@ class HomeScreen(Page):
         sw.setLayout(side)
         row.addWidget(sw, 1)
         col.addLayout(row)
-        self.recent_title = label("Your latest units", "h2")
+        self.recent_title = label("Your latest parts and units", "h2")
         col.addWidget(self.recent_title)
         self.recent = QHBoxLayout()
         col.addLayout(self.recent)
         self.hint = label("New here? Press “Show me an example” to see a finished unit being made, step by step. "
-                          "Then pick Soldier or Cavalry above.", "explain")
+                          "Then make a soldier or a horse above, or build a unit from the starter parts.", "explain")
         col.addWidget(self.hint)
         wrap = QHBoxLayout()
         wrap.addStretch(1)
@@ -90,7 +98,7 @@ class HomeScreen(Page):
         self.fill_recent()
 
     def picture(self, path: Path) -> None:
-        """A picture dropped on Home: a wide one is a horse (the cavalry steps), else a soldier."""
+        """A picture dropped on Home: a wide one is a horse, else a soldier (the New part steps)."""
         from PIL import Image
         try:
             with Image.open(path) as im:
@@ -110,7 +118,7 @@ class HomeScreen(Page):
         self.recent_title.setVisible(bool(rs))
         for r in rs:
             from eu4unitgen.gui.progress import state_text
-            b = card(r["name"].replace("_", " "), f"{r['kind']} · {state_text(r)}", "Open it in My units",
+            b = card(r["name"].replace("_", " "), f"{r['kind']} · {state_text(r)}", "Open it in the Library",
                      picture=pixmap(thumb_of(r), 64, 64))
             b.setFixedWidth(260)
             b.clicked.connect(lambda _=False, f=r["folder"]: self.window_.go("units", folder=f))

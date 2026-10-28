@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QGridLayout, QHBoxLayout, QLineEdit, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLineEdit, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from eu4unitgen.gui.base import DropImage, Page, card, clear_layout, ghost, label, pil_pixmap, pixmap, primary
@@ -119,6 +119,8 @@ class NewUnitScreen(Page):
             self.parent_draft = None
         self.name.setText("")
         self.rights.setText("")
+        self.regions.setText("")
+        self.style.setCurrentIndex(0)
         self.mask.setChecked(True)
         self.tier_group.button(1).setChecked(True)
         self.drop.show_image(None)
@@ -138,7 +140,8 @@ class NewUnitScreen(Page):
         what = WORD[self.kind]
         sub = f" (for the cavalry unit {self.parent_draft['name']})" if self.parent_draft and self.parent_draft.get("name") else (
             " (for a cavalry unit)" if self.parent_draft else "")
-        self.step_label.setText(f"NEW {what.upper()}{sub.upper()}  ·  STEP {self.i + 1} OF {n}")
+        part = "NEW PART: " if self.kind in ("soldier", "horse") else "NEW "
+        self.step_label.setText(f"{part}{what.upper()}{sub.upper()}  ·  STEP {self.i + 1} OF {n}")
         self.title.setText(title)
         self.explain.setText(explain + " " + self._why(key))
         self.stack.setCurrentWidget(self.steps[key]._scroll)
@@ -302,8 +305,33 @@ class NewUnitScreen(Page):
         lay.addLayout(ex)
         lay.addWidget(label("Other good answers: “Drawn by me”, “Photo I took myself”, “Licensed CC-BY 4.0 from "
                             "<artist>, credited in the mod”.", "explain"))
+        from eu4unitgen.core import library
+        lay.addWidget(label("Tags (optional)", "h2"))
+        lay.addWidget(label("They decide which parts the app suggests when you build a unit for a country. You can "
+                            "change them later in the Library.", "explain"))
+        self.style_row = QWidget()
+        sr = QHBoxLayout(self.style_row)
+        sr.setContentsMargins(0, 0, 0, 0)
+        sr.addWidget(label("Style", wrap=False))
+        self.style = QComboBox()
+        self.style.addItem("no style", None)
+        for s in library.STYLES:
+            self.style.addItem(library.STYLE_TEXT[s], s)
+        self.style.setToolTip("What kind of horse it is. A country's graphical culture suggests a style (westerngfx: "
+                              "barded first; muslimgfx: Arab; a nomad: steppe).")
+        sr.addWidget(self.style)
+        sr.addStretch(1)
+        lay.addWidget(self.style_row)
+        self.regions = QLineEdit()
+        self.regions.setPlaceholderText("Regions or peoples it fits, e.g. Byzantine, Greek")
+        self.regions.setToolTip("Separated by commas. A country whose culture or culture group matches gets this part "
+                                "suggested first.")
+        lay.addWidget(self.regions)
         lay.addStretch(1)
         return w
+
+    def _enter_about(self) -> None:
+        self.style_row.setVisible(self.kind == "horse")  # a style is a horse's; regions are any part's
 
     def _name_changed(self) -> None:
         from eu4unitgen.ref3d.unitstage import unit_names
@@ -518,6 +546,9 @@ class NewUnitScreen(Page):
                                           self.tier_group.checkedId(), options={"country_mask": self.mask.isChecked()})
         except (FileExistsError, ValueError, OSError) as exc:
             return self.show_message(str(exc), error=True)
+        if self.kind in ("soldier", "horse"):
+            from eu4unitgen.core import library
+            library.set_tags(folder, self.style.currentData(), self.regions.text())
         flow.start(folder)
         self.started = str(folder)
         self.go.setEnabled(False)
@@ -539,7 +570,7 @@ class NewUnitScreen(Page):
             return
         if st.get("done"):
             self.timer.stop()
-            self.show_message("Ready. Open it in My units to see it turn, edit it, or add it to your mod.")
+            self.show_message("Ready. Open it in the Library to see it turn, or use it in a unit (New unit).")
 
     def hideEvent(self, e):  # noqa: N802 - Qt name
         super().hideEvent(e)

@@ -235,12 +235,12 @@ def stage_trellis(folder: Path, req: dict, cfg) -> dict:
 
 def candidate_text(c: dict) -> str:
     """One candidate's scores in plain words (the edits' 3D model list, the Example, My units)."""
-    bits = [f"outline {c['iou']:.0%}"]
+    bits = [f"outline {c['iou']:.0%}"] if c.get("iou") is not None else []
     if c.get("colour_de") is not None:
         bits.append(f"colour distance {c['colour_de']:.0f}")
     if c.get("worst_stretch") is not None:
         bits.append(f"worst stretch {c['worst_stretch']:.2f}")
-    return ", ".join(bits)
+    return ", ".join(bits) or c.get("note") or "not scored"
 
 
 def candidates(folder: Path) -> dict | None:

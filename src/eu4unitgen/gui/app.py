@@ -1,5 +1,6 @@
-"""The app's window: a top bar on every screen (Home · New unit · My units · Setup · Help, the status ticks for EU4,
-Blender and the AI, the version) over one screen at a time.
+"""The app's window: a top bar on every screen (Home · New unit · Library · Setup · Help, the status ticks for EU4,
+Blender and the AI, the version) over one screen at a time. New unit builds a unit from library parts
+(``gui.builder``); New part (from Home and the Library) makes a part from a picture (``gui.new_unit``).
 
 Thin by design (CLAUDE.md): screens collect input and show results; runs are ``ref3d.flow`` in their own detached
 process; checks are ``core.checks``; Add to mod is ``export.modexport``. Short jobs (Add to mod) run on a worker
@@ -22,8 +23,8 @@ from eu4unitgen import __version__
 from eu4unitgen.gui.theme import tokens
 
 NAV = (("home", "Home", "The start: pick what to make, or watch the example"),
-       ("new", "New unit", "Make a soldier, a cavalry unit (or later a gun) from a picture, step by step"),
-       ("units", "My units", "Everything you've made: previews, edits, Add to mod"),
+       ("build", "New unit", "Build a unit (infantry, cavalry, artillery) from the parts in your library, tier by tier"),
+       ("units", "Library", "Your parts (horses, soldiers, guns) and units: previews, tags, edits, Add to mod"),
        ("setup", "Setup", "Paths, checks and the one-time setup of Blender and the AI"),
        ("help", "Help", "The tour, the example, the picture guide, questions and answers, updates"))
 STATUS_MS = 30000
@@ -124,6 +125,7 @@ class MainWindow(QMainWindow):
             if getattr(app, "_wheel_guard", None) is None:
                 app._wheel_guard = install_wheel_guard(app)
 
+        from eu4unitgen.gui.builder import BuildUnitScreen
         from eu4unitgen.gui.help_page import HelpPage
         from eu4unitgen.gui.home import HomeScreen
         from eu4unitgen.gui.my_units import MyUnitsScreen
@@ -133,11 +135,13 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.home = HomeScreen(self)
         self.new_unit = NewUnitScreen(self)
+        self.builder = BuildUnitScreen(self)
         self.my_units = MyUnitsScreen(self)
         self.setup_page = SetupPage(self)
         self.help_page = HelpPage(self)
         self.about_page = AboutPage(self)
-        self.screens = {"home": self.home, "new": self.new_unit, "units": self.my_units, "setup": self.setup_page,
+        self.screens = {"home": self.home, "new": self.new_unit, "build": self.builder, "units": self.my_units,
+                        "setup": self.setup_page,
                         "help": self.help_page, "about": self.about_page}
         for w in self.screens.values():
             self.stack.addWidget(w)
@@ -158,10 +162,11 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ screens
     def go(self, key: str, **kw) -> None:
-        """Show screen ``key`` (home, new, units, setup, help, about); ``kw`` go to its ``enter``."""
+        """Show screen ``key`` (home, new (a part), build (a unit), units (the Library), setup, help, about); ``kw``
+        go to its ``enter``."""
         w = self.screens[key]
         self.stack.setCurrentWidget(w)
-        self.bar.select("help" if key == "about" else key)
+        self.bar.select({"about": "help", "new": "units"}.get(key, key))
         if hasattr(w, "enter"):
             w.enter(**kw)
 

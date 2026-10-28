@@ -1,10 +1,10 @@
-"""My units: a gallery of everything made (a picture, its name, kind and state), and each unit's own page: the
-turntable (the unit turning, as the game draws it), the result sheet, the quality report in plain words, its
-progress while it is being made, and what to do with it: edit the look, use a soldier as a rider (or a horse for
-cavalry), add it to a mod, delete it.
+"""The Library (was My units; SPEC Track L): the parts (horses, soldiers, guns: made once from a picture, or the
+starter parts that come with the app) and the units put together from them. Each part's page: the turntable, the
+result sheet, the quality report in plain words, its progress while it is being made, its tags, and what to do with
+it: use it in a unit, edit the look, add it to a mod, delete it. A starter part is read-only.
 
-Thin by design: runs are ``ref3d.flow``; edits ``ref3d.edits`` (only what they need is rebuilt); Add to mod
-``export.modexport``."""
+Thin by design: parts and units are ``core.library``; runs ``ref3d.flow``; edits ``ref3d.edits`` (only what they need
+is rebuilt); Add to mod ``export.modexport``."""
 from __future__ import annotations
 
 import json
@@ -22,23 +22,27 @@ from eu4unitgen.gui.base import Page, Turntable, card, ghost, label, open_file, 
 from eu4unitgen.gui.progress import StageList, state_text
 from eu4unitgen.gui.widgets import FlowLayout
 
-KIND_TEXT = {"soldier": "soldier", "horse": "horse", "cavalry": "cavalry", "rider": "rider"}
-FILTERS = (("all", "All"), ("soldier", "Soldiers"), ("horse", "Horses"), ("cavalry", "Cavalry"))
+KIND_TEXT = {"soldier": "soldier", "horse": "horse", "gun": "gun", "cavalry": "cavalry unit", "rider": "cavalry unit",
+             "unit": "unit"}
+FILTERS = (("all", "All"), ("horse", "Horses"), ("soldier", "Soldiers"), ("gun", "Guns"), ("unit", "Units"))
 EMBLEMS = [("none", None), ("the Palaiologan cross (tetragrammatic)", "tetragrammatic")]
 VERDICT_COLOUR = {"good": "ok", "ok": "warn", "check": "error"}
 
 
 def thumb_of(r: dict) -> str | None:
-    """A unit's picture for the gallery: its turntable's three-quarter frame, its close render, else its reference."""
-    from eu4unitgen.ref3d import flow
-    f = Path(r["folder"])
-    frames = flow.turntable_frames(f)
-    if frames:
-        return str(frames[min(1, len(frames) - 1)])
-    g = f / "preview" / "gallery" / f"close_three_quarter_{r.get('tier', 1)}.png"
-    if g.is_file():
-        return str(g)
-    return r.get("image")
+    """A run's picture for the gallery: its turntable's three-quarter frame, its close render, else its reference."""
+    from eu4unitgen.core import library
+    return library.run_thumb(r)
+
+
+def unit_text(r: dict) -> str:
+    """A unit card's line: each tier's parts ("tier 1: bay horse + cataphract")."""
+    if r.get("kind") != "unit":
+        return f"tier {r.get('tier', 1)}: {r.get('horse')} + {r.get('soldier')}".replace("_", " ")
+    bits = []
+    for t, s in sorted((r.get("tiers") or {}).items()):
+        bits.append(f"tier {t}: " + " + ".join(ref.split(":", 1)[1].replace("_", " ") for ref in s.values()))
+    return "; ".join(bits)
 
 
 class MyUnitsScreen(Page):
@@ -51,7 +55,7 @@ class MyUnitsScreen(Page):
         g = QWidget()
         gl = QVBoxLayout(g)
         head = QHBoxLayout()
-        head.addWidget(label("My units", "h1"))
+        head.addWidget(label("Library", "h1"))
         head.addStretch(1)
         self.filter_group = QButtonGroup(self)
         for key, text in FILTERS:
@@ -62,13 +66,32 @@ class MyUnitsScreen(Page):
             self.filter_group.addButton(b)
             head.addWidget(b)
         head.addSpacing(12)
-        head.addWidget(primary("＋  New unit", lambda: window.go("new"), "Make a soldier or a cavalry unit"))
+        head.addWidget(ghost("＋  New part", lambda: window.go("new"),
+                             "Make a horse, a soldier or a gun from a picture (needs the AI setup)"))
+        head.addWidget(primary("＋  Build a unit", lambda: window.go("build"),
+                               "Put a unit together from the parts here, tier by tier (no AI needed)"))
         gl.addLayout(head)
-        self.empty = label("Nothing here yet. Press “New unit” to make your first soldier, or “Show me an example” "
-                           "on Home to see how it goes.", "explain")
+        gl.addWidget(label("Parts are made once from a picture and used in as many units as you like: infantry is a "
+                           "soldier, cavalry a horse and a soldier riding it, artillery a gun and a soldier as its "
+                           "crew.", "explain"))
+        self.ai_note = label("", "explain")
+        gl.addWidget(self.ai_note)
+        self.empty = label("Nothing here yet. Press “New part” to make your first soldier or horse from a picture.",
+                           "explain")
         gl.addWidget(self.empty)
         box = QWidget()
-        self.flow_layout = FlowLayout(box)
+        bl = QVBoxLayout(box)
+        self.parts_title = label("Parts", "h2")
+        bl.addWidget(self.parts_title)
+        pw = QWidget()
+        self.flow_layout = FlowLayout(pw)
+        bl.addWidget(pw)
+        self.units_title = label("Units", "h2")
+        bl.addWidget(self.units_title)
+        uw = QWidget()
+        self.units_layout = FlowLayout(uw)
+        bl.addWidget(uw)
+        bl.addStretch(1)
         sc = QScrollArea()
         sc.setWidgetResizable(True)
         sc.setWidget(box)
@@ -106,22 +129,50 @@ class MyUnitsScreen(Page):
         self.fill()
 
     def fill(self) -> None:
+        from eu4unitgen.core import library
         from eu4unitgen.ref3d import flow
         self.flow_layout.clear()
-        rs = [r for r in flow.runs() if self.filter == "all" or r["kind"] == self.filter
-              or (self.filter == "cavalry" and r["kind"] == "rider")]
-        for r in rs:
-            b = card(r["name"].replace("_", " "), f"{KIND_TEXT.get(r['kind'], r['kind'])}, tier {r.get('tier', 1)}\n"
-                     f"{state_text(r)}", "Open it: its preview, quality report, edits and Add to mod",
-                     picture=pixmap(thumb_of(r), 150, 150))
-            b.setFixedSize(380, 176)
-            b.clicked.connect(lambda _=False, f=r["folder"]: self.open(f))
+        self.units_layout.clear()
+        ps = [p for p in library.parts() if self.filter in ("all", p.kind)]
+        for p in ps:
+            tags = p.tag_text()
+            state = "ready" if p.done else state_text({"status": flow.status(p.folder) or {}, "state": p.state})
+            b = card(p.title, f"{KIND_TEXT[p.kind]}{' · starter' if p.starter else ''}\n"
+                     f"{tags or 'no tags yet'}\n{state}",
+                     "A starter part that comes with the app: use it in a unit, or make a copy to edit it" if p.starter
+                     else "Open it: its preview, quality report, tags, edits, Use in a unit",
+                     picture=pixmap(p.thumb or p.image, 130, 130))
+            b.setFixedSize(360, 160)
+            b.clicked.connect(lambda _=False, ref=p.ref: self.open_part(ref))
             self.flow_layout.addWidget(b)
-        self.empty.setVisible(not rs)
+        us = library.units() if self.filter in ("all", "unit") else []
+        for r in us:
+            b = card(r["name"].replace("_", " "), f"{library.TYPE_TEXT.get(r.get('type'), 'Cavalry')}\n{unit_text(r)}\n"
+                     f"{state_text(r)}", "Open it: its tiers, preview, Add to mod", picture=pixmap(thumb_of(r), 130, 130))
+            b.setFixedSize(360, 160)
+            b.clicked.connect(lambda _=False, f=r["folder"]: self.open(f))
+            self.units_layout.addWidget(b)
+        self.parts_title.setVisible(bool(ps))
+        self.units_title.setVisible(bool(us))
+        self.empty.setVisible(not ps and not us)
+        ok, why = library.ai_ready()
+        self.ai_note.setText(why)
+        self.ai_note.setVisible(not ok)
 
     def open(self, folder: str) -> None:
         self.detail.show_unit(folder)
         self.stack.setCurrentWidget(self.detail)
+
+    def open_part(self, ref: str) -> None:
+        from eu4unitgen.core import library
+        p = library.part(ref)
+        if p is None:
+            return
+        if p.starter:
+            self.detail.show_starter(p)
+            self.stack.setCurrentWidget(self.detail)
+        else:
+            self.open(str(p.folder))
 
     def back(self) -> None:
         self.fill()
@@ -134,12 +185,13 @@ class UnitDetail(QWidget):
         self.screen = screen
         self.window_ = screen.window_
         self.folder: str | None = None
+        self.starter = None  # a core.library.Part when a starter part is shown
         self.cloth: tuple | None = None
         self.emblem_upload: str | None = None
         self._shown_frames = None
         outer = QVBoxLayout(self)
         top = QHBoxLayout()
-        top.addWidget(ghost("← All units", screen.back))
+        top.addWidget(ghost("← Library", screen.back))
         self.title = label("", "h1", wrap=False)
         top.addWidget(self.title)
         top.addStretch(1)
@@ -163,11 +215,14 @@ class UnitDetail(QWidget):
         self.resume = primary("Resume", self._resume, "Carry on from the last finished step")
         self.edit_btn = ghost("Edit the look", lambda: self._toggle(self.edits_box),
                               "Colours, brightness, plume, shield side…: only what's needed is rebuilt")
-        self.ride_btn = ghost("Use as rider", self._use_as_rider, "Put this soldier on one of your horses (a new cavalry unit)")
+        self.ride_btn = primary("Use in a unit", self._use_as_rider, "Build a unit with this part (no AI needed)")
         self.add_btn = primary("Add to mod", lambda: self._toggle(self.add_box), "Write it into a mod folder you choose")
         self.del_btn = ghost("Delete", self._delete, "Delete this unit and its files (asks first)")
         self.del_btn.setObjectName("danger")
-        for b in (self.resume, self.edit_btn, self.ride_btn, self.add_btn, self.del_btn):
+        self.copy_btn = ghost("Make a copy", self._copy, "A copy of this starter part in your library, to edit")
+        self.tags_btn = ghost("Tags", lambda: self._toggle(self.tags_box), "Its style and regions: they drive the "
+                              "suggestions when you build a unit for a country")
+        for b in (self.resume, self.ride_btn, self.edit_btn, self.tags_btn, self.add_btn, self.copy_btn, self.del_btn):
             actions.addWidget(b)
         actions.addStretch(1)
         right.addLayout(actions)
@@ -175,6 +230,7 @@ class UnitDetail(QWidget):
         right.addWidget(self.stages)
         self.quality = label("", rich=True)
         right.addWidget(self.quality)
+        right.addWidget(self._tags())
         right.addWidget(self._edits())
         right.addWidget(self._add())
         self.message = label("", rich=True)
@@ -204,36 +260,52 @@ class UnitDetail(QWidget):
     # ------------------------------------------------------------------ showing a unit
     def show_unit(self, folder: str) -> None:
         self.folder = folder
+        self.starter = None
         self._shown_frames = None
         self.edits_box.hide()
         self.add_box.hide()
+        self.tags_box.hide()
         self.show_message("")
         self.refresh()
 
     def refresh(self) -> None:
         from eu4unitgen.ref3d import flow
+        if getattr(self, "starter", None) is not None:
+            return
         if not self.folder or not (Path(self.folder) / "request.json").is_file():
             return
+        from eu4unitgen.core import library
         req = flow.request(Path(self.folder))
-        st = self.stages.show_run(self.folder)
+        kind = req["kind"]
+        st = self.stages.show_run(self.folder) if kind != "unit" else (flow.status(Path(self.folder)) or {})
         state = st.get("state", "new")
         done = bool(st.get("done"))
-        kind = req["kind"]
+        part = kind in library.KINDS
         self.title.setText(req["name"].replace("_", " "))
-        bits = [f"A {KIND_TEXT.get(kind, kind)}, tier {req.get('tier', 1)}"]
+        if kind == "unit":
+            bits = [f"{library.TYPE_TEXT[req['type']]}, put together from the library",
+                    unit_text(req), "built" if done else "not built yet: putting units together comes in the next step"]
+        else:
+            bits = [f"A {KIND_TEXT.get(kind, kind)}" + ("" if part else f", tier {req.get('tier', 1)}")]
         if kind == "cavalry":
             bits.append(f"the soldier {req.get('soldier')} on the horse {req.get('horse')}")
+        if part and req.get("tags"):
+            bits.append("tags: " + library.Part("", "", kind, Path(), tags=req["tags"]).tag_text())
         bits.append(f"rights: {req.get('rights', '')}")
         self.state.setText(" · ".join(bits))
-        self.stages.setVisible(not done)
-        self.resume.setVisible(state in ("stopped", "failed", "new"))
+        self.stages.setVisible(not done and kind != "unit")
+        self.resume.setVisible(state in ("stopped", "failed", "new") and kind != "unit")
         for b in (self.edit_btn, self.add_btn):
             b.setEnabled(done)
-        self.ride_btn.setVisible(kind in ("soldier", "horse"))
-        self.ride_btn.setText("Use as rider" if kind == "soldier" else "Use for cavalry")
-        self.ride_btn.setToolTip("Put this soldier on one of your horses (a new cavalry unit)" if kind == "soldier"
-                                 else "Give this horse one of your soldiers as its rider (a new cavalry unit)")
+        self.edit_btn.setVisible(kind != "unit")
+        self.ride_btn.setVisible(part)
         self.ride_btn.setEnabled(done)
+        self.tags_btn.setVisible(part)
+        self.copy_btn.setVisible(False)
+        for b in (self.add_btn, self.del_btn, self.sheet_btn, self.folder_btn):
+            b.setVisible(True)
+        if part:
+            self._fill_tags(req)
         self.del_btn.setEnabled(state != "running")
         frames = [str(p) for p in flow.turntable_frames(Path(self.folder))]
         if frames != self._shown_frames:
@@ -276,12 +348,90 @@ class UnitDetail(QWidget):
         QTimer.singleShot(1500, self.refresh)
 
     def _use_as_rider(self) -> None:
+        """Use in a unit: Build a unit with this part picked for tier 1 (a horse: cavalry; a gun: artillery; a
+        soldier: infantry, switch the type there to ride or crew)."""
         from eu4unitgen.ref3d import flow
+        if self.starter is not None:
+            return self.window_.go("build", pick=self.starter.ref)
         req = flow.request(Path(self.folder))
-        if req["kind"] == "soldier":
-            self.window_.go("new", kind="cavalry", soldier=req["name"])
-        else:
-            self.window_.go("new", kind="cavalry", horse=req["name"])
+        self.window_.go("build", pick=f"run:{req['name']}")
+
+    # ------------------------------------------------------------------ a starter part (read-only)
+    def show_starter(self, p) -> None:
+        self.starter = p
+        self.folder = str(p.folder)
+        self._shown_frames = None
+        for box in (self.edits_box, self.add_box, self.tags_box):
+            box.hide()
+        self.show_message("")
+        self.title.setText(p.title)
+        self.state.setText(f"A starter {KIND_TEXT[p.kind]} that comes with the app · tags: {p.tag_text() or 'none'}"
+                           f" · rights: {p.rights}")
+        self.stages.hide()
+        for b in (self.resume, self.edit_btn, self.tags_btn, self.add_btn, self.del_btn):
+            b.setVisible(False)
+        self.ride_btn.setVisible(True)
+        self.ride_btn.setEnabled(True)
+        self.copy_btn.setVisible(True)
+        self.turn.set_frames([], p.thumb or p.image)
+        self.sheet_btn.setVisible(False)  # its sheet shows the game's own bodies: made on this PC once it's in a unit
+        self.folder_btn.setVisible(False)
+        import json as _json
+        d = _json.loads((p.folder / "part.json").read_text(encoding="utf-8"))
+        q = d.get("quality") or {}
+        from eu4unitgen.ref3d.quality import TITLES
+        rows = [f"<h3>How it came out: {q.get('summary') or '—'}</h3>"]
+        for k, title in TITLES.items():
+            x = (q.get("measures") or {}).get(k)
+            if x:
+                rows.append(f"<p><b>{title}</b>: {x.get('text', '')}</p>")
+        rows.append("<p>Read-only: it comes with the app. Use it in a unit as it is, or make a copy to change its "
+                    "colours, emblem or tags.</p>")
+        self.quality.setText("".join(rows))
+
+    def _copy(self) -> None:
+        self.show_message("Copying starter parts comes with the starter library (next steps).")
+
+    # ------------------------------------------------------------------ tags
+    def _tags(self) -> QGroupBox:
+        from eu4unitgen.core import library
+        box = QGroupBox("Tags (they decide which parts are suggested for a country)")
+        g = QGridLayout(box)
+        self.t_style = QComboBox()
+        self.t_style.addItem("no style", None)
+        for s in library.STYLES:
+            self.t_style.addItem(library.STYLE_TEXT[s], s)
+        self.t_style.setToolTip("What kind of horse it is. A country's graphical culture suggests a style (e.g. "
+                                "westerngfx: barded first; muslimgfx: Arab; a nomad: steppe).")
+        self.t_style_label = label("Style", wrap=False)
+        self.t_regions = QLineEdit()
+        self.t_regions.setPlaceholderText("e.g. Byzantine, Greek")
+        self.t_regions.setToolTip("Peoples or regions it fits, separated by commas. A country whose culture or culture "
+                                  "group matches gets it suggested first.")
+        g.addWidget(self.t_style_label, 0, 0)
+        g.addWidget(self.t_style, 0, 1)
+        g.addWidget(label("Regions", wrap=False), 1, 0)
+        g.addWidget(self.t_regions, 1, 1)
+        g.addWidget(primary("Save the tags", self._save_tags, "Saved with the part; nothing is rebuilt"), 2, 1,
+                    Qt.AlignRight)
+        box.hide()
+        self.tags_box = box
+        return box
+
+    def _fill_tags(self, req: dict) -> None:
+        tags = req.get("tags") or {}
+        horse = req["kind"] == "horse"
+        self.t_style.setVisible(horse)
+        self.t_style_label.setVisible(horse)
+        self.t_style.setCurrentIndex(max(0, self.t_style.findData(tags.get("style"))))
+        if not self.t_regions.hasFocus():
+            self.t_regions.setText(", ".join(tags.get("regions") or []))
+
+    def _save_tags(self) -> None:
+        from eu4unitgen.core import library
+        tags = library.set_tags(Path(self.folder), self.t_style.currentData(), self.t_regions.text())
+        self.show_message("Tags saved: " + (library.Part("", "", "", Path(), tags=tags).tag_text() or "none") + ".")
+        self.refresh()
 
     def _delete(self) -> None:
         from eu4unitgen.ref3d import flow

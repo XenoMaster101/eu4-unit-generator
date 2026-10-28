@@ -1,6 +1,7 @@
-"""The app's screens (the UI update): the top bar on every screen, Home leading into the picture flow, the guided New
-unit steps (Next only when a step is done, the reason beside it), cavalry from a horse and a soldier, My units,
-Help (the example, the guide, updates), the readability of every screen in light and dark."""
+"""The app's screens (the UI update, then the part library): the top bar on every screen, Home leading into the
+picture flow (New part) and Build a unit, the guided steps (Next only when a step is done, the reason beside it), the
+older cavalry steps, the Library (parts, units, tags, starter parts), Build a unit (tiers, suggestions), Help (the
+example, the guide, updates), the readability of every screen in light and dark."""
 from __future__ import annotations
 
 import json
@@ -44,23 +45,29 @@ def _soldier_png(path):
 
 
 def test_top_bar_on_every_screen(win):
-    assert [b.text() for b in win.bar.buttons.values()] == ["Home", "New unit", "My units", "Setup", "Help"]
+    assert [b.text() for b in win.bar.buttons.values()] == ["Home", "New unit", "Library", "Setup", "Help"]
     assert all(b.toolTip() for b in win.bar.buttons.values())
     assert __version__ in win.windowTitle()
     win.refresh_status()
     assert [t.text() for t in win.bar.ticks.values()] == ["✓ EU4", "✓ Blender", "✓ AI ready"]
-    for key in ("home", "new", "units", "setup", "help"):
+    for key in ("home", "build", "units", "setup", "help"):
         win.go(key)
         assert win.bar.buttons[key].isChecked() and win.stack.currentWidget() is win.screens[key]
         assert win.bar.isVisibleTo(win)
+    win.go("new")  # New part is the Library's
+    assert win.bar.buttons["units"].isChecked() and win.stack.currentWidget() is win.new_unit
 
 
 def test_home_leads_into_the_picture_flow(win, tmp_path):
     home = win.home
     assert not home.describe.isEnabled() and "coming later" in home.describe.placeholderText()
-    assert not home.cards["artillery"].isEnabled() and home.cards["soldier"].isEnabled()
-    home.cards["cavalry"].click()
-    assert win.stack.currentWidget() is win.new_unit and win.new_unit.kind == "cavalry"
+    assert not home.cards["gun"].isEnabled() and home.cards["soldier"].isEnabled()
+    home.cards["horse"].click()
+    assert win.stack.currentWidget() is win.new_unit and win.new_unit.kind == "horse"
+    assert "NEW PART: HORSE" in win.new_unit.step_label.text()
+    win.go("home")
+    home.build_card.click()
+    assert win.stack.currentWidget() is win.builder
     win.go("home")
     home.picture(_soldier_png(tmp_path / "guard.png"))  # a tall picture: a soldier
     assert win.new_unit.kind == "soldier" and win.new_unit.image.name == "guard.png"
@@ -149,24 +156,113 @@ def test_my_units_gallery_and_page(win, tmp_path):
     assert mu.flow_layout.count() == 1 and not mu.empty.isVisibleTo(mu)
     mu.open(str(f))
     d = mu.detail
-    assert d.title.text() == "guard" and d.ride_btn.text() == "Use as rider" and d.add_btn.isEnabled()
+    assert d.title.text() == "guard" and d.ride_btn.text() == "Use in a unit" and d.add_btn.isEnabled()
     assert not d.stages.isVisibleTo(d)  # finished: no progress
     d.ride_btn.click()
-    assert win.new_unit.kind == "cavalry" and win.new_unit.picks["soldier"] == "guard"
+    b = win.builder
+    assert win.stack.currentWidget() is b and b.utype == "infantry" and b.slots[(1, "soldier")].currentData() == "run:guard"
     win.go("units", folder=str(f))
     d.del_btn.click()
     assert not f.exists() and mu.stack.currentWidget() is mu.gallery_page
 
 
+
+def test_the_library_shows_parts_units_and_starter_parts(win, tmp_path, monkeypatch):
+    """Parts (the user's and the starter ones) and units in their own sections; a part's tags are saved; a starter
+    part opens read-only with Use in a unit."""
+    from eu4unitgen.core import library
+    img = _soldier_png(tmp_path / "s.png")
+    h = _finished("bay", "horse", img)
+    _finished("guard", "soldier", img)
+    st = tmp_path / "starter" / "cataphract_horse"
+    st.mkdir(parents=True)
+    img2 = st / "picture.png"
+    Image.open(img).save(img2)
+    (st / "part.json").write_text(json.dumps({"schema": 1, "name": "cataphract_horse", "kind": "horse",
+                                              "tags": {"style": "barded", "regions": ["Byzantine"]}, "rights": "mine",
+                                              "image": "picture.png", "quality": {"summary": "Usable"}}), encoding="utf-8")
+    monkeypatch.setattr(library, "starter_root", lambda: tmp_path / "starter")
+    library.new_unit("guard_cav", "cavalry", {1: {"horse": "run:bay", "soldier": "run:guard"}})
+    mu = win.my_units
+    win.go("units")
+    assert mu.flow_layout.count() == 3 and mu.units_layout.count() == 1 and not mu.ai_note.isVisibleTo(mu)
+    mu._set_filter("horse")
+    assert mu.flow_layout.count() == 2 and mu.units_layout.count() == 0
+    mu._set_filter("all")
+    mu.open(str(h))
+    d = mu.detail
+    d.tags_btn.click()
+    d.t_style.setCurrentIndex(d.t_style.findData("light"))
+    d.t_regions.setText("Western, European")
+    d._save_tags()
+    from eu4unitgen.ref3d import flow
+    assert flow.request(h)["tags"] == {"regions": ["Western", "European"], "style": "light"}
+    mu.open_part("starter:cataphract_horse")
+    assert d.copy_btn.isVisibleTo(d) and not d.del_btn.isVisibleTo(d) and "starter" in d.state.text()
+    d.ride_btn.click()
+    assert win.builder.utype == "cavalry" and win.builder.slots[(1, "horse")].currentData() == "starter:cataphract_horse"
+    mu.open(str(h))  # a run again: its own buttons back
+    assert d.del_btn.isVisibleTo(d) and not d.copy_btn.isVisibleTo(d)
+
+
+def test_build_a_unit_per_tier_with_suggestions(win, tmp_path, monkeypatch):
+    from eu4unitgen.core import library
+    img = _soldier_png(tmp_path / "s.png")
+    for name, style, regions in (("bay", "light", "Western"), ("cata_horse", "barded", "Byzantine, Greek")):
+        library.set_tags(_finished(name, "horse", img), style, regions)
+    library.set_tags(_finished("cata", "soldier", img), None, "Byzantine")
+    monkeypatch.setattr(library, "starter_root", lambda: tmp_path / "none")
+    monkeypatch.setattr(library, "country", lambda tag, eu4: library.Country(
+        "BYZ", "ByzantineEmpire", "easterngfx", "eastern", "greek", "byzantine"))
+    b = win.builder
+    win.go("build")
+    b.set_type("cavalry")
+    assert not b.build_btn.isEnabled() and "at least one tier" in b.why.text()
+    b.tag.setText("BYZ")
+    b.look_up()
+    assert "Byzantine Empire" in b.country_line.text() and b.gfx.currentData() in ("easterngfx", "")
+    horses = b.slots[(1, "horse")]
+    assert horses.itemData(1) == "run:cata_horse" and horses.itemText(1).startswith("★")  # its regions match
+    horses.setCurrentIndex(horses.findData("run:bay"))
+    assert "needs a rider" in b.why.text()
+    b.slots[(1, "soldier")].setCurrentIndex(1)
+    b.slots[(3, "horse")].setCurrentIndex(b.slots[(3, "horse")].findData("run:cata_horse"))
+    b.slots[(3, "soldier")].setCurrentIndex(1)
+    b.name.setText("byz_cav")
+    assert b.build_btn.isEnabled()
+    b.build()
+    from eu4unitgen.ref3d import flow
+    req = flow.request(flow.folder_of("byz_cav"))
+    assert req["kind"] == "unit" and req["type"] == "cavalry" and req["country"] == "BYZ"
+    assert req["tiers"] == {"1": {"horse": "run:bay", "soldier": "run:cata"}, "3": {"horse": "run:cata_horse",
+                                                                                     "soldier": "run:cata"}}
+    assert win.stack.currentWidget() is win.my_units and "not built yet" in win.my_units.detail.state.text()
+    b.set_type("artillery")
+    assert "no gun" in b.no_part.text()
+
+
+def test_library_suggestions_follow_the_country():
+    from eu4unitgen.core import library
+    pool = [library.Part(f"run:{n}", n, "horse", None, tags={"style": s, "regions": r}, done=True)
+            for n, s, r in (("bay", "light", ["Western"]), ("barded", "barded", []), ("steppe", "steppe", []),
+                            ("arab", "arab", []), ("cata", "barded", ["Byzantine"]))]
+    names = lambda **kw: [p.name for p, _ in library.suggest("horse", pool=pool, **kw)]  # noqa: E731
+    assert names(gfx="westerngfx")[:2] == ["barded", "cata"]
+    assert names(gfx="muslimgfx")[0] == "arab"
+    assert names(gfx="muslimgfx", tech_group="nomad_group")[0] == "steppe"  # a nomad: steppe first
+    assert names(gfx="easterngfx", culture="greek", culture_group="byzantine")[0] == "cata"  # its regions match
+    with pytest.raises(ValueError):
+        library.new_unit("x", "cavalry", {1: {"horse": "run:bay"}})  # a rider too
+
 def test_every_option_has_a_tooltip(win):
     missing = []
-    for key in ("home", "new", "units", "help"):
+    for key in ("home", "new", "build", "units", "help"):
         kinds = (QtWidgets.QAbstractButton, QtWidgets.QComboBox, QtWidgets.QLineEdit, QtWidgets.QSlider)
         for w in win.screens[key].findChildren(QtWidgets.QWidget):
             if not isinstance(w, kinds) or (isinstance(w, QtWidgets.QLineEdit) and isinstance(w.parent(), QtWidgets.QComboBox)):
                 continue
             text = w.text() if isinstance(w, QtWidgets.QAbstractButton) else ""
-            plain = text in ("← Back", "Next →", "Close", "Details", "← All units")  # says what it does
+            plain = text in ("← Back", "Next →", "Close", "Details", "← Library")  # says what it does
             if not w.toolTip() and not plain:
                 missing.append(f"{key}: {type(w).__name__} {text!r}")
     assert not missing, missing
