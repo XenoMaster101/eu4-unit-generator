@@ -14,7 +14,7 @@ LIGHT = {
     "window": "#f6f5f2", "surface": "#ffffff", "alt": "#efece6", "text": "#1f1f1f", "muted": "#555555",
     "placeholder": "#6f6f6f", "border": "#bdb6a8", "chip": "#ece7dc", "chip_border": "#cfc6b3",
     "image_chip": "#dfeaf6", "image_border": "#a9c1dc", "left_chip": "#fbe4dd", "left_border": "#e2b2a4",
-    "accent": "#b0412b", "accent_text": "#ffffff", "accent_off": "#c8a59d", "link": "#1f56a8",
+    "accent": "#b0412b", "accent_text": "#ffffff", "accent_off": "#c8a59d", "accent_fg": "#a33a25", "link": "#1f56a8",
     "ok": "#1f6b2c", "warn": "#9a4d00", "error": "#b3261e", "highlight": "#2a5fb0", "highlight_text": "#ffffff",
     "disabled": "#8e8e8e", "tooltip": "#fffbe6",
 }
@@ -22,7 +22,7 @@ DARK = {
     "window": "#1f2023", "surface": "#2a2b2f", "alt": "#323338", "text": "#ececec", "muted": "#b4b4b4",
     "placeholder": "#ababab", "border": "#55565c", "chip": "#3a3b40", "chip_border": "#5a5b62",
     "image_chip": "#23384f", "image_border": "#3f6390", "left_chip": "#4a2b25", "left_border": "#83493c",
-    "accent": "#b84a32", "accent_text": "#ffffff", "accent_off": "#6e4d46", "link": "#8ab4f8",
+    "accent": "#b84a32", "accent_text": "#ffffff", "accent_off": "#6e4d46", "accent_fg": "#ff9a80", "link": "#8ab4f8",
     "ok": "#7fd18b", "warn": "#f0b45a", "error": "#ff8a80", "highlight": "#3d6fc4", "highlight_text": "#ffffff",
     "disabled": "#7c7c7c", "tooltip": "#3a3b40",
 }

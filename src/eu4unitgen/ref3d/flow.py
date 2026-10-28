@@ -36,6 +36,15 @@ STAGES = ("cutout", "trellis", "build", "finish", "preview")
 LABELS = {"cutout": "Cut the subject out of the image", "trellis": "Make two 3D models (TRELLIS.2) and pick the better",
           "build": "Build the game model (shape, parts, textures, checks)", "finish": "Apply your edits",
           "preview": "Stage it and draw the result sheet"}
+# what each stage does and why, in plain words (the Make it step and My units show these)
+EXPLAIN = {"cutout": "The background is removed so only the subject becomes part of the model.",
+           "trellis": "An AI (TRELLIS.2) guesses the 3D shape and colours from your one picture. It makes two "
+                      "versions; the app keeps the one whose outline, colours and movement come out best.",
+           "build": "The model is cut down to the game's size, fitted onto the game's own skeleton so it moves with "
+                    "the game's animations, and painted. Shields, plumes and weapons are made as separate parts.",
+           "finish": "Your edits (colour, brightness, plume and so on) are applied to a copy.",
+           "preview": "The unit is put into a test copy of the game's files and drawn the way the game draws it, next to "
+                      "the game's own unit, and checked."}
 GPU = {"trellis", "build"}
 KIND_STAGES = {"cavalry": ("build", "finish", "preview")}  # the rest run every stage
 # horse 2's and the cataphract rider's runs (2026-10-23/24) until this machine has its own
@@ -354,7 +363,32 @@ def stage_preview(folder: Path, req: dict, cfg) -> dict:
                          on_foot=req["kind"] == "soldier")
     quality.save(rep, pv)
     sheet = result_sheet(folder, req, g, rep)
-    return {"sheet": str(sheet), "quality": rep["summary"], "verdict": rep["verdict"]}
+    try:  # My units' rotating preview; the unit is usable without it
+        frames = len(unitstage.turntable(pv, "preview", tier, cfg.eu4(), utype))
+    except Exception as exc:  # noqa: BLE001 - recorded, not fatal
+        frames = f"failed: {type(exc).__name__}: {exc}"
+    return {"sheet": str(sheet), "quality": rep["summary"], "verdict": rep["verdict"], "turntable": frames}
+
+
+def turntable_frames(folder: Path) -> list[Path]:
+    return sorted((Path(folder) / "preview" / "turntable").glob("frame_*.png"))
+
+
+def gpu_busy(folder: Path) -> str | None:
+    """Another live run in a graphics-card stage (two at once run out of video memory): its name, else None."""
+    for r in runs():
+        if Path(r["folder"]).resolve() == Path(folder).resolve() or r["state"] != "running":
+            continue
+        if any(v.get("state") == "running" for k, v in ((r["status"].get("stages") or {}).items()) if k in GPU):
+            return r["name"]
+    return None
+
+
+def waiting_for(req: dict) -> list[str]:
+    """A cavalry unit's horse and soldier runs that aren't finished yet (its build waits for them)."""
+    if req["kind"] != "cavalry":
+        return []
+    return [n for n in (req.get("horse"), req.get("soldier")) if n and not (status(folder_of(n)) or {}).get("done")]
 
 
 def result_sheet(folder: Path, req: dict, gallery: dict, rep: dict) -> Path:
@@ -420,7 +454,7 @@ def go(folder: Path) -> dict:
     stages = (old or {}).get("stages", {})
     plan = stages_of(req["kind"])
     for s in stages.values():  # a stage cut off by the stop runs again
-        if s.get("state") in ("running", "waiting_eu4"):
+        if s.get("state") in ("running", "waiting_eu4", "waiting_units", "waiting_gpu"):
             s["state"] = "waiting"
         if not isinstance(s.get("seconds", 0), (int, float)):  # a time recorded wrongly (0.1.0's trellis stage)
             s.pop("seconds")
@@ -431,7 +465,16 @@ def go(folder: Path) -> dict:
         for s in plan:
             if (st.d["stages"].get(s) or {}).get("state") == "done":
                 continue
+            while waiting_for(request(folder)):  # a cavalry unit: its horse and soldier first
+                broken = [n for n in waiting_for(request(folder)) if (status(folder_of(n)) or {}).get("state") == "failed"]
+                if broken:
+                    raise RuntimeError(f"{' and '.join(broken)} stopped with an error: open it in My units and resume it first")
+                st.stage(s, "waiting_units")
+                time.sleep(EU4_POLL)
             if s in GPU:
+                while gpu_busy(folder):  # one unit on the graphics card at a time; the next waits its turn
+                    st.stage(s, "waiting_gpu")
+                    time.sleep(EU4_POLL)
                 while checks.eu4_running():  # never while EU4 is open
                     st.stage(s, "waiting_eu4")
                     time.sleep(EU4_POLL)

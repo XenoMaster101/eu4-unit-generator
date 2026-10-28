@@ -42,28 +42,6 @@ def test_no_manifest_means_tick_by_hand(tmp_path):
     assert owned == [] and "by hand" in note
 
 
-def test_gui_auto_setup_fills_only_what_is_empty(tmp_path, monkeypatch):
-    import os
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6 import QtWidgets
-    from eu4unitgen.export.pipeline import Session, Settings
-    from eu4unitgen.gui.app import MainWindow
-
-    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    monkeypatch.delenv("EU4_PATH", raising=False)
-    root, game = _steam(tmp_path, ["2012010"])
-    monkeypatch.setattr("eu4unitgen.core.install.steam_roots", lambda: [root])
-    w = MainWindow(Session(Settings(output_dir=tmp_path / "out")), run_async=False)
-    w.settings_page.eu4.setText("")
-    did = w.auto_setup(load=False)
-    assert w.settings_page.eu4.text() == str(game) and w.settings_page.owned() == ["dlc116_scandinavian_unit_pack"]
-    assert any("found EU4" in d for d in did)
-    w.settings_page.set_owned(["dlc999_not_owned"])  # the user's ticks win
-    w.auto_setup(load=False)
-    assert w.settings_page.owned() == ["dlc999_not_owned"]
-    w.session.close()
-
-
 def test_f2_find_blender_prefers_the_pinned_series(tmp_path, monkeypatch):
     """F2: of several Blenders, the pinned 4.2 series wins; others come with a warning; BLENDER_PATH wins."""
     monkeypatch.delenv("BLENDER_PATH", raising=False)
@@ -76,30 +54,3 @@ def test_f2_find_blender_prefers_the_pinned_series(tmp_path, monkeypatch):
     assert find_blender([(new, "4.20.1")], pinned="4.2")[0] == new and "only" in find_blender([(new, "4.20.1")], pinned="4.2")[1]
     monkeypatch.setenv("BLENDER_PATH", str(new))
     assert find_blender([(old, "4.2.23")])[0] == new
-
-
-def test_f2_auto_setup_fills_a_missing_blender_but_keeps_a_working_one(tmp_path, monkeypatch):
-    import os
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6 import QtWidgets
-    from eu4unitgen.export.pipeline import Session, Settings
-    from eu4unitgen.gui.app import MainWindow
-
-    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    monkeypatch.delenv("EU4_PATH", raising=False)
-    monkeypatch.delenv("BLENDER_PATH", raising=False)
-    found = tmp_path / "Blender 4.2" / "blender.exe"
-    found.parent.mkdir()
-    found.write_bytes(b"")
-    mine = tmp_path / "my_blender.exe"
-    mine.write_bytes(b"")
-    monkeypatch.setattr("eu4unitgen.core.install.blender_candidates", lambda: [(found, "4.2.23")])
-    monkeypatch.setattr("eu4unitgen.core.install.steam_roots", lambda: [])
-    w = MainWindow(Session(Settings(output_dir=tmp_path / "out")), run_async=False)
-    w.settings_page.blender.setText(str(tmp_path / "missing.exe"))
-    did = w.auto_setup(load=False)
-    assert w.settings_page.blender.text() == str(found) and "found Blender 4.2.23" in did
-    w.settings_page.blender.setText(str(mine))
-    w.auto_setup(load=False)
-    assert w.settings_page.blender.text() == str(mine)
-    w.session.close()

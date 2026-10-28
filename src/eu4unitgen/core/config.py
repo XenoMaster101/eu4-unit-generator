@@ -20,6 +20,7 @@ Keys (all optional; an unset one falls back to its default or detection):
   wsl_python    the TRELLIS.2 environment's python inside WSL
   blender_path  Blender 4.2 LTS (only ever run as a subprocess)
   owned_dlc     DLC folder names the user owns
+  update_repo   the GitHub repository whose Releases "Check for updates" reads ("owner/name"; blank: core.updates.REPO)
 """
 from __future__ import annotations
 
@@ -83,6 +84,7 @@ class Config:
     wsl_python: str = DEFAULT_WSL_PYTHON
     blender_path: str = ""
     owned_dlc: list[str] = field(default_factory=list)
+    update_repo: str = ""
 
     # ------------------------------------------------------------------ resolved paths
     def _env(self, key: str) -> str:

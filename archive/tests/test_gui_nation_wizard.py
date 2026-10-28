@@ -708,3 +708,143 @@ def test_f11_export_confirms_then_writes_and_test_mod_stages(window, fake_instal
     window.result_test()
     assert "Test mod ready" in page.message.text(), page.message.text()
     assert any((tmp_path / "stage").rglob("*.mod"))
+
+
+# from tests/test_install.py
+def test_gui_auto_setup_fills_only_what_is_empty(tmp_path, monkeypatch):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtWidgets
+    from eu4unitgen.export.pipeline import Session, Settings
+    from eu4unitgen.gui.app import MainWindow
+
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    monkeypatch.delenv("EU4_PATH", raising=False)
+    root, game = _steam(tmp_path, ["2012010"])
+    monkeypatch.setattr("eu4unitgen.core.install.steam_roots", lambda: [root])
+    w = MainWindow(Session(Settings(output_dir=tmp_path / "out")), run_async=False)
+    w.settings_page.eu4.setText("")
+    did = w.auto_setup(load=False)
+    assert w.settings_page.eu4.text() == str(game) and w.settings_page.owned() == ["dlc116_scandinavian_unit_pack"]
+    assert any("found EU4" in d for d in did)
+    w.settings_page.set_owned(["dlc999_not_owned"])  # the user's ticks win
+    w.auto_setup(load=False)
+    assert w.settings_page.owned() == ["dlc999_not_owned"]
+    w.session.close()
+
+
+# from tests/test_install.py
+def test_f2_auto_setup_fills_a_missing_blender_but_keeps_a_working_one(tmp_path, monkeypatch):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtWidgets
+    from eu4unitgen.export.pipeline import Session, Settings
+    from eu4unitgen.gui.app import MainWindow
+
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    monkeypatch.delenv("EU4_PATH", raising=False)
+    monkeypatch.delenv("BLENDER_PATH", raising=False)
+    found = tmp_path / "Blender 4.2" / "blender.exe"
+    found.parent.mkdir()
+    found.write_bytes(b"")
+    mine = tmp_path / "my_blender.exe"
+    mine.write_bytes(b"")
+    monkeypatch.setattr("eu4unitgen.core.install.blender_candidates", lambda: [(found, "4.2.23")])
+    monkeypatch.setattr("eu4unitgen.core.install.steam_roots", lambda: [])
+    w = MainWindow(Session(Settings(output_dir=tmp_path / "out")), run_async=False)
+    w.settings_page.blender.setText(str(tmp_path / "missing.exe"))
+    did = w.auto_setup(load=False)
+    assert w.settings_page.blender.text() == str(found) and "found Blender 4.2.23" in did
+    w.settings_page.blender.setText(str(mine))
+    w.auto_setup(load=False)
+    assert w.settings_page.blender.text() == str(mine)
+    w.session.close()
+
+
+# from tests/test_multitag.py
+def test_gui_unit_colours_per_tag(qapp_window):
+    page = qapp_window.unit_page
+    page.tags.setText("AAA TST")
+    page.set_unit_colours("TST", BLUE)
+    assert page.spec().unit_colours == {"TST": BLUE}
+    page.unit_colour_tag.setCurrentText("AAA")
+    assert not page.unit_colours_on.isChecked()
+    page.unit_colours_on.setChecked(True)
+    assert set(page.spec().unit_colours) == {"AAA", "TST"}
+
+
+# from tests/test_multitag.py
+@pytest.fixture
+def qapp_window(fake_install, tmp_path):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widgets = pytest.importorskip("PySide6.QtWidgets")
+    from eu4unitgen.gui.app import MainWindow
+    widgets.QApplication.instance() or widgets.QApplication([])
+    w = MainWindow(Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out")), run_async=False)
+    yield w
+    w.session.close()
+
+
+# from tests/test_theme.py
+@pytest.mark.parametrize("choice", ["light", "dark", "system"])
+def test_home_is_readable_whatever_windows_says(qapp, fake_install, tmp_path, monkeypatch, choice):
+    _system_dark(qapp)
+    monkeypatch.setattr(qapp.styleHints(), "colorScheme", lambda: theme.Qt.ColorScheme.Dark)
+    w = MainWindow(Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out")), run_async=False)
+    w.set_theme(choice)
+    want = theme.DARK if choice in ("dark", "system") else theme.LIGHT
+    assert qapp.palette().color(QPalette.WindowText).name() == want["text"]  # ours, not the system's
+    assert w.theme_mode == ("dark" if choice in ("dark", "system") else "light")
+    home = w.home
+    home.set_text("Hoplites with red crests, no shield, long spears, javelins, bronze greaves")
+    w.resize(1200, 800)
+    w.show()
+    qapp.processEvents()
+    bad = []
+    checked = 0
+    shot = _window_image(w)
+    for widget, text in _texts(home):
+        if not widget.isEnabled() and widget is home.generate:
+            continue  # off until a country is picked; the hint beside it says so (checked below)
+        ratio = _text_contrast(widget, shot)
+        checked += 1
+        if ratio < MIN:
+            bad.append(f"{type(widget).__name__} {text!r}: {ratio:.1f}")
+    assert checked >= 15 and not bad, bad
+    assert home.ready_hint.isVisible() and not home.generate.isEnabled()  # no country yet: said where it matters
+    assert home.nation.property("missing") == "true"
+    home.set_nation("MAC")
+    assert home.generate.isEnabled() and not home.ready_hint.isVisible()
+    assert _text_contrast(home.generate) >= MIN
+
+    # the Result screen, filled the way the window fills it (no gallery: tiles say what they wait for)
+    from types import SimpleNamespace
+    from eu4unitgen.core.army import Army
+
+    page = w.result_page
+    army = Army(home.text(), tag="MAC")
+    page.show_army(army, army.look(home.interp), army.interpretation(home.interp), (140, 97, 90))
+    page.show_report(SimpleNamespace(errors=[]))
+    page.show_waiting("rendering…")
+    page.select("cavalry", 2)
+    w.views.setCurrentWidget(page)
+    qapp.processEvents()
+    shot = _window_image(w)
+    bad, checked = [], 0
+    for widget, text in _texts(page):
+        ratio = _text_contrast(widget, shot)
+        checked += 1
+        if ratio < MIN:
+            bad.append(f"{type(widget).__name__} {text!r}: {ratio:.1f}")
+    assert checked >= 20 and not bad, bad
+    page.tabs.setCurrentIndex(1)  # the Colours tab
+    qapp.processEvents()
+    shot = _window_image(w)
+    bad = [f"{type(x).__name__} {t!r}" for x, t in _texts(page.tabs.currentWidget()) if _text_contrast(x, shot) < MIN]
+    assert not bad, bad
+    w.hide()
+    w.session.close()
+    import shiboken6
+
+    shiboken6.delete(w)

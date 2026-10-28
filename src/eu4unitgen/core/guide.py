@@ -3,8 +3,9 @@ rules. Pillow only.
 
 The rules (from the horse and rider tracks):
   * a horse: a clean side view, the whole horse in frame, legs apart enough to see all four hooves;
-  * a rider or soldier: a front view standing, arms a little out from the body (an A-pose), weapons held clear of
+  * a soldier (or rider): a front view standing, arms a little out from the body (an A-pose), weapons held clear of
     the body (the lance beside it, the shield out to the side), the whole figure in frame;
+  * a gun (artillery, planned): a three-quarter view, the whole gun and its carriage in frame;
   * a plain, even background (a studio backdrop or a flat colour), no other figures, props or text;
   * at least about 768 pixels on the long side;
   * your own image or one you may use (the rights statement, rule 8).
@@ -28,8 +29,28 @@ GUIDE = {
               "Weapons held clear of the body: a lance or spear upright beside it, a shield out to the side.",
               "A plain, even background; no horse, other figures, props or text.",
               "At least about 768 pixels tall."],
+    "artillery": ["A three-quarter view of the gun: from the front and a little to one side, so the barrel's length "
+                  "and the wheels both show.",
+                  "The whole gun and carriage in frame; no crew (your soldiers become the crew).",
+                  "A plain, even background; no people, props or text.",
+                  "At least about 768 pixels wide."],
     "all": ["Use your own image or one you have the right to use, and say so in the rights statement."],
 }
+GUIDE["soldier"] = GUIDE["rider"]
+# why each kind's picture matters, in one sentence (the New unit screen's first step)
+WHY = {
+    "soldier": "The 3D model is guessed from this one picture, so the app needs to see the whole figure from the front, "
+               "with the arms apart from the body: that is how it tells the arms, the body, the weapon and the shield "
+               "apart and fits them to the game's skeleton.",
+    "horse": "The 3D model is guessed from this one picture. A side view shows the length of the body, the legs and "
+             "the tail, which is what the game's horse skeleton needs.",
+    "artillery": "A three-quarter view shows both the barrel's length and the wheels, which a front or side view "
+                 "hides.",
+}
+WHY["rider"] = WHY["soldier"]
+# what each kind's picture should look like, in a few words (shown with the warnings)
+VIEW = {"soldier": "front view, arms a little out (A-pose)", "rider": "front view, arms a little out (A-pose)",
+        "horse": "side view", "artillery": "three-quarter view"}
 
 
 def horse_check(image: Path) -> list[str]:
@@ -92,26 +113,48 @@ def _foreground(image: Path):
         return a.point(lambda v: 255 if v >= 128 else 0), full, 1.0
     warn = horse_check(image)
     calm = 0.5 if any("background" in w for w in warn) else 1.0
-    rgb = small.convert("RGB")
+    return _border_mask(small.convert("RGB")), full, calm
+
+
+def _border_mask(rgb: Image.Image) -> Image.Image:
+    """The subject against a background read from the border (each row's left and right strips, each column's top
+    and bottom ones, blended across the image), so a soft gradient or vignette stays background."""
     px = rgb.load()
     w, h = rgb.size
-    corners = [px[1, 1], px[w - 2, 1], px[1, h - 2], px[w - 2, h - 2]]
-    bg = tuple(sorted(c[k] for c in corners)[1] for k in range(3))
-    m = Image.new("L", (w, h), 0)
+    b = max(2, round(0.03 * min(w, h)))
+    med = lambda pts: tuple(statistics.median(px[q][k] for q in pts) for k in range(3))  # noqa: E731
+    left = [med([(x, y) for x in range(b)]) for y in range(h)]
+    right = [med([(x, y) for x in range(w - b, w)]) for y in range(h)]
+    top = [med([(x, y) for y in range(b)]) for x in range(w)]
+    bottom = [med([(x, y) for y in range(h - b, h)]) for x in range(w)]
+    m = Image.new("L", (w, h))
     mp = m.load()
     for y in range(h):
         for x in range(w):
-            if sum(abs(px[x, y][k] - bg[k]) for k in range(3)) >= 60:
-                mp[x, y] = 255
-    return m, full, calm
+            u, v = x / (w - 1), y / (h - 1)
+            bg = [((1 - u) * left[y][k] + u * right[y][k] + (1 - v) * top[x][k] + v * bottom[x][k]) / 2 for k in range(3)]
+            mp[x, y] = 255 if sum(abs(px[x, y][k] - bg[k]) for k in range(3)) >= 60 else 0
+    return m
 
 
 def check(image: Path, kind: str) -> list[str]:
-    """Warnings for an image (empty: it follows the guide as far as can be told)."""
+    """Warnings for an image (empty: it follows the guide as far as can be told), by what it should show: a horse's
+    side view, a soldier's front A-pose, a gun's three-quarter view."""
     out = []
     full = Image.open(image).size
     if kind == "horse":
         out += horse_check(image)
+    elif kind == "artillery":
+        m, full, calm = _foreground(image)
+        if calm < 1.0:
+            out.append("The background doesn't look plain: the gun may be cut out badly.")
+        box = m.getbbox()
+        if box is None:
+            return out + ["No gun found: the image looks empty."]
+        ratio = (box[2] - box[0]) / max(1, box[3] - box[1])
+        if not 1.0 <= ratio <= 2.6:
+            out.append(f"This may not be a three-quarter view: the gun is {ratio:.1f} times as wide as it is tall (a "
+                       "three-quarter view is about 1.2 to 2).")
     else:
         m, full, calm = _foreground(image)
         if calm < 1.0:
@@ -123,6 +166,9 @@ def check(image: Path, kind: str) -> list[str]:
         bw, bh = box[2] - box[0], box[3] - box[1]
         if bw > 1.1 * bh:
             out.append("This doesn't look like a standing front view: the figure is wider than it is tall.")
+        elif bw < 0.38 * bh:  # good A-poses with a lance and shield: 0.55-0.71; arms down 0.24; a side view 0.15
+            out.append("The figure is very narrow: the arms, weapon and shield seem to be close to the body, or it is "
+                       "seen from the side. A front view with the arms a little out (an A-pose) builds much better.")
         w, h = m.size
         # three edges: a lance tip at the top and the feet at the bottom alone are common in good references
         if sum((box[0] <= 1, box[1] <= 1, box[2] >= w - 1, box[3] >= h - 1)) >= 3:

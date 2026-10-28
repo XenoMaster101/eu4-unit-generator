@@ -13,8 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from eu4unitgen.gui.home_page import css
-from eu4unitgen.gui.pages import Page
+from eu4unitgen.gui.base import Page, css
 from eu4unitgen.gui.theme import tokens
 
 FIELDS = (("eu4_path", "EU4 install", True), ("mod_dir", "EU4 mod folder", True), ("workspace", "Workspace (runs)", True),
@@ -33,10 +32,6 @@ def _scrolled(page: Page, inner: QWidget) -> None:
 
 def _top(page: Page, window, title: str) -> None:
     top = QHBoxLayout()
-    back = QPushButton("← Back")
-    back.setObjectName("ghost")
-    back.clicked.connect(lambda: window.show_unit())
-    top.addWidget(back)
     h = QLabel(title)
     h.setObjectName("h1")
     top.addWidget(h)

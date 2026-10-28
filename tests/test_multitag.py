@@ -113,26 +113,3 @@ def test_cli_several_tags(fake_install, tmp_path, capsys):
                             "--tag-unit-colours", "TST", "20", "60", "200", "240", "200", "30", "20", "20", "20"]) == 0
     out = capsys.readouterr().out
     assert "0 errors" in out and "TST = {" in out
-
-
-def test_gui_unit_colours_per_tag(qapp_window):
-    page = qapp_window.unit_page
-    page.tags.setText("AAA TST")
-    page.set_unit_colours("TST", BLUE)
-    assert page.spec().unit_colours == {"TST": BLUE}
-    page.unit_colour_tag.setCurrentText("AAA")
-    assert not page.unit_colours_on.isChecked()
-    page.unit_colours_on.setChecked(True)
-    assert set(page.spec().unit_colours) == {"AAA", "TST"}
-
-
-@pytest.fixture
-def qapp_window(fake_install, tmp_path):
-    import os
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    widgets = pytest.importorskip("PySide6.QtWidgets")
-    from eu4unitgen.gui.app import MainWindow
-    widgets.QApplication.instance() or widgets.QApplication([])
-    w = MainWindow(Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out")), run_async=False)
-    yield w
-    w.session.close()

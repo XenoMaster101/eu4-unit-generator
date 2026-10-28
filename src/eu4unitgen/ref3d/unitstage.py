@@ -152,3 +152,32 @@ def gallery(folder: Path, name: str, tiers: list[int], labels: dict, eu4: Path, 
             d.text((ci * cell + 6, y - 24), f"{labels.get(tier, tier)}: {row}, {view.replace('_', ' ')}", fill=(20, 20, 24), font=font)
     sheet.save(out / "sheet.png")
     return {"sheet": str(out / "sheet.png"), "images": images}
+
+
+TURNTABLE_FRAMES = 12
+
+
+def turntable(folder: Path, name: str, tier: int, eu4: Path, utype: str = "cavalry", frames: int = TURNTABLE_FRAMES,
+              size: int = 360) -> list[str]:
+    """The staged unit at ``tier`` turned round once, as the game draws it (lit, its idle pose, the game's close
+    camera's elevation): ``frames`` images under ``folder/turntable``, for My units' rotating preview."""
+    from eu4unitgen.core.character import CharacterSpec
+    from eu4unitgen.export.gallery import GAME_CLOSE
+    from eu4unitgen.export.pipeline import Session, Settings
+    folder = Path(folder)
+    ch = CharacterSpec.load(folder / f"{name}.json")
+    s = Session(Settings(eu4_path=Path(eu4), owned_dlc=[], prefix="hr_", stage_dir=folder / "turntable_stage"))
+    v = GAME_CLOSE["view"]
+    el = math.atan2(-v[2], math.hypot(v[0], v[1]))
+    out = folder / "turntable"
+    out.mkdir(exist_ok=True)
+    paths = []
+    for i in range(frames):
+        a = math.radians(180 - 360 * i / frames)  # from the side (VIEWS) round past the three-quarter and the front
+        cam = dict(GAME_CLOSE, width=size, height=size, view=[math.cos(a) * math.cos(el), math.sin(a) * math.cos(el), -math.sin(el)])
+        g = s.gallery(ch.set_spec(), units=[(utype, tier)], camera=cam, lit={"normal_maps": True})
+        for im in g.images.values():
+            p = out / f"frame_{i:02d}.png"
+            im.save(p)
+            paths.append(str(p))
+    return paths

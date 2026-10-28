@@ -79,69 +79,6 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-@pytest.mark.parametrize("choice", ["light", "dark", "system"])
-def test_home_is_readable_whatever_windows_says(qapp, fake_install, tmp_path, monkeypatch, choice):
-    _system_dark(qapp)
-    monkeypatch.setattr(qapp.styleHints(), "colorScheme", lambda: theme.Qt.ColorScheme.Dark)
-    w = MainWindow(Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out")), run_async=False)
-    w.set_theme(choice)
-    want = theme.DARK if choice in ("dark", "system") else theme.LIGHT
-    assert qapp.palette().color(QPalette.WindowText).name() == want["text"]  # ours, not the system's
-    assert w.theme_mode == ("dark" if choice in ("dark", "system") else "light")
-    home = w.home
-    home.set_text("Hoplites with red crests, no shield, long spears, javelins, bronze greaves")
-    w.resize(1200, 800)
-    w.show()
-    qapp.processEvents()
-    bad = []
-    checked = 0
-    shot = _window_image(w)
-    for widget, text in _texts(home):
-        if not widget.isEnabled() and widget is home.generate:
-            continue  # off until a country is picked; the hint beside it says so (checked below)
-        ratio = _text_contrast(widget, shot)
-        checked += 1
-        if ratio < MIN:
-            bad.append(f"{type(widget).__name__} {text!r}: {ratio:.1f}")
-    assert checked >= 15 and not bad, bad
-    assert home.ready_hint.isVisible() and not home.generate.isEnabled()  # no country yet: said where it matters
-    assert home.nation.property("missing") == "true"
-    home.set_nation("MAC")
-    assert home.generate.isEnabled() and not home.ready_hint.isVisible()
-    assert _text_contrast(home.generate) >= MIN
-
-    # the Result screen, filled the way the window fills it (no gallery: tiles say what they wait for)
-    from types import SimpleNamespace
-    from eu4unitgen.core.army import Army
-
-    page = w.result_page
-    army = Army(home.text(), tag="MAC")
-    page.show_army(army, army.look(home.interp), army.interpretation(home.interp), (140, 97, 90))
-    page.show_report(SimpleNamespace(errors=[]))
-    page.show_waiting("rendering…")
-    page.select("cavalry", 2)
-    w.views.setCurrentWidget(page)
-    qapp.processEvents()
-    shot = _window_image(w)
-    bad, checked = [], 0
-    for widget, text in _texts(page):
-        ratio = _text_contrast(widget, shot)
-        checked += 1
-        if ratio < MIN:
-            bad.append(f"{type(widget).__name__} {text!r}: {ratio:.1f}")
-    assert checked >= 20 and not bad, bad
-    page.tabs.setCurrentIndex(1)  # the Colours tab
-    qapp.processEvents()
-    shot = _window_image(w)
-    bad = [f"{type(x).__name__} {t!r}" for x, t in _texts(page.tabs.currentWidget()) if _text_contrast(x, shot) < MIN]
-    assert not bad, bad
-    w.hide()
-    w.session.close()
-    import shiboken6
-
-    shiboken6.delete(w)
-
-
 def test_contrast_maths():
     assert round(theme.contrast((0, 0, 0), (255, 255, 255)), 1) == 21.0
     assert theme.contrast((246, 245, 242), (255, 255, 255)) < 1.1  # the bug: white text on cream
