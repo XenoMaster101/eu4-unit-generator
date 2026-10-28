@@ -198,6 +198,8 @@ class NewUnitScreen(Page):
         self.drop = DropImage(w=380, h=380)
         self.drop.picked.connect(self.set_picture)
         left.addWidget(self.drop)
+        self.example_row = QHBoxLayout()
+        left.addLayout(self.example_row)
         self.checks_out = label("", rich=True)
         left.addWidget(self.checks_out)
         left.addStretch(1)
@@ -214,11 +216,19 @@ class NewUnitScreen(Page):
         return w
 
     def _enter_picture(self) -> None:
-        from eu4unitgen.core import guide, guide_pictures
+        from eu4unitgen.core import example, guide, guide_pictures
         self.rules.setText("<ul>" + "".join(f"<li>{x}</li>" for x in guide.GUIDE[self.kind] + guide.GUIDE["all"]) + "</ul>")
         if getattr(self, "_examples_kind", None) == self.kind:
             return
         self._examples_kind = self.kind
+        clear_layout(self.example_row)
+        for caption, path in example.pictures(self.kind):
+            self.example_row.addWidget(ghost("Use the example picture" if len(example.pictures(self.kind)) == 1
+                                             else f"Example: {caption.split(':')[0].replace('the ', '', 1)}",
+                                             lambda *_, p=path: self.use_example(p),
+                                             f"Try the app with {caption} (comes with the app; its rights are filled "
+                                             "in for you)"))
+        self.example_row.addStretch(1)
         clear_layout(self.examples)
         for i, (good, caption, im) in enumerate(guide_pictures.examples(self.kind)):
             pic = label("")
@@ -232,6 +242,11 @@ class NewUnitScreen(Page):
             cell = QWidget()
             cell.setLayout(box)
             self.examples.addWidget(cell, i // 3, i % 3)
+
+    def use_example(self, path: Path) -> None:
+        from eu4unitgen.core import example
+        self.set_picture(path)
+        self.rights.setText(example.RIGHTS)
 
     def set_picture(self, path: Path) -> None:
         from PIL import Image

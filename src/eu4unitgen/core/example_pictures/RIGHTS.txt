@@ -1,0 +1,8 @@
+The example pictures (Help -> Show me an example, and "Use the example picture" in New unit)
+
+cataphract_rider.png       the soldier: a front view, A-pose
+cataphract_side_clean.png  the horse: a side view
+horse2_light_cavalry.png   a second horse: an unarmoured bay, side view
+
+Generated with ChatGPT from the app author's own original. The author owns the output and allows it to be bundled
+with the app as the Example (declared 2026-10-28). They are reference pictures for trying the app, not game assets.

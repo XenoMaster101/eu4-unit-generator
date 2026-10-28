@@ -134,11 +134,17 @@ class ExampleDialog(QDialog):
         self.steps = example.steps() or []
         self.i = 0
         if not self.steps:
-            self.title.setText("The example isn't on this computer")
-            self.text.setText("The example is the cataphract made with this app: its horse, its soldier and the cavalry "
-                              "unit joining them. Its pictures belong to the app's author, so they aren't included in "
-                              "the download. Make your own unit instead: New unit in the top bar walks you through it, "
-                              "and the tour (Help) shows every screen.")
+            # the pictures come with the app; the results (renders of the game's own bodies) are made here
+            self.steps = [example.Step(
+                "Make the example yourself",
+                "The example is the cataphract: a horse, a soldier and the cavalry unit joining them. Its pictures "
+                "(below) come with the app, but its results are made on your computer. Press New unit, choose Soldier "
+                "and press “Use the example picture” on the first step; then do the same for a Horse, and last make "
+                "Cavalry from the two. Once they're made, this example walks through every step with their real "
+                "results.",
+                [(c, str(p)) for k in ("soldier", "horse") for c, p in example.pictures(k)])]
+            self.show_step(0)
+            self.step.setText("")
             self.prev.hide()
             self.next.hide()
         else:

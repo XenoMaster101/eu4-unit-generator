@@ -3,8 +3,9 @@ real results: the pictures, the cut-outs, TRELLIS.2's two candidates and their s
 its parts, the soldier on foot, the cavalry riding, the quality report, the turntable and Add to mod.
 
 The example is the cataphract: three runs of the app's own flow (the horse, the soldier and the cavalry joining
-them) in the projects folder. Its pictures are the user's (rights recorded in each run), so the example is read from
-this computer's runs, never bundled. ``steps()`` -> the steps, or None when the runs aren't here."""
+them) in the projects folder. Its results are read from this computer's runs (renders of the game's own bodies are
+never bundled); its pictures come with the app (``PICTURES``: the author's, bundling allowed 2026-10-28), so on any PC
+the Example shows them and New unit can start from them. ``steps()`` -> the steps, or None when the runs aren't here."""
 from __future__ import annotations
 
 import json
@@ -12,6 +13,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 RUNS = {"horse": "cataphract_horse", "soldier": "cataphract", "cavalry": "cataphract_cavalry"}
+PICTURES_DIR = Path(__file__).with_name("example_pictures")
+PICTURES = {"soldier": [("the cataphract: a front view, A-pose", "cataphract_rider.png")],
+            "horse": [("the cataphract's horse: a side view", "cataphract_side_clean.png"),
+                      ("a light cavalry horse: a side view", "horse2_light_cavalry.png")]}
+RIGHTS = ("Example picture bundled with the app: generated with ChatGPT from the app author's own original; the "
+          "author owns it and allows its use (declared 2026-10-28)")
+
+
+def pictures(kind: str) -> list[tuple[str, Path]]:
+    """The example pictures for a kind (soldier, horse) that come with the app: (caption, path)."""
+    return [(c, PICTURES_DIR / n) for c, n in PICTURES.get(kind, []) if (PICTURES_DIR / n).is_file()]
 
 
 @dataclass

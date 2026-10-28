@@ -85,8 +85,13 @@ def main() -> dict:
         names = z.namelist()
     for must in ("eu4unitgen/setup_scripts/trellis2_setup.sh", "eu4unitgen/ai/jobs/trellis2_generate.py",
                  "eu4unitgen/blender/jobs/fresh_horse.py", "eu4unitgen/library/base_models.json",
-                 "eu4unitgen/gui/icon.png", "eu4unitgen/gui/eu4unitgen.ico", "eu4unitgen/core/layout.py"):
+                 "eu4unitgen/gui/icon.png", "eu4unitgen/gui/eu4unitgen.ico", "eu4unitgen/core/layout.py",
+                 "eu4unitgen/core/example_pictures/RIGHTS.txt"):
         assert must in names, f"{must} is missing from the wheel"
+    # the only pictures: the app's icon and the Example's three (the author's, bundling allowed 2026-10-28)
+    pics = {n for n in names if n.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))}
+    assert pics == {"eu4unitgen/gui/icon.png"} | {f"eu4unitgen/core/example_pictures/{n}" for n in (
+        "cataphract_rider.png", "cataphract_side_clean.png", "horse2_light_cavalry.png")}, sorted(pics)
     assert not any(n.lower().endswith((".dds", ".mesh", ".anim")) for n in names), "game files in the wheel"
     shutil.copy(wheel, files / wheel.name)
     for f in ("install.ps1", "uninstall.ps1"):

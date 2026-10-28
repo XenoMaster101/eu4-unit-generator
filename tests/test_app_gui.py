@@ -214,6 +214,35 @@ def test_example_walks_a_finished_cavalry(win, tmp_path, monkeypatch):
     d.close()
 
 
+
+def test_the_example_pictures_come_with_the_app(win, tmp_path, monkeypatch):
+    """The three example pictures are package data, pass their own kind's check, and start New unit with their rights
+    filled in; without the runs the Example shows them and says how to make it."""
+    from eu4unitgen.core import example, guide
+    names = sorted(p.name for k in ("soldier", "horse") for _, p in example.pictures(k))
+    assert names == ["cataphract_rider.png", "cataphract_side_clean.png", "horse2_light_cavalry.png"]
+    for k in ("soldier", "horse"):
+        for _, p in example.pictures(k):
+            assert guide.check(p, k) == [], p.name
+    assert "allows" in (example.PICTURES_DIR / "RIGHTS.txt").read_text(encoding="utf-8")
+    nu = win.new_unit
+    win.go("new", kind="horse")
+    buttons = [b for b in nu.steps["picture"].findChildren(QtWidgets.QPushButton) if b.text().startswith("Example")]
+    assert len(buttons) == 2
+    win.go("new", kind="soldier")
+    b = [b for b in nu.steps["picture"].findChildren(QtWidgets.QPushButton)
+         if b.text() == "Use the example picture" and b.isVisibleTo(nu)]
+    assert len(b) == 1
+    b[0].click()
+    assert nu.image.name == "cataphract_rider.png" and nu.rights.text() == example.RIGHTS
+    assert nu.name.text() == "cataphract_rider"
+    from eu4unitgen.gui.help_page import ExampleDialog
+    monkeypatch.setattr(example, "steps", lambda *a: None)
+    d = ExampleDialog(win)
+    pics = [w for w in d.findChildren(QtWidgets.QLabel) if w.pixmap() is not None and not w.pixmap().isNull()]
+    assert len(pics) == 3 and "Use the example picture" in d.text.text() and not d.next.isVisibleTo(d)
+    d.close()
+
 def test_guide_checks_adapt_to_the_kind(tmp_path):
     from eu4unitgen.core import guide, guide_pictures
     for kind in ("soldier", "horse", "artillery"):

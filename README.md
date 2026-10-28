@@ -55,7 +55,7 @@ Windows **Settings > Apps > Installed apps > EU4 Unit Generator > Uninstall**. I
 
 ## Making a unit
 
-New to the app? **Help > Show me an example** walks through a finished cataphract with its real results, and **Help > Watch the tour** plays the app's screens with captions. Every button has a tooltip.
+New to the app? **Help > Show me an example** walks through a finished cataphract with its real results (its pictures come with the app: press **Use the example picture** on New unit's first step to make it yourself), and **Help > Watch the tour** plays the app's screens with captions. Every button has a tooltip.
 
 The bar at the top of every screen: **Home · New unit · My units · Setup · Help**, with ticks for EU4, Blender and the AI, and the version.
 
@@ -77,7 +77,7 @@ The bar at the top of every screen: **Home · New unit · My units · Setup · H
 
      If Windows blocks writing to the mod folder (Controlled Folder Access), the app stages the mod and tells you what to copy where. Then enable the mod in the EU4 launcher.
    - **Delete**.
-4. **Help > Check for updates** looks for a newer release on GitHub.
+4. **Help > Check for updates** will look for a newer release on GitHub once the app has a download page (not yet: for now it says so).
 
 ## A good reference
 
