@@ -195,3 +195,30 @@ def test_candidates_pick_and_switch(tmp_path, monkeypatch):
     flow.use_candidate(f, 0)
     assert (f / "trellis" / "raw.glb").read_bytes() == b"model-42"
     assert edits.stage_for({}, {"candidate": 1}) == "build"
+
+
+def test_pick_weighs_outline_colour_and_stretch():
+    from eu4unitgen.ref3d import trellis
+    neat = {"iou": 0.80, "colour_de": 12.0, "worst_stretch": 1.7, "vanilla_worst": 1.6}
+    torn = {"iou": 0.83, "colour_de": 12.0, "worst_stretch": 3.4, "vanilla_worst": 1.6}  # a better outline, but it tears
+    off = {"iou": 0.82, "colour_de": 30.0, "worst_stretch": 1.6, "vanilla_worst": 1.6}  # a better outline, wrong colours
+    assert trellis.pick_score(neat) > trellis.pick_score(torn)
+    assert trellis.pick_score(neat) > trellis.pick_score(off)
+    assert trellis.pick_score({"iou": 0.7}) == 0.7  # scored by outline alone (an older run)
+    assert flow.candidate_text(neat) == "outline 80%, colour distance 12, worst stretch 1.70"
+
+
+def test_colour_distance_reads_the_subjects_colours():
+    from eu4unitgen.ref3d import trellis
+    ref = Image.new("RGBA", (80, 120), (0, 0, 0, 0))
+    ImageDraw.Draw(ref).rectangle([20, 10, 60, 110], fill=(160, 30, 30, 255))
+    same = Image.new("RGBA", (200, 200), (0, 0, 0, 0))  # bigger and placed elsewhere: framed by its box
+    ImageDraw.Draw(same).rectangle([10, 20, 70, 170], fill=(160, 30, 30, 255))
+    blue = same.copy()
+    ImageDraw.Draw(blue).rectangle([10, 20, 70, 170], fill=(30, 40, 160, 255))
+    assert trellis.colour_distance(same, ref) < 1.0
+    assert trellis.colour_distance(blue, ref) > 40
+    render = Image.new("RGBA", (200, 200), (225, 225, 228, 255))  # a render on its grey background, no alpha
+    ImageDraw.Draw(render).rectangle([10, 20, 70, 170], fill=(160, 30, 30, 255))
+    assert trellis.colour_distance(render, ref) < 1.0
+    assert trellis.colour_distance(Image.new("RGBA", (10, 10)), ref) is None

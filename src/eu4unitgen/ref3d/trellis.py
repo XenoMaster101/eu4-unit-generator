@@ -174,6 +174,93 @@ def score_candidate(br, glb: Path, reference_fg: Path, out: Path, views: int = 1
     fg = Image.open(reference_fg)
     best = max(((silhouette_iou(Image.open(p), fg), v) for v, p in r["images"].items()), key=lambda t: t[0])
     return {"iou": best[0], "azimuth": int(best[1][1:])}
+# How the two candidates are weighed (the user, 2026-10-28: outline, colour AND deformation, not outline alone):
+# the outline's overlap, less 0.01 per unit of colour distance (Lab ΔE, median) to the reference, less 0.05 per unit
+# the worst stretch goes past vanilla's own worst (a stretch of 1 is none; vanilla's horse reaches about 1.6).
+PICK = {"colour_per_de": 0.01, "stretch_per_unit": 0.05}
+
+
+def colour_distance(model, reference_rgba, step: int = 4) -> float | None:
+    """The median Lab distance between a textured render and the reference where both show the subject, each
+    framed by its box (the better of as-is and mirrored, like the outline). None: no overlap."""
+    from PIL import Image, ImageChops
+
+    from eu4unitgen.core import palette as pal
+    from eu4unitgen.ref3d.part_gen import _framed
+
+    def subject(im):  # no transparency (a render on its background): the subject is what isn't the corner's colour
+        im = im.convert("RGBA")
+        if im.getchannel("A").getextrema()[0] > 250:
+            bg = Image.new("RGB", im.size, im.getpixel((2, 2))[:3])
+            im.putalpha(ImageChops.difference(im.convert("RGB"), bg).convert("L").point(lambda v: 255 if v > 18 else 0))
+        return im
+    a, b = _framed(subject(model)), _framed(subject(reference_rgba))
+    best = None
+    for m in (a, a.transpose(Image.FLIP_LEFT_RIGHT)):
+        pm, pr = m.load(), b.load()
+        des = sorted(pal.delta_e(pm[x, y][:3], pr[x, y][:3]) for y in range(0, m.height, step) for x in range(0, m.width, step)
+                     if pm[x, y][3] > 127 and pr[x, y][3] > 127)
+        if des and (best is None or len(des) > best[0]):  # the orientation that overlaps more
+            best = (len(des), des[len(des) // 2])
+    return round(best[1], 1) if best else None
+
+
+def score_colour(br, glb: Path, reference_rgba: Path, out: Path, azimuth: int) -> float | None:
+    """The raw model with its own texture (EEVEE) from the outline's best side, against the reference's colours."""
+    from PIL import Image
+    r = br.run_job("render_model", {"model": str(Path(glb).resolve()), "engine": "EEVEE", "out_dir": str(Path(out).resolve()),
+                                    "name": "colour", "size": 320, "views": {"best": [azimuth, 0]}}).result
+    return colour_distance(Image.open(r["images"]["best"]), Image.open(reference_rgba))
+
+
+def trial_deform(glb: Path, kind: str, out: Path, blender: str | None = None) -> dict:
+    """How a candidate deforms once fitted to the game skeleton, before the full build: only the shape and weights
+    (fresh_horse / fresh_rider; no bakes, no parts) and the deformation check against vanilla's.
+    -> {"worst_stretch", "vanilla_worst", "flips": {anim: n}}."""
+    from eu4unitgen.blender.runner import BlenderRunner
+    from eu4unitgen.core.fresh_mesh import base_arrays
+    from eu4unitgen.core.project import default_blender_path
+    out = Path(out).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    br = BlenderRunner(blender or default_blender_path(), log_dir=out / "logs", timeout=1800)
+    src = {"path": str(Path(glb).resolve()), "merge": 1e-5}
+    if kind == "horse":
+        base = (eu4() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes()
+        br.run_job("fresh_horse", {"source": {"kind": "direct", **src},
+                                   **{k: PROCESS[k] for k in ("target_tris", "smooth", "influences", "chain_weights", "uv_margin", "hair")},
+                                   "reins": PROCESS.get("reins", True), "vanilla": base_arrays(base),
+                                   "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
+                                   "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj")})
+        d = deform(br, out, base)
+    else:
+        base_file = eu4() / "gfx" / "models" / "Units" / "western_generic_01_type1.mesh"
+        base = base_file.read_bytes()
+        anim = eu4() / "gfx" / "models" / "Units" / "animation" / "cavalry_rider_idle.anim"
+        frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": "Left_hand_node",
+                                            "elbow": "L_elbow", "shoulder": "L_shoulder",
+                                            "bind": node_bind(base, "Left_hand_node")}).result
+        (out / "parts").mkdir(exist_ok=True)
+        br.run_job("fresh_rider", {"vanilla": base_arrays(base), "source": src, **RIDER, "shield_frame": frame, "plume": "part",
+                                   "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
+                                   "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),
+                                   "parts_dir": str(out / "parts")})
+        pin_head(out / "low_geometry.json")
+        d = rider_deform(br, out, base, base_file, renders=False)
+    ours, van = d.get("ours") or {}, d.get("vanilla") or {}
+    return {"worst_stretch": max((a["max"] for a in ours.values()), default=None),
+            "vanilla_worst": max((a["max"] for a in van.values()), default=None),
+            "flips": {k: a["flips"] for k, a in ours.items()}}
+
+
+def pick_score(c: dict) -> float:
+    """One number per candidate from its outline, colour and worst stretch (``PICK``); a missing measure costs
+    nothing (so an old candidate scored by outline alone still compares)."""
+    s = float(c.get("iou") or 0.0)
+    if c.get("colour_de") is not None:
+        s -= PICK["colour_per_de"] * float(c["colour_de"])
+    if c.get("worst_stretch") is not None:
+        s -= PICK["stretch_per_unit"] * max(0.0, float(c["worst_stretch"]) - float(c.get("vanilla_worst") or 1.0))
+    return round(s, 4)
 
 
 def glb_basecolor(glb: Path, out: Path) -> Path:
@@ -751,19 +838,8 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
         vp = base_arrays((eu4() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes())["p"]
         d = leg_spread(hp, vp)
         fr["leg_spread"] = {"by": d, "vertices": spread_legs(out / "low_geometry.json", d)}
-    dd = out / "deform"
-    dd.mkdir()
-    (dd / "rider.mesh").write_bytes(write_fresh(base, geometry_from_job(out / "low_geometry.json")))
-    anims = [{"id": k, "path": str(eu4() / "gfx" / "models" / "Units" / "animation" / f"cavalry_rider_{k}.anim")}
-             for k in ("idle", "moving", "attack")]
-    res = {name: br.run_job("check_mesh_deform", {"mesh": str(m), "anims": anims, "groups": RIDER_GROUPS,
-                                                  "renders": {"out_dir": str(dd), "name": name, "size": 700}}).result
-           for name, m in (("ours", dd / "rider.mesh"), ("vanilla", base_file))}
-    (dd / "deform.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
-    summary = {who: {k: {"stretch": [round(x["str_p05"], 2), round(x["str_p95"], 2)], "max": round(x["str_max"], 2),
-                         "flips": x["flips"], "groups": {g: m.get("flips") for g, m in (x.get("groups") or {}).items()}}
-                     for k, x in res[who]["anims"].items()} for who in res}
-    tex = {"diffuse": str(out / "riderb_diffuse.png"), "specular": bc["specular"], "normal": str(out / "riderb_normal.png")}
+    summary = rider_deform(br, out, base, base_file)
+    tex ={"diffuse": str(out / "riderb_diffuse.png"), "specular": bc["specular"], "normal": str(out / "riderb_normal.png")}
     # the raw model and the game body from the front, one camera (the quality report's outline against the reference)
     cmp_ = br.run_job("render_compare", {"models": {"raw": {"obj": str(out / "fitted.obj"), "texture": str(basecolor)},
                                                     "game": {"obj": str(out / "low.obj"), "texture": tex["diffuse"]}},
@@ -774,6 +850,24 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                 "geometry": str(out / "low_geometry.json"), "deform": summary, "seconds": round(time.time() - t0, 1)}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str), encoding="utf-8")
     return manifest
+
+
+def rider_deform(br, out: Path, base: bytes, base_file: Path, renders: bool = True, prefix: str = "cavalry_rider_",
+                 anims=("idle", "moving", "attack")) -> dict:
+    """The deformation check (check_mesh_deform, per bone group) on the rider's game mesh and vanilla's body under
+    ``<prefix><anim>`` animations (a soldier on foot: ``infantry_`` ones)."""
+    from eu4unitgen.core.fresh_mesh import geometry_from_job, write_fresh
+    dd = out / ("deform" if prefix == "cavalry_rider_" else f"deform_{prefix.rstrip('_')}")
+    dd.mkdir(exist_ok=True)
+    (dd / "rider.mesh").write_bytes(write_fresh(base, geometry_from_job(out / "low_geometry.json")))
+    jobs = [{"id": k, "path": str(eu4() / "gfx" / "models" / "Units" / "animation" / f"{prefix}{k}.anim")} for k in anims]
+    res = {name: br.run_job("check_mesh_deform", {"mesh": str(m), "anims": jobs, "groups": RIDER_GROUPS,
+                                                  "renders": {"out_dir": str(dd), "name": name, "size": 700} if renders else None}).result
+           for name, m in (("ours", dd / "rider.mesh"), ("vanilla", base_file))}
+    (dd / "deform.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    return {who: {k: {"stretch": [round(x["str_p05"], 2), round(x["str_p95"], 2)], "max": round(x["str_max"], 2),
+                      "flips": x["flips"], "groups": {g: m.get("flips") for g, m in (x.get("groups") or {}).items()}}
+                  for k, x in res[who]["anims"].items()} for who in res}
 
 
 def _config():

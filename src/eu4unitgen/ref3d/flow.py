@@ -32,7 +32,7 @@ LABELS = {"cutout": "Cut the subject out of the image", "trellis": "Make two 3D 
           "preview": "Stage it and draw the result sheet"}
 GPU = {"trellis", "build"}
 # horse 2's and the cataphract rider's runs (2026-10-23/24) until this machine has its own
-DEFAULT_SECONDS = {"cutout": 45, "trellis": 820, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150}
+DEFAULT_SECONDS = {"cutout": 45, "trellis": 910, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150}
 KINDS = ("horse", "rider")  # the foot soldier is on the roadmap (SPEC Track P)
 EU4_POLL = 20.0
 
@@ -170,8 +170,9 @@ def stage_cutout(folder: Path, req: dict, cfg) -> dict:
 
 
 def stage_trellis(folder: Path, req: dict, cfg) -> dict:
-    """Two TRELLIS.2 candidates (seeds 42 and 43, one model load), each scored by its outline against the reference;
-    the better one becomes ``raw.glb`` (an edit can pick the other: ``candidate``)."""
+    """Two TRELLIS.2 candidates (seeds 42 and 43, one model load), each scored on its outline and colour against
+    the reference and on its worst stretch once fitted to the game skeleton (``trellis.pick_score``); the better
+    one becomes ``raw.glb`` (an edit can pick the other: ``candidate``)."""
     from eu4unitgen.blender.runner import BlenderRunner
     from eu4unitgen.ref3d import trellis
     tr = folder / "trellis"
@@ -180,13 +181,32 @@ def stage_trellis(folder: Path, req: dict, cfg) -> dict:
         return {"kept": True}
     cands = trellis.generate_candidates((tr / "input" / "input_rgba.png").resolve(), tr, cfg.ai_root_path())
     br = BlenderRunner(cfg.blender(), log_dir=tr / "logs", timeout=1200)
+    build_kind = "horse" if req["kind"] == "horse" else "rider"
     for c in cands:
-        c.update(trellis.score_candidate(br, Path(c["glb"]), tr / "input" / "input_fg.png", tr / f"cand_s{c['seed']}"))
-    best = max(range(len(cands)), key=lambda i: cands[i]["iou"])
+        out = tr / f"cand_s{c['seed']}"
+        c.update(trellis.score_candidate(br, Path(c["glb"]), tr / "input" / "input_fg.png", out))
+        c["colour_de"] = trellis.score_colour(br, Path(c["glb"]), tr / "input" / "input_rgba.png", out, c["azimuth"])
+        try:
+            c.update(trellis.trial_deform(Path(c["glb"]), build_kind, out / "trial", cfg.blender()))
+        except Exception as exc:  # noqa: BLE001 - scored on outline and colour alone; recorded
+            c["trial_error"] = f"{type(exc).__name__}: {exc}"
+        c["score"] = trellis.pick_score(c)
+    best = max(range(len(cands)), key=lambda i: cands[i]["score"])
     cj.write_text(json.dumps({"candidates": cands, "best": best}, indent=1), encoding="utf-8")
     use_candidate(folder, best)
     # TRELLIS.2's own timings under their own name: the stage's "seconds" is its wall time
-    return {"candidates": [{"seed": c["seed"], "iou": c["iou"]} for c in cands], "chosen": best + 1}
+    return {"candidates": [{k: c.get(k) for k in ("seed", "iou", "colour_de", "worst_stretch", "score")} for c in cands],
+            "chosen": best + 1}
+
+
+def candidate_text(c: dict) -> str:
+    """One candidate's scores in plain words (the edits' 3D model list, the Example, My units)."""
+    bits = [f"outline {c['iou']:.0%}"]
+    if c.get("colour_de") is not None:
+        bits.append(f"colour distance {c['colour_de']:.0f}")
+    if c.get("worst_stretch") is not None:
+        bits.append(f"worst stretch {c['worst_stretch']:.2f}")
+    return ", ".join(bits)
 
 
 def candidates(folder: Path) -> dict | None:

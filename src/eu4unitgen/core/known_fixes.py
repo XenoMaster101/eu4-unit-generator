@@ -172,6 +172,12 @@ FIXES: tuple[Fix, ...] = (
         "M24's known limit: the parts' normal maps were flat", "ref3d/trellis.py:process_rider",
         ("tests/test_rider_rules.py::test_sword_is_textured_not_flat", "tests/test_gear.py::test_normal_from_height_signs"),
         "parts"),
+    Fix("candidate_pick", "of TRELLIS.2's two candidates the one built scores best on outline, colour (median Lab "
+        "distance to the reference) and worst stretch once fitted to the game skeleton (a shape-only trial build)",
+        "the user, 2026-10-28: horse 2's seed 42 and 43 tied on outline; the darker mane was closer to the reference",
+        "ref3d/trellis.py:pick_score", ("tests/test_app_flow.py::test_pick_weighs_outline_colour_and_stretch",
+                                         "tests/test_app_flow.py::test_colour_distance_reads_the_subjects_colours"),
+        "model"),
 )
 
 
