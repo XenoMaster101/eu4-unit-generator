@@ -167,3 +167,35 @@ def test_a_fresh_soldier_on_foot(fake_install, tmp_path):
     assert 'id = "walk"' in block and 'id = "horse_idle"' in block
     assert any(i.rule == "fresh_mesh" and "fresh soldier" in i.message for i in res.report.issues)
 
+
+
+def test_a_fresh_soldier_keeps_its_stance(fake_install, tmp_path):
+    """The stance's pdxmesh is replaced by the fresh soldier's: the stance (its animation ids and the validator's
+    record of it) moves with it (the cataphract on foot, 2026-10-28)."""
+    import json
+
+    from PIL import Image
+
+    from eu4unitgen.core.loadout import Loadout
+    from eu4unitgen.export.pipeline import Session, Settings, SetSpec
+    from fakes import make_textures_decodable
+
+    make_textures_decodable(fake_install)
+    (fake_install / "gfx/models/Units/generic_01.mesh").write_bytes(body_like())
+    geo = quad([{"head": 1.0}, {"head": 0.5, "root": 0.5}, {"root": 1.0}, {"root": 1.0}])
+    (tmp_path / "geo.json").write_text(json.dumps(geo.__dict__), encoding="utf-8")
+    for kind in ("diffuse", "specular", "normal"):
+        Image.new("RGBA", (64, 64), (40, 60, 160, 255)).save(tmp_path / f"{kind}.png")
+    lo = Loadout.from_json({"schema": 1, "slots": {"1/infantry": {"parts": [], "stance": "spear_shield"}},
+                            "soldiers": {"1": {"base": "generic_01", "geometry": "geo.json", "rights": "original (test)",
+                                               "textures": {k: f"{k}.png" for k in ("diffuse", "specular", "normal")}}}},
+                           tmp_path)
+    s = Session(Settings(eu4_path=fake_install, output_dir=tmp_path / "out"))
+    try:
+        res = s.validate(SetSpec(tags=["MAC"], gfx="hellenicgfx", loadout=lo))[0]
+    finally:
+        s.close()
+    assert not res.report.errors, [str(i) for i in res.report.errors]
+    gfx = "".join(f.text for p, f in res.generated.files.items() if p.endswith(".gfx"))
+    block = gfx.split('name = "hr_mac_fresh_soldier_1_mesh"', 1)[1].split("pdxmesh = {", 1)[0]
+    assert "spear_shield_idle_animation" in block and "spear_shield_attack_animation" in block

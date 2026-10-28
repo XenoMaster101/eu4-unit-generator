@@ -725,6 +725,9 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
 
         files, res.soldiers, notes = apply_horses(naming, set_name, owner, by_name, pdx.records, pdx.by_name, loadout,
                                                   game, idx, kind="soldier")
+        for fs in res.soldiers.values():  # the stance now lives on the fresh soldier's pdxmesh
+            if fs.entity in res.stances:
+                res.stances[fs.entity] = (res.stances[fs.entity][0], fs.pdxmesh)
         derived_files += files
         res.notes += notes
     built = build_parts(runner, naming, set_name, builds, version, cache)
