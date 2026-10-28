@@ -178,6 +178,12 @@ FIXES: tuple[Fix, ...] = (
         "ref3d/trellis.py:pick_score", ("tests/test_app_flow.py::test_pick_weighs_outline_colour_and_stretch",
                                          "tests/test_app_flow.py::test_colour_distance_reads_the_subjects_colours"),
         "model"),
+    Fix("foot_parts", "a soldier on foot holds its hand parts in the base game's convention for its stance, not the "
+        "seated pose they were split off in: the weapon's point along +z (muslim_spear's), the shield's face along "
+        "+x with its back at the hand (indian_generic_01_type1_shield's)",
+        "the cataphract on foot, 2026-10-28: the lance hung point down and the kite sat behind the body",
+        "ref3d/trellis.py:foot_part", ("tests/test_app_flow.py::test_a_soldiers_hand_parts_follow_the_base_game_on_foot",),
+        "parts"),
 )
 
 

@@ -247,3 +247,38 @@ def test_colour_distance_reads_the_subjects_colours():
     ImageDraw.Draw(render).rectangle([10, 20, 70, 170], fill=(160, 30, 30, 255))
     assert trellis.colour_distance(render, ref) < 1.0
     assert trellis.colour_distance(Image.new("RGBA", (10, 10)), ref) is None
+
+
+# the hands' frames measured with rider_frames on western_generic_01_type1 (2026-10-28): seated (cavalry_rider_idle)
+# and on foot (spear_shield_idle); world out, up and forward in each hand node's own axes
+SEATED = {"Right_hand_node": {"out": [-0.95, -0.3, 0.08], "up": [-0.27, 0.92, 0.27], "forward": [-0.15, 0.24, -0.96]},
+          "Left_hand_node": {"out": [-0.44, 0.26, 0.86], "up": [-0.2, 0.9, -0.38], "forward": [0.88, 0.34, 0.34]}}
+FOOT = {"Right_hand_node": {"out": [-0.86, -0.51, 0.03], "up": [0.08, -0.08, 0.99], "forward": [-0.51, 0.85, 0.11]},
+        "Left_hand_node": {"out": [0.8, 0.1, 0.59], "up": [0.01, 0.98, -0.18], "forward": [0.6, -0.16, -0.79]}}
+
+
+def test_a_soldiers_hand_parts_follow_the_base_game_on_foot():
+    """The cataphract on foot (2026-10-28): its lance (point forward when seated: -z) hung point down and its kite
+    sat behind the body. On foot the point is along +z (muslim_spear's, straight up in spear_shield_idle), the
+    shield faces +x with its back at the hand (indian_generic_01_type1_shield's)."""
+    from eu4unitgen.ref3d import trellis
+    s, f = SEATED["Right_hand_node"], FOOT["Right_hand_node"]
+    # a lance through the hand, its point ahead of the seated rider (along forward) and a longer butt behind
+    lance = [s["forward"][k] * t for t in range(-8, 11) for k in range(3)]
+    q = trellis.foot_part(lance, "mesh_weapon", s, f)
+    zs = q[2::3]
+    assert max(zs) > 9.5 and min(zs) < -7.5  # the point (10 ahead) now up along +z, the butt below, the grip at 0
+    assert max(abs(x) for x in q[0::3] + q[1::3]) < 0.1
+    up = [sum(q[i + j] * f["up"][j] for j in range(3)) for i in range(0, len(q), 3)]
+    assert max(up) > 9.5  # straight up in the standing pose
+    s, f = SEATED["Left_hand_node"], FOOT["Left_hand_node"]
+    # a flat kite 5 tall, 3 wide, facing out from the seated rider, 1 out from the forearm
+    plate = []
+    for a in (-1.5, 1.5):
+        for b in (-2.5, 2.5):
+            plate += [s["out"][k] * 1.0 + s["forward"][k] * a + s["up"][k] * b for k in range(3)]
+    q = trellis.foot_part(plate, "mesh_shield", s, f)
+    xs, ys, zs = q[0::3], q[1::3], q[2::3]
+    assert max(xs) - min(xs) < 0.05 and abs(min(xs) - trellis.FOOT["shield_back_x"]) < 1e-6  # its face along +x
+    assert abs((min(ys) + max(ys)) / 2 - trellis.FOOT["shield_centre_y"]) < 1e-6 and max(ys) - min(ys) > 4.5
+    assert abs(min(zs) + max(zs)) < 1e-6

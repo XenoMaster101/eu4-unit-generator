@@ -888,6 +888,102 @@ def foot_deform(vdir: Path, out: Path, blender: str | None = None) -> dict:
     return {**d, "stance": stance}
 
 
+# A hand part on foot follows the base game's convention for its stance, not the seated pose it was split off in
+# (2026-10-28, the cataphract on foot: the lance hung point down, the kite behind the body). Read from the install:
+# muslim_spear (indiangfx's spear_shield infantry) points along +z, which spear_shield_idle and polearm_twohanded_idle
+# turn straight up; indian_generic_01_type1_shield faces +x (out and forward in spear_shield_idle), its back at the
+# hand. The centre and back as core.parts' hoplon (in game, test 7).
+FOOT = {"shield_centre_y": 1.2, "shield_back_x": -0.1}
+
+
+def _unit(v):
+    n = math.sqrt(sum(x * x for x in v)) or 1.0
+    return [x / n for x in v]
+
+
+def _basis(a, b):
+    """(a, b made perpendicular to a, a x b): a right-handed orthonormal basis."""
+    a = _unit(a)
+    d = sum(x * y for x, y in zip(a, b))
+    b = _unit([y - d * x for x, y in zip(a, b)])
+    return [a, b, [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]]
+
+
+def _long_axis(pts):
+    """The points' principal axis (power iteration on the covariance; pure Python)."""
+    n = len(pts)
+    m = [sum(p[k] for p in pts) / n for k in range(3)]
+    c = [[sum((p[i] - m[i]) * (p[j] - m[j]) for p in pts) for j in range(3)] for i in range(3)]
+    v = [1.0, 1.0, 1.0]
+    for _ in range(50):
+        v = _unit([sum(c[i][j] * v[j] for j in range(3)) for i in range(3)])
+    return v
+
+
+def foot_part(p: list, kind: str, seated: dict, foot: dict) -> list:
+    """A hand part's points (flat x, y, z) from the seated hand frame (``rider_frames`` on cavalry_rider_idle) into
+    the base game's convention on foot (``FOOT``): a weapon's point (the end that pointed forward and up when seated)
+    along +z, rolled so what faced out still faces out, the grip kept at the hand; a shield's face (out when seated)
+    along +x, its top towards the standing pose's up, its back at ``shield_back_x`` and its centre at
+    ``shield_centre_y`` above the hand. ``foot`` is the hand's frame in the stance's idle. A rotation: no winding
+    change. -> the new flat points."""
+    pts = [p[i:i + 3] for i in range(0, len(p), 3)]
+    if kind == "mesh_weapon":
+        t = _long_axis(pts)
+        lead = [f + u for f, u in zip(seated["forward"], seated["up"])]
+        if sum(a * b for a, b in zip(t, lead)) < 0:
+            t = [-x for x in t]
+        A, B = _basis(t, seated["out"]), _basis([0.0, 0.0, 1.0], foot["out"])
+    else:
+        A, B = _basis(seated["out"], seated["up"]), _basis([1.0, 0.0, 0.0], foot["up"])
+    q = []
+    for v in pts:
+        c = [sum(v[j] * a[j] for j in range(3)) for a in A]
+        q.append([sum(c[k] * B[k][j] for k in range(3)) for j in range(3)])
+    if kind != "mesh_weapon":
+        lo = [min(v[k] for v in q) for k in range(3)]
+        hi = [max(v[k] for v in q) for k in range(3)]
+        shift = [FOOT["shield_back_x"] - lo[0], FOOT["shield_centre_y"] - (lo[1] + hi[1]) / 2, -(lo[2] + hi[2]) / 2]
+        q = [[v[k] + shift[k] for k in range(3)] for v in q]
+    return [round(x, 5) for v in q for x in v]
+
+
+def to_foot(vdir: Path, blender: str | None = None) -> dict:
+    """A soldier's built version (``vdir``) for use on foot: each hand part re-placed by ``foot_part`` into a
+    ``<key>_foot.json`` beside it, the manifest's part geometry pointed at it (``on_foot``: the stance and frames).
+    -> the manifest."""
+    from eu4unitgen.blender.runner import BlenderRunner
+    vdir = Path(vdir)
+    m = json.loads((vdir / "manifest.json").read_text(encoding="utf-8"))
+    stance = foot_stance(m)
+    base_file = eu4() / "gfx" / "models" / "Units" / "western_generic_01_type1.mesh"
+    base = base_file.read_bytes()
+    anims = eu4() / "gfx" / "models" / "Units" / "animation"
+    br = BlenderRunner(blender or _config().blender(), log_dir=vdir / "logs", timeout=900)
+    node_of = {v: k for k, v in HAND_KIND.items()}
+    frames = {}
+    for key, part in (m.get("parts") or {}).items():
+        node = node_of.get(part.get("kind"))
+        if node is None:
+            continue
+        side = "R" if node.startswith("Right") else "L"
+        for pose, anim in (("seated", "cavalry_rider_idle"), ("foot", f"{stance}_idle")):
+            if (pose, node) not in frames:
+                frames[(pose, node)] = br.run_job("rider_frames", {
+                    "mesh": str(base_file), "anim": str(anims / f"{anim}.anim"), "node": node, "elbow": f"{side}_elbow",
+                    "shoulder": f"{side}_shoulder", "bind": node_bind(base, node)}).result
+        src = Path(part["mesh"]["geometry"])
+        g = json.loads(src.read_text(encoding="utf-8"))
+        g["p"] = foot_part(g["p"], part["kind"], frames[("seated", node)], frames[("foot", node)])
+        dst = src.with_name(f"{key}_foot.json")
+        dst.write_text(json.dumps(g), encoding="utf-8")
+        part["mesh"]["geometry"] = str(dst)
+    m["on_foot"] = {"stance": stance, "frames": {f"{p}/{n}": {k: fr[k] for k in ("out", "up", "forward")}
+                                                  for (p, n), fr in frames.items()}}
+    (vdir / "manifest.json").write_text(json.dumps(m, indent=1, default=str), encoding="utf-8")
+    return m
+
+
 def _config():
     from eu4unitgen.core import config
     return config.load()

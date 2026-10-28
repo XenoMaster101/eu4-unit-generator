@@ -295,6 +295,8 @@ def stage_build(folder: Path, req: dict, cfg) -> dict:
         cache = glb.parent / "parts_cache"  # a cavalry unit shares its soldier's part models (cached by crop)
         m = trellis.process_rider(glb, folder / "trellis" / "game", palette_from=horse_textures(req.get("horse")),
                                   part_cache=cache, **opts)
+        if req["kind"] == "soldier":  # on foot: its hand parts in the base game's convention for its stance
+            trellis.to_foot(folder / "trellis" / "game" / m["version"], cfg.blender())
     return {"version": m["version"]}
 
 
