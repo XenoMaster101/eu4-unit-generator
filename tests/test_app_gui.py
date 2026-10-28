@@ -206,7 +206,7 @@ def test_example_walks_a_finished_cavalry(win, tmp_path, monkeypatch):
     assert len(s) == 10 and s[0].images and "Usable" in s[7].lines[0] and "Add to mod" in s[9].title
     from eu4unitgen.gui.help_page import ExampleDialog
     monkeypatch.setattr(example, "steps", lambda *a: s)
-    d = ExampleDialog()
+    d = ExampleDialog(win)
     for i in range(len(s)):  # each step shows its own pictures only, none left over from the one before
         d.show_step(i)
         pics = [w for w in d.findChildren(QtWidgets.QLabel) if w.pixmap() is not None and not w.pixmap().isNull()]
