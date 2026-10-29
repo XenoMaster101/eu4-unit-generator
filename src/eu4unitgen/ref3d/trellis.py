@@ -339,9 +339,8 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
             if P.get("tassels", True) else None,
             "bones": van["bones"], "country_mask": bool(country_mask), "colour_render": raw["images"]["side"],
             "size": P["size"], **P["bake"], "out_dir": str(out), "name": "horse"}
-    metallic = glb_metallic(glb, out / "raw_metallic.png")
-    if metallic:  # metal from TRELLIS.2's own map where it varies (bake_colour.baked_metal)
-        args["metallic_image"] = str(metallic)
+    # horses keep the colour rule for steel: their metallic maps call the coat metal (horse 2: 59%) and lose the
+    # bit's and buckles' gloss (regression 2026-10-29); the metallic map is for people's pale cloth (bake_colour)
     if emblem:
         args["emblem"] = {"decal": str(Path(emblem).resolve()), "size": 0.7}
     bc = br.run_job("bake_colour", args).result

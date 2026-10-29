@@ -140,7 +140,10 @@ def silver_mask(px, cov, chroma_max=0.18, lum_min=0.38):
     return cov & ((mx - mn) / np.maximum(mx, 1e-6) < chroma_max) & (c @ np.array([0.299, 0.587, 0.114]) > lum_min)
 
 
-METAL_TRUST = (0.2, 0.5)  # TRELLIS.2's metallic map is used where it varies: its 10th percentile under 0.2, its 90th over 0.5
+# TRELLIS.2's metallic map is used where it varies: its 10th percentile under 0.2, its 90th over 0.75 (horse 2's, 0.14 to
+# 0.67, passed at 0.5 and took the gloss off its bit and buckles: regression 2026-10-29; the English soldier's reaches
+# 0.78, the cataphract's 1.0)
+METAL_TRUST = (0.2, 0.75)  # used for soldiers and guns only (trellis: horses keep the colour rule)
 
 
 def baked_metal(low, high, size, path, cov):

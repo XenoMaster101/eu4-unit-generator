@@ -25,7 +25,16 @@
     "head_band": false,
     "head_marks": 0,
     "reins": true,
-    "tail": true
+    "tail": true,
+    "colour_de_side_top": 4.6,
+    "colour_de_side_middle": 4.9,
+    "colour_de_side_bottom": 5.5,
+    "colour_de_front34_top": 2.9,
+    "colour_de_front34_middle": 4.1,
+    "colour_de_front34_bottom": 1.5,
+    "colour_de_rear34_top": 3.1,
+    "colour_de_rear34_middle": 4.3,
+    "colour_de_rear34_bottom": 5.0
    },
    "added": {
     "20261024-203217": [
@@ -39,6 +48,17 @@
      "side_ratio",
      "silver_cap",
      "tail"
+    ],
+    "20261029-003943": [
+     "colour_de_front34_bottom",
+     "colour_de_front34_middle",
+     "colour_de_front34_top",
+     "colour_de_rear34_bottom",
+     "colour_de_rear34_middle",
+     "colour_de_rear34_top",
+     "colour_de_side_bottom",
+     "colour_de_side_middle",
+     "colour_de_side_top"
     ]
    }
   },
@@ -74,7 +94,16 @@
      77,
      70
     ],
-    "mask_share": 0.355
+    "mask_share": 0.355,
+    "colour_de_side_top": 2.4,
+    "colour_de_side_middle": 3.0,
+    "colour_de_side_bottom": 9.4,
+    "colour_de_front34_top": 2.5,
+    "colour_de_front34_middle": 5.2,
+    "colour_de_front34_bottom": 12.8,
+    "colour_de_rear34_top": 2.4,
+    "colour_de_rear34_middle": 3.5,
+    "colour_de_rear34_bottom": 6.6
    },
    "added": {
     "20261024-203217": [
@@ -89,6 +118,17 @@
      "side_ratio",
      "silver_cap",
      "tail"
+    ],
+    "20261029-003943": [
+     "colour_de_front34_bottom",
+     "colour_de_front34_middle",
+     "colour_de_front34_top",
+     "colour_de_rear34_bottom",
+     "colour_de_rear34_middle",
+     "colour_de_rear34_top",
+     "colour_de_side_bottom",
+     "colour_de_side_middle",
+     "colour_de_side_top"
     ]
    }
   },
@@ -125,7 +165,17 @@
      105,
      92
     ],
-    "mask_share": 0.391
+    "mask_share": 0.391,
+    "colour_de_front_top": 3.7,
+    "colour_de_front_middle": 3.7,
+    "colour_de_front_bottom": 6.3,
+    "colour_de_side_top": 3.5,
+    "colour_de_side_middle": 6.9,
+    "colour_de_side_bottom": 13.7,
+    "colour_de_front34_top": 5.4,
+    "colour_de_front34_middle": 3.2,
+    "colour_de_front34_bottom": 7.5,
+    "feet_ratio": 0.46
    },
    "added": {
     "20261024-203217": [
@@ -144,6 +194,18 @@
     ],
     "20261025": [
      "the shield's part metrics from runs/v007: the emblem check now picks the crop-traced kite (the user, 2026-10-25)"
+    ],
+    "20261029-003943": [
+     "colour_de_front34_bottom",
+     "colour_de_front34_middle",
+     "colour_de_front34_top",
+     "colour_de_front_bottom",
+     "colour_de_front_middle",
+     "colour_de_front_top",
+     "colour_de_side_bottom",
+     "colour_de_side_middle",
+     "colour_de_side_top",
+     "feet_ratio"
     ]
    }
   },
@@ -177,7 +239,16 @@
     "head_marks": 0,
     "reins": true,
     "tail": true,
-    "ref_iou": 0.641
+    "ref_iou": 0.641,
+    "colour_de_side_top": 4.6,
+    "colour_de_side_middle": 4.9,
+    "colour_de_side_bottom": 5.5,
+    "colour_de_front34_top": 2.9,
+    "colour_de_front34_middle": 4.1,
+    "colour_de_front34_bottom": 1.5,
+    "colour_de_rear34_top": 3.1,
+    "colour_de_rear34_middle": 4.3,
+    "colour_de_rear34_bottom": 5.0
    },
    "added": {
     "20261028-222636": [
@@ -205,6 +276,173 @@
      "tail",
      "tris",
      "uv_used"
+    ],
+    "20261029-003943": [
+     "colour_de_front34_bottom",
+     "colour_de_front34_middle",
+     "colour_de_front34_top",
+     "colour_de_rear34_bottom",
+     "colour_de_rear34_middle",
+     "colour_de_rear34_top",
+     "colour_de_side_bottom",
+     "colour_de_side_middle",
+     "colour_de_side_top"
+    ]
+   }
+  },
+  "english_soldier": {
+   "from": "regression run 20261029-003943",
+   "metrics": {
+    "tris": 2950,
+    "flips_idle": 30,
+    "max_idle": 2.08,
+    "flips_moving": 22,
+    "max_moving": 1.9,
+    "flips_attack": 49,
+    "max_attack": 3.33,
+    "cloth_primary": [
+     255,
+     87,
+     82
+    ],
+    "mask_share": 0.102,
+    "bake_reached": 1.0,
+    "gloss_silver": 0.066,
+    "gloss_gold": 0.001,
+    "parts": [
+     "lance"
+    ],
+    "group_flips_head": 1,
+    "group_flips_arms": 11,
+    "group_flips_legs": 9,
+    "group_flips_torso": 11,
+    "locate_fit": 0.624,
+    "colour_de_front_top": 7.4,
+    "colour_de_front_middle": 8.6,
+    "colour_de_front_bottom": 1.1,
+    "colour_de_side_top": 3.9,
+    "colour_de_side_middle": 3.6,
+    "colour_de_side_bottom": 2.1,
+    "colour_de_front34_top": 4.6,
+    "colour_de_front34_middle": 3.5,
+    "colour_de_front34_bottom": 5.6,
+    "feet_ratio": 1.03,
+    "ref_iou": 0.51
+   },
+   "added": {
+    "20261029-003943": [
+     "bake_reached",
+     "cloth_primary",
+     "colour_de_front34_bottom",
+     "colour_de_front34_middle",
+     "colour_de_front34_top",
+     "colour_de_front_bottom",
+     "colour_de_front_middle",
+     "colour_de_front_top",
+     "colour_de_side_bottom",
+     "colour_de_side_middle",
+     "colour_de_side_top",
+     "feet_ratio",
+     "flips_attack",
+     "flips_idle",
+     "flips_moving",
+     "gloss_gold",
+     "gloss_silver",
+     "group_flips_arms",
+     "group_flips_head",
+     "group_flips_legs",
+     "group_flips_torso",
+     "locate_fit",
+     "mask_share",
+     "max_attack",
+     "max_idle",
+     "max_moving",
+     "parts",
+     "ref_iou",
+     "tris"
+    ]
+   }
+  },
+  "cataphract_foot": {
+   "from": "regression run 20261029-003943",
+   "metrics": {
+    "tris": 2950,
+    "flips_idle": 24,
+    "max_idle": 3.94,
+    "flips_moving": 21,
+    "max_moving": 3.91,
+    "flips_attack": 39,
+    "max_attack": 4.25,
+    "cloth_primary": [
+     255,
+     105,
+     93
+    ],
+    "mask_share": 0.383,
+    "bake_reached": 1.0,
+    "gloss_silver": 0.025,
+    "gloss_gold": 0.064,
+    "parts": [
+     "lance",
+     "plume",
+     "shield"
+    ],
+    "group_flips_head": 1,
+    "group_flips_arms": 8,
+    "group_flips_legs": 5,
+    "group_flips_torso": 16,
+    "locate_fit": 0.744,
+    "part_iou_shield": 0.896,
+    "part_de_shield": 21.7,
+    "part_method_shield": "procedural (from the crop)",
+    "colour_de_front_top": 3.2,
+    "colour_de_front_middle": 2.5,
+    "colour_de_front_bottom": 3.9,
+    "colour_de_side_top": 2.9,
+    "colour_de_side_middle": 6.4,
+    "colour_de_side_bottom": 13.7,
+    "colour_de_front34_top": 5.5,
+    "colour_de_front34_middle": 3.1,
+    "colour_de_front34_bottom": 3.6,
+    "feet_ratio": 1.024,
+    "strap_gap": 0.856,
+    "ref_iou": 0.719
+   },
+   "added": {
+    "20261029-003943": [
+     "bake_reached",
+     "cloth_primary",
+     "colour_de_front34_bottom",
+     "colour_de_front34_middle",
+     "colour_de_front34_top",
+     "colour_de_front_bottom",
+     "colour_de_front_middle",
+     "colour_de_front_top",
+     "colour_de_side_bottom",
+     "colour_de_side_middle",
+     "colour_de_side_top",
+     "feet_ratio",
+     "flips_attack",
+     "flips_idle",
+     "flips_moving",
+     "gloss_gold",
+     "gloss_silver",
+     "group_flips_arms",
+     "group_flips_head",
+     "group_flips_legs",
+     "group_flips_torso",
+     "locate_fit",
+     "mask_share",
+     "max_attack",
+     "max_idle",
+     "max_moving",
+     "part_de_shield",
+     "part_iou_shield",
+     "part_method_shield",
+     "parts",
+     "ref_iou",
+     "strap_gap",
+     "tris"
     ]
    }
   }

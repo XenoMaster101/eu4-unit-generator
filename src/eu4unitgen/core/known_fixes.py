@@ -214,8 +214,9 @@ FIXES: tuple[Fix, ...] = (
         "ref3d/trellis.py:strap_part", ("regress:strap_gap",
                                         "tests/test_app_flow.py::test_a_shield_is_strapped_to_the_forearm_through_every_frame"),
         "parts"),
-    Fix("metal_from_the_model", "steel is what TRELLIS.2's metallic map says where that map varies (its 10th percentile "
-        "under 0.2, its 90th over 0.5); elsewhere the colour rule (pale and colourless)",
+    Fix("metal_from_the_model", "on a soldier or a gun, steel is what TRELLIS.2's metallic map says where that map "
+        "varies (its 10th percentile under 0.2, its 90th over 0.75); elsewhere, and on horses (their maps call the coat "
+        "metal), the colour rule (pale and colourless)",
         "the English soldier, 2026-10-28: his off-white jack was taken for steel (41%) and darkened from 178 to 125",
         "blender/jobs/bake_colour.py:baked_metal", ("regress:colour_de",
                                                     "tests/test_app_flow.py::test_the_game_version_is_shown_tinted_and_compared_by_region"),

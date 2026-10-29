@@ -26,6 +26,8 @@ def win(tmp_path, monkeypatch):
     ok = [checks.Check(k, True, f"{k} fine") for k in ("eu4_path", "blender", "ai_env", "weights", "eu4")]
     monkeypatch.setattr(checks, "run_all", lambda quick=False: list(ok))
     monkeypatch.setattr("eu4unitgen.ref3d.flow.start", lambda folder: None)  # no detached runs from tests
+    # no starter parts unless a test adds them (the installer build packs the author's into the app's folder)
+    monkeypatch.setattr("eu4unitgen.core.library.starter_root", lambda: tmp_path / "no_starter")
     from eu4unitgen.gui.app import MainWindow
     w = MainWindow(run_async=False)
     w.confirm = lambda *a, **k: True
