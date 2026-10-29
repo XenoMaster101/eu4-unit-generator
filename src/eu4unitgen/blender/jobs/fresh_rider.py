@@ -184,6 +184,12 @@ def slim_body(co, keep, vanilla_co, low=0.7, edge=2.0):
     return kx, kz, {"vanilla": [vx, vz], "ours": [ox, oz]}
 
 
+# a large swing moves only what joins the hand (the English soldier's arm, 41.5 degrees: the jack came along as a
+# sheet); a small one keeps its neighbours with it, which smooths the shoulder (the cataphract's 31 and 34 degrees:
+# moving the arm alone raised its worst stretch from 2.4-2.8 to 4.7-9.8, regression 2026-10-28)
+ARM_CONNECTED_DEG = 38.0
+
+
 def swing_arm(co, movable, grip, target, shoulder, side, edges=None):
     """``movable`` points on one arm turned about the shoulder so the grip points where the target is (arm length
     kept: the hands were 4.6 and 5.9 from vanilla's, holding the lance in front and the shield at the hip; sliding
@@ -194,7 +200,9 @@ def swing_arm(co, movable, grip, target, shoulder, side, edges=None):
     t = np.clip(((co - sh) @ g) / max(g @ g, 1e-9), 0, 1.2)
     near = np.linalg.norm(co - (sh + np.clip(t, 0, 1)[:, None] * g), axis=1) < 1.3
     m = movable & (co[:, 0] * side > 0) & near & (t > 0.0)
-    if edges is not None:  # the arm: what joins the hand along the surface past the shoulder seam (t > 0.1), not all
+    k0 = np.cross(g, tg)
+    big = math.degrees(math.atan2(np.linalg.norm(k0), g @ tg)) > ARM_CONNECTED_DEG
+    if edges is not None and big:  # the arm: what joins the hand along the surface past the shoulder seam (t > 0.1), not all
         # that lies near the line: a hand held at the chest brought the jack's side along (the English soldier,
         # 2026-10-28: a sheet from the shoulder to the wrist)
         seed = m & (t > 0.85)
