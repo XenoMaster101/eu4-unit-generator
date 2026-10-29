@@ -35,8 +35,10 @@ SET = {
 # what must hold whatever the baseline says: (metric, test, value)
 EXPECT = {"horse2_mask": [("mask_share", "at most", 0.05)],
           "english_soldier": [("parts", "without", "shield"), ("parts", "with", "lance"), ("feet_ratio", "at least", 0.75),
-                              ("colour_de_front_middle", "at most", 15.0)],
-          "cataphract_foot": [("strap_gap", "at most", 0.95), ("parts", "with", "shield")]}  # vanilla's: 0.89
+                              ("colour_de_front_middle", "at most", 15.0),
+                              ("joints_spine", "at most", 0.4), ("joints_legs", "at most", 0.6)],
+          "cataphract_foot": [("strap_gap", "at most", 0.95), ("parts", "with", "shield"),
+                              ("joints_spine", "at most", 0.4), ("joints_legs", "at most", 0.6)]}  # vanilla's: 0.89
 # a metric worse than the baseline by more than this is flagged ("higher": bigger is better)
 RULES = {"flips": ("lower", lambda b: max(6.0, 0.25 * b)), "max": ("lower", lambda b: 1.0),
          "iou": ("higher", lambda b: 0.02), "ref_iou": ("higher", lambda b: 0.02), "uv_used": ("higher", lambda b: 0.03),
@@ -47,7 +49,8 @@ RULES = {"flips": ("lower", lambda b: max(6.0, 0.25 * b)), "max": ("lower", lamb
          "head_marks": ("higher", lambda b: 0.5), "emblem_texels": ("higher", lambda b: 0.25 * b),
          "locate_fit": ("higher", lambda b: 0.05), "group_flips": ("lower", lambda b: max(5.0, 0.3 * b)),
          "colour_de": ("lower", lambda b: 4.0), "feet_ratio": ("higher", lambda b: 0.08),
-         "strap_gap": ("lower", lambda b: 0.2)}
+         "strap_gap": ("lower", lambda b: 0.2), "joints_spine": ("lower", lambda b: 0.1),
+         "joints_legs": ("lower", lambda b: 0.15)}
 # colours: compared by distance from the baseline, either way (Lab for colours, plain for shares)
 NEAR = {"cloth_primary": 8.0, "mask_share": 0.04}
 # measures that are there or not (True in the baseline, False now: worse)
@@ -58,7 +61,7 @@ METRICS = ("tris", "flips_idle", "flips_moving", "flips_attack", "max_idle", "ma
            "part_method_shield", "seat_gap", "side_ratio", "bake_reached", "silver_cap", "gloss_gold", "gloss_silver",
            "head_band", "head_marks", "emblem_texels", "reins", "mane", "tail", "locate_fit", "group_flips_head",
            "group_flips_arms", "group_flips_legs", "group_flips_torso", "cloth_primary", "mask_share", "colour_de",
-           "feet_ratio", "strap_gap")
+           "feet_ratio", "strap_gap", "joints_spine", "joints_legs")
 NOTE_ONLY = {"tris": 0.03}  # changes reported, never flagged
 
 
@@ -159,6 +162,10 @@ def metrics(manifest: dict, kind: str, quality: dict | None = None) -> dict:
     feet = ((manifest.get("fresh") or {}).get("feet") or {})
     if feet.get("ratio") is not None:
         m["feet_ratio"] = feet["ratio"]
+    j = (manifest.get("fresh") or {}).get("joints") or {}
+    if j.get("spine_off"):  # the joint fit (quality.joints): the worst spine bone and leg joint
+        m["joints_spine"] = max(j["spine_off"].values())
+        m["joints_legs"] = max((v for d in (j.get("legs_off") or {}).values() for v in d), default=0.0)
     straps = [c.get("max_gap") for c in (manifest.get("on_foot_checks") or {}).values() if c.get("max_gap") is not None]
     if straps:
         m["strap_gap"] = max(straps)
