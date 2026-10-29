@@ -753,7 +753,7 @@ def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None, carve=(
 SOLID = {}  # collapse_to's solid_fill settings for this run (direct sets them)
 
 
-def collapse_to(obj, target, close=None, keep=None):
+def collapse_to(obj, target, close=None, keep=None, outward=True):
     """Quadric (collapse) decimation straight to ``target`` triangles: the silhouette kept. With
     ``close``, a voxel remesh that fine first: TRELLIS.2's surface has thousands of non-manifold
     edges and open sheets, and the collapse stalls on them (horse 2: at 36-61k triangles whatever
@@ -798,7 +798,8 @@ def collapse_to(obj, target, close=None, keep=None):
         bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 3])
         # every face outwards (the cataphract's lance, 2026-10-29: a third of its thin shaft came out of the voxel
         # solid inside out, 69% of its faces outward against T38's 92%, and back-face culling shredded it)
-        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        if outward:  # (an imported model keeps its own winding: on an open sheet, her face, recalc guessed inward)
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
         bm.to_mesh(obj.data)
         bm.free()
         obj.data.update()

@@ -216,6 +216,56 @@ def nearest_labels(co, pts, labels):
     return np.array([labels[tree.find(Vector(q))[1]] for q in co])
 
 
+def _open_pieces(bm):
+    """The connected pieces with an open edge (a sheet, not a closed shell): [set of faces]."""
+    seen, out = set(), []
+    for f in bm.faces:
+        if f.index in seen:
+            continue
+        stack, piece = [f], set()
+        while stack:
+            g = stack.pop()
+            if g.index in seen:
+                continue
+            seen.add(g.index)
+            piece.add(g)
+            for e in g.edges:
+                for h in e.link_faces:
+                    if h.index not in seen:
+                        stack.append(h)
+        if any(e.is_boundary for g in piece for e in g.edges):
+            out.append(piece)
+    return out
+
+
+def open_faces(obj):
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    n = sum(len(p) for p in _open_pieces(bm))
+    bm.free()
+    return n
+
+
+def back_sides(obj):
+    """Each open sheet's faces copied with their winding reversed, at the same place: the game draws front sides only
+    (a double-sided model's hair, face and skirt vanish from behind, or wholly when they face in). -> faces added."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    faces = [f for p in _open_pieces(bm) for f in p]
+    if not faces:
+        bm.free()
+        return 0
+    dup = bmesh.ops.duplicate(bm, geom=faces)
+    new = [g for g in dup["geom"] if isinstance(g, bmesh.types.BMFace)]
+    bmesh.ops.reverse_faces(bm, faces=new)
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    return len(new)
+
+
 def set_rigid(obj, mask, bone):
     """Every vertex in ``mask`` 100% on ``bone``. -> how many."""
     g = obj.vertex_groups.get(bone) or obj.vertex_groups.new(name=bone)
@@ -800,7 +850,13 @@ def main():
         # under vanilla's, his forearm 0.19 from his side at the wrist against vanilla's 1.07)
         grip = free_hand(co, ~lance & ~shield, bones, side)
         if grip is not None:
-            ang, slide = swing_arm(co, ~lance & ~shield, grip, bones[f"{side}_hand"], bones[f"{side}_shoulder"], s_, edges)
+            target = np.array(bones[f"{side}_hand"], dtype=np.float64)
+            if a.get("keep_length"):  # an imported model's arm keeps its own length (1:1): turned to point where the
+                # game's arm points, its hand past the game's hand bone, carried by it (Mambo, 2026-10-29: fitted by
+                # her neck her arms are longer than the game's; slid 2.7 shorter they squashed, her hand at her hip)
+                sh_ = np.array(bones[f"{side}_shoulder"], dtype=np.float64)
+                target = sh_ + (target - sh_) / np.linalg.norm(target - sh_) * np.linalg.norm(np.asarray(grip) - sh_)
+            ang, slide = swing_arm(co, ~lance & ~shield, grip, target, bones[f"{side}_shoulder"], s_, edges)
             moves[f"free_{side}"] = {"node": f"{side}_hand", "grip": grip.round(3).tolist(), "turned_deg": round(ang, 1),
                                      "slid": round(float(np.linalg.norm(slide)), 3)}
     if a.get("stylise", True):
@@ -865,7 +921,17 @@ def main():
         # carving, no new UVs: on Mambo the closed solid sealed her hair round her face into a dark column)
         res["fit"] = {"kind": a.get("fit", "seated"), "keep_mesh": True}
         before = hs.verts(obj)
-        res["body_tris"] = fh.collapse_to(obj, int(a.get("import_tris", a["target_tris"])), None)
+        # its own winding kept: Mambo's face is an open sheet, and recalculated, 56 of her face's 193 front triangles
+        # pointed into her head (the game draws front sides only: no face in game, 2026-10-29)
+        budget = int(a.get("import_tris", a["target_tris"]))
+        res["body_tris"] = fh.collapse_to(obj, budget, None, outward=False)
+        if a.get("two_sided"):  # its open sheets (hair, face, skirt) get a back side; room made for it in the budget
+            open_n = open_faces(obj)
+            if res["body_tris"] + open_n > budget:
+                res["body_tris"] = fh.collapse_to(obj, int(budget * budget / (res["body_tris"] + open_n)), None,
+                                                  outward=False)
+            res["back_sides"] = back_sides(obj)
+            res["body_tris"] = fh.tri_count(obj)
         if region is not None:  # the cut mesh's points take the region of the nearest point before the cut
             region = nearest_labels(hs.verts(obj), before, region)
         crest_pts = crest_pts[:0]

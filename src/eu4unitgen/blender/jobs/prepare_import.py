@@ -438,7 +438,10 @@ def main() -> None:
     bmesh.ops.triangulate(bm, faces=bm.faces[:])
     bm.to_mesh(me)
     bm.free()
-    res = {"rig_applied": rig, "clear_faces_removed": cleared, "materials": len([m for m in me.materials if m]), "stood_up": None}
+    # the model's materials drawn from both sides (glTF doubleSided: Blender's reader turns back-face culling off):
+    # the game draws front sides only, so the fit gives its open sheets a back side (fresh_rider.two_sided)
+    two = any(m is not None and not m.use_backface_culling for o in [obj] for m in o.data.materials)
+    res = {"rig_applied": rig, "clear_faces_removed": cleared, "double_sided": two, "materials": len([m for m in me.materials if m]), "stood_up": None}
     if a.get("kind") == "soldier":
         res["stood_up"] = stand_up(obj)
     if a.get("turn") is not None:
