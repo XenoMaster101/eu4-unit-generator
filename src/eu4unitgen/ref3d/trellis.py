@@ -1120,9 +1120,10 @@ FOOT_ANIMS = ("idle", "moving", "attack")  # the crew is the infantry entity: it
 
 def to_foot(vdir: Path, blender: str | None = None) -> dict:
     """A soldier's built version (``vdir``) for use on foot: each hand part re-placed by ``foot_part`` into a
-    ``<key>_foot.json`` beside it, the manifest's part geometry pointed at it (``on_foot``: the stance and frames).
-    -> the manifest."""
+    ``<key>_foot.json`` beside it, the manifest's part geometry pointed at it (``on_foot``: the stance and frames); a
+    weapon slid to the base game's grip for its stance (``core.stances``). -> the manifest."""
     from eu4unitgen.blender.runner import BlenderRunner
+    from eu4unitgen.core import stances
     vdir = Path(vdir)
     m = json.loads((vdir / "manifest.json").read_text(encoding="utf-8"))
     stance = foot_stance(m)
@@ -1157,6 +1158,13 @@ def to_foot(vdir: Path, blender: str | None = None) -> dict:
             m.setdefault("on_foot_checks", {})[key] = strap_check
         else:
             g["p"] = foot_part(g["p"], part["kind"], frames[("seated", node)], frames[("foot", node)])
+            conv = stances.convention(str(eu4()), stance)
+            if conv:  # held where the base game holds its weapon for this stance (the user, after T38: the English
+                # soldier's bill was gripped at 0.63 of its length from the butt, its head 6.6 over his hand;
+                # western_halbard's at 0.44, its head 13.9 over)
+                q, slid = stances.slide_to_grip([g["p"][i:i + 3] for i in range(0, len(g["p"]), 3)], conv["grip"])
+                g["p"] = [round(x, 5) for v in q for x in v]
+                m.setdefault("on_foot_checks", {})[key] = {**slid, "as": conv["weapon"]}
         dst = src.with_name(f"{key}_foot.json")
         dst.write_text(json.dumps(g), encoding="utf-8")
         part["mesh"]["seated_geometry"] = str(src)  # the rider's (ref3d.assemble seats the soldier on a horse)
