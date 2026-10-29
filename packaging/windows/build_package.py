@@ -87,6 +87,10 @@ def main() -> dict:
     from eu4unitgen.core import library
     packed = library.pack_starters(starter)
     print("starter library:", packed)
+    # setuptools' cache keeps files it built before (a starter part taken out stayed in the wheel): cleared; the rest
+    # of build/ (the in-game tests) stays
+    for stale in [ROOT / "build" / "lib", *(ROOT / "build").glob("bdist.*")]:
+        shutil.rmtree(stale, ignore_errors=True)
     subprocess.run([sys.executable, "-m", "pip", "wheel", str(ROOT), "--no-deps", "-w", str(wheels)], check=True)
     wheel = next(wheels.glob(f"eu4unitgen-{v}-*.whl"))
     with zipfile.ZipFile(wheel) as z:
