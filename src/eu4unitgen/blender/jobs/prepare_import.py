@@ -34,6 +34,7 @@ from _pdx import args as job_args, clear_scene, write_result  # noqa: E402
 
 TOES_MIN = 0.01  # toes out less than this share of the height say nothing about facing: the model is left as it is
 PERSON_MIN = 1.4  # a standing person is at least this much taller than wide (arms out at 35 degrees: about 1.6-2)
+ALPHA_MIN = 0.5
 VIEWS = {"soldier": (0.0, 0.0), "horse": (90.0, 0.0), "gun": (45.0, 20.0)}  # azimuth, elevation (render_model's)
 
 
@@ -48,12 +49,22 @@ def _import(path: Path) -> list:
     return list(bpy.data.objects)
 
 
+def model_meshes(objs) -> list:
+    """The model's own meshes: those in the scene, shown, and not a rig's bone shape. Blender's glTF reader adds an
+    "Icosphere" (radius 1, outside the scene) to draw a rig's bones: joined in, it made Mambo a ball 2 across with her
+    textures baked onto it from inside (2026-10-29)."""
+    scene = set(bpy.context.scene.objects)
+    shapes = {pb.custom_shape for o in objs if o.type == "ARMATURE" for pb in o.pose.bones if pb.custom_shape}
+    return [o for o in objs if o.type == "MESH" and o in scene and o not in shapes and not o.hide_get()
+            and not o.hide_render]
+
+
 def baked_meshes(objs) -> tuple[list, bool]:
     """Every mesh as it stands (modifiers, a rig's pose and shape keys applied), in world space; the rest removed."""
     dg = bpy.context.evaluated_depsgraph_get()
     rig = any(o.type == "ARMATURE" for o in objs)
     out = []
-    for o in [o for o in objs if o.type == "MESH"]:
+    for o in model_meshes(objs):
         ev = o.evaluated_get(dg)
         me = bpy.data.meshes.new_from_object(ev, preserve_all_data_layers=True, depsgraph=dg)
         me.transform(o.matrix_world)
@@ -65,6 +76,51 @@ def baked_meshes(objs) -> tuple[list, bool]:
     if not out:
         raise SystemExit("no mesh in the model")
     return out, rig
+
+
+def clear_faces(obj) -> int:
+    """A see-through material's faces that are clear where they sit (the texture's alpha at the face's middle under
+    ``ALPHA_MIN``) removed: the bake reads colour without alpha, so a transparent overlay baked as black over
+    Mambo's face (2026-10-29); its visible faces (brows, blush) stay. -> faces removed."""
+    me = obj.data
+    if not me.uv_layers:
+        return 0
+    uv = me.uv_layers.active.data
+    alpha = {}
+    for i, m in enumerate(me.materials):
+        if m is None or not m.use_nodes or getattr(m, "blend_method", "OPAQUE") == "OPAQUE":
+            continue
+        bsdf = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        link = bsdf.inputs["Alpha"].links if bsdf else None
+        node = link[0].from_node if link else None
+        if node is None or node.type != "TEX_IMAGE" or node.image is None:
+            continue
+        img = node.image
+        w, h = img.size
+        if not w or not h:
+            continue
+        px = list(img.pixels)
+        alpha[i] = (w, h, px)
+    if not alpha:
+        return 0
+    drop = []
+    for p in me.polygons:
+        if p.material_index not in alpha:
+            continue
+        w, h, px = alpha[p.material_index]
+        u = sum(uv[li].uv[0] for li in p.loop_indices) / p.loop_total
+        v = sum(uv[li].uv[1] for li in p.loop_indices) / p.loop_total
+        x, y = int((u % 1.0) * (w - 1)), int((v % 1.0) * (h - 1))
+        if px[4 * (y * w + x) + 3] < ALPHA_MIN:
+            drop.append(p.index)
+    if drop:
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bm.faces.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[bm.faces[i] for i in drop], context="FACES")
+        bm.to_mesh(me)
+        bm.free()
+    return len(drop)
 
 
 def join(objs):
@@ -282,6 +338,7 @@ def main() -> None:
     a = job_args()
     clear_scene()
     objs, rig = baked_meshes(_import(Path(a["model"])))
+    cleared = sum(clear_faces(o) for o in objs)
     obj = join(objs)
     me = obj.data
     bm = bmesh.new()
@@ -289,7 +346,7 @@ def main() -> None:
     bmesh.ops.triangulate(bm, faces=bm.faces[:])
     bm.to_mesh(me)
     bm.free()
-    res = {"rig_applied": rig, "materials": len([m for m in me.materials if m]), "stood_up": None}
+    res = {"rig_applied": rig, "clear_faces_removed": cleared, "materials": len([m for m in me.materials if m]), "stood_up": None}
     if a.get("kind") == "soldier":
         res["stood_up"] = stand_up(obj)
     if a.get("turn") is not None:
