@@ -596,7 +596,7 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
             continue
         if game.exists(rec.file):
             out.append(Issue(ERROR, "fresh_mesh", "has a game file's name: it would replace it for everyone", f.path))
-        for problem in check_fresh(game.read(rec.base_file), f.data):
+        for problem in check_fresh(game.read(rec.base_file), f.data, ("cannon_muzzle",) if what == "gun" else ()):
             out.append(Issue(ERROR, "fresh_mesh", problem, f.path))
         pdx = w.pdxmesh(rec.pdxmesh) or {}
         base = w.pdxmesh(rec.base_pdxmesh) or {}
@@ -617,6 +617,20 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
         budget = GUN_TRIANGLES if what == "gun" else HORSE_TRIANGLES
         if rec.triangles > budget:
             out.append(Issue(WARNING, "fresh_mesh", f"{rec.triangles} triangles (budget {budget})", f.path))
+        if what == "gun":  # the muzzle locator on the gun (moved to our muzzle: UNVERIFIED in game until test 38)
+            from eu4unitgen.core.fresh_mesh import base_arrays
+            tree = parse_pdx_mesh(f.data)
+            mz = next((c for loc in tree["children"] if loc["name"] == "locator" for c in loc["children"]
+                       if c["name"] == "cannon_muzzle"), None)
+            p = base_arrays(f.data)["p"]
+            if mz is not None:
+                bone = base_arrays(f.data)["bones"].get(mz["props"].get("pa", [""])[0], [0.0, 0.0, 0.0])
+                at = [mz["props"]["p"][k] + bone[k] for k in range(3)]
+                lo = [min(p[k::3]) - 0.3 for k in range(3)]
+                hi = [max(p[k::3]) + 0.3 for k in range(3)]
+                if not all(lo[k] <= at[k] <= hi[k] for k in range(3)):
+                    out.append(Issue(ERROR, "fresh_mesh", f"its cannon_muzzle {[round(v, 2) for v in at]} is off the gun",
+                                     f.path))
         if what == "gun":  # Track A: the tier's artillery attaches the cannon entity that wears it
             art = rec.entity.removesuffix("_cannon")
             nodes = {n: e for a in (w.resolve(art, "attach") or []) for n, e in

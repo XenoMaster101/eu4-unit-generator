@@ -199,3 +199,23 @@ def test_a_fresh_soldier_keeps_its_stance(fake_install, tmp_path):
     gfx = "".join(f.text for p, f in res.generated.files.items() if p.endswith(".gfx"))
     block = gfx.split('name = "hr_mac_fresh_soldier_1_mesh"', 1)[1].split("pdxmesh = {", 1)[0]
     assert "spear_shield_idle_animation" in block and "spear_shield_attack_animation" in block
+
+
+def test_a_guns_muzzle_locator_moves_onto_its_own_muzzle():
+    """Track A: the base's cannon_muzzle locator written at our muzzle (relative to its parent bone), its name, parent
+    and rotation kept; the re-import check allows that position only when told."""
+    tree = parse_pdx_mesh(horse_like())
+    loc = next(c for c in tree["children"] if c["name"] == "locator")
+    loc["children"].append({"name": "cannon_muzzle", "props": {"p": [5.0, 2.0, 0.0], "q": [0.0, 1.0, 0.0, 0.0],
+                                                               "pa": ["HorseHead"]}, "children": []})
+    base = write_pdx_mesh(tree)
+    geo = FreshGeometry([0.0, 8, 0, 1, 8, 0, 0, 9, 0], [0.0, 0, -1] * 3, [0.0, 0, 1, 0, 0, 1], [0, 2, 1],
+                        [{"HorseHead": 1.0}] * 3)
+    data = write_fresh(base, geo, locators={"cannon_muzzle": [4.0, 2.5, 0.1]})
+    mz = next(c for c in parse_pdx_mesh(data)["children"] if c["name"] == "locator")["children"][0]
+    assert mz["props"]["p"] == pytest.approx([4.0, 2.5, 0.1]) and mz["props"]["pa"] == ["HorseHead"]
+    assert mz["props"]["q"] == [0.0, 1.0, 0.0, 0.0]
+    assert check_fresh(base, data, ("cannon_muzzle",)) == []
+    assert any("locator" in p for p in check_fresh(base, data))  # not allowed unless named
+    with pytest.raises(FreshMeshError):
+        write_fresh(base, geo, locators={"no_such_locator": [0.0, 0.0, 0.0]})

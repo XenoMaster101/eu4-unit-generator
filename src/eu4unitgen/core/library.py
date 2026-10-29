@@ -377,7 +377,7 @@ STARTER_RIGHTS = ("Starter part that comes with the app: made by the app's autho
 STARTER = {"bay_horse": {"style": "light", "regions": ["Western", "European"]},
            "english_horse": {"style": "light", "regions": ["English", "Western", "generic"]},
            "cataphract_horse": {"style": "barded", "regions": ["Byzantine", "Greek"]},
-           "english_soldier": {"regions": ["English", "Western", "generic"]},
+           # "english_soldier": out until he's fixed (the user, 2026-10-28; rerun from the arms-out picture)
            "cataphract": {"regions": ["Byzantine", "Greek"]},
            "bombard": {"regions": ["European", "generic"]}}
 

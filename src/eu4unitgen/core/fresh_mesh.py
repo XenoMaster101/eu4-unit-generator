@@ -51,9 +51,12 @@ def influences(base: bytes) -> int:
     return skin["props"]["bones"][0]
 
 
-def write_fresh(base: bytes, geo: FreshGeometry, textures: dict[str, str] | None = None) -> bytes:
+def write_fresh(base: bytes, geo: FreshGeometry, textures: dict[str, str] | None = None,
+                locators: dict[str, list[float]] | None = None) -> bytes:
     """``base`` (a base-game skinned .mesh) with its geometry replaced by ``geo`` (module doc).
-    ``textures``: new material texture names (diffuse, normal, specular: bare file names)."""
+    ``textures``: new material texture names (diffuse, normal, specular: bare file names). ``locators``: base
+    locators moved onto the new geometry, {name: world position} (a gun's cannon_muzzle at its own muzzle, Track A);
+    each keeps its name, parent bone and rotation, its position written relative to the parent bone."""
     try:
         tree = parse_pdx_mesh(base)
         mesh, skeleton = _only_mesh(tree)
@@ -95,6 +98,15 @@ def write_fresh(base: bytes, geo: FreshGeometry, textures: dict[str, str] | None
     if box is not None:
         box["props"]["min"] = [min(geo.p[j::3]) for j in range(3)]
         box["props"]["max"] = [max(geo.p[j::3]) for j in range(3)]
+    if locators:
+        loc = next((c for c in tree["children"] if c["name"] == "locator"), None)
+        binds = {k: v for k, v in base_arrays(base)["bones"].items()}
+        for name, world in locators.items():
+            node = next((c for c in (loc or {}).get("children", []) if c["name"] == name), None)
+            if node is None:
+                raise FreshMeshError(f"the base mesh has no locator {name}")
+            parent = binds.get(node["props"].get("pa", [""])[0], [0.0, 0.0, 0.0])
+            node["props"]["p"] = [float(world[k] - parent[k]) for k in range(3)]
     if textures:
         material = _child(mesh, "material")
         for key, kind in TEXTURE_SLOTS:
@@ -103,8 +115,9 @@ def write_fresh(base: bytes, geo: FreshGeometry, textures: dict[str, str] | None
     return write_pdx_mesh(tree)
 
 
-def check_fresh(base: bytes, fresh: bytes) -> list[str]:
-    """Re-import checks: problems with ``fresh`` as a fresh mesh on ``base``'s skeleton (empty = fine)."""
+def check_fresh(base: bytes, fresh: bytes, moved: tuple[str, ...] = ()) -> list[str]:
+    """Re-import checks: problems with ``fresh`` as a fresh mesh on ``base``'s skeleton (empty = fine). ``moved``:
+    locators whose position may differ (a gun's muzzle); their names, parents and rotations still must not."""
     problems = []
     try:
         bt, ft = parse_pdx_mesh(base), parse_pdx_mesh(fresh)
@@ -119,8 +132,21 @@ def check_fresh(base: bytes, fresh: bytes) -> list[str]:
         problems.append("top-level blocks differ from the base mesh's")
     bloc = next((c for c in bt["children"] if c["name"] == "locator"), None)
     floc = next((c for c in ft["children"] if c["name"] == "locator"), None)
-    if (bloc is None) != (floc is None) or (bloc is not None and bloc != floc):
-        problems.append("the locator block differs from the base mesh's")
+    def same(a, b):
+        if a is None or b is None:
+            return a is b
+        if [c["name"] for c in a["children"]] != [c["name"] for c in b["children"]]:
+            return False
+        for x, y in zip(a["children"], b["children"]):
+            keys = set(x["props"]) | set(y["props"])
+            if x["name"] in moved:
+                keys.discard("p")
+            if any(x["props"].get(k) != y["props"].get(k) for k in keys):
+                return False
+        return True
+    if not same(bloc, floc):
+        problems.append("the locator block differs from the base mesh's" + (f" (beyond {', '.join(moved)}'s position)"
+                                                                            if moved else ""))
     props = fmesh["props"]
     count = len(props.get("p", [])) // 3
     for key, width in (("n", 3), ("ta", 4), ("u0", 2)):
@@ -293,8 +319,13 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
             paths[tex] = f"{naming.part_dir(set_name)}/{names[tex]}"
             files.append(GeneratedFile(paths[tex], write_dds(img, DDSFormat(fmt, w, hh, full_mip_count(w, hh))), OWNED,
                                        procedural=True))
+        locs = None
+        if gun:  # the flash from our muzzle (Track A): fresh_gun recorded where it is
+            import json as _json
+            raw = _json.loads(loadout.path(h["geometry"]).read_text(encoding="utf-8"))
+            locs = raw.get("locators") or None
         try:
-            data = write_fresh(base, geo, names)
+            data = write_fresh(base, geo, names, locators=locs)
         except FreshMeshError as exc:
             raise GenerationError(f"tier {tier}: fresh {kind}: {exc}") from exc
         file, name = ((naming.fresh_rider_file(set_name, tier), naming.fresh_rider_pdxmesh(set_name, tier)) if rider

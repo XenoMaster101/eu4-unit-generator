@@ -19,6 +19,7 @@ args: {"source": .glb, "vanilla": {"bones": {name: [x, y, z]}, "muzzle": [x, y, 
        "target_tris", "uv_margin", "geometry_out", "preview_out", "textured_out", "result_path"}
 Result: {"frame", "wheels", "scale", "muzzle": {"ours", "vanilla", "off"}, "final": {"tris", "bounds"}, "shares"}.
 """
+import json
 import math
 import os
 import sys
@@ -149,6 +150,17 @@ def main():
     mod.factor, mod.iterations = 0.5, 2
     bpy.ops.object.modifier_apply(modifier=mod.name)
     res["tris"] = fh.collapse_to(obj, int(a.get("target_tris", 1500)), None)
+    # the collapse leaves small open holes and faces turned inside out in the thin planks of the trail (they show
+    # as holes: the game draws faces from the front only): holes filled, every face turned outwards
+    res["holes_filled"] = fh.fill_open(obj)
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 3])
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    res["tris"] = fh.tri_count(obj)
     obj.data.uv_layers.new(name="UV")
     fh.packed_uv(obj, float(a.get("uv_margin", 0.003)))
     co = hs.verts(obj)
@@ -163,6 +175,17 @@ def main():
     res["shares"] = {"wheels": round(float(on_wheel.mean()), 3), "Cannon": round(float(1 - on_wheel.mean()), 3)}
     nv, nt, unweighted = fh.export(obj, a["geometry_out"], a.get("preview_out"))
     co = hs.verts(obj)
+    # our muzzle: the centre of the barrel's mouth (the points within 0.15 of the gun's front end, the barrel's
+    # height there); the base game's cannon_muzzle locator is moved onto it so the flash fires from it
+    front = co[:, 0] < co[:, 0].min() + 0.15
+    mouth = [float(co[front, 0].min()), float(np.median(co[front, 1])), float(np.median(co[front, 2]))]
+    with open(a["geometry_out"], encoding="utf-8") as fp:
+        geo = json.load(fp)
+    geo["locators"] = {"cannon_muzzle": mouth}
+    with open(a["geometry_out"], "w", encoding="utf-8") as fp:
+        json.dump(geo, fp)
+    res["muzzle"]["ours"] = [round(v, 3) for v in mouth]
+    res["muzzle"]["locator"] = "moved to ours"
     res["final"] = {"vertices": nv, "tris": nt, "unweighted": unweighted,
                     "bounds": [co.min(0).round(3).tolist(), co.max(0).round(3).tolist()]}
     _pdx.write_result(a, res)
