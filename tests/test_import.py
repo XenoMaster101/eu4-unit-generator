@@ -70,3 +70,20 @@ def test_the_credits_file_is_never_written_over_a_file_the_tool_didnt_write(tmp_
     plan2 = ExportPlan(tmp_path, "knight_units", manifest={"files": {}})
     assert plan_extra(plan2, "knight_units/eu4unitgen_credits.txt", b"credits\n").action == BLOCKED
     assert "knight_units/eu4unitgen_credits.txt" not in plan2.manifest["files"]
+
+
+def test_a_glbs_own_licence_is_suggested_only_when_it_is_cc0_or_plain_cc_by(tmp_path):
+    import struct
+
+    def glb(extras):
+        doc = json.dumps({"asset": {"version": "2.0", "extras": extras}}).encode()
+        doc += b" " * (-len(doc) % 4)
+        p = tmp_path / "m.glb"
+        p.write_bytes(b"glTF" + struct.pack("<II", 2, 20 + len(doc)) + struct.pack("<I", len(doc)) + b"JSON" + doc)
+        return p
+    m = importer.metadata(glb({"title": "Knight", "author": "Jane", "license": "CC-BY-4.0 (http://x)", "source": "http://s"}))
+    assert m["licence"] == "cc_by" and m["credit"] == "“Knight”, by Jane, http://s, CC-BY-4.0 (http://x)"
+    assert importer.metadata(glb({"license": "CC0 1.0"}))["licence"] == "cc0"
+    for other in ("CC-BY-SA-4.0", "CC-BY-NC-4.0", "CC-BY-ND-4.0", "All rights reserved"):
+        assert importer.metadata(glb({"license": other}))["licence"] is None
+    assert importer.metadata(tmp_path / "missing.glb") == {"licence": None, "credit": ""}

@@ -324,6 +324,11 @@ class NewUnitScreen(Page):
         self.model_name.setText(f"✓ {self.model.name} ({mb:.1f} MB)")
         if not self.name.text().strip():
             self.name.setText(suggest_name(self.model))
+        meta = importer.metadata(self.model)  # a suggestion from the file itself (Sketchfab writes its licence)
+        if meta.get("licence"):
+            self.licence.setCurrentIndex(self.licence.findData(meta["licence"]))
+        if meta.get("credit") and not self.credit.text().strip():
+            self.credit.setText(meta["credit"])
         self.show_message("")
         self._ready()
 

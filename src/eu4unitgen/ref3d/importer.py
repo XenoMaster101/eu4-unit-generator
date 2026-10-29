@@ -39,6 +39,28 @@ def problem(model: Path | None, licence: str | None, credit: str = "") -> str:
     return ""
 
 
+def metadata(model: Path) -> dict:
+    """What a .glb says about itself (``asset.extras``: Sketchfab writes title, author, licence and source) and the
+    licence and credit it suggests: {"title", "author", "license", "source", "licence": key or None, "credit"}.
+    Only a suggestion: the user confirms it (a model's own label can be wrong)."""
+    import struct
+    out = {"licence": None, "credit": ""}
+    try:
+        data = Path(model).read_bytes()[:4 << 20]
+        n = struct.unpack_from("<I", data, 12)[0]
+        ex = (json.loads(data[20:20 + n]).get("asset") or {}).get("extras") or {}
+    except (OSError, ValueError, struct.error):
+        return out
+    out.update({k: str(ex[k]) for k in ("title", "author", "license", "source") if ex.get(k)})
+    lic = out.get("license", "").upper().replace(" ", "")
+    import re  # only plain CC BY (not BY-SA, BY-NC, BY-ND: not the choices offered)
+    out["licence"] = "cc0" if lic.startswith("CC0") else "cc_by" if re.match(r"CC-?BY(-?\d\.\d)?(\(|$)", lic) else None
+    bits = [f"“{out['title']}”" if out.get("title") else "", f"by {out['author']}" if out.get("author") else "",
+            out.get("source", ""), out.get("license", "")]
+    out["credit"] = ", ".join(b for b in bits if b)
+    return out
+
+
 def rights_text(licence: str, credit: str = "") -> str:
     """The run's rights statement from its licence."""
     credit = credit.strip()
