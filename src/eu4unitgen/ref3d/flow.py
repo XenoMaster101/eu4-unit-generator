@@ -335,9 +335,12 @@ def gun_report(m: dict) -> dict:
         "silhouette": {"verdict": "good" if (best or 0) > 0.8 else "ok" if (best or 0) > 0.65 else "check",
                        "text": f"The game version's outline overlaps TRELLIS.2's model by {best:.0%}." if best is not None
                        else "Not measured."},
-        "muzzle": {"verdict": "good" if mz.get("off", 9) < 0.6 else "ok" if mz.get("off", 9) < 1.2 else "check",
-                   "text": f"Its muzzle is {mz.get('off', '?')} from where the game fires the flash (the base game's "
-                           "cannon_muzzle point, kept as it is)."},
+        "muzzle": ({"verdict": "good", "text": "The flash fires from its own muzzle (the game's cannon_muzzle point "
+                                               "moved onto it; to be confirmed in game)."}
+                   if mz.get("locator") == "moved to ours" else
+                   {"verdict": "good" if mz.get("off", 9) < 0.6 else "ok" if mz.get("off", 9) < 1.2 else "check",
+                    "text": f"Its muzzle is {mz.get('off', '?')} from where the game fires the flash (the base game's "
+                            "cannon_muzzle point, kept as it is)."}),
         "wheels": {"verdict": "good" if 0.08 < wheels < 0.6 else "check",
                    "text": f"{wheels:.0%} of it turns with the wheels; the rest recoils with the barrel."},
         "budget": {"verdict": "good" if tris <= m.get("budget", 1500) else "ok",
