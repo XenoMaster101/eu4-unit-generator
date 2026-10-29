@@ -1049,4 +1049,5 @@ def cloth_weights(obj, bones, behind=0.6, influences=4):
     return {"behind_legs_on_hips": n}
 
 
-main()
+if __name__ == "__main__":  # base_body imports the fit
+    main()

@@ -142,6 +142,10 @@ def main():
                     score[groups[g.group]] = score.get(groups[g.group], 0) + g.weight
             tri_bone.append(max(score, key=score.get) if score else None)
         rest_n = [tri_normal(rest, t) for t in tris]
+        skip = set(a["skip"]) if a.get("skip") is not None and a.get("tris") == len(tris) else None
+        if a.get("skip") is not None and skip is None:
+            res_note = f"skip ignored: {len(tris)} triangles, the geometry had {a.get('tris')}"
+            out.setdefault("notes", []).append(res_note)
         import_anim(ie, rig, anim["path"])
         rest_bone = {b.name: rig.matrix_world @ b.matrix_local for b in rig.data.bones}
         f0, f1 = frame_range(rig)
@@ -178,7 +182,11 @@ def main():
                 m = (rig.matrix_world @ rig.pose.bones[b].matrix) @ rest_bone[b].inverted()
                 flipped[i] = (m.to_3x3() @ n0).dot(tri_normal(co, t)) < 0
             flips = sum(flipped)
+            if flips > res["flips"]:  # where they are, at the worst frame (triangle indices)
+                res["flip_tris"] = [i for i, x in enumerate(flipped) if x]
             res["flips"] = max(res["flips"], flips)
+            if skip is not None:  # the folds that show (a closed shell's faces inside another never do)
+                res["flips_visible"] = max(res.get("flips_visible", 0), sum(f for i, f in enumerate(flipped) if i not in skip))
             if first is None:
                 first = co
             for g, sel in gsel.items():

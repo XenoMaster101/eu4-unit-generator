@@ -330,8 +330,10 @@ def stage_build(folder: Path, req: dict, cfg) -> dict:
     else:  # a soldier alone has no horse: its own palette, its legs as built
         cache = glb.parent / "parts_cache"  # a cavalry unit shares its soldier's part models (cached by crop)
         soldier = req["kind"] == "soldier"
+        from eu4unitgen.ref3d import base_body
+        body = base_body.current() if soldier else None  # Track W: the outfit over the base body, once it passed
         m = trellis.process_rider(glb, folder / "trellis" / "game", palette_from=horse_textures(req.get("horse")),
-                                  part_cache=cache, fit="standing" if soldier else "seated", **opts)
+                                  part_cache=cache, fit="standing" if soldier else "seated", body=body, **opts)
         if soldier:  # two fits (the user, T37): standing for infantry and the crew, its hand parts strapped for its
             # stance; seated for riding (ref3d.assemble seats it on a horse from this one)
             trellis.to_foot(folder / "trellis" / "game" / m["version"], cfg.blender())

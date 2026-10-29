@@ -815,7 +815,8 @@ HAND_KIND = {"Right_hand_node": "mesh_weapon", "Left_hand_node": "mesh_shield"} 
 def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None, plume: str = "part",
                   sword: bool = False, kite: bool = True, cfg: dict | None = None, reference: dict | None = None,
                   ai_python: str | None = None, palette_from: dict | None = None, part_method: str = "auto",
-                  part_cache: Path | None = None, shield_side: str = "auto", fit: str = "seated") -> dict:
+                  part_cache: Path | None = None, shield_side: str = "auto", fit: str = "seated",
+                  body: Path | None = None) -> dict:
     """A TRELLIS.2 rider (.glb from a front view) into ``root/vNNN`` (SPEC M23): Blender job fresh_rider (the body on
     the infantry skeleton; the lance and shield split off as parts in their hand nodes' frames); bake_colour (the
     body and each part; the cloth as the country colour's mask) and bake_horse (the body's normal and AO); the
@@ -826,7 +827,9 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     colours and the helmet's gold come from their crops; every colour is moved onto the unit's palette
     (``palette_from``: {"diffuse", "specular", "primary"} of the horse it rides, else the rider's own).
     ``shield_side``: "left" or "right" forearm ("auto": where the reference has it); the weapon goes to the other
-    hand, mirrored (``mirror_part``). ``plume`` "none" leaves the plume off.
+    hand, mirrored (``mirror_part``). ``plume`` "none" leaves the plume off. ``body`` (Track W2): a base body's
+    version folder (``ref3d.base_body``): the soldier's shape pushed onto it (blender job ``outfit``) in place of
+    his own fused body; its topology, weights and UVs kept.
     -> the manifest (``parts``: ready loadout part entries; ``part_checks``)."""
     from PIL import Image
 
@@ -848,7 +851,16 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                                     "shield_frame": frame, "plume": "part" if plume in ("part", "none") else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
                                     "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),
                                     "parts_dir": str(out / "parts")}).result
-    fr["head_pinned"] = pin_head(out / "low_geometry.json")
+    if body is not None:  # the outfit over the base body (SPEC Track W)
+        bm = json.loads((Path(body) / "manifest.json").read_text(encoding="utf-8"))
+        (out / "low_geometry.json").replace(out / "fused_geometry.json")  # his own body, kept to compare
+        fr["outfit"] = br.run_job("outfit", {"body": bm["geometry"], "target": str(out / "textured.obj"),
+                                             "bones": base_arrays(base)["bones"],
+                                             "geometry_out": str(out / "low_geometry.json"),
+                                             "preview_out": str(out / "low.obj")}).result
+        fr["outfit"]["body"] = str(body)
+    else:
+        fr["head_pinned"] = pin_head(out / "low_geometry.json")
     raw = br.run_job("render_model", {"model": str(Path(glb).resolve()), "engine": "EEVEE", "out_dir": str(out / "raw"),
                                       "name": "raw", "size": 900, "views": {"front": [0, 5]}}).result
     common = {"gloss": PROCESS["gloss"], **PROCESS["bake"], "image": str(basecolor), "colour_render": raw["images"]["front"]}
@@ -984,14 +996,19 @@ def rider_deform(br, out: Path, base: bytes, base_file: Path, renders: bool = Tr
     from eu4unitgen.core.fresh_mesh import geometry_from_job, write_fresh
     dd = out / ("deform" if prefix == "cavalry_rider_" else f"deform_{prefix.rstrip('_')}")
     dd.mkdir(parents=True, exist_ok=True)
+    geo = json.loads(Path(geometry or out / "low_geometry.json").read_text(encoding="utf-8"))
     (dd / "rider.mesh").write_bytes(write_fresh(base, geometry_from_job(geometry or out / "low_geometry.json")))
     jobs = [{"id": k, "path": str(eu4() / "gfx" / "models" / "Units" / "animation" / f"{prefix}{k}.anim")} for k in anims]
+    # a base body's hidden faces (inside another tube) are counted apart: their folds never show
+    hid = {"skip": geo["hidden"], "tris": len(geo["tri"]) // 3} if geo.get("hidden") is not None else {}
     res = {name: br.run_job("check_mesh_deform", {"mesh": str(m), "anims": jobs, "groups": RIDER_GROUPS,
+                                                  **(hid if name == "ours" else {}),
                                                   "renders": {"out_dir": str(dd), "name": name, "size": 700} if renders else None}).result
            for name, m in (("ours", dd / "rider.mesh"), ("vanilla", base_file))}
     (dd / "deform.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
     return {who: {k: {"stretch": [round(x["str_p05"], 2), round(x["str_p95"], 2)], "max": round(x["str_max"], 2),
-                      "flips": x["flips"], "groups": {g: m.get("flips") for g, m in (x.get("groups") or {}).items()}}
+                      "flips": x["flips"], **({"flips_visible": x["flips_visible"]} if "flips_visible" in x else {}),
+                      "groups": {g: m.get("flips") for g, m in (x.get("groups") or {}).items()}}
                   for k, x in res[who]["anims"].items()} for who in res}
 
 
