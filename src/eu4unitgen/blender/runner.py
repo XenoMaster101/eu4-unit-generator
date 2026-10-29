@@ -88,6 +88,9 @@ class BlenderRunner:
         script = JOBS_DIR / f"{job}.py"
         if not script.is_file():
             raise BlenderError(f"no Blender job {job!r} ({script})")
+        from eu4unitgen.ref3d.writeguard import absolute, app_roots, check_writes
+        args = absolute(args or {})  # Blender reads a relative path from the drive's root
+        check_writes(args, app_roots(), f"Blender job {job}")  # nothing outside the app's folders
         if not self._checked:
             self.check_version()
         with tempfile.TemporaryDirectory(prefix="eu4unitgen_blender_") as tmp:

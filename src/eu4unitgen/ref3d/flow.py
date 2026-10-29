@@ -580,7 +580,7 @@ def ram_short(stage: str, free: float | None = None, top=None) -> dict | None:
 def go(folder: Path) -> dict:
     from eu4unitgen.core import checks, config
     from eu4unitgen.ref3d.runstate import Status as _Status
-    folder = Path(folder)
+    folder = Path(folder).resolve()  # every path a stage hands a job is absolute
     req = request(folder)
     cfg = config.load()
     old = status(folder)
