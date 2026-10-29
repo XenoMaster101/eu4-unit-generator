@@ -53,6 +53,8 @@ def pca_axis(pts):
     return c, vt
 
 
+PLUME_FIN = {"middle": 0.6, "width": 1.5}  # a plume: its middle within this of the centre line, at most this wide
+WEAPON_LONG, WEAPON_BOW = 0.45, 0.02  # a weapon split off: at least this share of the height, at most this bow
 SHIELD_FLAT, SHIELD_BROAD = 0.3, 0.035  # a shield: its thinnest spread under 0.3 of its width, its width over 0.035 H
 
 
@@ -98,6 +100,13 @@ def split(obj):
         lance = lance | head
         info["lance"] = {"axis": a.tolist(), "centre": c.tolist(), "shaft_radius": rs, "grip_t": tg,
                          "grip": (c + tg * a).tolist(), "t": [tmin, tmax], "vertices": int(lance.sum())}
+        # a weapon is long and straight (Mambo, 2026-10-29: an ear over a hanging hair ribbon was split off as a
+        # "lance" and put in her hand): at least WEAPON_LONG of the height, its shaft within WEAPON_BOW of straight
+        bend = _rigid.bow(co[lance][:: max(1, int(lance.sum()) // 4000)].tolist()) if lance.sum() > 30 else 1.0
+        if span < WEAPON_LONG * H or bend > WEAPON_BOW:
+            info["lance_rejected"] = {"length_share": round(span / H, 3), "bow": round(bend, 4)}
+            info.pop("lance")
+            lance = np.zeros(len(co), dtype=bool)
     shield = np.zeros(len(co), dtype=bool)
     sgn = -side if side else 1.0
     out = (co[:, 0] - x0) * sgn
@@ -178,6 +187,48 @@ def place(obj, bones, keep, top=16.4):
     off = np.array([-x0 * s, -y0 * s, -float(np.median(torso[:, 2])) * s])
     hs.set_verts(obj, co * s + off)
     return s, off, helmet
+
+
+NECK_GAME = 13.95  # the game's neck: between top_spine (13.82) and head (14.5), where its weights turn to the head
+GAME_TOP = 16.65  # the game's body, top of the head
+BIG_HEAD = 0.30  # a head (neck to top) over this share of the height: fitted by the neck (a chibi's: 0.60)
+
+
+def big_head(co, keep, rig_neck=None):
+    """Where the neck is and whether the head is big enough to fit by the neck: from the model's own rig when it has
+    one (``rig_neck``: its neck bone's height as a share, ``prepare_import``'s landmarks), else measured: the
+    narrowest slice of the body's core between 0.3 and 0.95 of the height (the core is the run of points along x
+    through the middle without a gap; Mambo's face, between gaps in her hair, read as a neck at 0.55 against her rig's
+    0.40). -> {"neck": height above the feet, "head_share", "fit_by_neck", "from"}."""
+    body = co[keep]
+    y0, y1 = body[:, 1].min(), body[:, 1].max()
+    H = y1 - y0
+    if rig_neck:
+        share = 1.0 - float(rig_neck)
+        return {"neck": round(float(rig_neck * H), 4), "neck_share": round(float(rig_neck), 3),
+                "head_share": round(share, 3), "fit_by_neck": bool(share > BIG_HEAD), "from": "rig"}
+    x0 = float(np.median(body[:, 0]))
+    gap = 0.012 * H
+    best = None
+    for f in np.arange(0.30, 0.95, 0.01):
+        sl = body[np.abs(body[:, 1] - (y0 + f * H)) < 0.006 * H]
+        if len(sl) < 8:
+            continue
+        xs = np.sort(sl[:, 0])
+        i = int(np.searchsorted(xs, x0))
+        lo = hi = min(max(i, 0), len(xs) - 1)
+        while lo > 0 and xs[lo] - xs[lo - 1] < gap:
+            lo -= 1
+        while hi < len(xs) - 1 and xs[hi + 1] - xs[hi] < gap:
+            hi += 1
+        w = xs[hi] - xs[lo]
+        if best is None or w < best[1]:
+            best = (f, w)
+    if best is None:
+        return {"neck": None, "head_share": None, "fit_by_neck": False, "from": "measured"}
+    share = 1.0 - best[0]
+    return {"neck": round(float(best[0] * H), 4), "neck_share": round(float(best[0]), 3),
+            "head_share": round(float(share), 3), "fit_by_neck": bool(share > BIG_HEAD), "from": "measured"}
 
 
 def torso_half(co, bands=((8.6, 9.6), (9.6, 10.6), (10.6, 11.6)), reach=3.0):
@@ -648,6 +699,17 @@ def main():
     edges = edges.reshape(-1, 2)
     s, off, _ = place(obj, bones, ~lance & ~shield)
     res["place"] = {"scale": float(s), "offset": off.tolist()}
+    big = big_head(hs.verts(obj), ~lance & ~shield, (a.get("landmarks") or {}).get("neck"))
+    res["head"] = big
+    if big["fit_by_neck"]:  # her neck on the game's neck, her head kept whole above it (1:1; the unit is scaled
+        # to the game's height in its pdxmesh: ``unit_scale``); a rig's neck bone (its base) on top_spine
+        k = (bones["top_spine"][1] if big["from"] == "rig" else NECK_GAME) / big["neck"]
+        co_ = hs.verts(obj)
+        hs.set_verts(obj, co_ * k)
+        s, off = s * k, off * k
+        res["place"].update(scale=float(s), offset=off.tolist(), by_neck=round(float(k), 4))
+        top = float(hs.verts(obj)[:, 1].max())
+        res["unit_scale"] = round(min(1.0, GAME_TOP / top), 4)
     if a.get("fitted_out"):
         fh.write_obj(obj, a["fitted_out"], uv=True)
     co = hs.verts(obj)
@@ -738,7 +800,12 @@ def main():
     # the parts, with their own raw copies (bake sources)
     parts = {}
     helmet_top = float(np.percentile(helmet_pts[:, 1], 99)) if helmet_pts is not None and len(helmet_pts) > 20 else NECK + 2.0
-    if a.get("plume") == "part" and len(crest_pts) > 200 and helmet_pts is not None:
+    xs = np.percentile(crest_pts[:, 0], [10, 50, 90]) if len(crest_pts) else None
+    res["crest_shape"] = None if xs is None else {"middle_x": round(float(xs[1]), 3), "width": round(float(xs[2] - xs[0]), 3)}
+    # a plume is a narrow fin on the head's centre line (the cataphract's: x 0, under 1 wide); a red ribbon hanging at
+    # the side of the head isn't (Mambo, 2026-10-29: made a "plume" floating over her)
+    fin = xs is not None and abs(xs[1]) < PLUME_FIN["middle"] and xs[2] - xs[0] < PLUME_FIN["width"]
+    if a.get("plume") == "part" and len(crest_pts) > 200 and helmet_pts is not None and fin:
         # the plume as a rigid part on the head (the user, test 31: test 29's arc was right, but smoothed into the body
         # it merged into the helmet, mail and cloak; cut out as it was, its rise went with the gap): its centre line
         # for a clean tube (trellis.plume_part) out of a finial on the helmet's top

@@ -55,6 +55,8 @@ def rider_entry(vdir: Path, subject: dict) -> tuple[dict, list]:
     e = {"base": "western_generic_01_type1", "geometry": _abs(m["geometry"]),
          "textures": {k: _abs(v) for k, v in m["textures"].items()}, "rights": subject["rights"],
          "source": f"TRELLIS.2 from {subject.get('original', '?')}, game {Path(vdir).name}"}
+    if (m.get("fresh") or {}).get("unit_scale"):  # a model fitted by its neck, scaled to the game's height
+        e["scale"] = m["fresh"]["unit_scale"]
     parts = []
     for p in (m.get("parts") or {}).values():
         q = json.loads(json.dumps(p))

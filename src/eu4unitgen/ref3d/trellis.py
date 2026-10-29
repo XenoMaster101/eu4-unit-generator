@@ -846,7 +846,10 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": "Left_hand_node",
                                         "elbow": "L_elbow", "shoulder": "L_shoulder",
                                         "bind": node_bind(base, "Left_hand_node")}).result  # the strapped shield's frame
+    imp = Path(glb).parent / "import.json"  # an imported model's own rig: its joints (ref3d.importer)
+    marks = json.loads(imp.read_text(encoding="utf-8")).get("landmarks") if imp.is_file() else None
     fr = br.run_job("fresh_rider", {"vanilla": base_arrays(base), "source": {"path": str(Path(glb).resolve()), "merge": 1e-5},
+                                    **({"landmarks": marks} if marks else {}),
                                     **{**RIDER, **(STANDING if fit == "standing" else {}), **(cfg or {})}, "fit": fit,
                                     "shield_frame": frame, "plume": "part" if plume in ("part", "none") else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
                                     "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),

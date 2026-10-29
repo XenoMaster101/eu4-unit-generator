@@ -129,7 +129,8 @@ def check_slot(tier: int, role: str, slot: RoleLoadout) -> None:
         bones[k.bone] = p.kind
 
 
-HORSE_KEYS = {"geometry", "textures", "base", "rights", "source", "unit_colours"}
+HORSE_KEYS = {"geometry", "textures", "base", "rights", "source", "unit_colours", "scale"}
+SCALE_RANGE = (0.1, 2.0)  # a fresh mesh's own size: a factor on its base pdxmesh's scale
 
 
 def check_horse(key, raw) -> dict:
@@ -150,6 +151,9 @@ def check_horse(key, raw) -> dict:
     if uc is not None and not (isinstance(uc, list) and len(uc) == 3 and all(
             isinstance(c, list) and len(c) == 3 and all(isinstance(x, int) and 0 <= x <= 255 for x in c) for c in uc)):
         raise LoadoutError(f"horses: tier {key}: unit_colours must be three [r, g, b] triples, 0-255")
+    sc = raw.get("scale")
+    if sc is not None and not (isinstance(sc, (int, float)) and SCALE_RANGE[0] <= sc <= SCALE_RANGE[1]):
+        raise LoadoutError(f"horses: tier {key}: scale must be a number from {SCALE_RANGE[0]} to {SCALE_RANGE[1]}")
     return {"base": "cavalry_horse", **raw}
 
 

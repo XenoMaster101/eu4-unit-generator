@@ -334,13 +334,51 @@ def render_reference(obj, kind: str, out_dir: Path, size: int) -> str:
     return str(path)
 
 
+# a rig's joints by name (Mixamo, Unity/VRM and Cygames-style names), the side bones averaged; hair, skirt, tail,
+# ear and helper bones left out
+LANDMARKS = {"neck": r"neck", "head": r"(^|[_:.\s])head", "hip": r"hip|pelvis", "thigh": r"thigh|upleg|upperleg",
+             "knee": r"knee|calf|lowerleg|shin", "ankle": r"ankle|foot(?!.*end)", "shoulder": r"shoulder|clavicle",
+             "elbow": r"elbow|forearm|lowerarm", "wrist": r"wrist|hand(?!_?attach)"}
+LANDMARK_SKIP = r"sp_|ex_|hair|skirt|tail|ear|_end|end$|ctrl|eye|mouth|cheek|twist|toe|finger|thumb|index|attach"
+
+
+def rig_landmarks(objs) -> dict:
+    """The rig's main joints in world space as it stands: {landmark: [points]} (``LANDMARKS``)."""
+    import re
+    out = {}
+    for arm in [o for o in objs if o.type == "ARMATURE"]:
+        for b in arm.pose.bones:
+            n = b.name.lower()
+            if re.search(LANDMARK_SKIP, n):
+                continue
+            for key, pat in LANDMARKS.items():
+                if re.search(pat, n):
+                    out.setdefault(key, []).append(arm.matrix_world @ b.head)
+                    break
+    return out
+
+
 def main() -> None:
     a = job_args()
     clear_scene()
-    objs, rig = baked_meshes(_import(Path(a["model"])))
+    imported = _import(Path(a["model"]))
+    marks = rig_landmarks(imported)
+    objs, rig = baked_meshes(imported)
     cleared = sum(clear_faces(o) for o in objs)
     obj = join(objs)
     me = obj.data
+    mark_at = {}
+    if marks:  # carried through the same turns and scaling as loose points, read back, removed (below)
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        n0 = len(bm.verts)
+        for key, pts in marks.items():
+            mark_at[key] = []
+            for p in pts:
+                bm.verts.new(p)
+                mark_at[key].append(n0 + sum(len(v) for v in mark_at.values()))
+        bm.to_mesh(me)
+        bm.free()
     bm = bmesh.new()
     bm.from_mesh(me)
     bmesh.ops.triangulate(bm, faces=bm.faces[:])
@@ -363,6 +401,19 @@ def main() -> None:
     res["turn"] = turn
     normalise(obj)
     obj.data.update()
+    if mark_at:  # each joint's height as a share of the model's (the fit by the neck reads it: ``fresh_rider``)
+        idx = {i for v in mark_at.values() for i in v}
+        zs = [v.co.z for v in obj.data.vertices if v.index not in idx]
+        z0, z1 = min(zs), max(zs)
+        res["landmarks"] = {k: round(sum((obj.data.vertices[i].co.z - z0) / (z1 - z0) for i in v) / len(v), 4)
+                            for k, v in mark_at.items()}
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bm.verts.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[bm.verts[i] for i in sorted(idx)], context="VERTS")
+        bm.to_mesh(obj.data)
+        bm.free()
+        obj.data.update()
     plain = None if one_texture(obj) else plain_colours(obj)
     res["colours"] = "kept" if one_texture(obj) else "palette" if plain else "baked"
     res["baked"] = res["colours"] == "baked"

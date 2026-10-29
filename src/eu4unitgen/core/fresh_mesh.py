@@ -343,8 +343,13 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
         if soldier:  # the infantry's own ids (its stance pdxmesh's, or the culture's) over the body's
             worn = by_name.get(entity["pdxmesh"]) or idx.pdxmesh(entity["pdxmesh"]) or {}
             anims.update(worn.get("animations") or {})
+        scale = rec.get("scale")
+        if h.get("scale") is not None:  # its own size: a factor on the base's scale (a chibi fitted by its neck)
+            # UNVERIFIED in game: that a pdxmesh's scale shrinks the skinned body with its animations and the parts
+            # attached to its nodes alike (the base game's own pdxmeshes set scale; in-game test to confirm)
+            scale = round(float(scale if scale is not None else 1.0) * float(h["scale"]), 4)
         pdx = {"name": name, "file": file, "base": h["base"], "animations": anims,
-               "scale": rec.get("scale"), "extra": dict(rec.get("extra") or {}), "settings": []}
+               "scale": scale, "extra": dict(rec.get("extra") or {}), "settings": []}
         records.append(pdx)
         by_name[name] = pdx
         entity["pdxmesh"] = name
