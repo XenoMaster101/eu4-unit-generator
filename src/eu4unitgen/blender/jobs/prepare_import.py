@@ -1,0 +1,264 @@
+"""Blender job: an imported model (.glb, .gltf or .fbx: the user's own or a CC0 / CC BY download) made into what
+TRELLIS.2 hands the build (the user, 2026-10-29: "the imported model replaces the TRELLIS.2 step"):
+
+  1. imported; a rig, shape keys and other modifiers applied as the model stands, then dropped (no skins, no
+     animations: the build rigs it on the game's skeleton);
+  2. its meshes joined, its transforms applied;
+  3. a soldier stood up (its tallest side up) and turned to face the front (Blender's -Y, as TRELLIS.2's do): from
+     its feet (the toes, the lowest slice, stick out forwards of the shins) unless ``turn`` (degrees about up) is
+     given; turned in quarter turns;
+  4. centred and scaled so its largest side is 1 (TRELLIS.2's unit cube);
+  5. one material with one base-colour texture: kept if it already is (one material, an image on its base colour,
+     UVs), else the materials' colours baked (Cycles, diffuse colour only) onto new UVs at ``bake_size``;
+  6. written as a .glb (``out_glb``);
+  7. the reference picture (the cut-out the build's part crops, the outline check and the result sheet read): an
+     orthographic render on a transparent ground from the kind's view (``views``: soldier front, horse side, gun
+     three-quarter), ``out_dir``/input_rgba.png.
+
+args: {"model", "out_glb", "kind", "turn": deg | null, "bake_size": 2048, "out_dir", "size": 1024, "result_path"}
+Result: {"triangles", "materials", "baked": bool, "rig_applied": bool, "stood_up": [axis] | None, "turn": deg,
+         "turn_from": "feet" | "asked" | "kept", "toes": offset, "dimensions", "reference"}
+"""
+import math
+import sys
+from pathlib import Path
+
+import bmesh
+import bpy
+from mathutils import Matrix, Vector
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _pdx import args as job_args, clear_scene, write_result  # noqa: E402
+
+VIEWS = {"soldier": (0.0, 0.0), "horse": (90.0, 0.0), "gun": (45.0, 20.0)}  # azimuth, elevation (render_model's)
+
+
+def _import(path: Path) -> list:
+    ext = path.suffix.lower()
+    if ext in (".glb", ".gltf"):
+        bpy.ops.import_scene.gltf(filepath=str(path))
+    elif ext == ".fbx":
+        bpy.ops.import_scene.fbx(filepath=str(path))
+    else:
+        raise SystemExit(f"can't import {path.suffix} (a .glb or .fbx)")
+    return list(bpy.data.objects)
+
+
+def baked_meshes(objs) -> tuple[list, bool]:
+    """Every mesh as it stands (modifiers, a rig's pose and shape keys applied), in world space; the rest removed."""
+    dg = bpy.context.evaluated_depsgraph_get()
+    rig = any(o.type == "ARMATURE" for o in objs)
+    out = []
+    for o in [o for o in objs if o.type == "MESH"]:
+        ev = o.evaluated_get(dg)
+        me = bpy.data.meshes.new_from_object(ev, preserve_all_data_layers=True, depsgraph=dg)
+        me.transform(o.matrix_world)
+        new = bpy.data.objects.new(o.name + "_baked", me)
+        bpy.context.scene.collection.objects.link(new)
+        out.append(new)
+    for o in objs:
+        bpy.data.objects.remove(o, do_unlink=True)
+    if not out:
+        raise SystemExit("no mesh in the model")
+    return out, rig
+
+
+def join(objs):
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    if len(objs) > 1:
+        bpy.ops.object.join()
+    obj = bpy.context.view_layer.objects.active
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    return obj
+
+
+def extent(obj):
+    co = [v.co for v in obj.data.vertices]
+    lo = Vector((min(c.x for c in co), min(c.y for c in co), min(c.z for c in co)))
+    hi = Vector((max(c.x for c in co), max(c.y for c in co), max(c.z for c in co)))
+    return lo, hi
+
+
+def stand_up(obj):
+    """A person's tallest side to +Z (a Z-up export read as Y-up lies on its back). -> the axis it was, or None."""
+    lo, hi = extent(obj)
+    d = hi - lo
+    tall = max(range(3), key=lambda k: d[k])
+    if tall == 2:
+        return None
+    rot = Matrix.Rotation(math.radians(90), 4, "X" if tall == 1 else "Y")
+    obj.data.transform(rot)
+    lo, hi = extent(obj)
+    co = [v.co for v in obj.data.vertices]  # head up: the arms and shoulders, the widest, belong in the upper half
+    mid = (lo.z + hi.z) / 2
+    up_w = max((abs(c.x) + abs(c.y) for c in co if c.z > mid), default=0)
+    low_w = max((abs(c.x) + abs(c.y) for c in co if c.z <= mid), default=0)
+    if low_w > 1.4 * up_w:
+        obj.data.transform(Matrix.Rotation(math.radians(180), 4, "X"))
+    return ["x", "y", "z"][tall]
+
+
+def facing_from_feet(obj) -> tuple[float, float]:
+    """The turn about Z (a quarter turn) that faces a standing person to -Y, from its feet: the lowest 3% of its
+    height (the soles and toes) against the slice at 6-12% (the shins): toes stick out forwards. -> (degrees, how
+    far the toes stick out, as a share of the height)."""
+    lo, hi = extent(obj)
+    h = hi.z - lo.z
+    co = [v.co for v in obj.data.vertices]
+    sole = [c for c in co if c.z < lo.z + 0.03 * h]
+    shin = [c for c in co if lo.z + 0.06 * h < c.z < lo.z + 0.12 * h]
+    if not sole or not shin:
+        return 0.0, 0.0
+    ms = Vector((sum(c.x for c in sole) / len(sole), sum(c.y for c in sole) / len(sole), 0))
+    mh = Vector((sum(c.x for c in shin) / len(shin), sum(c.y for c in shin) / len(shin), 0))
+    d = ms - mh
+    if d.length < 1e-9:
+        return 0.0, 0.0
+    ang = math.degrees(math.atan2(d.x, -d.y))  # 0 when the toes point to -Y
+    return float(-round(ang / 90.0) * 90.0) % 360.0, d.length / h
+
+
+def normalise(obj):
+    lo, hi = extent(obj)
+    c, s = (lo + hi) / 2, 1.0 / max(hi - lo)
+    obj.data.transform(Matrix.Scale(s, 4) @ Matrix.Translation(-c))
+
+
+def one_texture(obj) -> bool:
+    """One material whose base colour is an image, and UVs."""
+    mats = [m for m in obj.data.materials if m]
+    if len(mats) != 1 or not obj.data.uv_layers or not mats[0].use_nodes:
+        return False
+    bsdf = next((n for n in mats[0].node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    link = bsdf and bsdf.inputs["Base Color"].links
+    return bool(link and link[0].from_node.type == "TEX_IMAGE" and link[0].from_node.image)
+
+
+def bake_colours(obj, size: int) -> None:
+    """The materials' base colours (images, vertex colours or plain values) baked onto new UVs, one material."""
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 4
+    src_uv = obj.data.uv_layers.active.name if obj.data.uv_layers else None
+    new = obj.data.uv_layers.new(name="baked")
+    obj.data.uv_layers.active = new
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.003)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    img = bpy.data.images.new("baked_colour", size, size, alpha=False)
+    if not obj.data.materials:
+        m = bpy.data.materials.new("plain")
+        m.use_nodes = True
+        obj.data.materials.append(m)
+    for m in obj.data.materials:
+        if m is None:
+            continue
+        m.use_nodes = True
+        nt = m.node_tree
+        if src_uv:  # the old textures still read the old UVs
+            for n in nt.nodes:
+                if n.type == "TEX_IMAGE" and not n.inputs["Vector"].links:
+                    uvn = nt.nodes.new("ShaderNodeUVMap")
+                    uvn.uv_map = src_uv
+                    nt.links.new(uvn.outputs["UV"], n.inputs["Vector"])
+        t = nt.nodes.new("ShaderNodeTexImage")
+        t.image = img
+        nt.nodes.active = t
+    bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"}, margin=8, use_clear=True, uv_layer="baked")
+    for uv in [u for u in obj.data.uv_layers if u.name != "baked"]:
+        obj.data.uv_layers.remove(uv)
+    mat = bpy.data.materials.new("baked")
+    mat.use_nodes = True
+    t = mat.node_tree.nodes.new("ShaderNodeTexImage")
+    t.image = img
+    img.pack()
+    bsdf = mat.node_tree.nodes["Principled BSDF"]
+    mat.node_tree.links.new(t.outputs["Color"], bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = 0.8
+    obj.data.materials.clear()
+    obj.data.materials.append(mat)
+
+
+def render_reference(obj, kind: str, out_dir: Path, size: int) -> str:
+    """The model on a transparent ground from its kind's view, orthographic, its own material, plain light."""
+    scene = bpy.context.scene
+    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    scene.view_settings.view_transform = "Standard"
+    scene.render.film_transparent = True
+    scene.render.resolution_x = scene.render.resolution_y = size
+    scene.render.image_settings.color_mode = "RGBA"
+    world = bpy.data.worlds.new("w")
+    scene.world = world
+    world.use_nodes = True
+    world.node_tree.nodes["Background"].inputs["Color"].default_value = (1, 1, 1, 1)
+    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.9
+    sun = bpy.data.objects.new("sun", bpy.data.lights.new("sun", "SUN"))
+    sun.data.energy = 2.0
+    sun.rotation_euler = (math.radians(40), 0, math.radians(-20))
+    scene.collection.objects.link(sun)
+    cam_data = bpy.data.cameras.new("cam")
+    cam_data.type = "ORTHO"
+    cam_data.ortho_scale = 1.1
+    cam = bpy.data.objects.new("cam", cam_data)
+    scene.collection.objects.link(cam)
+    scene.camera = cam
+    az, el = (math.radians(x) for x in VIEWS.get(kind, (0.0, 0.0)))
+    direction = Vector((math.sin(az) * math.cos(el), -math.cos(az) * math.cos(el), math.sin(el)))
+    cam.location = direction * 3.0
+    cam.rotation_euler = (-direction).to_track_quat("-Z", "Y").to_euler()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "input_rgba.png"
+    scene.render.filepath = str(path)
+    bpy.ops.render.render(write_still=True)
+    return str(path)
+
+
+def main() -> None:
+    a = job_args()
+    clear_scene()
+    objs, rig = baked_meshes(_import(Path(a["model"])))
+    obj = join(objs)
+    me = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    bm.to_mesh(me)
+    bm.free()
+    res = {"rig_applied": rig, "materials": len([m for m in me.materials if m]), "stood_up": None}
+    if a.get("kind") == "soldier":
+        res["stood_up"] = stand_up(obj)
+    if a.get("turn") is not None:
+        turn, res["turn_from"] = float(a["turn"]) % 360.0, "asked"
+    elif a.get("kind") == "soldier":
+        turn, res["toes"] = facing_from_feet(obj)
+        res["turn_from"] = "feet"
+    else:
+        turn, res["turn_from"] = 0.0, "kept"
+    if turn:
+        obj.data.transform(Matrix.Rotation(math.radians(turn), 4, "Z"))
+    res["turn"] = turn
+    normalise(obj)
+    obj.data.update()
+    res["baked"] = not one_texture(obj)
+    if res["baked"]:
+        bake_colours(obj, int(a.get("bake_size", 2048)))
+    lo, hi = extent(obj)
+    res["dimensions"] = [round(x, 4) for x in (hi - lo)]
+    res["triangles"] = len(obj.data.polygons)
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.ops.export_scene.gltf(filepath=str(a["out_glb"]), export_format="GLB", use_selection=True,
+                              export_animations=False, export_skins=False, export_morph=False, export_yup=True)
+    res["reference"] = render_reference(obj, a.get("kind", "soldier"), Path(a["out_dir"]), int(a.get("size", 1024)))
+    write_result(a, res)
+
+
+main()

@@ -1,7 +1,8 @@
 """New unit: a guided flow, one action per screen ("Step 2 of 4"), each with what happens and why.
 
   soldier or horse   1 the picture (the guide for its kind: what works, why, good and bad examples, the picture's own
-                     checks)   2 name and rights   3 where it goes (the tier, the country colour)   4 make it (the
+                     checks), or a 3D model to import (.glb or .fbx: ``ref3d.importer``; it takes TRELLIS.2's place)
+                     2 name and rights (an imported model: its licence, CC0, CC BY with its credit, or own work)   3 where it goes (the tier, the country colour)   4 make it (the
                      checks, then the run's stages as they go)
   cavalry            1 the horse   2 the rider (each picked from the Library, or made here: that runs the horse's or
                      soldier's own steps, then comes back)   3 name and tier   4 make it (it waits for the horse and
@@ -17,7 +18,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLineEdit, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLineEdit, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from eu4unitgen.gui.base import DropImage, Page, card, clear_layout, ghost, label, pil_pixmap, pixmap, primary
@@ -70,6 +71,7 @@ class NewUnitScreen(Page):
         super().__init__(window)
         self.kind = "soldier"
         self.image: Path | None = None
+        self.model: Path | None = None  # Import a model: the .glb or .fbx in place of a picture
         self.started: str | None = None  # the run started from the Make it step
         self.parent_draft: dict | None = None  # making a horse or soldier for a cavalry unit: where to go back to
         self.picks = {"horse": None, "soldier": None}
@@ -116,6 +118,11 @@ class NewUnitScreen(Page):
             return self._show()
         self.kind = kind or "soldier"
         self.image, self.started, self.i = None, None, 0
+        self.model = None
+        self.model_name.setText("No model chosen yet.")
+        self._set_how(False)
+        self.licence.setCurrentIndex(0)
+        self.credit.setText("")
         self.picks = {"horse": horse, "soldier": soldier}
         if kind in (None, "soldier", "horse", "cavalry") and self.parent_draft and kind != "cavalry":
             pass  # a horse or soldier made for a cavalry unit keeps its way back
@@ -169,8 +176,14 @@ class NewUnitScreen(Page):
         """Next is on only when this step is done; the reason shows beside it."""
         key = self.flow()[self.i][0]
         why = ""
-        if key == "picture" and self.image is None:
+        if key == "picture" and self.importing() and self.model is None:
+            why = "Choose a model file first."
+        elif key == "picture" and not self.importing() and self.image is None:
             why = "Drop in a picture first."
+        elif key == "about" and self.importing():
+            from eu4unitgen.ref3d import importer
+            why = name_problem(self.name.text().strip()) or importer.problem(self.model, self.licence.currentData(),
+                                                                             self.credit.text())
         elif key == "about":
             why = name_problem(self.name.text().strip()) or ("Say where the picture comes from (the rights)."
                                                              if not self.rights.text().strip() else "")
@@ -214,8 +227,44 @@ class NewUnitScreen(Page):
             self.kind_cards[key] = c
             kinds.addWidget(c)
         outer.addLayout(kinds)
-        row = QHBoxLayout()
-        outer.addLayout(row, 1)
+        how = QHBoxLayout()
+        self.how_group = QButtonGroup(self)
+        self.from_picture = card("From a picture", "The AI makes the 3D model", "Make it from one picture (TRELLIS.2)",
+                                 checkable=True)
+        self.from_model = card("Import a 3D model", ".glb (best) or .fbx: CC0, CC BY or your own",
+                               "Use a 3D model you made or may use, in place of the AI's", checkable=True)
+        for c in (self.from_picture, self.from_model):
+            c.setMaximumHeight(64)
+            self.how_group.addButton(c)
+            how.addWidget(c)
+        self.from_picture.setChecked(True)
+        self.from_picture.clicked.connect(lambda *_: self._set_how(False))
+        self.from_model.clicked.connect(lambda *_: self._set_how(True))
+        outer.addLayout(how)
+        self.model_box = QWidget()
+        mb = QVBoxLayout(self.model_box)
+        mb.setContentsMargins(0, 0, 0, 0)
+        pick = QHBoxLayout()
+        pick.addWidget(primary("Choose a model file…", self.choose_model, "A .glb (textures inside it) or an .fbx"))
+        self.model_name = label("No model chosen yet.", "explain")
+        pick.addWidget(self.model_name, 1)
+        mb.addLayout(pick)
+        mb.addWidget(label("What works", "h2"))
+        mb.addWidget(label("<ul><li>One model of the whole thing: a soldier standing with his arms a little out from his "
+                           "sides, a horse standing, or a gun.</li><li>His weapon, shield and helmet can be part of "
+                           "it: the app splits them off as it does for the AI's models.</li><li>A .glb with its "
+                           "textures inside is best; an .fbx's textures must sit beside it. A rig and animations are "
+                           "dropped: the app rigs it on the game's skeleton.</li><li>Any size and any number of "
+                           "pieces or materials: they're joined and the colours put on one texture.</li><li>Only a "
+                           "model you made, or one under CC0 or CC BY (you give its credit next).</li></ul>",
+                           rich=True))
+        mb.addStretch(1)
+        self.model_box.hide()
+        outer.addWidget(self.model_box, 1)
+        self.picture_box = QWidget()
+        row = QHBoxLayout(self.picture_box)
+        row.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(self.picture_box, 1)
         left = QVBoxLayout()
         self.drop = DropImage(w=380, h=380)
         self.drop.picked.connect(self.set_picture)
@@ -239,10 +288,44 @@ class NewUnitScreen(Page):
 
     def _switch_kind(self, kind: str) -> None:
         """What the part is: its guide, checks and steps follow (the picture, if any, is checked again)."""
-        image = self.image
+        image, model, importing = self.image, self.model, self.from_model.isChecked()
         self.enter(kind=kind)
         if image:
             self.set_picture(image)
+        if importing:
+            self._set_how(True)
+            if model:
+                self.set_model(model)
+
+    def importing(self) -> bool:
+        return self.from_model.isChecked() and self.kind in ("soldier", "horse", "gun")
+
+    def _set_how(self, model: bool) -> None:
+        """From a picture or from an imported model: the step shows the one asked for."""
+        self.from_model.setChecked(model)
+        self.from_picture.setChecked(not model)
+        self.model_box.setVisible(model)
+        self.picture_box.setVisible(not model)
+        if hasattr(self, "next_why"):
+            self._ready()
+
+    def choose_model(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Choose your 3D model", "", "3D models (*.glb *.fbx)")
+        if path:
+            self.set_model(Path(path))
+
+    def set_model(self, path: Path) -> None:
+        from eu4unitgen.ref3d import importer
+        why = importer.problem(Path(path), "own")
+        if why:
+            return self.show_message(why, error=True)
+        self.model = Path(path)
+        mb = self.model.stat().st_size / 1e6
+        self.model_name.setText(f"✓ {self.model.name} ({mb:.1f} MB)")
+        if not self.name.text().strip():
+            self.name.setText(suggest_name(self.model))
+        self.show_message("")
+        self._ready()
 
     def _enter_picture(self) -> None:
         from eu4unitgen.core import example, guide, guide_pictures
@@ -319,21 +402,48 @@ class NewUnitScreen(Page):
         lay.addWidget(self.name)
         self.name_hint = label("", "explain")
         lay.addWidget(self.name_hint)
-        lay.addWidget(label("Where does the picture come from? (rights)", "h2"))
+        self.licence_box = QWidget()
+        lb = QVBoxLayout(self.licence_box)
+        lb.setContentsMargins(0, 0, 0, 0)
+        lb.addWidget(label("The model's licence", "h2"))
+        from eu4unitgen.ref3d import importer
+        self.licence = QComboBox()
+        self.licence.addItem("Choose…", None)
+        for k, text in importer.LICENCES.items():
+            self.licence.addItem(text, k)
+        self.licence.setToolTip("Only a model you made, or one its author released under CC0 or CC BY. It's saved with "
+                                "the part; a CC BY credit is written into your mod with it.")
+        self.licence.currentIndexChanged.connect(lambda *_: self._ready())
+        lb.addWidget(self.licence)
+        self.credit = QLineEdit()
+        self.credit.setPlaceholderText("Credit: who made it and where it's from, e.g. \u201cKnight by Jane Doe, "
+                                       "sketchfab.com/\u2026\u201d")
+        self.credit.setToolTip("Needed for CC BY (the licence asks for it); for CC0 and your own work it's optional")
+        self.credit.textChanged.connect(lambda *_: self._ready())
+        lb.addWidget(self.credit)
+        lb.addWidget(label("Don't import models of characters, uniforms or logos you don't have the rights to.",
+                           "explain"))
+        self.licence_box.hide()
+        lay.addWidget(self.licence_box)
+        self.rights_box = QWidget()
+        rbx = QVBoxLayout(self.rights_box)
+        rbx.setContentsMargins(0, 0, 0, 0)
+        rbx.addWidget(label("Where does the picture come from? (rights)", "h2"))
         self.rights = QLineEdit()
         self.rights.setPlaceholderText(f"e.g. {RIGHTS_EXAMPLE}")
         self.rights.setToolTip("Who made the picture, and that you may use it in your mod. It's saved with the unit. "
                                "Don't use pictures of characters, uniforms or logos you don't have the rights to.")
         self.rights.textChanged.connect(lambda *_: self._ready())
-        lay.addWidget(self.rights)
+        rbx.addWidget(self.rights)
         ex = QHBoxLayout()
         ex.addWidget(label(f"Example: “{RIGHTS_EXAMPLE}”", "explain"))
         ex.addWidget(ghost("Use this wording", lambda: self.rights.setText(RIGHTS_EXAMPLE),
                            "Only if it's true for your picture"))
         ex.addStretch(1)
-        lay.addLayout(ex)
-        lay.addWidget(label("Other good answers: “Drawn by me”, “Photo I took myself”, “Licensed CC-BY 4.0 from "
+        rbx.addLayout(ex)
+        rbx.addWidget(label("Other good answers: “Drawn by me”, “Photo I took myself”, “Licensed CC-BY 4.0 from "
                             "<artist>, credited in the mod”.", "explain"))
+        lay.addWidget(self.rights_box)
         from eu4unitgen.core import library
         lay.addWidget(label("Tags (optional)", "h2"))
         lay.addWidget(label("They decide which parts the app suggests when you build a unit for a country. You can "
@@ -361,6 +471,8 @@ class NewUnitScreen(Page):
 
     def _enter_about(self) -> None:
         self.style_row.setVisible(self.kind == "horse")  # a style is a horse's; regions are any part's
+        self.licence_box.setVisible(self.importing())
+        self.rights_box.setVisible(not self.importing())
 
     def _name_changed(self) -> None:
         from eu4unitgen.ref3d.unitstage import unit_names
@@ -527,6 +639,10 @@ class NewUnitScreen(Page):
         if self.kind == "cavalry":
             body = (f"<b>{self.name.text().strip()}</b>: the soldier <b>{self.picks['soldier']}</b> riding the horse "
                     f"<b>{self.picks['horse']}</b>, cavalry tier {tier}.")
+        elif self.importing():
+            body = (f"<b>{self.name.text().strip()}</b>: a {what} from your 3D model <b>{self.model.name if self.model else '?'}"
+                    f"</b> ({self.licence.currentText()}), tier {tier}"
+                    f"{', its cloth in each country’s colour' if self.mask.isChecked() else ''}.")
         else:
             body = (f"<b>{self.name.text().strip()}</b>: a {what} from <b>{self.image.name if self.image else '?'}</b>, "
                     f"tier {tier}{', its cloth in each country’s colour' if self.mask.isChecked() else ''}.")
@@ -570,6 +686,11 @@ class NewUnitScreen(Page):
             if self.kind == "cavalry":
                 folder = flow.new_request(name, None, "", "cavalry", self.tier_group.checkedId(),
                                           horse=self.picks["horse"], soldier=self.picks["soldier"])
+            elif self.importing():
+                folder = flow.new_request(name, None, "", self.kind, self.tier_group.checkedId(),
+                                          options={"country_mask": self.mask.isChecked()},
+                                          model={"path": str(self.model), "licence": self.licence.currentData(),
+                                                 "credit": self.credit.text()})
             else:
                 folder = flow.new_request(name, self.image, self.rights.text().strip(), self.kind,
                                           self.tier_group.checkedId(), options={"country_mask": self.mask.isChecked()})

@@ -794,8 +794,9 @@ class UnitDetail(QWidget):
             return
 
         def work():
+            from eu4unitgen.ref3d import importer
             return modexport.add_to_mod(folder / "preview" / "preview.json", req["name"], mode, tag, gfx, tiers,
-                                        mod_dir, cfg.eu4(), cfg.exports(), utype=utype)
+                                        mod_dir, cfg.eu4(), cfg.exports(), utype=utype, credits=importer.credits_for(req))
 
         def done(r) -> None:
             if r.notes and any(n.startswith("validation") for n in r.notes):

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 
-STAGE_WORDS = {"cutout": "cutting the subject out of the image", "trellis": "making the 3D model",
+STAGE_WORDS = {"import": "preparing your 3D model", "cutout": "cutting the subject out of the image", "trellis": "making the 3D model",
                "build": "building the game model", "finish": "applying your edits", "preview": "staging the result",
                "add": "adding the unit to your mod", "setup": "setting up"}
 

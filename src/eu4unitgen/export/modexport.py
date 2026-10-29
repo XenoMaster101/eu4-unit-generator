@@ -165,11 +165,14 @@ def _entity_blocks(text: str) -> list[tuple[str, str]]:
 
 
 def add_to_mod(preview_spec: Path, subject: str, mode: str, tag: str, gfx: str, tier: int | list[int], mod_dir: Path,
-               eu4: Path, stage_root: Path, write: bool = True, utype: str = "cavalry") -> AddResult:
+               eu4: Path, stage_root: Path, write: bool = True, utype: str = "cavalry",
+               credits: tuple[list[str], bool] | None = None) -> AddResult:
     """Write the finished unit (its preview spec: the loadout and set) into ``mod_dir`` as mod ``<subject>_units``.
     ``mode``: "normal" (for ``tag``, graphical culture ``gfx``) or "achievement_safe" (``gfx``'s ``utype`` at
     ``tier``, cavalry or infantry: ``gfx`` an existing culture such as westerngfx). ``write`` False: the plan
-    only."""
+    only. ``credits``: ``importer.credits_for``'s (lines, any CC BY): written as ``<mod>/eu4unitgen_credits.txt``
+    (rule 8; in both modes: a text file in the mod's root is outside the checksum); a CC BY credit that can't be
+    written stops the export."""
     import json
 
     from eu4unitgen.core.character import CharacterSpec
@@ -226,6 +229,13 @@ def add_to_mod(preview_spec: Path, subject: str, mode: str, tag: str, gfx: str, 
         # packs, unit files, tech, countries, colours, localisation); nor does reusing the culture's own entity names
         # with a higher version, which is the point here
         plan.validation_errors = [e for e in plan.validation_errors if _rule_of(e) not in DROPPED_RULES]
+    if credits and credits[0]:
+        from eu4unitgen.export.writer import BLOCKED, plan_extra
+        from eu4unitgen.ref3d import importer
+        pf = plan_extra(plan, f"{name}/{importer.CREDITS_FILE}", importer.credits_text(credits[0]))
+        if pf.action == BLOCKED and credits[1]:
+            plan.validation_errors.append(f"ERROR   credits: {pf.path} {pf.reason}: a CC BY model's credit must ship "
+                                          "with the mod")
     out.files = sorted(f.path for f in plan.files)
     out.checksum_files = checksum_files([p.split("/", 1)[1] if "/" in p else p for p in out.files], rules)
     if plan.validation_errors:

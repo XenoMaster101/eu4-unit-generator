@@ -31,9 +31,9 @@ def time_left(folder: str | Path) -> float:
     from eu4unitgen.ref3d import flow
     st = flow.status(Path(folder)) or {}
     req = flow.request(Path(folder))
-    est = flow.estimates(req["kind"])
+    est = flow.estimates(req["kind"], req)
     left, now = 0.0, time.time()
-    for key in flow.stages_of(req["kind"]):
+    for key in flow.stages_of(req["kind"], req):
         s = (st.get("stages") or {}).get(key) or {}
         if s.get("state") == "done":
             continue
@@ -65,11 +65,11 @@ class StageList(QFrame):
         self.kind = None
         self._st: dict = {}
 
-    def _build(self, kind: str) -> None:
+    def _build(self, kind: str, req: dict | None = None) -> None:
         from eu4unitgen.ref3d import flow
         clear_layout(self.grid)
         self.rows = {}
-        for r, key in enumerate(flow.stages_of(kind)):
+        for r, key in enumerate(flow.stages_of(kind, req)):
             name = label(f"<b>{r + 1}. {flow.LABELS[key]}</b><br><span style='font-size:12px'>{flow.EXPLAIN[key]}</span>",
                          rich=True)
             state = label("–", "muted", wrap=False)
@@ -85,12 +85,14 @@ class StageList(QFrame):
         from eu4unitgen.core import errors
         from eu4unitgen.ref3d import flow
         req = flow.request(Path(folder))
-        if self.kind != req["kind"]:
-            self._build(req["kind"])
+        plan = flow.stages_of(req["kind"], req)
+        if self.kind != (req["kind"], plan):
+            self._build(req["kind"], req)
+            self.kind = (req["kind"], plan)
         st = flow.status(Path(folder)) or {"state": "new", "stages": {}}
         self._st = st
         state = st.get("state", "new")
-        est = flow.estimates(req["kind"])
+        est = flow.estimates(req["kind"], req)
         now, done_s, total_s = time.time(), 0.0, 0.0
         for key, (_, lab) in self.rows.items():
             s = (st.get("stages") or {}).get(key) or {}

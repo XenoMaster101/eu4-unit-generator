@@ -33,11 +33,14 @@ import traceback
 from pathlib import Path
 
 STAGES = ("cutout", "trellis", "build", "finish", "preview")
-LABELS = {"cutout": "Cut the subject out of the image", "trellis": "Make two 3D models (TRELLIS.2) and pick the better",
+LABELS = {"import": "Prepare your 3D model", "cutout": "Cut the subject out of the image", "trellis": "Make two 3D models (TRELLIS.2) and pick the better",
           "build": "Build the game model (shape, parts, textures, checks)", "finish": "Apply your edits",
           "preview": "Stage it and draw the result sheet", "assemble": "Put the parts together and check them"}
 # what each stage does and why, in plain words (the Make it step and the Library show these)
-EXPLAIN = {"cutout": "The background is removed so only the subject becomes part of the model.",
+EXPLAIN = {"import": "Your model is joined into one, stood up and turned to face the front, its colours put on one "
+                     "texture, and drawn from the front as its reference picture. It takes the place of the AI's "
+                     "3D model.",
+           "cutout": "The background is removed so only the subject becomes part of the model.",
            "trellis": "An AI (TRELLIS.2) guesses the 3D shape and colours from your one picture. It makes two "
                       "versions; the app keeps the one whose outline, colours and movement come out best.",
            "build": "The model is cut down to the game's size, fitted onto the game's own skeleton so it moves with "
@@ -54,15 +57,19 @@ NEED_RAM = {"cutout": 4.0, "trellis": 14.0, "build": 8.0}
 RAM_POLL = 30.0
 KIND_STAGES = {"cavalry": ("build", "finish", "preview"),  # the rest run every stage
                "unit": ("assemble", "preview")}  # a unit from library parts (ref3d.assemble): no AI
+IMPORTED = ("import", "build", "finish", "preview")  # a part from the user's own 3D model (ref3d.importer)
 # horse 2's and the cataphract rider's runs (2026-10-23/24) until this machine has its own
-DEFAULT_SECONDS = {"cutout": 45, "trellis": 910, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150,
+DEFAULT_SECONDS = {"import": 60, "cutout": 45, "trellis": 910, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150,
                    "assemble": 40}
 KINDS = ("horse", "soldier", "cavalry", "rider", "gun")
 FOOT_TYPE = {"horse": "cavalry", "soldier": "infantry", "cavalry": "cavalry", "rider": "cavalry",
              "gun": "artillery"}  # the unit slot's type
 
 
-def stages_of(kind: str) -> tuple[str, ...]:
+def stages_of(kind: str, req: dict | None = None) -> tuple[str, ...]:
+    """A run's stages: by its kind, or for a part made from an imported model (``req``'s ``source``) ``IMPORTED``."""
+    if req is not None and (req.get("source") or {}).get("model"):
+        return IMPORTED
     return KIND_STAGES.get(kind, STAGES)
 
 
@@ -85,11 +92,23 @@ def folder_of(name: str) -> Path:
 
 # ------------------------------------------------------------------ requests
 def new_request(name: str, image: Path | None, rights: str, kind: str, tier: int = 1, horse: str | None = None,
-                options: dict | None = None, soldier: str | None = None) -> Path:
+                options: dict | None = None, soldier: str | None = None, model: dict | None = None) -> Path:
     """A new run's folder and request (refused if the name is taken). A cavalry run names its ``horse`` and
-    ``soldier`` (finished runs) instead of an image: the soldier's picture and both rights are recorded."""
+    ``soldier`` (finished runs) instead of an image: the soldier's picture and both rights are recorded. A part
+    from an imported 3D model has ``model`` ({"path", "licence", "credit"}: ``ref3d.importer``) instead of an image;
+    its rights are its licence."""
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
+    source = None
+    if model is not None:
+        from eu4unitgen.ref3d import importer
+        if kind not in ("soldier", "horse", "gun"):
+            raise ValueError("only a soldier, horse or gun can be made from a 3D model")
+        why = importer.problem(Path(model["path"]), model.get("licence"), model.get("credit", ""))
+        if why:
+            raise ValueError(why)
+        source = importer.source_record(Path(model["path"]), model["licence"], model.get("credit", ""))
+        rights = importer.rights_text(model["licence"], model.get("credit", ""))
     f = folder_of(name)
     if f.exists():
         raise FileExistsError(f"a run called {name} exists already")
@@ -98,15 +117,19 @@ def new_request(name: str, image: Path | None, rights: str, kind: str, tier: int
         if not (horse and soldier):
             raise ValueError("a cavalry unit needs a finished horse and a finished soldier")
         h, sd = request(folder_of(horse)), request(folder_of(soldier))
-        image, rights = Path(sd["image"]), rights or f"horse: {h['rights']}; soldier: {sd['rights']}"
+        image = Path(sd["image"]) if sd.get("image") else None  # an imported soldier's: its render, once made
+        rights = rights or f"horse: {h['rights']}; soldier: {sd['rights']}"
         edits = {k: v for k, v in (sd.get("edits") or {}).items() if k != "candidate"}  # the soldier's look
     (f / "trellis").mkdir(parents=True)
-    image = keep_reference(Path(image))
-    req = {"schema": 1, "name": name, "image": str(Path(image).resolve()), "rights": rights, "kind": kind, "tier": int(tier),
-           "horse": horse, "soldier": soldier, "options": options or {}, "edits": edits, "created": time.time()}
+    image = keep_reference(Path(image)) if source is None and image else None  # an imported model's: its render
+    req = {"schema": 1, "name": name, "image": str(Path(image).resolve()) if image else None, "rights": rights, "kind": kind,
+           "tier": int(tier), "horse": horse, "soldier": soldier, "options": options or {}, "edits": edits,
+           "created": time.time(), **({"source": source} if source else {})}
     (f / "request.json").write_text(json.dumps(req, indent=1), encoding="utf-8")
-    subject = {"schema": 1, "name": name, "template": body_kind(kind), "rights": rights, "original": str(Path(image).resolve()),
-               "pipeline": "trellis", "written_by": "ref3d.flow (the app)"}
+    subject = {"schema": 1, "name": name, "template": body_kind(kind), "rights": rights,
+               "original": source["model"] if source else str(Path(image).resolve()) if image else None,
+               "pipeline": "import" if source else "trellis", **({"source": source} if source else {}),
+               "written_by": "ref3d.flow (the app)"}
     (f / "subject.json").write_text(json.dumps(subject, indent=1), encoding="utf-8")
     return f
 
@@ -185,9 +208,9 @@ def runs() -> list[dict]:
     return sorted(out, key=lambda r: -r.get("created", 0))
 
 
-def estimates(kind: str) -> dict[str, float]:
+def estimates(kind: str, req: dict | None = None) -> dict[str, float]:
     """Each stage's expected seconds: the median of this machine's finished runs, else the defaults."""
-    seen: dict[str, list] = {s: [] for s in stages_of(kind)}
+    seen: dict[str, list] = {s: [] for s in stages_of(kind, req)}
     for r in runs():
         if r.get("kind") != kind:
             continue
@@ -487,7 +510,9 @@ def result_sheet(folder: Path, req: dict, gallery: dict, rep: dict) -> Path:
         font = big = ImageFont.load_default()
     tier = int(req.get("tier", 1))
     cell = 420
-    tiles = [("the reference", Image.open(req["image"]).convert("RGB"))]
+    ref = req.get("image") or (request(folder_of(req["soldier"])).get("image") if req.get("soldier") else None)
+    imported = bool((req.get("source") or {}).get("model"))  # its picture is its render
+    tiles = [("your 3D model" if imported else "the reference", Image.open(ref).convert("RGB"))] if ref else []
     for key, label in ((f"close_three_quarter_{tier}", "in game, close (three-quarter)"), (f"close_side_{tier}", "in game, close (side)"),
                        (f"map_three_quarter_{tier}", "map zoom"), (f"map_three_quarter_{tier + 1}", "map zoom: vanilla")):
         p = gallery["images"].get(key)
@@ -523,7 +548,12 @@ def quality_title(key: str) -> str:
     return TITLES.get(key, key)
 
 
-RUN = {"cutout": stage_cutout, "trellis": stage_trellis, "build": stage_build, "finish": stage_finish,
+def stage_import(folder: Path, req: dict, cfg) -> dict:
+    from eu4unitgen.ref3d import importer
+    return importer.stage_import(folder, req, cfg)
+
+
+RUN = {"import": stage_import, "cutout": stage_cutout, "trellis": stage_trellis, "build": stage_build, "finish": stage_finish,
        "preview": stage_preview}
 
 
@@ -557,7 +587,7 @@ def go(folder: Path) -> dict:
     if old and old.get("alive") and old.get("pid") != os.getpid() and old.get("state") == "running":
         raise SystemExit(f"{req['name']} is already running (process {old.get('pid')})")
     stages = (old or {}).get("stages", {})
-    plan = stages_of(req["kind"])
+    plan = stages_of(req["kind"], req)
     for s in stages.values():  # a stage cut off by the stop runs again
         if s.get("state") in ("running", "waiting_eu4", "waiting_units", "waiting_gpu", "waiting_ram"):
             s["state"] = "waiting"
@@ -608,7 +638,7 @@ def redo(folder: Path, stage: str) -> None:
     """Mark ``stage`` and every stage after it to run again (a pipeline fix: rebuilt from the models already made)."""
     folder = Path(folder)
     st = read_status(folder) or {}
-    plan = stages_of(request(folder)["kind"])
+    plan = stages_of(request(folder)["kind"], request(folder))
     if stage not in plan:
         raise ValueError(f"{stage} isn't one of {plan}")
     for s in plan[plan.index(stage):]:
