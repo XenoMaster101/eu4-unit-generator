@@ -266,7 +266,10 @@ def measure(name: str, vdir: Path) -> tuple[dict, dict]:
     rev = None
     if SET[name]["kind"] == "soldier":  # the animation review (ref3d.review) against the game's unit of its set
         from eu4unitgen.core import config
-        from eu4unitgen.ref3d import review
+        from eu4unitgen.ref3d import review, trellis
+        # its deformation under its own stance's animations, as the app's preview measures it (the build's own check
+        # is the rider's: a standing soldier on its legs at vanilla's stance folded more when seated, 2026-10-29)
+        manifest = {**manifest, "deform": trellis.foot_deform(Path(vdir), Path(vdir) / "foot")}
         subject = json.loads((source(name) / "subject.json").read_text(encoding="utf-8"))
         rev = review.review_version(Path(vdir), subject, Path(vdir) / "review_stage", config.load().eu4())
     rep = q.report(manifest, kind, source(name) / "input" / "input_fg.png", Path(game) if game else None,
