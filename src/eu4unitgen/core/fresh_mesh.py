@@ -216,7 +216,13 @@ def geometry_from_job(path) -> FreshGeometry:
     from pathlib import Path
 
     d = json.loads(Path(path).read_text(encoding="utf-8"))
-    return FreshGeometry(d["p"], d["n"], d["u0"], d["tri"], d["weights"])
+    # each vertex's weights to exactly 1 (the job's smoothing and its cut to the influence limit leave rounding of
+    # ~1e-4: the cataphract's build stopped on "weights sum to 0.99989", 2026-10-29)
+    weights = []
+    for row in d["weights"]:
+        total = sum(row.values())
+        weights.append({k: v / total for k, v in row.items()} if total > 0 else row)
+    return FreshGeometry(d["p"], d["n"], d["u0"], d["tri"], weights)
 
 
 @dataclass
