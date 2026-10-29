@@ -461,7 +461,7 @@ class Session:
     def gallery(self, spec: SetSpec, units: list[tuple[str, int]] | None = None, size: int = 256,
                 result: SetResult | None = None, thumbs: int = 0, camera: dict | None = None,
                 lit: dict | None = None, dump_dir: Path | None = None, state: str = "idle",
-                frame: int = 1) -> "Gallery":
+                frame: int = 1, shots: list[dict] | None = None, entities: list[str] | None = None) -> "Gallery":
         """Whole units, posed at ``frame`` of their ``state`` (idle, walk, attack), as the game assembles them (Track F, F9): the
         generated set (``result``: a validation already run, else one now) over the mod and the
         game, each unit's entity tree staged and rendered in one background Blender run.
@@ -469,8 +469,11 @@ class Session:
         (render_unit's ``camera``, e.g. gallery.GAME_CLOSE) instead of each unit fitted to its tile.
         ``lit``: render_unit's lit mode (EEVEE with the normal maps on or off) instead of Workbench.
         ``dump_dir``: each unit's posed meshes (render_unit's ``dump``) copied there as ``<type>_<tier>_posed.json``
-        (the rider's clearance over its horse is measured from them). Writes nothing else outside a temporary
-        folder."""
+        (the rider's clearance over its horse is measured from them). ``shots``: render_unit's shots (the animation
+        review: several poses and cameras from one load): images keyed (type, tier, shot), dumps
+        ``<type>_<tier>_<shot>_posed.json``. ``entities``: base-game entities rendered too, by name (the review's
+        comparison: one playing the same animation set), keyed ("entity", name) and dumped ``<name>_...``. Writes
+        nothing else outside a temporary folder."""
         import tempfile
 
         from PIL import Image
@@ -504,20 +507,32 @@ class Session:
                         jobs.append({"name": name, "root": stage(tree, world, colours, folder / name)})
                     except GalleryError as exc:
                         notes.append(f"{utype} tier {tier}: {exc}")
+                for ent in entities or []:
+                    try:
+                        tree = entity_tree(world, ent, state)
+                        parts[("entity", ent)] = parts_of(tree)
+                        jobs.append({"name": ent, "root": stage(tree, world, colours, folder / ent)})
+                    except GalleryError as exc:
+                        notes.append(f"{ent}: {exc}")
                 if jobs:
                     try:
                         res = self.runner().run_job("render_unit", {"units": jobs, "frame": int(frame), "size": size,
                                                                     "thumbs": thumbs, "out_dir": tmp, "camera": camera,
-                                                                    "lit": lit, "dump": bool(dump_dir)},
-                                                 timeout=900)
+                                                                    "lit": lit, "dump": bool(dump_dir), "shots": shots},
+                                                 timeout=1800)
                         if dump_dir:
                             import shutil
                             Path(dump_dir).mkdir(parents=True, exist_ok=True)
                             for unit, path in (res.result.get("dumps") or {}).items():
-                                shutil.copyfile(path, Path(dump_dir) / f"{unit}_posed.json")
+                                shutil.copyfile(path, Path(dump_dir) / f"{unit.replace('@', '_')}_posed.json")
                     except BlenderError as exc:
                         raise SpecError(f"the gallery needs Blender: {exc}") from exc
-                    for utype, tier in wanted:
+                    for utype, tier in wanted + [("entity", e) for e in entities or []]:
+                        for i in range(len(shots or [])):
+                            path = res.result["tiles"].get(f"{tier}@{i}" if utype == "entity" else f"{utype}_{tier}@{i}")
+                            if path:
+                                with Image.open(path) as im:
+                                    images[(utype, tier, i)] = im.convert("RGB")
                         path = res.result["tiles"].get(f"{utype}_{tier}")
                         if path:
                             with Image.open(path) as im:

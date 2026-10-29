@@ -417,10 +417,11 @@ def stage_preview(folder: Path, req: dict, cfg) -> dict:
     if st["exit"] != 0:
         raise RuntimeError(f"staging the preview failed; see {pv / 'log.txt'}")
     g = unitstage.gallery(pv, "preview", [tier, tier + 1], {tier: req["name"], tier + 1: "vanilla"}, cfg.eu4(), utype=utype)
-    legs = None
+    legs = rev = None
     if req["kind"] == "soldier":  # on foot: its stance's own animations, not the rider's
-        from eu4unitgen.ref3d import trellis
+        from eu4unitgen.ref3d import review, trellis
         m = {**m, "deform": trellis.foot_deform(fin, pv / "foot", cfg.blender())}
+        rev = review.review(pv, tier, trellis.foot_stance(m), cfg.eu4())  # next to the game's unit of that set
     if req["kind"] in ("rider", "cavalry"):
         from eu4unitgen.core.character import CharacterSpec
         from eu4unitgen.export.gallery import GAME_CLOSE
@@ -440,7 +441,7 @@ def stage_preview(folder: Path, req: dict, cfg) -> dict:
                          Path(imgs["raw"][view]) if imgs.get("raw", {}).get(view) else None, legs,
                          exclude=[Path(m.get("edited_from", fin)) / "parts" / "crops" / f"{k}_mask.png"
                                   for k in ("lance", "shield", "crest")] if req["kind"] != "horse" else None,
-                         on_foot=req["kind"] == "soldier")
+                         on_foot=req["kind"] == "soldier", review=rev)
     quality.save(rep, pv)
     sheet = result_sheet(folder, req, g, rep)
     try:  # the Library's rotating preview; the unit is usable without it

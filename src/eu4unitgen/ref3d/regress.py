@@ -50,7 +50,9 @@ RULES = {"flips": ("lower", lambda b: max(6.0, 0.25 * b)), "max": ("lower", lamb
          "locate_fit": ("higher", lambda b: 0.05), "group_flips": ("lower", lambda b: max(5.0, 0.3 * b)),
          "colour_de": ("lower", lambda b: 4.0), "feet_ratio": ("higher", lambda b: 0.08),
          "strap_gap": ("lower", lambda b: 0.2), "joints_spine": ("lower", lambda b: 0.1),
-         "joints_legs": ("lower", lambda b: 0.15)}
+         "joints_legs": ("lower", lambda b: 0.15), "review_flags": ("lower", lambda b: 2.0),
+         "review_bends": ("lower", lambda b: 0.03), "review_clipping": ("lower", lambda b: 0.03),
+         "review_floating": ("lower", lambda b: 0.3)}
 # colours: compared by distance from the baseline, either way (Lab for colours, plain for shares)
 NEAR = {"cloth_primary": 8.0, "mask_share": 0.04}
 # measures that are there or not (True in the baseline, False now: worse)
@@ -61,7 +63,8 @@ METRICS = ("tris", "flips_idle", "flips_moving", "flips_attack", "max_idle", "ma
            "part_method_shield", "seat_gap", "side_ratio", "bake_reached", "silver_cap", "gloss_gold", "gloss_silver",
            "head_band", "head_marks", "emblem_texels", "reins", "mane", "tail", "locate_fit", "group_flips_head",
            "group_flips_arms", "group_flips_legs", "group_flips_torso", "cloth_primary", "mask_share", "colour_de",
-           "feet_ratio", "strap_gap", "joints_spine", "joints_legs")
+           "feet_ratio", "strap_gap", "joints_spine", "joints_legs", "review_flags",
+           "review_bends", "review_clipping", "review_floating")
 NOTE_ONLY = {"tris": 0.03}  # changes reported, never flagged
 
 
@@ -260,11 +263,24 @@ def measure(name: str, vdir: Path) -> tuple[dict, dict]:
         game = str(hits[0]) if hits else None
     raw = game.replace("game", "raw") if game and Path(game.replace("game", "raw")).is_file() else None
     crops = Path(vdir) / "parts" / "crops"
+    rev = None
+    if SET[name]["kind"] == "soldier":  # the animation review (ref3d.review) against the game's unit of its set
+        from eu4unitgen.core import config
+        from eu4unitgen.ref3d import review
+        subject = json.loads((source(name) / "subject.json").read_text(encoding="utf-8"))
+        rev = review.review_version(Path(vdir), subject, Path(vdir) / "review_stage", config.load().eu4())
     rep = q.report(manifest, kind, source(name) / "input" / "input_fg.png", Path(game) if game else None,
                    raw_view=Path(raw) if raw else None,
-                   exclude=[crops / f"{k}_mask.png" for k in ("lance", "shield", "crest")] if kind == "rider" else None)
+                   exclude=[crops / f"{k}_mask.png" for k in ("lance", "shield", "crest")] if kind == "rider" else None,
+                   review=rev)
     q.save(rep, Path(vdir))
-    return metrics(manifest, kind, rep), rep
+    m = metrics(manifest, kind, rep)
+    if rev:
+        sm = rev["summary"]
+        m.update(review_flags=sm["flags"], review_bends=round(sm["bends_ours"] - sm["bends_game"], 4),
+                 review_clipping=round(sm["clipping_ours"] - sm["clipping_game"], 4),
+                 review_floating=round(sm["floating_ours"] - sm["floating_game"], 3))
+    return m, rep
 
 
 def run(only: list[str] | None = None, blender: str | None = None) -> dict:

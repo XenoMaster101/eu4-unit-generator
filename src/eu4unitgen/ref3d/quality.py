@@ -8,6 +8,8 @@ Five measures, each with a verdict (good / ok / check) and a sentence:
                (too thin for the budget: reins, stirrup leathers), with each part's check against its crop
   texture      how much of the texture the model's UVs use, and how much the bake reached
   map zoom     the unit's brightness and contrast at map zoom against vanilla's, from the gallery's map row
+  animation    a soldier on foot: the animation review's flags (ref3d.review: bends, clipping, floating gear against
+               a base-game unit playing the same animations)
   joints       a soldier: the skeleton's joints inside his body (each spine bone's distance from where vanilla's
                body has it in depth, each leg's from vanilla's at the knee and ankle; the joint fit's own measure)
 
@@ -135,6 +137,22 @@ def joints(manifest: dict) -> dict | None:
     return {"verdict": verdict, "text": text, "spine": spine, "legs": legs}
 
 
+ANIMATION_FLAGS = (0, 6)  # good with none, ok up to this many (of 15 poses x 3 measures)
+
+
+def animation(rev: dict | None) -> dict | None:
+    """The animation measure from ``ref3d.review``'s result (None: not reviewed)."""
+    if not rev:
+        return None
+    n = (rev.get("summary") or {}).get("flags", 0)
+    flags = [f"{st}: {f['flag']}" for st, v in (rev.get("states") or {}).items() for f in v.get("flags") or []]
+    verdict = GOOD if n <= ANIMATION_FLAGS[0] else OK if n <= ANIMATION_FLAGS[1] else CHECK
+    text = (f"Through idle, walk and attack against the game's {rev.get('against')}: "
+            + ("nothing worse than the game's own." if not n else f"{n} flagged pose{'s' if n != 1 else ''} ("
+               + "; ".join(flags[:3]) + ("; ..." if n > 3 else "") + "). See the review sheet."))
+    return {"verdict": verdict, "text": text, "flags": n, "sheet": rev.get("sheet")}
+
+
 def parts_summary(manifest: dict, kind: str) -> dict:
     kept, rebuilt, lost, flagged = [], [], [], []
     if kind == "horse":
@@ -214,7 +232,7 @@ def map_zoom(ours: Path | None, vanilla: Path | None) -> dict:
 
 def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path | None,
            map_ours: Path | None = None, map_vanilla: Path | None = None, raw_view: Path | None = None,
-           legs: dict | None = None, exclude: list | None = None, on_foot: bool = False) -> dict:
+           legs: dict | None = None, exclude: list | None = None, on_foot: bool = False, review: dict | None = None) -> dict:
     """The five measures (module doc). ``game_view``: the game version rendered from the reference's view
     (compare/game_side.png for a horse, compare/game_front.png for a rider); ``raw_view``: TRELLIS.2's own model
     from the same camera. The outline's verdict is relative to the raw model's own overlap (the approved horses'
@@ -247,6 +265,8 @@ def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path
     m["map_zoom"] = map_zoom(map_ours, map_vanilla)
     if kind == "rider" and (jm := joints(manifest)):
         m["joints"] = jm
+    if (am := animation(review)):
+        m["animation"] = am
     if (kind == "rider" and not on_foot) or legs:
         m["seating"] = clearance((legs or {}).get("ours"), (legs or {}).get("vanilla"))
     order = {GOOD: 0, OK: 1, CHECK: 2}
@@ -257,7 +277,7 @@ def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path
 
 TITLES = {"silhouette": "Outline vs the reference", "deformation": "Deformation vs vanilla", "parts": "Parts",
           "texture": "Texture", "map_zoom": "At map zoom", "seating": "Seated on the horse",
-          "joints": "Joints inside the body", "muzzle": "The muzzle", "wheels": "The wheels", "budget": "Size"}  # the last three: a gun's (Track A)
+          "joints": "Joints inside the body", "animation": "In its animations", "muzzle": "The muzzle", "wheels": "The wheels", "budget": "Size"}  # the last three: a gun's (Track A)
 
 
 def markdown(rep: dict) -> str:

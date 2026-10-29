@@ -13,6 +13,9 @@ args: {"units": [{"name": ..., "root": node}], "frame": 1, "view": [x, y, z] (ca
        "size": px, "camera": null | {fixed framing, see shoot_fixed}, "inherit_scale": false, "thumbs": px or 0 (each attached rigid part alone, by entity
        name, for the Parts cards), "dump": bool (each unit's posed meshes as JSON in the root mesh's PDX space:
        {node name: {"p", "tri"}}, for measuring e.g. where a rider's legs hang), "out_dir": ..., "result_path": ...}
+"shots": null | [{"t": 0..1 through the root's animation | "frame": n | "rest": true (the bind pose), "camera": {..}}]:
+       several renders (and dumps) of each unit from one load (the animation review): tiles "<unit>@<i>", dumps
+       "<unit>@<i>", each dump with its rigs' bone heads ("bones": {node name: {bone: [x, y, z]}}, the same space);
 "lit": null | {"normal_maps": bool, "flip_green": bool, "sun": [x, y, z] (light -> scene), "energy", "roughness"}: EEVEE with a
        sun instead of Workbench (which shows no normal maps), to judge a normal map: each material's
        normal texture as plain RGB tangent space, green up (the base game's convention, SPEC Q3;
@@ -135,7 +138,7 @@ def points(loaded):
     return co
 
 
-def dump_posed(unit, loaded, path, bone=None):
+def dump_posed(unit, loaded, path, bone=None, with_bones=False):
     """The posed, drawn meshes in the root mesh's own space (PDX axes, its pdxmesh scale taken out);
     with ``bone``, as if that bone of the root's rig were at rest (the animation can turn the root)."""
     import json
@@ -163,6 +166,9 @@ def dump_posed(unit, loaded, path, bone=None):
             ev.to_mesh_clear()
         if p:
             out[node["name"]] = {"p": p, "tri": tri}
+    if with_bones:
+        out["bones"] = {node["name"]: {b.name: list(inv @ (rig_.matrix_world @ b.head)) for b in rig_.pose.bones}
+                        for node, _, rig_ in loaded if rig_ is not None and not node.get("hidden")}
     with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f)
     return path
@@ -244,6 +250,35 @@ def shoot_fixed(sc, cam, c, path):
     return path
 
 
+def shots(a, unit, scene, cam, loaded, out):
+    """The ``shots`` mode (module doc): each shot's pose, then its render through its camera and its dump."""
+    rig = loaded[0][2]
+    act = rig.animation_data.action if rig is not None and rig.animation_data else None
+    f0, f1 = (int(act.frame_range[0]), int(act.frame_range[1])) if act else (1, 1)
+    for node, objs, _ in loaded:
+        for o in objs:
+            if o.type != "MESH" or node.get("hidden"):
+                o.hide_render = True
+    if a.get("lit"):
+        light(scene, [o for _, objs, _ in loaded for o in objs], a["lit"])
+    out.setdefault("frames", {})[unit["name"]] = [f0, f1]
+    for i, sh in enumerate(a["shots"]):
+        rest = bool(sh.get("rest"))
+        for _, _, r in loaded:
+            if r is not None:
+                r.data.pose_position = "REST" if rest else "POSE"
+        f = sh.get("frame") or int(round(f0 + float(sh.get("t", 0.0)) * (f1 - f0)))
+        scene.frame_set(f)
+        place(unit["root"], Matrix.Identity(4), loaded, a.get("inherit_scale", False))
+        bpy.context.view_layer.update()
+        key = f"{unit['name']}@{i}"
+        out["dumps"][key] = dump_posed(unit, loaded, os.path.join(a["out_dir"], f"{unit['name']}_{i}_posed.json"),
+                                       with_bones=True)
+        if sh.get("camera"):
+            out["tiles"][key] = shoot_fixed(scene, cam, sh["camera"], os.path.join(a["out_dir"], f"{unit['name']}_{i}.png"))
+        out.setdefault("shot_frames", {})[key] = None if rest else f
+
+
 def main() -> None:
     a = _pdx.args()
     ie = _pdx.io_module()
@@ -265,6 +300,10 @@ def main() -> None:
         scene.camera = cam
         loaded = []
         load(ie, unit["root"], loaded)
+        if a.get("shots"):
+            shots(a, unit, scene, cam, loaded, out)
+            out["seconds"][unit["name"]] = round(time.time() - start, 2)
+            continue
         scene.frame_set(a.get("frame", 1))
         place(unit["root"], Matrix.Identity(4), loaded, a.get("inherit_scale", False))
         bpy.context.view_layer.update()

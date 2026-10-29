@@ -50,8 +50,9 @@ def catalogue(eu4: str) -> dict:
         idle = (rec.get("animations") or {}).get("idle") or ""
         if not idle.endswith("_idle_animation"):
             continue
-        s = out.setdefault(idle[: -len("_idle_animation")], {"bodies": set(), "units": 0, "by_body": {},
+        s = out.setdefault(idle[: -len("_idle_animation")], {"bodies": set(), "units": 0, "by_body": {}, "entities": [],
                                                                **{h: Counter() for h in HANDS}})
+        s["entities"].append((name, pm, _attach_targets(resolved(idx, name, "attach") or [])))
         s["bodies"].add(pm)
         s["units"] += 1
         for node, target in _attach_targets(resolved(idx, name, "attach") or []).items():
@@ -59,7 +60,8 @@ def catalogue(eu4: str) -> dict:
                 s[node][target] += 1
                 s["by_body"].setdefault(pm, {}).setdefault(node, Counter())[target] += 1
     return {k: {"bodies": sorted(v["bodies"]), "units": v["units"], **{h: dict(v[h].most_common()) for h in HANDS},
-                "by_body": {b: {n: dict(c.most_common()) for n, c in d.items()} for b, d in v["by_body"].items()}}
+                "by_body": {b: {n: dict(c.most_common()) for n, c in d.items()} for b, d in v["by_body"].items()},
+                "entities": sorted(v["entities"])}
             for k, v in out.items()}
 
 
@@ -132,3 +134,14 @@ def slide_to_grip(pts: list, grip: float) -> tuple[list, dict]:
     out = [[p[0] - cx, p[1] - cy, p[2] + dz] for p in pts]
     return out, {"grip_before": round(before, 3), "grip_after": round(grip, 3), "slid": round(dz, 3),
                  "centred": [round(-cx, 3), round(-cy, 3)]}
+
+
+def example_unit(eu4: str, stance: str, body: str | None = "western_generic_01_type1") -> str | None:
+    """A base-game infantry entity playing ``stance`` and holding its convention's weapon (on ``body`` if one does):
+    the review's comparison."""
+    conv = convention(eu4, stance, body)
+    ents = (catalogue(eu4).get(stance) or {}).get("entities") or []
+    if not ents:
+        return None
+    holds = [e for e in ents if conv and e[2].get(conv["node"]) == conv["weapon"]] or ents
+    return next((e[0] for e in holds if e[1] == body), holds[0][0])
