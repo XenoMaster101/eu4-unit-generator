@@ -812,6 +812,9 @@ HAND = {"left": "Left_hand_node", "right": "Right_hand_node"}
 HAND_KIND = {"Right_hand_node": "mesh_weapon", "Left_hand_node": "mesh_shield"}  # core.parts: the kind gives the bone
 
 
+IMPORT_TRIS = 4400  # an imported model's budget: the largest base-game infantry body has 4,360 (rules.DERIVED_TRI_BUDGET)
+
+
 def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None, plume: str = "part",
                   sword: bool = False, kite: bool = True, cfg: dict | None = None, reference: dict | None = None,
                   ai_python: str | None = None, palette_from: dict | None = None, part_method: str = "auto",
@@ -846,10 +849,12 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": "Left_hand_node",
                                         "elbow": "L_elbow", "shoulder": "L_shoulder",
                                         "bind": node_bind(base, "Left_hand_node")}).result  # the strapped shield's frame
-    imp = Path(glb).parent / "import.json"  # an imported model's own rig: its joints (ref3d.importer)
+    # an imported model (ref3d.importer): its own mesh, UVs and build kept (1:1), its rig's joints for the fit
+    imp = Path(glb).parent / "import.json"
     marks = json.loads(imp.read_text(encoding="utf-8")).get("landmarks") if imp.is_file() else None
     fr = br.run_job("fresh_rider", {"vanilla": base_arrays(base), "source": {"path": str(Path(glb).resolve()), "merge": 1e-5},
-                                    **({"landmarks": marks} if marks else {}),
+                                    **({"landmarks": marks, "keep_mesh": True, "slim": False, "stylise": False,
+                                        "import_tris": IMPORT_TRIS} if imp.is_file() else {}),
                                     **{**RIDER, **(STANDING if fit == "standing" else {}), **(cfg or {})}, "fit": fit,
                                     "shield_frame": frame, "plume": "part" if plume in ("part", "none") else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
                                     "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),
@@ -876,6 +881,15 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     nb = br.run_job("bake_horse", {"low": str(out / "low_geometry.json"), "high": [str(out / "textured.obj")],
                                    "diffuse": bc["diffuse"], "size": PROCESS["size"], **PROCESS["normal"], "preview": False,
                                    "out_dir": str(out), "name": "riderb", "paint": PAINT}).result
+    if imp.is_file():  # an imported model keeps its own UVs: its own texture is the diffuse, exactly (the bake's
+        # projection from the full model missed where the cut-down surface moved: dark patches on Mambo's beret)
+        own = Image.open(basecolor).convert("RGB")
+        dif = Image.open(out / "riderb_diffuse.png")
+        own = own.resize(dif.size, Image.LANCZOS)
+        if dif.mode == "RGBA":
+            own.putalpha(dif.getchannel("A"))
+        own.save(out / "riderb_diffuse.png")
+        fr["own_texture"] = True
     tex_body = {"diffuse": str(out / "riderb_diffuse.png")}
     parts = {}
     for key in ("lance", "shield"):

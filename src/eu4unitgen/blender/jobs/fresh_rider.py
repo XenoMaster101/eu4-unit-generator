@@ -727,7 +727,10 @@ def main():
                 g = np.array(info["grip"]) * s + off
                 co[mask] = held[mask] + (shift(g) - g)
     legs =((bones["L_knee"][1] + bones["R_knee"][1]) / 2, (bones["L_thigh"][1] + bones["R_thigh"][1]) / 2 + 0.8)         if a.get("fit") == "standing" else None
-    kx, kz, measured = slim_body(co, ~lance & ~shield, hs.verts(vanilla), float(a.get("slim_low", 0.7)), legs=legs)
+    if a.get("slim", True):
+        kx, kz, measured = slim_body(co, ~lance & ~shield, hs.verts(vanilla), float(a.get("slim_low", 0.7)), legs=legs)
+    else:  # an imported model keeps its own build (1:1)
+        kx, kz, measured = 1.0, 1.0, {"skipped": "keep_mesh"}
     res["slim"] = {"x": round(kx, 3), "z": round(kz, 3), **measured}
     moves, dirs = {}, {}
     li, si = res["split"].get("lance"), res["split"].get("shield")
@@ -821,7 +824,13 @@ def main():
     fh.delete_vertices(obj, np.flatnonzero(lance | shield).tolist())
     if a.get("textured_out"):
         fh.write_obj(obj, a["textured_out"], uv=True)
-    while obj.data.uv_layers:
+    keep_mesh = bool(a.get("keep_mesh"))
+    if keep_mesh:  # an imported model: its own mesh, pieces and UVs; only cut to the budget (no closed solid, no
+        # carving, no new UVs: on Mambo the closed solid sealed her hair round her face into a dark column)
+        res["fit"] = {"kind": a.get("fit", "seated"), "keep_mesh": True}
+        res["body_tris"] = fh.collapse_to(obj, int(a.get("import_tris", a["target_tris"])), None)
+        crest_pts = crest_pts[:0]
+    while obj.data.uv_layers and not keep_mesh:
         obj.data.uv_layers.remove(obj.data.uv_layers[0])
     fh.SOLID.clear()
     # the slot between the legs, from just under the crotch down: closed round both legs, the skirt was one block
@@ -838,7 +847,9 @@ def main():
     # the English soldier's boots, his feet 2.5 out: legs that tapered to spikes)
     standing = a.get("fit", "seated") == "standing"
     slot_top, side_lo = crotch, -1.0
-    if standing:
+    if keep_mesh:
+        pass
+    elif standing:
         slot_top = min(crotch, skirt_hem(hs.verts(obj), crotch, gap, SLIM_ZC.get("zc", 0.0)))
         side_lo = crotch
         res["fit"] = {"kind": "standing", "hem": round(slot_top, 2)}
@@ -860,8 +871,9 @@ def main():
         res["collar_cut"] = {"centre": hc.round(3).tolist(), "radius": round(hr, 3), "above": NECK - 0.2}
     res["side_cut"] = {"beyond_x": side_x, "below_y": round(under, 2)}
     vs = float(a.get("close_voxel", 0.1))
-    fh.collapse_to(obj, 10 ** 9, vs)
-    fh.keep_largest(obj)
+    if not keep_mesh:
+        fh.collapse_to(obj, 10 ** 9, vs)
+        fh.keep_largest(obj)
     if len(crest_pts) and a.get("plume", "cut") in ("cut", "part"):  # (a part: its own tube replaces it)
         # the plume cut off the closed solid (smoothed, it was a heavy red arc over the head: the user, test 29); a
         # small crest part (a tuft on the head bone) takes its place in the loadout
@@ -885,12 +897,13 @@ def main():
         res["plume_holes_filled"] = fh.fill_open(obj)
         crest_pts = crest_pts[:0]  # nothing left to keep rigid
     keep_group = None
-    if a.get("importance", True):  # the triangle budget on material borders and the limbs, not flat areas
+    if a.get("importance", True) and not keep_mesh:  # the triangle budget on material borders and limbs, not flat areas
         res["importance"] = importance(obj, colour_src, bones)
         # inverted: the Decimate modifier's group marks what may go (as it is, the collapse stalled at 33,300 triangles;
         # inverted, the English soldier's limbs took 78% of his triangles against 67%)
         keep_group = ("importance", float(a.get("importance_factor", 5.0)), bool(a.get("importance_invert", True)))
-    res["body_tris"] = fh.collapse_to(obj, int(a["target_tris"]), None, keep=keep_group)
+    if not keep_mesh:
+        res["body_tris"] = fh.collapse_to(obj, int(a["target_tris"]), None, keep=keep_group)
     if obj.vertex_groups.get("importance"):
         obj.vertex_groups.remove(obj.vertex_groups["importance"])
     if res.get("plume_line"):
@@ -909,8 +922,9 @@ def main():
         mod = obj.modifiers.new("even", "SMOOTH")
         mod.factor, mod.iterations = 0.4, int(a["even"])
         bpy.ops.object.modifier_apply(modifier=mod.name)
-    obj.data.uv_layers.new(name="UV")
-    fh.packed_uv(obj, float(a.get("uv_margin", 0.002)))
+    if not keep_mesh:
+        obj.data.uv_layers.new(name="UV")
+        fh.packed_uv(obj, float(a.get("uv_margin", 0.002)))
     res["uv_area"] = round(fh.uv_area(obj), 4)
     wstats = {}
     fh.transfer_weights(obj, vanilla, a.get("smooth", 12), a.get("influences", 4), None, wstats)

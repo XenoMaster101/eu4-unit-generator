@@ -614,7 +614,8 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
                 path = f"{folder}/{shape.get(kind)}"
                 if shape.get(kind) and path not in ctx.generated.files:
                     out.append(Issue(ERROR, "fresh_mesh", f"its {kind} texture {path} isn't generated", f.path))
-        budget = GUN_TRIANGLES if what == "gun" else HORSE_TRIANGLES
+        # a person (rider, soldier) up to the largest base-game infantry body's (an imported model keeps more detail)
+        budget = GUN_TRIANGLES if what == "gun" else DERIVED_TRI_BUDGET if what in ("rider", "soldier") else HORSE_TRIANGLES
         if rec.triangles > budget:
             out.append(Issue(WARNING, "fresh_mesh", f"{rec.triangles} triangles (budget {budget})", f.path))
         if what == "gun":  # the muzzle locator on the gun (moved to our muzzle: UNVERIFIED in game until test 38)
