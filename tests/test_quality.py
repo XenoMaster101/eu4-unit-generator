@@ -102,3 +102,15 @@ def test_legs_clear_and_verdict(tmp_path):
     assert r["inside"] == 2 and r["points"] == 4 and r["share"] == 0.5
     assert quality.clearance(r, {"share": 0.05})["verdict"] == "check"
     assert quality.clearance({"share": 0.06, "inside": 3, "points": 50}, {"share": 0.05})["verdict"] == "good"
+
+
+def test_joints_verdicts():
+    def man(spine, legs):
+        return {"fresh": {"joints": {"spine_off": {"hip": 0.01, "head": spine}, "legs_off": {"L": [0.1, legs], "R": [0.1, 0.1]}}}}
+    assert quality.joints({}) is None  # built before the joint fit
+    assert quality.joints(man(0.17, 0.15))["verdict"] == quality.GOOD  # the fitted English soldier
+    assert quality.joints(man(0.14, 0.54))["verdict"] == quality.OK  # the cataphract's knee in his skirt
+    assert quality.joints(man(1.03, 1.6))["verdict"] == quality.CHECK  # the cataphract before the fit
+    rep = quality.report(man(0.17, 0.15), "rider", None, None, on_foot=True)
+    assert rep["measures"]["joints"]["verdict"] == quality.GOOD
+    assert "joints" not in quality.report(man(0.17, 0.15), "horse", None, None)["measures"]

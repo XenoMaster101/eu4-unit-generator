@@ -8,6 +8,8 @@ Five measures, each with a verdict (good / ok / check) and a sentence:
                (too thin for the budget: reins, stirrup leathers), with each part's check against its crop
   texture      how much of the texture the model's UVs use, and how much the bake reached
   map zoom     the unit's brightness and contrast at map zoom against vanilla's, from the gallery's map row
+  joints       a soldier: the skeleton's joints inside his body (each spine bone's distance from where vanilla's
+               body has it in depth, each leg's from vanilla's at the knee and ankle; the joint fit's own measure)
 
 ``report(...)`` -> {"measures": {name: {"verdict", "text", ...numbers}}, "summary"}; ``markdown(report)``.
 """
@@ -110,6 +112,27 @@ def deformation(deform: dict, kind: str) -> dict:
     if worst == CHECK:
         text += " Watch it move in game: some triangles may visibly fold or stretch."
     return {"verdict": worst, "text": text, "rows": [list(r) for r in rows]}
+
+
+# the joint fit (the user, T38): limits on the fit's own measure (fresh_rider.joints_report) of the low mesh; the
+# fitted English soldier 0.17 / 0.15, the cataphract 0.14 / 0.54 (his right knee inside his skirt); 1.0-1.7 before
+JOINTS_SPINE = (0.25, 0.4)
+JOINTS_LEGS = (0.35, 0.6)
+
+
+def joints(manifest: dict) -> dict | None:
+    """The joints measure (module doc) from the build's ``fresh.joints``; None for builds made before the joint fit."""
+    j = (manifest.get("fresh") or {}).get("joints")
+    if not j:
+        return None
+    spine = max((j.get("spine_off") or {}).values(), default=0.0)
+    legs = max((v for d in (j.get("legs_off") or {}).values() for v in d), default=0.0)
+    verdict = (GOOD if spine <= JOINTS_SPINE[0] and legs <= JOINTS_LEGS[0]
+               else OK if spine <= JOINTS_SPINE[1] and legs <= JOINTS_LEGS[1] else CHECK)
+    text = (f"The skeleton's joints sit inside the body as on the game's own: the spine within {spine:.2f}, the knees "
+            f"and ankles within {legs:.2f} of where the game's body has them")
+    text += "." if verdict != CHECK else ": the joints sit outside the body, so it will fold and squash when it moves."
+    return {"verdict": verdict, "text": text, "spine": spine, "legs": legs}
 
 
 def parts_summary(manifest: dict, kind: str) -> dict:
@@ -222,6 +245,8 @@ def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path
     m["parts"] = parts_summary(manifest, kind)
     m["texture"] = texture(manifest, kind)
     m["map_zoom"] = map_zoom(map_ours, map_vanilla)
+    if kind == "rider" and (jm := joints(manifest)):
+        m["joints"] = jm
     if (kind == "rider" and not on_foot) or legs:
         m["seating"] = clearance((legs or {}).get("ours"), (legs or {}).get("vanilla"))
     order = {GOOD: 0, OK: 1, CHECK: 2}
@@ -232,7 +257,7 @@ def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path
 
 TITLES = {"silhouette": "Outline vs the reference", "deformation": "Deformation vs vanilla", "parts": "Parts",
           "texture": "Texture", "map_zoom": "At map zoom", "seating": "Seated on the horse",
-          "muzzle": "The muzzle", "wheels": "The wheels", "budget": "Size"}  # the last three: a gun's (Track A)
+          "joints": "Joints inside the body", "muzzle": "The muzzle", "wheels": "The wheels", "budget": "Size"}  # the last three: a gun's (Track A)
 
 
 def markdown(rep: dict) -> str:

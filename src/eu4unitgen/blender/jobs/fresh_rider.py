@@ -216,6 +216,153 @@ def slim_body(co, keep, vanilla_co, low=0.7, edge=2.0, legs=None):
     return kx, kz, {"vanilla": [vx, vz], "ours": [ox, oz]}
 
 
+# the joint fit (the user, T38: the English soldier squashed in game): one scale and a centring left the skeleton's
+# joints outside the body (the cataphract's spine at 0.70-0.77 of his depth from the front against vanilla's 0.47-0.50,
+# his neck bone at his back's surface; the English soldier's knees and feet 0.9-1.7 off his legs' centres): turning a
+# joint outside a limb swings it on a lever and folds it. Each part moves whole (its volume and shape kept) so its
+# centre is where vanilla's body has it, measured the same way on both.
+SPINE_FIT = ("hip", "lower_spine", "mid_spine", "top_spine", "head")
+LEG_BANDS = (1.0, 1.8, 2.6, 3.4, 4.2, 5.0)  # heights the legs are measured at (the ankle bone is at 0.92)
+LEG_WIDE = 2.2  # a band wider than this on one side is a skirt or cloak, not a leg
+
+
+def torso_depth(co, y, half=0.4, reach=1.2, strip=0.2):
+    """The torso's front and back (z) near the centre line at height ``y``: across strips ``strip`` wide in x, the
+    median of each strip's nearest and farthest point. Not percentiles of the vertices: those followed where a mesh is
+    dense (the raw cataphract's thousands of plume vertices behind him moved his "front" 0.5 inwards)."""
+    s = co[(np.abs(co[:, 1] - y) < half) & (np.abs(co[:, 0]) < reach)]
+    if len(s) < 10:
+        return None
+    k = np.floor(s[:, 0] / strip).astype(int)
+    fr, bk = [], []
+    for i in np.unique(k):
+        z = s[k == i, 2]
+        if len(z) >= 3:
+            fr.append(z.min())
+            bk.append(z.max())
+    return (float(np.median(fr)), float(np.median(bk))) if len(fr) >= 3 else None
+
+
+def surface_points(obj, per=12, seed=0):
+    """Points spread over a mesh's triangles (a low mesh has too few vertices to measure)."""
+    co = hs.verts(obj)
+    tri = np.array([(p.vertices[0], p.vertices[k], p.vertices[k + 1]) for p in obj.data.polygons
+                    for k in range(1, len(p.vertices) - 1)])
+    rng = np.random.default_rng(seed)
+    u = rng.random((len(tri), per, 2))
+    u = np.where(u.sum(2, keepdims=True) > 1, 1 - u, u)
+    a, b, c = co[tri[:, 0]][:, None], co[tri[:, 1]][:, None], co[tri[:, 2]][:, None]
+    return np.concatenate([co, (a + u[..., :1] * (b - a) + u[..., 1:] * (c - a)).reshape(-1, 3)])
+
+
+def spine_fractions(co, bones):
+    """Each spine bone's place in the body's depth at its height: 0 the front, 1 the back."""
+    out = {}
+    for b in SPINE_FIT:
+        d = torso_depth(co, bones[b][1])
+        if d and d[1] - d[0] > 1e-3:
+            out[b] = round((bones[b][2] - d[0]) / (d[1] - d[0]), 3)
+    return out
+
+
+DEPTH_CLAMP = (0.8, 1.2)  # our depth counted at most this far from vanilla's: a cloak or plume behind isn't the body
+
+
+def spine_targets(co, vanilla_co, bones):
+    """Where each spine bone should sit in our body: from the front surface (nothing hangs in front of a chest), at
+    vanilla's fraction of our depth clamped to ``DEPTH_CLAMP`` of vanilla's (the cataphract's cloak and plume behind
+    him put his neck bone behind his back when the middle of the whole depth was used). -> {bone: (target z, bone z)}."""
+    out = {}
+    for b in SPINE_FIT:
+        v, d = torso_depth(vanilla_co, bones[b][1]), torso_depth(co, bones[b][1])
+        if v is None or d is None or v[1] - v[0] < 1e-3:
+            continue
+        vd = v[1] - v[0]
+        frac = (bones[b][2] - v[0]) / vd
+        depth = float(np.clip(d[1] - d[0], DEPTH_CLAMP[0] * vd, DEPTH_CLAMP[1] * vd))
+        out[b] = (d[0] + frac * depth, bones[b][2])
+    return out
+
+
+def leg_line(co, side, top):
+    """One leg's centre line (x and z as straight lines in y) through its bands under ``top``; bands where that side is
+    wider than ``LEG_WIDE`` (a skirt) are skipped. -> (fx, fz) callables or None."""
+    ys, xs, zs = [], [], []
+    for y in LEG_BANDS:
+        if y > top:
+            break
+        s = co[(np.abs(co[:, 1] - y) < 0.3) & (co[:, 0] * side > 0.25)]
+        if len(s) < 8:
+            continue
+        lo, hi = np.percentile(s[:, 0], 5), np.percentile(s[:, 0], 95)
+        if hi - lo > LEG_WIDE:
+            continue
+        ys.append(y)
+        xs.append(float(np.median(s[:, 0])))
+        zs.append(float(np.median(s[:, 2])))
+    if len(ys) < 2:
+        return None
+    px, pz = np.polyfit(ys, xs, 1), np.polyfit(ys, zs, 1)
+    return (lambda y: float(np.polyval(px, y))), (lambda y: float(np.polyval(pz, y)))
+
+
+def leg_offsets(co, vanilla_co, bones, top):
+    """How far each leg's centre is from vanilla's at the knee and the ankle: {side: (d_knee, d_foot)} (x, z)."""
+    out = {}
+    for side, s in (("L", 1.0), ("R", -1.0)):
+        ours, van = leg_line(co, s, top), leg_line(vanilla_co, s, 9.0)
+        if ours is None or van is None:
+            continue
+        out[side] = tuple(np.array([van[0](y) - ours[0](y), van[1](y) - ours[1](y)])
+                          for y in (bones[f"{side}_knee"][1], bones[f"{side}_foot"][1]))
+    return out
+
+
+def joint_fit(co, keep, vanilla_co, bones, legs=True):
+    """The joint fit (see ``SPINE_FIT``), in place on ``co``: the torso shifted in depth, by height, so each spine
+    bone sits at vanilla's fraction of the depth (everything with it: arms, head, weapons by their height); then with
+    ``legs`` each leg sheared under the thigh (none at the thigh, the knee's offset at the knee, the ankle's at the
+    ankle and below), so the legs stand at vanilla's stance; the cloth between them takes each side's share.
+    -> (shift(p): where a point measured before the fit went (the torso's shift only: for grips), report)."""
+    tg = spine_targets(co[keep], vanilla_co, bones)
+    ys = [bones[b][1] for b in tg]
+    dz = [bz - t for t, bz in tg.values()]
+    rep = {"spine_dz": {b: round(float(v), 3) for b, v in zip(tg, dz)}}
+    if not ys:
+        return (lambda p: np.asarray(p, dtype=np.float64)), rep
+
+    def tz(y):
+        return np.interp(y, ys, dz)
+    co[:, 2] += tz(co[:, 1])
+    if legs:
+        thigh = (bones["L_thigh"][1] + bones["R_thigh"][1]) / 2
+        offs = leg_offsets(co[keep], vanilla_co, bones, thigh - 1.0)
+        rep["legs"] = {}
+        for side, s in (("L", 1.0), ("R", -1.0)):
+            if side not in offs:
+                continue
+            dk, df = offs[side]
+            ky, fy = bones[f"{side}_knee"][1], bones[f"{side}_foot"][1]
+            y = co[:, 1]
+            sx = np.interp(y, [fy, ky, thigh], [df[0], dk[0], 0.0])
+            sz = np.interp(y, [fy, ky, thigh], [df[1], dk[1], 0.0])
+            w = keep * fh.smoothstep(co[:, 0] * s, -0.4, 0.4)
+            co[:, 0] += w * sx
+            co[:, 2] += w * sz
+            rep["legs"][side] = {"knee": np.round(dk, 3).tolist(), "foot": np.round(df, 3).tolist()}
+    return (lambda p: np.asarray(p, dtype=np.float64) + np.array([0.0, 0.0, float(tz(p[1]))])), rep
+
+
+def joints_report(co, vanilla_co, bones):
+    """The check (rule ``joints_inside``): each spine bone's distance from where ``spine_targets`` puts it, the
+    fractions (for reading), and each leg's distance from vanilla's at the knee and the ankle."""
+    thigh = (bones["L_thigh"][1] + bones["R_thigh"][1]) / 2
+    offs = leg_offsets(co, vanilla_co, bones, thigh - 1.0)
+    return {"spine_off": {b: round(abs(bz - t), 3) for b, (t, bz) in spine_targets(co, vanilla_co, bones).items()},
+            "spine": spine_fractions(co, bones), "spine_vanilla": spine_fractions(vanilla_co, bones),
+            "legs_off": {s: [round(float(np.linalg.norm(v)), 3) for v in d] for s, d in offs.items()}}
+
+
 # a large swing moves only what joins the hand (the English soldier's arm, 41.5 degrees: the jack came along as a
 # sheet); a small one keeps its neighbours with it, which smooths the shoulder (the cataphract's 31 and 34 degrees:
 # moving the arm alone raised its worst stretch from 2.4-2.8 to 4.7-9.8, regression 2026-10-28)
@@ -362,13 +509,24 @@ def main():
     co = hs.verts(obj)
     fitted = co.copy()  # placed, not yet slimmed or posed: as the reference shows it (Track P1.2's part crops)
     feet_raw = feet_span(fitted[~lance & ~shield])
-    legs = ((bones["L_knee"][1] + bones["R_knee"][1]) / 2, (bones["L_thigh"][1] + bones["R_thigh"][1]) / 2 + 0.8)         if a.get("fit") == "standing" else None
+    van_co = surface_points(vanilla)
+    res["joints_before"] = joints_report(co[~lance & ~shield], van_co, bones)
+    shift = lambda p: np.asarray(p, dtype=np.float64)  # noqa: E731 - the identity without the fit
+    if a.get("joint_fit", True):
+        held = co.copy()
+        shift, res["joint_fit"] = joint_fit(co, ~lance & ~shield, van_co, bones, legs=True)
+        for key, mask in (("lance", lance), ("shield", shield)):  # each weapon whole, as its grip moved
+            info = res["split"].get(key)
+            if info and mask.any():
+                g = np.array(info["grip"]) * s + off
+                co[mask] = held[mask] + (shift(g) - g)
+    legs =((bones["L_knee"][1] + bones["R_knee"][1]) / 2, (bones["L_thigh"][1] + bones["R_thigh"][1]) / 2 + 0.8)         if a.get("fit") == "standing" else None
     kx, kz, measured = slim_body(co, ~lance & ~shield, hs.verts(vanilla), float(a.get("slim_low", 0.7)), legs=legs)
     res["slim"] = {"x": round(kx, 3), "z": round(kz, 3), **measured}
     moves, dirs = {}, {}
     li, si = res["split"].get("lance"), res["split"].get("shield")
     if li:
-        grip = slimmed(np.array(li["grip"]) * s + off, kx, kz, co)
+        grip = slimmed(shift(np.array(li["grip"]) * s + off), kx, kz, co)
         side = -1.0 if grip[0] < 0 else 1.0
         node = "Right_hand_node" if side < 0 else "Left_hand_node"
         sh = bones["R_shoulder" if side < 0 else "L_shoulder"]
@@ -380,7 +538,7 @@ def main():
         moves["lance"] = {"node": node, "grip": grip.round(3).tolist(), "turned_deg": round(ang, 1),
                           "slid": round(float(np.linalg.norm(slide)), 3)}
     if si:
-        grip = slimmed(np.array(si["grip"]) * s + off, kx, kz, co)
+        grip = slimmed(shift(np.array(si["grip"]) * s + off), kx, kz, co)
         side = -1.0 if grip[0] < 0 else 1.0
         node = "Right_hand_node" if side < 0 else "Left_hand_node"
         sh = bones["R_shoulder" if side < 0 else "L_shoulder"]
@@ -510,8 +668,10 @@ def main():
     res["uv_area"] = round(fh.uv_area(obj), 4)
     wstats = {}
     fh.transfer_weights(obj, vanilla, a.get("smooth", 12), a.get("influences", 4), None, wstats)
-    res["regions"] = rider_weights(obj, bones, a.get("influences", 4), int(a.get("weight_smooth", 12)), plume=crest_pts)
+    res["regions"] = rider_weights(obj, bones, a.get("influences", 4), int(a.get("weight_smooth", 12)), plume=crest_pts,
+                                   standing=a.get("fit") == "standing")
     feet_game = feet_span(hs.verts(obj))
+    res["joints"] = joints_report(surface_points(obj), van_co, bones)  # rule joints_inside
     res["feet"] = {"raw": feet_raw, "game": feet_game,
                    "ratio": round(min(g / r for g, r in zip(feet_game, feet_raw) if r) if any(feet_raw) else 1.0, 3)}
     verts, tris, unweighted = fh.export(obj, a["geometry_out"], a.get("preview_out"))
@@ -583,7 +743,7 @@ def chain_rows(co, bones, chain):
     return rows, d.min(1)
 
 
-def rider_weights(obj, bones, influences=4, smooth=12, back=0.8, plume=None):
+def rider_weights(obj, bones, influences=4, smooth=12, back=0.8, plume=None, standing=False):
     """M23: region rules over the nearest-surface weights (which only hold where the new mesh hugs vanilla's body;
     the rider's plume, cloak and armour don't: the plume stretched on the shoulders' weights, the cloak mixed the
     spine, hips and thighs, ~100 flips seated against vanilla's 12):
@@ -636,7 +796,9 @@ def rider_weights(obj, bones, influences=4, smooth=12, back=0.8, plume=None):
             rows[i] = mix(rows[i], arow[i], float(fh.smoothstep(np.array(abs(x)), sh, sh + 1.0)))
             counts["arms"] += 1
             continue
-        if z > back and y < bones["top_spine"][1]:  # the cloak behind: the spine by height
+        # standing, only above the hips (the user, T38: the English soldier's calves and seat, 14% of him, took the
+        # spine's weights and stayed behind while his legs walked; below the hips a coat moves with the legs)
+        if z > back and y < bones["top_spine"][1] and not (standing and y < hip[1]):  # the cloak behind: the spine by height
             k = int(np.clip(np.searchsorted(spine_y, y) - 1, 0, len(SPINE) - 2))
             f = float(np.clip((y - spine_y[k]) / (spine_y[k + 1] - spine_y[k]), 0, 1))
             rows[i] = {SPINE[k]: 1 - f, SPINE[k + 1]: f}
