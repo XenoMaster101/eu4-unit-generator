@@ -3309,6 +3309,8 @@ The brief: make the app as hand-holding as possible; the test is "could someone 
 - `blender/jobs/outfit.py`, `process_rider(body=)`, the flow uses `base_body.current()` (the newest version that passed its gate). The English soldier on the proxy body: 95% of points pushed onto his surface, under the rider's animations 8 / 8 / 5 folds (his fused body: 15-35); on foot the review has **0 flags**, 11.7% squashed attacking against the game's 12.1% (fused: 24.6%).
 - To do: the real body from the user's picture and its gate; the kettle hat's brim as a rigid head part (left over above the neck: 0.9% of his surface); the review sheet to the user.
 
+**Decided (the user, 2026-10-29): derived animations and skeletons.** A unit may have a skeleton of its own (an imported model whose proportions differ from the game's, e.g. Mambo's chibi head at 0.60 of her height) with the game's animations retargeted onto it (each bone's rotations kept, its own bone lengths), so it moves as the game's units do. Allowed on the terms of rule 2: written only into the generated mod folder, never into the game's files, the repo or the app; never derived from DLC animations. Only the unit's own entity uses them; nothing else in the game changes. Used only where fitting the model to the game's skeleton (by the neck, the head rigid) isn't faithful enough.
+
 **Risks:**
 - The bridges at the shoulders and hips are where the game's body folds too. If our bridge can't reach the gate, the fallback is the arm tube overlapping into the torso (closed shells, a common low-poly trick; at map zoom it doesn't show).
 - A bulky outfit (a padded jack, plate) pushed to `push` may still squash at the elbows. That's why `shrink` and the joint-ring cap exist; both are measured, not guessed.
