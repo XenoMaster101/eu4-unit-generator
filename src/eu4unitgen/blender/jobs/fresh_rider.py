@@ -41,6 +41,7 @@ import numpy as np  # noqa: E402 - Blender's numpy
 import _colour as cc  # noqa: E402
 import _horse_shape as hs  # noqa: E402
 import _pdx  # noqa: E402
+import _rigid  # noqa: E402
 import fresh_horse as fh  # noqa: E402
 
 NECK = 14.1  # vanilla's neck: between top_spine (13.82) and head (14.5); the crest is looked for above it
@@ -705,6 +706,11 @@ def main():
                                      "slid": round(float(np.linalg.norm(slide)), 3)}
     if a.get("stylise", True):
         res["stylise"] = stylise(co, ~lance & ~shield, van_co, bones)
+    if li and lance.sum() > 50 and a.get("straighten", True):
+        # a straight shaft (the user, after T39's review sheets: the lance and the bill bent as they moved; they are
+        # rigid on the hand node, so the bend was TRELLIS.2's own, waving along the shaft: _rigid)
+        q, res["straighten"] = _rigid.straighten(co[lance].tolist())
+        co[lance] = np.array(q)
     hs.set_verts(obj, co)
     res["arms"] = moves
     # the crest: the crest's own colour over the helmet (the cataphract's is red)

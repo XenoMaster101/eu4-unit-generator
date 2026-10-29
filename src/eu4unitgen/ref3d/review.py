@@ -10,6 +10,9 @@ flags come from the dumps (pure Python), each against the base-game unit at the 
   clipping  the share of each hand part's points inside the body
   floating  how far each hand part is from the nearest hand node (a weapon runs through the hand; a shield is
             strapped to the forearm)
+  rigid     how much each part (weapon, shield, plume, belt) changes shape from the rest pose
+            (``_rigid.distortion``): every part sits on one node, so anything over ``RIGID_MAX`` is a bug, flagged
+            whatever the game's does
 
 A flag is raised when ours is worse than the base game's by more than ``MARGIN``. -> ``review.json`` and
 ``review_sheet.png`` under ``<preview>/review``; the regression set reads the numbers.
@@ -113,7 +116,13 @@ def shot_measures(rest: dict, posed: dict, hand_parts: set | None = None) -> dic
     body, parts, bones = split_dump(posed, hand_parts)
     if body is None or body0 is None or len(body0["p"]) != len(body["p"]):
         return {}
-    m = {"bends": round(squashed(body0, body), 4), "clipping": {}, "floating": {}}
+    from eu4unitgen.blender.jobs import _rigid
+    m = {"bends": round(squashed(body0, body), 4), "clipping": {}, "floating": {}, "rigid": {}}
+    _, parts0, _ = split_dump(rest)
+    for name, part in split_dump(posed)[1].items():  # every part, held or not
+        if name in parts0:
+            flat = lambda q: [q[i:i + 3] for i in range(0, len(q), 3)]  # noqa: E731
+            m["rigid"][name] = round(_rigid.distortion(flat(parts0[name]["p"]), flat(part["p"])), 5)
     hands = [bones[h] for h in HANDS if h in bones]
     for name, part in parts.items():
         pts = [part["p"][i:i + 3] for i in range(0, len(part["p"]), 3)]
@@ -130,7 +139,11 @@ def shot_measures(rest: dict, posed: dict, hand_parts: set | None = None) -> dic
 
 def flags(ours: dict, game: dict) -> list[str]:
     """A shot's flags: ours against the base game's at the same shot."""
+    from eu4unitgen.blender.jobs._rigid import RIGID_MAX
     out = []
+    for k, v in (ours.get("rigid") or {}).items():
+        if v > RIGID_MAX:
+            out.append(f"bent: {_short(k)} changes shape by {v:.1%} (a part must be rigid)")
     if ours.get("bends", 0) > game.get("bends", 0) + MARGIN["bends"]:
         out.append(f"bad bends: {ours['bends']:.0%} squashed (the game's {game.get('bends', 0):.0%})")
     gc = max((game.get("clipping") or {}).values(), default=0.0)
@@ -207,7 +220,7 @@ def summary(res: dict) -> dict:
                 vals.append(max(v.values(), default=0.0) if isinstance(v, dict) else (v or 0.0))
         return round(max(vals, default=0.0), 4)
     return {"flags": sum(len(st["flags"]) for st in res["states"].values()),
-            **{f"{k}_{who}": worst(who, k) for k in ("bends", "clipping", "floating") for who in ("ours", "game")}}
+            **{f"{k}_{who}": worst(who, k) for k in ("bends", "clipping", "floating", "rigid") for who in ("ours", "game")}}
 
 
 def sheet(res: dict, images: dict, path: Path, samples: int) -> Path:
