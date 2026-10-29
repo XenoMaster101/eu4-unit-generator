@@ -358,11 +358,55 @@ def rig_landmarks(objs) -> dict:
     return out
 
 
+REGION_CLASSES = ("torso", "head", "arm", "leg", "skirt", "tail")
+REGION_POINTS = 40000
+
+
+def rig_regions(objs) -> list:
+    """Each vertex's region from the rig's own weights: its strongest bone, and the first of that bone and its parents
+    that names a region (the head bone and everything under it, its hair, ears, eyes: "head"; arm, leg, skirt, tail
+    bones; else "torso"). -> [(world point, class index)], at most ``REGION_POINTS`` (evenly taken)."""
+    import re
+    arms = [o for o in objs if o.type == "ARMATURE"]
+    if not arms:
+        return []
+    head_pat = re.compile(LANDMARKS["head"])
+    skip = re.compile(LANDMARK_SKIP)
+    rules = (("head", lambda n: bool(head_pat.search(n)) and not skip.search(n)),
+             ("arm", lambda n: bool(re.search(r"shoulder|clavicle|arm|elbow|wrist|hand", n)) and "sp_" not in n),
+             ("skirt", lambda n: "skirt" in n), ("tail", lambda n: "tail" in n),
+             ("leg", lambda n: bool(re.search(r"thigh|knee|ankle|foot|leg|calf|toe", n)) and "sp_" not in n))
+    cls = {}
+    for arm in arms:
+        for b in arm.data.bones:
+            c, q = "torso", b
+            while q is not None:
+                n = q.name.lower()
+                hit = next((name for name, test in rules if test(n)), None)
+                if hit:
+                    c = hit
+                    break
+                q = q.parent
+            cls[b.name] = REGION_CLASSES.index(c)
+    dg = bpy.context.evaluated_depsgraph_get()
+    out = []
+    for o in model_meshes(objs):
+        names = {g.index: g.name for g in o.vertex_groups}
+        me = o.evaluated_get(dg).to_mesh()
+        for v, ev in zip(o.data.vertices, me.vertices):
+            g = max(v.groups, key=lambda x: x.weight, default=None)
+            if g is not None and names.get(g.group) in cls:
+                out.append((o.matrix_world @ ev.co, cls[names[g.group]]))
+    step = max(1, len(out) // REGION_POINTS)
+    return out[::step]
+
+
 def main() -> None:
     a = job_args()
     clear_scene()
     imported = _import(Path(a["model"]))
     marks = rig_landmarks(imported)
+    regions = rig_regions(imported)
     objs, rig = baked_meshes(imported)
     cleared = sum(clear_faces(o) for o in objs)
     obj = join(objs)
@@ -377,6 +421,16 @@ def main() -> None:
             for p in pts:
                 bm.verts.new(p)
                 mark_at[key].append(n0 + sum(len(v) for v in mark_at.values()))
+        bm.to_mesh(me)
+        bm.free()
+    region_at = []
+    if regions:  # the same: loose points carried through the turns and scaling, read back, removed
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        n0 = len(bm.verts)
+        for p, _ in regions:
+            bm.verts.new(p)
+        region_at = list(range(n0, n0 + len(regions)))
         bm.to_mesh(me)
         bm.free()
     bm = bmesh.new()
@@ -401,12 +455,18 @@ def main() -> None:
     res["turn"] = turn
     normalise(obj)
     obj.data.update()
-    if mark_at:  # each joint's height as a share of the model's (the fit by the neck reads it: ``fresh_rider``)
-        idx = {i for v in mark_at.values() for i in v}
+    if region_at:  # in glTF axes (x, z, -y of Blender's), as the .glb is written: fresh_rider matches them
+        res["regions"] = {"classes": list(REGION_CLASSES),
+                          "points": [round(c, 4) for i in region_at
+                                     for c in (obj.data.vertices[i].co.x, obj.data.vertices[i].co.z, -obj.data.vertices[i].co.y)],
+                          "class": [c for _, c in regions]}
+    if mark_at or region_at:  # each joint's height as a share of the model's (the fit by the neck reads it: ``fresh_rider``)
+        idx = {i for v in mark_at.values() for i in v} | set(region_at)
         zs = [v.co.z for v in obj.data.vertices if v.index not in idx]
         z0, z1 = min(zs), max(zs)
-        res["landmarks"] = {k: round(sum((obj.data.vertices[i].co.z - z0) / (z1 - z0) for i in v) / len(v), 4)
-                            for k, v in mark_at.items()}
+        if mark_at:
+            res["landmarks"] = {k: round(sum((obj.data.vertices[i].co.z - z0) / (z1 - z0) for i in v) / len(v), 4)
+                                for k, v in mark_at.items()}
         bm = bmesh.new()
         bm.from_mesh(obj.data)
         bm.verts.ensure_lookup_table()

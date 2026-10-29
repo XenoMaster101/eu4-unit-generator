@@ -194,6 +194,39 @@ GAME_TOP = 16.65  # the game's body, top of the head
 BIG_HEAD = 0.30  # a head (neck to top) over this share of the height: fitted by the neck (a chibi's: 0.60)
 
 
+REGION_HEAD = 1  # prepare_import.REGION_CLASSES: torso, head, arm, leg, skirt, tail
+
+
+def model_regions(co, regions):
+    """Each vertex's region from an imported model's rig (``prepare_import``'s points, glTF axes: PDX is (x, y, -z)),
+    by the nearest point, or None."""
+    if not regions or not regions.get("points"):
+        return None
+    p = np.array(regions["points"], dtype=np.float64).reshape(-1, 3) * np.array([1.0, 1.0, -1.0])
+    return nearest_labels(co, p, np.array(regions["class"]))
+
+
+def nearest_labels(co, pts, labels):
+    from mathutils import Vector
+    from mathutils.kdtree import KDTree
+    tree = KDTree(len(pts))
+    for i, q in enumerate(pts):
+        tree.insert(Vector(q), i)
+    tree.balance()
+    return np.array([labels[tree.find(Vector(q))[1]] for q in co])
+
+
+def set_rigid(obj, mask, bone):
+    """Every vertex in ``mask`` 100% on ``bone``. -> how many."""
+    g = obj.vertex_groups.get(bone) or obj.vertex_groups.new(name=bone)
+    idx = [int(i) for i in np.flatnonzero(mask)]
+    for vg in obj.vertex_groups:
+        if vg.name != bone:
+            vg.remove(idx)
+    g.add(idx, 1.0, "REPLACE")
+    return len(idx)
+
+
 def big_head(co, keep, rig_neck=None):
     """Where the neck is and whether the head is big enough to fit by the neck: from the model's own rig when it has
     one (``rig_neck``: its neck bone's height as a share, ``prepare_import``'s landmarks), else measured: the
@@ -693,6 +726,7 @@ def main():
     obj = fh.import_model(a["source"]["path"])
     fh.merge_seams(obj, float(a["source"].get("merge", 1e-5)))
     res["imported"] = {"tris": fh.tri_count(obj), "pieces": fh.count_pieces(obj)}
+    region = model_regions(hs.verts(obj), a.get("regions"))  # an imported model's own rig: each vertex's region
     lance, shield, res["split"] = split(obj)
     edges = np.empty(len(obj.data.edges) * 2, dtype=np.int64)  # the arms are found along them (swing_arm)
     obj.data.edges.foreach_get("vertices", edges)
@@ -822,13 +856,18 @@ def main():
     # the body: the weapons off; the bake source as it is
     colour_src = (co[~lance & ~shield].copy(), rgb[~lance & ~shield].copy())  # for the importance after the remesh
     fh.delete_vertices(obj, np.flatnonzero(lance | shield).tolist())
+    if region is not None:
+        region = region[~(lance | shield)]
     if a.get("textured_out"):
         fh.write_obj(obj, a["textured_out"], uv=True)
     keep_mesh = bool(a.get("keep_mesh"))
     if keep_mesh:  # an imported model: its own mesh, pieces and UVs; only cut to the budget (no closed solid, no
         # carving, no new UVs: on Mambo the closed solid sealed her hair round her face into a dark column)
         res["fit"] = {"kind": a.get("fit", "seated"), "keep_mesh": True}
+        before = hs.verts(obj)
         res["body_tris"] = fh.collapse_to(obj, int(a.get("import_tris", a["target_tris"])), None)
+        if region is not None:  # the cut mesh's points take the region of the nearest point before the cut
+            region = nearest_labels(hs.verts(obj), before, region)
         crest_pts = crest_pts[:0]
     while obj.data.uv_layers and not keep_mesh:
         obj.data.uv_layers.remove(obj.data.uv_layers[0])
@@ -930,6 +969,11 @@ def main():
     fh.transfer_weights(obj, vanilla, a.get("smooth", 12), a.get("influences", 4), None, wstats)
     res["regions"] = rider_weights(obj, bones, a.get("influences", 4), int(a.get("weight_smooth", 12)), plume=crest_pts,
                                    standing=a.get("fit") == "standing")
+    if region is not None and len(region) == len(obj.data.vertices):
+        # the head and everything its rig hangs from it (hair, ears, beret) rigid on the head bone, as the model's own
+        # rig moves them (Mambo, 2026-10-29: hair below her neck took the arm's and spine's weights and creased: 24 of
+        # 38 idle folds on head-weighted hair, 21 of 32 walking on the right hand's)
+        res["rigid_head"] = set_rigid(obj, region == REGION_HEAD, "head")
     feet_game = feet_span(hs.verts(obj))
     res["joints"] = joints_report(surface_points(obj), van_co, bones)  # rule joints_inside
     res["feet"] = {"raw": feet_raw, "game": feet_game,

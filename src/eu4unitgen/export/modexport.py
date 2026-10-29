@@ -83,7 +83,9 @@ def mod_name(subject: str) -> str:
 def copy_steps(staged: Path, mod_dir: Path, name: str) -> list[str]:
     return [f"Windows didn't let the app write into {mod_dir} (Controlled Folder Access).",
             f"Open {staged} in Explorer.",
-            f"Copy the folder {name} and the file {name}.mod into {mod_dir} (replace them if asked).",
+            f"In {mod_dir}, delete the old folder {name} and the file {name}.mod if they are there (copying a folder "
+            "over another merges them, and files the new version no longer has would stay and still load).",
+            f"Copy the folder {name} and the file {name}.mod into {mod_dir}.",
             f"In the EU4 launcher, enable \"{name}\"."]
 
 
