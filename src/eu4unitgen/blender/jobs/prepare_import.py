@@ -32,6 +32,8 @@ from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).parent))
 from _pdx import args as job_args, clear_scene, write_result  # noqa: E402
 
+TOES_MIN = 0.01  # toes out less than this share of the height say nothing about facing: the model is left as it is
+PERSON_MIN = 1.4  # a standing person is at least this much taller than wide (arms out at 35 degrees: about 1.6-2)
 VIEWS = {"soldier": (0.0, 0.0), "horse": (90.0, 0.0), "gun": (45.0, 20.0)}  # azimuth, elevation (render_model's)
 
 
@@ -295,6 +297,8 @@ def main() -> None:
     elif a.get("kind") == "soldier":
         turn, res["toes"] = facing_from_feet(obj)
         res["turn_from"] = "feet"
+        if res["toes"] < TOES_MIN:  # no feet to go by (Mambo, a ball, 2026-10-29: turned 90 degrees on nothing)
+            turn, res["turn_from"] = 0.0, "kept (no clear feet)"
     else:
         turn, res["turn_from"] = 0.0, "kept"
     if turn:
@@ -312,6 +316,13 @@ def main() -> None:
     lo, hi = extent(obj)
     res["dimensions"] = [round(x, 4) for x in (hi - lo)]
     res["triangles"] = len(obj.data.polygons)
+    if a.get("kind") == "soldier":  # a soldier is fitted to a human skeleton: say so early if it isn't one
+        d = res["dimensions"]
+        ratio = d[2] / max(d[0], d[1], 1e-9)
+        res["person_ratio"] = round(ratio, 2)
+        if ratio < PERSON_MIN:
+            res["warning"] = (f"This model isn't shaped like a standing person (only {ratio:.1f} times as tall as it is "
+                              "wide): a soldier is fitted to the game's human skeleton, so it will fold and squash.")
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     Path(a["out_glb"]).parent.mkdir(parents=True, exist_ok=True)

@@ -107,7 +107,8 @@ def stage_import(folder: Path, req: dict, cfg) -> dict:
     r = json.loads((folder / "request.json").read_text(encoding="utf-8"))
     r["image"] = str((inp / "input_rgb.png").resolve())  # its picture: the render (the Library, the result sheet)
     (folder / "request.json").write_text(json.dumps(r, indent=1), encoding="utf-8")
-    return {k: res.get(k) for k in ("triangles", "materials", "baked", "rig_applied", "stood_up", "turn", "turn_from")}
+    return {k: res.get(k) for k in ("triangles", "materials", "baked", "rig_applied", "stood_up", "turn", "turn_from",
+                                     "person_ratio", "warning") if k in res}
 
 
 def credit_line(name: str, source: dict) -> str:

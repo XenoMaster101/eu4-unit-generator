@@ -102,6 +102,8 @@ class StageList(QFrame):
                 text = f"✓ done in {minutes(s['seconds'])}" if s.get("seconds") else "✓ done"
                 done_s += est[key]
                 name = "good"
+                if s.get("warning"):  # a stage that finished with a caution (an imported model not shaped as asked)
+                    text, name = f"⚠ done: {s['warning']}", "warn"
             elif ss == "running" and state == "running":
                 took = now - s.get("started", now)
                 text = f"⏳ {minutes(took)} of about {minutes(est[key])}"
