@@ -753,7 +753,7 @@ def solid_fill(obj, vs, closing=1, opening=0, protect=None, region=None, carve=(
 SOLID = {}  # collapse_to's solid_fill settings for this run (direct sets them)
 
 
-def collapse_to(obj, target, close=None):
+def collapse_to(obj, target, close=None, keep=None):
     """Quadric (collapse) decimation straight to ``target`` triangles: the silhouette kept. With
     ``close``, a voxel remesh that fine first: TRELLIS.2's surface has thousands of non-manifold
     edges and open sheets, and the collapse stalls on them (horse 2: at 36-61k triangles whatever
@@ -779,12 +779,18 @@ def collapse_to(obj, target, close=None):
             bpy.ops.object.modifier_apply(modifier=mod.name)
     mod = obj.modifiers.new("tri", "TRIANGULATE")
     bpy.ops.object.modifier_apply(modifier=mod.name)
-    for _ in range(8):  # one pass can stall far above the target (horse 2: 277k -> 61k)
-        if tri_count(obj) <= target * 1.02:
+    for _ in range(10):  # one pass can stall far above the target (horse 2: 277k -> 61k)
+        before = tri_count(obj)
+        if before <= target * 1.02:
             break
         mod = obj.modifiers.new("collapse", "DECIMATE")
-        mod.decimate_type, mod.ratio, mod.use_collapse_triangulate = "COLLAPSE", target / tri_count(obj), True
+        mod.decimate_type, mod.ratio, mod.use_collapse_triangulate = "COLLAPSE", target / before, True
+        if keep and obj.vertex_groups.get(keep[0]):  # (group, factor, invert): where the triangles are kept
+            # (fresh_rider.importance); dropped once a pass stalls on it, so the target is still reached
+            mod.vertex_group, mod.vertex_group_factor, mod.invert_vertex_group = keep[0], float(keep[1]), bool(keep[2])
         bpy.ops.object.modifier_apply(modifier=mod.name)
+        if keep and tri_count(obj) > 0.9 * before:
+            keep = None
     if target < 10 ** 8:  # zero-length edges and slivers the collapse leaves (the deformation check divides by them)
         bm = bmesh.new()
         bm.from_mesh(obj.data)

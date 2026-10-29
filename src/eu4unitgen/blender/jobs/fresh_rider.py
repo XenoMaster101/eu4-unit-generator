@@ -407,14 +407,101 @@ def stylise(co, keep, vanilla_co, bones):
     return out
 
 
+# borders at 1.0 (or spread over neighbours) protected so much the weighted collapse stalled and the plain fallback
+# thinned the limbs (57% of the English soldier's triangles); at 0.4 the limbs keep 74% (67% unweighted)
+IMPORTANCE = {"border": 0.4, "limb": 0.7, "border_de": 25.0, "materials": 6, "limb_r": 1.2, "smooth": 0}
+
+
+def importance(obj, colour_src, bones, cfg=None):
+    """A vertex group ``importance`` (the user, after T38: the simplification rounded off the edges between materials
+    and spent its triangles on flat areas): 1 where two distinct materials meet (the colours of the raw model, before
+    the voxel remesh, carried over by nearest point; k-means on Lab, borders at least ``border_de`` apart), ``limb``
+    on the arms and legs (within ``limb_r`` of their bone chains, the legs below the hips), 0 elsewhere; smoothed over
+    the neighbours. -> shares."""
+    from mathutils.kdtree import KDTree
+    c = {**IMPORTANCE, **(cfg or {})}
+    src_co, src_rgb = colour_src
+    tree = KDTree(len(src_co))
+    for i, q in enumerate(src_co):
+        tree.insert(q, i)
+    tree.balance()
+    co = hs.verts(obj)
+    rgb = np.array([src_rgb[tree.find(q)[1]] for q in co])
+    import _paint
+    lab = _paint._lab(np.clip(rgb / 255.0, 0, 1)[:, None, :])[:, 0, :]  # vertex_colours: 0-255
+    rng = np.random.default_rng(0)
+    cent = lab[rng.choice(len(lab), int(c["materials"]), replace=False)]
+    for _ in range(12):
+        lab_ = np.argmin(((lab[:, None] - cent[None]) ** 2).sum(-1), 1)
+        cent = np.array([lab[lab_ == i].mean(0) if (lab_ == i).any() else cent[i] for i in range(len(cent))])
+    apart = np.sqrt(((cent[:, None] - cent[None]) ** 2).sum(-1)) >= c["border_de"]
+    edges = np.empty(len(obj.data.edges) * 2, dtype=np.int64)
+    obj.data.edges.foreach_get("vertices", edges)
+    edges = edges.reshape(-1, 2)
+    w = np.zeros(len(co))
+    hit = apart[lab_[edges[:, 0]], lab_[edges[:, 1]]]
+    w[edges[hit].ravel()] = c["border"]
+    limb = np.zeros(len(co), dtype=bool)
+    for chain in list(ARMS.values()) + list(LEGS.values()):
+        _, d = chain_rows(co, bones, chain)
+        limb |= d < c["limb_r"]
+    limb &= ~((co[:, 1] > bones["hip"][1]) & (np.abs(co[:, 0]) < abs(bones["L_shoulder"][0])))  # not the torso
+    w = np.maximum(w, limb * c["limb"])
+    for _ in range(int(c["smooth"])):
+        acc, n = w.copy(), np.ones(len(w))
+        np.add.at(acc, edges[:, 0], w[edges[:, 1]])
+        np.add.at(acc, edges[:, 1], w[edges[:, 0]])
+        np.add.at(n, edges.ravel(), 1)
+        w = np.maximum(w, acc / n)
+    g = obj.vertex_groups.new(name="importance")
+    for i, x in enumerate(w):
+        g.add([i], float(x), "REPLACE")
+    return {"border": round(float(hit.mean()), 4), "limb": round(float(limb.mean()), 4), "mean": round(float(w.mean()), 3)}
+
+
+def gaps(co, bones):
+    """The outline's gaps (the user, after T38: the base game's units read because arms, torso and legs are apart):
+    between the legs at the knees, and between each forearm and the torso at the wrists' height (the widest empty
+    run in x between them, 0 when joined; at the elbows the upper arm crosses the slice: vanilla's read 0.04)."""
+    def run(sl, lo, hi):
+        xs = np.sort(sl[(sl[:, 0] > lo) & (sl[:, 0] < hi), 0])
+        return float(np.diff(np.concatenate([[lo], xs, [hi]])).max()) if len(xs) else hi - lo
+    knee = co[np.abs(co[:, 1] - bones["L_knee"][1]) < 0.3]
+    out = {"legs": round(run(knee, -0.9, 0.9), 3)}
+    for side, s in (("L", 1.0), ("R", -1.0)):
+        y = bones[f"{side}_wrist"][1]
+        sl = co[np.abs(co[:, 1] - y) < 0.3]
+        sl = sl[sl[:, 0] * s > 0] * np.array([s, 1.0, 1.0])
+        out[f"{side}_arm"] = round(run(sl, 1.2, abs(bones[f"{side}_wrist"][0])), 3)
+    return out
+
+
 def joints_report(co, vanilla_co, bones):
     """The check (rule ``joints_inside``): each spine bone's distance from where ``spine_targets`` puts it, the
     fractions (for reading), and each leg's distance from vanilla's at the knee and the ankle."""
     thigh = (bones["L_thigh"][1] + bones["R_thigh"][1]) / 2
     offs = leg_offsets(co, vanilla_co, bones, thigh - 1.0)
-    return {"spine_off": {b: round(abs(bz - t), 3) for b, (t, bz) in spine_targets(co, vanilla_co, bones).items()},
+    return {"gaps": gaps(co, bones), "gaps_vanilla": gaps(vanilla_co, bones),
+            "spine_off": {b: round(abs(bz - t), 3) for b, (t, bz) in spine_targets(co, vanilla_co, bones).items()},
             "spine": spine_fractions(co, bones), "spine_vanilla": spine_fractions(vanilla_co, bones),
             "legs_off": {s: [round(float(np.linalg.norm(v)), 3) for v in d] for s, d in offs.items()}}
+
+
+def free_hand(co, keep, bones, side):
+    """An empty hand: the arm's far end along vanilla's shoulder-to-hand direction (within 45 degrees of it, the
+    farthest 3% of the arm's points), or None."""
+    sh = np.array(bones[f"{side}_shoulder"])
+    d = np.array(bones[f"{side}_hand"]) - sh
+    d /= np.linalg.norm(d)
+    rel = co - sh
+    dist = np.linalg.norm(rel, axis=1)
+    cos = (rel @ d) / np.maximum(dist, 1e-9)
+    arm = keep & (cos > np.cos(np.radians(45))) & (dist > 1.5) & (dist < 9.0)
+    if arm.sum() < 30:
+        return None
+    t = rel[arm] @ d
+    far = co[arm][t >= np.percentile(t, 97)]
+    return far.mean(0)
 
 
 # a large swing moves only what joins the hand (the English soldier's arm, 41.5 degrees: the jack came along as a
@@ -603,6 +690,17 @@ def main():
         dirs["shield"] = (ax[1] - ax[0], ax[2] - ax[0])
         moves["shield"] = {"node": node, "grip": grip.round(3).tolist(), "turned_deg": round(ang, 1),
                            "slid": round(float(np.linalg.norm(slide)), 3)}
+    held = {m["node"] for m in moves.values()}
+    for side, s_, node in (("L", 1.0, "Left_hand_node"), ("R", -1.0, "Right_hand_node")):
+        if node in held or not a.get("free_arm", True):
+            continue
+        # an empty hand to vanilla's hand too (the user, after T38: the English soldier's free arm hung about 20 degrees
+        # under vanilla's, his forearm 0.19 from his side at the wrist against vanilla's 1.07)
+        grip = free_hand(co, ~lance & ~shield, bones, side)
+        if grip is not None:
+            ang, slide = swing_arm(co, ~lance & ~shield, grip, bones[f"{side}_hand"], bones[f"{side}_shoulder"], s_, edges)
+            moves[f"free_{side}"] = {"node": f"{side}_hand", "grip": grip.round(3).tolist(), "turned_deg": round(ang, 1),
+                                     "slid": round(float(np.linalg.norm(slide)), 3)}
     if a.get("stylise", True):
         res["stylise"] = stylise(co, ~lance & ~shield, van_co, bones)
     hs.set_verts(obj, co)
@@ -644,6 +742,7 @@ def main():
             fh.write_obj(p, os.path.join(a["parts_dir"], f"{key}_textured.obj"), uv=True)
             parts[key] = p
     # the body: the weapons off; the bake source as it is
+    colour_src = (co[~lance & ~shield].copy(), rgb[~lance & ~shield].copy())  # for the importance after the remesh
     fh.delete_vertices(obj, np.flatnonzero(lance | shield).tolist())
     if a.get("textured_out"):
         fh.write_obj(obj, a["textured_out"], uv=True)
@@ -710,7 +809,15 @@ def main():
         res["plume_voxels_cut"] = len(cut)
         res["plume_holes_filled"] = fh.fill_open(obj)
         crest_pts = crest_pts[:0]  # nothing left to keep rigid
-    res["body_tris"] = fh.collapse_to(obj, int(a["target_tris"]), None)
+    keep_group = None
+    if a.get("importance", True):  # the triangle budget on material borders and the limbs, not flat areas
+        res["importance"] = importance(obj, colour_src, bones)
+        # inverted: the Decimate modifier's group marks what may go (as it is, the collapse stalled at 33,300 triangles;
+        # inverted, the English soldier's limbs took 78% of his triangles against 67%)
+        keep_group = ("importance", float(a.get("importance_factor", 5.0)), bool(a.get("importance_invert", True)))
+    res["body_tris"] = fh.collapse_to(obj, int(a["target_tris"]), None, keep=keep_group)
+    if obj.vertex_groups.get("importance"):
+        obj.vertex_groups.remove(obj.vertex_groups["importance"])
     if res.get("plume_line"):
         # the finial on the low body's crown (the raw helmet's top points lean forward: it stood on the dome's front
         # edge); the line moved with it, keeping its shape
