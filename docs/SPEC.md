@@ -3302,6 +3302,13 @@ The brief: make the app as hand-holding as possible; the test is "could someone 
 - W4 the seated fit from the same build; the rider and the cavalry units rebuilt; the regression's soldier baselines refreshed only after the user approves them in game.
 - W5 T39: both soldiers, the lineups and the review sheets.
 
+**Built so far (2026-10-29; the user's go, the picture `assets_in/new_refs/base_body.png`, CC BY 4.0, the user's):**
+- `ref3d/base_body.py` (raw, build, gate, current) and `blender/jobs/base_body.py`. Decided: the limbs' tubes overlap into the torso (closed shells, their hidden faces marked and their folds counted apart), not bridged: simpler, and on the proxy it already reaches the game's range. Rings are measured from TRELLIS.2's cross-sections in each ring's plane (rays from the bone met the near side of a limb where the bone ran outside it: pinched arms).
+- Weights as measured on the game's body (western_generic_01_type1): the shoulder blends 57/43 with top_spine; the upper arm `X_arm`; the forearm wholly `X_elbow` (the game never weights the wrists or mid_spine); the hand blends in at the hand bone; the torso hip → lower_spine at 8.7 → top_spine at 11.0 → head at 13.95. Tuned: knee blend 1.1 either side (0.4 folded the inside of a bent knee: 20 of 31 walking folds), elbow 0.55, hip-thigh 0.8.
+- Debugged on a proxy (the English soldier's own raw model, as the real body's TRELLIS.2 run waited for memory: CK3 was open): folds under the halberd set 9 / 8 / 13 (the game's body 8 / 4 / 14), under the rider's 6 / 3 / 2 (12 / 0 / 12); squash in the review within the game's.
+- `blender/jobs/outfit.py`, `process_rider(body=)`, the flow uses `base_body.current()` (the newest version that passed its gate). The English soldier on the proxy body: 95% of points pushed onto his surface, under the rider's animations 8 / 8 / 5 folds (his fused body: 15-35); on foot the review has **0 flags**, 11.7% squashed attacking against the game's 12.1% (fused: 24.6%).
+- To do: the real body from the user's picture and its gate; the kettle hat's brim as a rigid head part (left over above the neck: 0.9% of his surface); the review sheet to the user.
+
 **Risks:**
 - The bridges at the shoulders and hips are where the game's body folds too. If our bridge can't reach the gate, the fallback is the arm tube overlapping into the torso (closed shells, a common low-poly trick; at map zoom it doesn't show).
 - A bulky outfit (a padded jack, plate) pushed to `push` may still squash at the elbows. That's why `shrink` and the joint-ring cap exist; both are measured, not guessed.
