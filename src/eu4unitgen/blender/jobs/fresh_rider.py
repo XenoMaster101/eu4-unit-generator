@@ -136,7 +136,9 @@ def feet_span(co, under=1.2):
     out = []
     for side in (1.0, -1.0):
         s = low[low[:, 0] * side > 0.1]
-        out.append(round(float(s[:, 0].max() - s[:, 0].min()), 3) if len(s) > 5 else 0.0)
+        # the 5th to 95th percentile: a thin stray near the ground (a polearm's butt beside the foot: the English
+        # soldier's raw "foot" measured 3.1 for 1.4) doesn't count
+        out.append(round(float(np.percentile(s[:, 0], 95) - np.percentile(s[:, 0], 5)), 3) if len(s) > 5 else 0.0)
     return out
 
 
@@ -189,7 +191,7 @@ def torso_half(co, bands=((8.6, 9.6), (9.6, 10.6), (10.6, 11.6)), reach=3.0):
     return (float(np.median(xs)) if xs else None), (float(np.median(zs)) if zs else None)
 
 
-def slim_body(co, keep, vanilla_co, low=0.7, edge=2.0):
+def slim_body(co, keep, vanilla_co, low=0.7, edge=2.0, legs=None):
     """M23 (the user, test 29: bulkier than vanilla's rider): x and z scaled about the centre line towards vanilla's
     rider body's waist and chest (half-width and half-depth: ``torso_half``), at least ``low`` (the armour, cloak and
     skirt need room); before the arms are turned, so the hands still reach their nodes. -> (kx, kz, measures)."""
@@ -203,8 +205,14 @@ def slim_body(co, keep, vanilla_co, low=0.7, edge=2.0):
     # across the torso (|x| under ``edge``) x scales; beyond, the arms shift in whole (their shape and length kept:
     # scaled, the hands fell short of their nodes and the slide stretched the arms)
     ax = np.abs(co[:, 0])
-    co[:, 0] = np.sign(co[:, 0]) * np.where(ax < edge, ax * kx, ax - edge * (1 - kx))
-    co[:, 2] = zc + (co[:, 2] - zc) * kz
+    f = np.ones(len(co))
+    if legs is not None:  # standing: the legs keep their stance (slimmed at 0.6 the cataphract's knees met): the
+        # slimming whole above the hips, faded out to the knees, none below
+        knee, hip = legs
+        f = np.clip((co[:, 1] - knee) / max(hip - knee, 1e-6), 0.0, 1.0)
+    k = 1.0 - (1.0 - kx) * f
+    co[:, 0] = np.sign(co[:, 0]) * np.where(ax < edge, ax * k, ax - edge * (1 - k))
+    co[:, 2] = zc + (co[:, 2] - zc) * (1.0 - (1.0 - kz) * f)
     return kx, kz, {"vanilla": [vx, vz], "ours": [ox, oz]}
 
 
@@ -354,7 +362,8 @@ def main():
     co = hs.verts(obj)
     fitted = co.copy()  # placed, not yet slimmed or posed: as the reference shows it (Track P1.2's part crops)
     feet_raw = feet_span(fitted[~lance & ~shield])
-    kx, kz, measured = slim_body(co, ~lance & ~shield, hs.verts(vanilla), float(a.get("slim_low", 0.7)))
+    legs = ((bones["L_knee"][1] + bones["R_knee"][1]) / 2, (bones["L_thigh"][1] + bones["R_thigh"][1]) / 2 + 0.8)         if a.get("fit") == "standing" else None
+    kx, kz, measured = slim_body(co, ~lance & ~shield, hs.verts(vanilla), float(a.get("slim_low", 0.7)), legs=legs)
     res["slim"] = {"x": round(kx, 3), "z": round(kz, 3), **measured}
     moves, dirs = {}, {}
     li, si = res["split"].get("lance"), res["split"].get("shield")
