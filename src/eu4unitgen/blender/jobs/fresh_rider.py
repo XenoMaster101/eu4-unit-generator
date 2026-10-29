@@ -129,6 +129,30 @@ def split(obj):
     return lance, shield, info
 
 
+def feet_span(co, under=1.2):
+    """How wide each foot is (its x extent under ``under``, left and right of the centre line): a boot kept or lost
+    (the English soldier's tapered to spikes, 2026-10-28). -> [left, right]."""
+    low = co[co[:, 1] < under]
+    out = []
+    for side in (1.0, -1.0):
+        s = low[low[:, 0] * side > 0.1]
+        out.append(round(float(s[:, 0].max() - s[:, 0].min()), 3) if len(s) > 5 else 0.0)
+    return out
+
+
+def skirt_hem(co, crotch, gap, zc, step=0.1, floor=1.5):
+    """How far the skirt or cloak hangs between the legs: the first height under the crotch with nothing on the centre
+    line (within ``gap`` across, 1.2 of the torso's middle in depth). The crotch itself when the legs are bare there;
+    ``floor`` when it hangs to the feet (split there, the feet stay apart)."""
+    y = crotch
+    while y > floor:
+        sl = co[(np.abs(co[:, 1] - y) < step) & (np.abs(co[:, 0]) < gap) & (np.abs(co[:, 2] - zc) < 1.2)]
+        if len(sl) < 3:
+            return float(y)
+        y -= step
+    return float(floor)
+
+
 def place(obj, bones, keep, top=16.4):
     """Scale (the helmet's top at ``top``: vanilla's body is 16.65 with its hat), feet on the ground, centred (x on
     the body's median, z on its torso's). The helmet's top: the highest point near the centre line that isn't the
@@ -329,6 +353,7 @@ def main():
         fh.write_obj(obj, a["fitted_out"], uv=True)
     co = hs.verts(obj)
     fitted = co.copy()  # placed, not yet slimmed or posed: as the reference shows it (Track P1.2's part crops)
+    feet_raw = feet_span(fitted[~lance & ~shield])
     kx, kz, measured = slim_body(co, ~lance & ~shield, hs.verts(vanilla), float(a.get("slim_low", 0.7)))
     res["slim"] = {"x": round(kx, 3), "z": round(kz, 3), **measured}
     moves, dirs = {}, {}
@@ -411,13 +436,24 @@ def main():
     side_x = float(a.get("side_cut", 2.1))
     slit_x, slit = float(a.get("slit_x", 1.85)), float(a.get("slit_half", 0.0))  # slits off: no gain (54 against 57 flips)
     under = min(bones["R_hand"][1], bones["L_hand"][1]) - 1.0
+    # the standing fit (infantry and the gun crew; the user, T37: the rider build stood hunched and bulky): the skirt
+    # hangs whole (the legs split only below its hem) and the side cut stops at the crotch (from the ground up it took
+    # the English soldier's boots, his feet 2.5 out: legs that tapered to spikes)
+    standing = a.get("fit", "seated") == "standing"
+    slot_top, side_lo = crotch, -1.0
+    if standing:
+        slot_top = min(crotch, skirt_hem(hs.verts(obj), crotch, gap, SLIM_ZC.get("zc", 0.0)))
+        side_lo = crotch
+        res["fit"] = {"kind": "standing", "hem": round(slot_top, 2)}
+    else:
+        res["fit"] = {"kind": "seated"}
     fh.SOLID.update({"closing": 0.2, "opening": 0.0, "relax": 3,
-                     "carve": [[[-gap, -1.0, -20.0], [gap, crotch, 20.0]],
+                     "carve": [[[-gap, -1.0, -20.0], [gap, slot_top, 20.0]],
                                # side slits: the skirt's front panels follow the thighs, its back ones the hips
                                *([[[slit_x, -1.0, -slit], [20.0, crotch, slit]], [[-20.0, -1.0, -slit], [-slit_x, crotch, slit]]]
                                  if slit > 0 else []),
-                               [[side_x, -1.0, -20.0], [20.0, under, 20.0]], [[-20.0, -1.0, -20.0], [-side_x, under, 20.0]]]})
-    res["leg_slot"] = {"half_width": gap, "top": round(crotch, 2)}
+                               [[side_x, side_lo, -20.0], [20.0, under, 20.0]], [[-20.0, side_lo, -20.0], [-side_x, under, 20.0]]]})
+    res["leg_slot"] = {"half_width": gap, "top": round(slot_top, 2)}
     # the collar round the helmet (the user, test 30: the head read as a hooded blob): above the neck, anything farther
     # out than the helmet (its steel near the centre line: the median axis, the 90th percentile radius, + 0.1) is cut
     if a.get("collar_cut", True) and helmet_pts is not None and len(helmet_pts) > 50:
@@ -466,6 +502,9 @@ def main():
     wstats = {}
     fh.transfer_weights(obj, vanilla, a.get("smooth", 12), a.get("influences", 4), None, wstats)
     res["regions"] = rider_weights(obj, bones, a.get("influences", 4), int(a.get("weight_smooth", 12)), plume=crest_pts)
+    feet_game = feet_span(hs.verts(obj))
+    res["feet"] = {"raw": feet_raw, "game": feet_game,
+                   "ratio": round(min(g / r for g, r in zip(feet_game, feet_raw) if r) if any(feet_raw) else 1.0, 3)}
     verts, tris, unweighted = fh.export(obj, a["geometry_out"], a.get("preview_out"))
     res["final"] = {"vertices": verts, "tris": tris, "unweighted_vertices": unweighted, "pieces": fh.count_pieces(obj)}
     # the parts in their nodes' frames

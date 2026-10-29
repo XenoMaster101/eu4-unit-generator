@@ -198,6 +198,35 @@ FIXES: tuple[Fix, ...] = (
         "the bay horse, 2026-10-28: its reddish coat fell in the red cloth's hue window; 40% of it was masked and its "
         "game version came out grey",
         "blender/jobs/bake_colour.py:cloth_mask", ("regress:mask_share", "tests/test_app_flow.py::test_the_regression_set_expects_no_shield_and_a_bare_coat"), "colour"),
+    Fix("standing_fit", "a soldier is built twice: standing for infantry and the gun crew (the skirt whole, the legs "
+        "split below its hem, the side cut above the crotch only, slimmed towards vanilla's infantry, 2,950 triangles) "
+        "and seated for riding; a unit takes the fit its type needs",
+        "T37 and the English soldier, 2026-10-28: on foot the rider build stood hunched and bulky, and its side cut (from "
+        "the ground up) took the English soldier's boots: his legs tapered to spikes",
+        "blender/jobs/fresh_rider.py:skirt_hem", ("regress:feet_ratio",
+                                                  "tests/test_app_flow.py::test_the_regression_set_expects_no_shield_and_a_bare_coat"),
+        "model"),
+    Fix("shield_strapped", "on foot a shield is strapped to the forearm through every sampled frame of the stance's "
+        "idle, moving and attack (the crew plays the same states): its back on the forearm's mean middle, the largest gap "
+        "recorded and checked",
+        "T37 in game, 2026-10-28: placed by the base game's convention for its own small shield, the kite floated in "
+        "front of the cataphract or over his hand",
+        "ref3d/trellis.py:strap_part", ("regress:strap_gap",
+                                        "tests/test_app_flow.py::test_a_shield_is_strapped_to_the_forearm_through_every_frame"),
+        "parts"),
+    Fix("metal_from_the_model", "steel is what TRELLIS.2's metallic map says where that map varies (its 10th percentile "
+        "under 0.2, its 90th over 0.5); elsewhere the colour rule (pale and colourless)",
+        "the English soldier, 2026-10-28: his off-white jack was taken for steel (41%) and darkened from 178 to 125",
+        "blender/jobs/bake_colour.py:baked_metal", ("regress:colour_de",
+                                                    "tests/test_app_flow.py::test_the_game_version_is_shown_tinted_and_compared_by_region"),
+        "colour"),
+    Fix("compare_as_the_game_draws", "the game version is compared with the raw model as the game draws it (the masked "
+        "cloth tinted with its default colour) and colour by colour per region of its outline",
+        "the English soldier, 2026-10-28: his red cross and hose looked grey in the comparison (stored grey for the game "
+        "to tint)",
+        "ref3d/trellis.py:region_colours", ("regress:colour_de",
+                                            "tests/test_app_flow.py::test_the_game_version_is_shown_tinted_and_compared_by_region"),
+        "colour"),
 )
 
 

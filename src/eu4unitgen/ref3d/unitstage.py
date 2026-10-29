@@ -163,6 +163,57 @@ def gallery(folder: Path, name: str, tiers: list[int], labels: dict, eu4: Path, 
     return {"sheet": str(out / "sheet.png"), "images": images}
 
 
+def action_sheet(folder: Path, name: str, tiers: list[int], labels: dict, eu4: Path, utype: str,
+                 states=(("idle", 1), ("walk", 8), ("attack", 1), ("attack", 12)), view: str = "three_quarter") -> dict:
+    """The staged units through the game's close camera at chosen frames of their states (the units' own animations:
+    infantry, and artillery with its crew), each tier side by side (ours, the game's), and a sheet of them. ->
+    {"sheet", "images": {"<state>_<frame>_<tier>": path}}."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    from eu4unitgen.core.character import CharacterSpec
+    from eu4unitgen.export.gallery import GAME_CLOSE
+    from eu4unitgen.export.pipeline import Session, Settings
+    folder = Path(folder)
+    ch = CharacterSpec.load(folder / f"{name}.json")
+    s = Session(Settings(eu4_path=Path(eu4), owned_dlc=[], prefix="hr_", stage_dir=folder / "action_stage"))
+    v = GAME_CLOSE["view"]
+    el = math.atan2(-v[2], math.hypot(v[0], v[1]))
+    hx, hy = VIEWS[view]
+    cam = dict(GAME_CLOSE, view=[hx * math.cos(el), hy * math.cos(el), -math.sin(el)])
+    out = folder / "actions"
+    out.mkdir(exist_ok=True)
+    images = {}
+    for state, frame in states:
+        g = s.gallery(ch.set_spec(), units=[(utype, t) for t in tiers], camera=cam, lit={"normal_maps": True},
+                      state=state, frame=frame)
+        for (_, tier), im in g.images.items():
+            p = out / f"{utype}_{state}_{frame}_{tier}.png"
+            im.save(p)
+            images[f"{state}_{frame}_{tier}"] = str(p)
+    try:
+        font = ImageFont.truetype("arial.ttf", 18)
+    except OSError:
+        font = ImageFont.load_default()
+    cell = 340
+    sheet = Image.new("RGB", (len(states) * cell, len(tiers) * (cell + 28) + 4), (232, 232, 236))
+    d = ImageDraw.Draw(sheet)
+    for ci, (state, frame) in enumerate(states):
+        for ti, tier in enumerate(tiers):
+            p = images.get(f"{state}_{frame}_{tier}")
+            if not p:
+                continue
+            im = Image.open(p).convert("RGB")
+            w, h = im.size
+            im = im.crop((int(w * 0.18), int(h * 0.05), int(w * 0.82), int(h * 0.95)))
+            im.thumbnail((cell, cell))
+            y = ti * (cell + 28) + 28
+            sheet.paste(im, (ci * cell + (cell - im.width) // 2, y))
+            d.text((ci * cell + 6, y - 24), f"{labels.get(tier, tier)}: {utype} {state}, frame {frame}", fill=(20, 20, 24),
+                   font=font)
+    sheet.save(out / f"{utype}_sheet.png")
+    return {"sheet": str(out / f"{utype}_sheet.png"), "images": images}
+
+
 TURNTABLE_FRAMES = 12
 TURNTABLE_SCALE = 11.0  # the view's width in game units: a unit (about 8-10 tall, a spear more) fills the square
 

@@ -262,6 +262,24 @@ def pick_score(c: dict) -> float:
     return round(s, 4)
 
 
+def glb_metallic(glb: Path, out: Path) -> Path | None:
+    """The metallicRoughness image of a .glb's first material (blue: metallic), as a png; None without one."""
+    from PIL import Image
+    data = Path(glb).read_bytes()
+    off, chunks = 12, {}
+    while off < len(data):
+        length, kind = struct.unpack_from("<II", data, off)
+        chunks[kind] = data[off + 8: off + 8 + length]
+        off += 8 + length
+    doc, binary = json.loads(chunks[0x4E4F534A]), chunks[0x004E4942]
+    ref = (doc.get("materials") or [{}])[0].get("pbrMetallicRoughness", {}).get("metallicRoughnessTexture")
+    if not ref:
+        return None
+    bv = doc["bufferViews"][doc["images"][doc["textures"][ref["index"]]["source"]]["bufferView"]]
+    Image.open(io.BytesIO(binary[bv.get("byteOffset", 0): bv.get("byteOffset", 0) + bv["byteLength"]])).save(out)
+    return out
+
+
 def glb_basecolor(glb: Path, out: Path) -> Path:
     """The base-colour image of a .glb's first material (TRELLIS.2 writes one), as a png."""
     from PIL import Image
@@ -321,6 +339,9 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
             if P.get("tassels", True) else None,
             "bones": van["bones"], "country_mask": bool(country_mask), "colour_render": raw["images"]["side"],
             "size": P["size"], **P["bake"], "out_dir": str(out), "name": "horse"}
+    metallic = glb_metallic(glb, out / "raw_metallic.png")
+    if metallic:  # metal from TRELLIS.2's own map where it varies (bake_colour.baked_metal)
+        args["metallic_image"] = str(metallic)
     if emblem:
         args["emblem"] = {"decal": str(Path(emblem).resolve()), "size": 0.7}
     bc = br.run_job("bake_colour", args).result
@@ -332,7 +353,8 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
                 "fresh": {k: fr.get(k) for k in ("fit", "pose", "hair", "reins", "final", "back", "uv", "stages")},
                 "colour": bc, "normal": {k: nb.get(k) for k in ("tilt", "match")}, "textures": tex,
                 "geometry": str(out / "low_geometry.json"), "seconds": round(time.time() - t0, 1)}
-    manifest["compare"] = compare_sheet(br, out, basecolor)
+    manifest["compare"] = compare_sheet(br, out, basecolor, tinted(Path(tex["diffuse"]), Path(bc["specular"]),
+                                                                    bc.get("default_primary"), out / "game_tinted.png"))
     manifest["deform"] = deform(br, out, base)
     manifest["seconds"] = round(time.time() - t0, 1)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str), encoding="utf-8")
@@ -385,7 +407,9 @@ def process_gun(glb: Path, root: Path, blender: str | None = None, cfg: dict | N
                                     # the brightness only: the raw render's hues are dull and the transfer greyed the
                                     # bombard's wood and bronze
                                     "colour_strength": (1.0, 0.0, 0.0),
-                                    "size": P["size"], **PROCESS["bake"], "out_dir": str(out), "name": "gun"}).result
+                                    "size": P["size"], **PROCESS["bake"], "out_dir": str(out), "name": "gun",
+                                    **({"metallic_image": str(m_)} if (m_ := glb_metallic(glb, out / "raw_metallic.png"))
+                                       else {})}).result
     nb = br.run_job("bake_horse", {"low": str(out / "low_geometry.json"), "high": [str(out / "fitted.obj")],
                                    "diffuse": bc["diffuse"], "size": P["size"], **PROCESS["normal"], "preview": False,
                                    "out_dir": str(out), "name": "horseb"}).result
@@ -403,13 +427,37 @@ def process_gun(glb: Path, root: Path, blender: str | None = None, cfg: dict | N
 # (3 passes) and its weights smoothed 24 times: flips idle 30 / moving 29 / attack 41 (12 / 0 / 12 for vanilla's)
 RIDER = {"target_tris": 2600, "part_tris": {"lance": 200, "shield": 400}, "close_voxel": 0.1, "slim_low": 0.75,
          "weight_smooth": 24, "even": 3}
+# the standing fit (infantry and the gun crew; the user, T37/T38): slimmed further towards vanilla's infantry (the
+# rider build stood bulky), and more triangles for the hands and boots (the English soldier's came out as blobs and
+# spikes at 2,600; the budget is the fresh_mesh rule's 3,000)
+STANDING = {"slim_low": 0.6, "target_tris": 2950}
 # the sword in its scabbard (the user, test 30: decoration, never drawn): in the reference's colours
 SWORD = {"hang_deg": 65.0, "length": 6.5, "grip": 1.3, "guard": 1.4, "out": 1.0, "up": 0.2, "forward": 0.6}  # out 0.35: inside the skirt
 SWORD_COLOURS = {"gold": (200, 160, 70), "grip": (60, 38, 26), "scabbard": (150, 38, 32), "steel": (150, 150, 152)}  # lit, 105 read black
 SWORD_GLOSS = {"gold": 12, "grip": 4, "scabbard": 4, "steel": 14}
 
 
-def sword_part(out: Path, frame: dict, hip_half_width: float, cfg: dict | None = None, gold=None) -> dict:
+def sword_colours(pal: dict) -> dict:
+    """The sword in the soldier's own colours (the cataphract's gold and red were fixed; the English soldier's are
+    steel and leather): the hilt fittings his gold if he has any, else his steel; the scabbard his darkest brown;
+    the blade's steel his silver. -> SWORD_COLOURS' keys."""
+    from eu4unitgen.core import palette as palmod
+    out = {}
+    silver = (pal.get("silver") or {}).get("colour") if (pal.get("silver") or {}).get("share", 0) > 0.01 else None
+    if silver:
+        out["steel"] = tuple(int(v) for v in silver)
+        if (pal.get("gold") or {}).get("share", 0) <= 0.005:
+            out["gold"] = tuple(int(v * 0.85) for v in silver)
+    browns = [m["colour"] for m in pal.get("matte") or []
+              if 10 <= palmod.hue(m["colour"]) <= 45 and palmod.lum(m["colour"]) < 120]
+    if browns:
+        out["scabbard"] = tuple(int(v) for v in min(browns, key=palmod.lum))
+        out["grip"] = tuple(int(v * 0.7) for v in out["scabbard"])
+    return out
+
+
+def sword_part(out: Path, frame: dict, hip_half_width: float, cfg: dict | None = None, gold=None,
+               colours: dict | None = None) -> dict:
     """M23: a sword in its scabbard as a rigid belt part (``mesh_belt``, the pelvis bone): our own geometry, plain
     boxes (pommel, grip, crossguard, a tapered scabbard with a gold locket and chape) on a four-swatch texture in
     the reference's colours (gold hilt, dark grip, dark red scabbard). Placed with ``frame`` (rider_frames on
@@ -459,7 +507,7 @@ def sword_part(out: Path, frame: dict, hip_half_width: float, cfg: dict | None =
     # Track P1: no flat-colour placeholders: each swatch worn (grime and grain) with a normal map from the grain;
     # the gold the unit's own (``gold``: the palette's)
     from eu4unitgen.core import gear
-    colours = dict(SWORD_COLOURS, **({"gold": tuple(int(v) for v in gold)} if gold else {}))
+    colours = dict(SWORD_COLOURS, **(colours or {}), **({"gold": tuple(int(v) for v in gold)} if gold else {}))
     S = 256
     diff, spec = Image.new("RGB", (S, S)), Image.new("RGBA", (S, S))
     for zone, (u0, v0) in swatch.items():
@@ -761,7 +809,7 @@ HAND_KIND = {"Right_hand_node": "mesh_weapon", "Left_hand_node": "mesh_shield"} 
 def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None, plume: str = "part",
                   sword: bool = False, kite: bool = True, cfg: dict | None = None, reference: dict | None = None,
                   ai_python: str | None = None, palette_from: dict | None = None, part_method: str = "auto",
-                  part_cache: Path | None = None, shield_side: str = "auto") -> dict:
+                  part_cache: Path | None = None, shield_side: str = "auto", fit: str = "seated") -> dict:
     """A TRELLIS.2 rider (.glb from a front view) into ``root/vNNN`` (SPEC M23): Blender job fresh_rider (the body on
     the infantry skeleton; the lance and shield split off as parts in their hand nodes' frames); bake_colour (the
     body and each part; the cloth as the country colour's mask) and bake_horse (the body's normal and AO); the
@@ -790,13 +838,17 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                                         "elbow": "L_elbow", "shoulder": "L_shoulder",
                                         "bind": node_bind(base, "Left_hand_node")}).result  # the strapped shield's frame
     fr = br.run_job("fresh_rider", {"vanilla": base_arrays(base), "source": {"path": str(Path(glb).resolve()), "merge": 1e-5},
-                                    **{**RIDER, **(cfg or {})}, "shield_frame": frame, "plume": "part" if plume in ("part", "none") else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
+                                    **{**RIDER, **(STANDING if fit == "standing" else {}), **(cfg or {})}, "fit": fit,
+                                    "shield_frame": frame, "plume": "part" if plume in ("part", "none") else "cut", "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
                                     "fitted_out": str(out / "fitted.obj"), "textured_out": str(out / "textured.obj"),
                                     "parts_dir": str(out / "parts")}).result
     fr["head_pinned"] = pin_head(out / "low_geometry.json")
     raw = br.run_job("render_model", {"model": str(Path(glb).resolve()), "engine": "EEVEE", "out_dir": str(out / "raw"),
                                       "name": "raw", "size": 900, "views": {"front": [0, 5]}}).result
     common = {"gloss": PROCESS["gloss"], **PROCESS["bake"], "image": str(basecolor), "colour_render": raw["images"]["front"]}
+    metallic = glb_metallic(glb, out / "raw_metallic.png")
+    if metallic:  # metal from TRELLIS.2's own map where it varies (bake_colour.baked_metal)
+        common["metallic_image"] = str(metallic)
     bc = br.run_job("bake_colour", {**common, "size": PROCESS["size"], "country_mask": bool(country_mask),
                                     "low": str(out / "low_geometry.json"), "high": str(out / "textured.obj"),
                                     "out_dir": str(out), "name": "rider"}).result
@@ -891,10 +943,12 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                                     if (helmet is None or helmet.get("gold_share", 0) > 0.03) else None,
                                     scale=RIDER_ANIM_SCALE, gold=gold, cfg={"shows": shows} if shows else None)
     if sword:  # on the side the shield doesn't cover (the reference hangs it on the shield's side; the user, test 30)
-        hip_frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(anim), "node": "hip",
+        hip_anim = anim if fit != "standing" else anim.with_name("polearm_twohanded_idle.anim")
+        hip_frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(hip_anim), "node": "hip",
                                                 "elbow": "R_thigh", "shoulder": "R_shoulder", "bind": node_bind(base, "hip")}).result
         parts["sword"] = sword_part(out / "parts", hip_frame, float(fr.get("slim", {}).get("hip_half", 1.9)),
-                                    gold=(pal.get("gold") or {}).get("colour"))
+                                    gold=(pal.get("gold") or {}).get("colour") if (pal.get("gold") or {}).get("share", 0) > 0.005
+                                    else None, colours=sword_colours(pal))
     if palette_from and palette_from.get("geometry"):  # the legs clear of the horse it rides
         hp = json.loads(Path(palette_from["geometry"]).read_text(encoding="utf-8"))["p"]
         vp = base_arrays((eu4() / "gfx" / "models" / "Units" / "cavalry_horse.mesh").read_bytes())["p"]
@@ -903,10 +957,11 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     summary = rider_deform(br, out, base, base_file)
     tex ={"diffuse": str(out / "riderb_diffuse.png"), "specular": bc["specular"], "normal": str(out / "riderb_normal.png")}
     # the raw model and the game body from the front, one camera (the quality report's outline against the reference)
-    cmp_ = br.run_job("render_compare", {"models": {"raw": {"obj": str(out / "fitted.obj"), "texture": str(basecolor)},
-                                                    "game": {"obj": str(out / "low.obj"), "texture": tex["diffuse"]}},
-                                         "views": {"front": [0, 0]}, "size": 700, "out_dir": str(out / "compare")}).result
-    manifest = {"stage": "rider game version (M23)", "compare": {"images": {k: dict(cmp_[k]) for k in ("raw", "game")}}, "glb": str(glb), "version": out.name, "fresh": fr, "colour": bc,
+    # the raw model and the game version, one camera per view, their overlay and colours by region (the user, T38:
+    # "the game version must look like TRELLIS.2's model, just simpler"); the game version as the game tints it
+    cmp_ = compare_sheet(br, out, basecolor, tinted(Path(tex["diffuse"]), Path(bc["specular"]), bc.get("default_primary"),
+                                                    out / "game_tinted.png"), views=RIDER_VIEWS)
+    manifest = {"stage": "rider game version (M23)", "compare": cmp_, "glb": str(glb), "version": out.name, "fresh": fr, "colour": bc,
                 "normal": {k: nb.get(k) for k in ("tilt", "match")}, "textures": tex, "parts": parts,
                 "part_checks": checks, "palette": pal,
                 "geometry": str(out / "low_geometry.json"), "deform": summary, "seconds": round(time.time() - t0, 1)}
@@ -1013,6 +1068,49 @@ def foot_part(p: list, kind: str, seated: dict, foot: dict) -> list:
     return [round(x, 5) for v in q for x in v]
 
 
+STRAP = {"out": 0.15, "max_gap": 0.6}  # the shield's back this far out from the forearm; flagged if a frame strays further
+
+
+def strap_part(p: list, seated: dict, frames: list[dict]) -> tuple[list, dict]:
+    """A shield's points (flat x, y, z, in the seated hand frame) strapped to the forearm through every sampled frame
+    of the soldier's animations on foot (T37 in game: placed by the base game's convention for its own small shield,
+    our kite floated in front of him and over the hand). ``frames``: ``rider_frames``' per-frame records on
+    Left_hand_node (the elbow, the outward side and world up, all in the hand's frame). The shield turned so its face
+    (out when seated) points along the frames' mean outward side and its top along their mean up, its back's centre on
+    the forearm's mean middle, ``STRAP["out"]`` outwards. -> (the new flat points, the check: each frame's gap
+    between the forearm's middle and the shield's back plane, and how far the middle lies off the shield)."""
+    pts = [p[i:i + 3] for i in range(0, len(p), 3)]
+    mean = lambda vs: [sum(v[k] for v in vs) / len(vs) for k in range(3)]  # noqa: E731
+    out = _unit(mean([f["out"] for f in frames]))
+    up = mean([f["up"] for f in frames])
+    A, B = _basis(seated["out"], seated["up"]), _basis(out, up)
+    q = []
+    for v in pts:
+        c = [sum(v[j] * a[j] for j in range(3)) for a in A]
+        q.append([sum(c[k] * B[k][j] for k in range(3)) for j in range(3)])
+    d = [sum(v[k] * B[0][k] for k in range(3)) for v in q]  # along the face's outward normal
+    back = [v for v, dv in zip(q, d) if dv <= min(d) + 0.2 * (max(d) - min(d))]
+    centre = mean(back)
+    mids = [[0.5 * f["elbow"][k] for k in range(3)] for f in frames]
+    strap = [mean(mids)[k] + STRAP["out"] * B[0][k] for k in range(3)]
+    shift = [strap[k] - centre[k] for k in range(3)]
+    q = [[v[k] + shift[k] for k in range(3)] for v in q]
+    # the check: each frame's forearm middle against the back plane (through ``strap``, normal B[0]) and the shield's
+    # extent across it (B[1] up, B[2] across)
+    half = [max(abs(sum((v[k] - strap[k]) * B[i][k] for k in range(3))) for v in q) for i in (1, 2)]
+    gaps, off = [], []
+    for m_ in mids:
+        rel = [m_[k] - strap[k] for k in range(3)]
+        gaps.append(abs(sum(rel[k] * B[0][k] for k in range(3))))
+        off.append(max(abs(sum(rel[k] * B[i][k] for k in range(3))) - half[j] for j, i in enumerate((1, 2))))
+    check = {"frames": len(frames), "max_gap": round(max(gaps), 3), "mean_gap": round(sum(gaps) / len(gaps), 3),
+             "max_off_shield": round(max(off), 3), "ok": max(gaps) <= STRAP["max_gap"] and max(off) <= 0.0}
+    return [round(x, 5) for v in q for x in v], check
+
+
+FOOT_ANIMS = ("idle", "moving", "attack")  # the crew is the infantry entity: it plays these same states at the gun
+
+
 def to_foot(vdir: Path, blender: str | None = None) -> dict:
     """A soldier's built version (``vdir``) for use on foot: each hand part re-placed by ``foot_part`` into a
     ``<key>_foot.json`` beside it, the manifest's part geometry pointed at it (``on_foot``: the stance and frames).
@@ -1039,7 +1137,19 @@ def to_foot(vdir: Path, blender: str | None = None) -> dict:
                     "shoulder": f"{side}_shoulder", "bind": node_bind(base, node)}).result
         src = Path(part["mesh"]["geometry"])
         g = json.loads(src.read_text(encoding="utf-8"))
-        g["p"] = foot_part(g["p"], part["kind"], frames[("seated", node)], frames[("foot", node)])
+        if part["kind"] == "mesh_shield":  # strapped to the forearm in every frame it plays on foot and as crew
+            per = []
+            for anim in [f"{stance}_{x}" for x in FOOT_ANIMS]:
+                f = anims / f"{anim}.anim"
+                if f.is_file():
+                    r = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(f), "node": node,
+                                                    "elbow": f"{side}_elbow", "shoulder": f"{side}_shoulder",
+                                                    "bind": node_bind(base, node), "frames": "all"}).result
+                    per += [{**x, "anim": anim} for x in r.get("per_frame") or []]
+            g["p"], strap_check = strap_part(g["p"], frames[("seated", node)], per)
+            m.setdefault("on_foot_checks", {})[key] = strap_check
+        else:
+            g["p"] = foot_part(g["p"], part["kind"], frames[("seated", node)], frames[("foot", node)])
         dst = src.with_name(f"{key}_foot.json")
         dst.write_text(json.dumps(g), encoding="utf-8")
         part["mesh"]["seated_geometry"] = str(src)  # the rider's (ref3d.assemble seats the soldier on a horse)
@@ -1148,12 +1258,65 @@ def shield_from_reference(br, parts_dir: Path, frame: dict, tall: float, crop: d
     return entry, record
 
 
-def compare_sheet(br, out: Path, basecolor: Path) -> dict:
-    """The raw model (fitted only) and the game version through one camera per view, and their overlay."""
+def tinted(diffuse: Path, specular: Path, primary, out: Path) -> Path:
+    """The diffuse as the game draws it with its country colour ``primary`` (PdxMeshColor: lerp(col, col * spec.r *
+    Primary, spec.r)): the masked cloth is stored grey for the game to tint, so a render of the plain diffuse showed the
+    English soldier's red cross and hose grey. Also the "country colours off" look (the cloth keeps the picture's
+    colour: ``primary`` the default)."""
+    from PIL import Image, ImageChops
+    d = Image.open(diffuse).convert("RGB")
+    r = Image.open(specular).convert("RGBA").getchannel("R").resize(d.size)
+    if r.getextrema()[1] == 0 or not primary:
+        d.save(out)
+        return out
+    full = ImageChops.multiply(d, Image.new("RGB", d.size, tuple(int(c) for c in primary[:3])))
+    once = Image.composite(ImageChops.multiply(full, Image.merge("RGB", (r, r, r))), d, r)  # lerp by r of col*r*P
+    once.save(out)
+    return out
+
+
+REGIONS = (("top", 0.0, 0.2), ("middle", 0.2, 0.55), ("bottom", 0.55, 1.0))  # head; body; legs (of the outline's height)
+
+
+def region_colours(raw: Path, game: Path) -> dict:
+    """The raw model's and the game version's colours compared by region (one camera): in each height band of their
+    outline, the median colour of the pixels both show, and the distance (CIE76) between them. -> {region: dE}."""
+    from PIL import Image
+
+    from eu4unitgen.core.palette import delta_e
+    a, b = Image.open(raw).convert("RGBA"), Image.open(game).convert("RGBA")
+    both = Image.composite(Image.new("L", a.size, 255), Image.new("L", a.size, 0),
+                           Image.eval(a.getchannel("A"), lambda v: 255 if v > 127 else 0)).point(lambda v: v)
+    both = Image.composite(both, Image.new("L", a.size, 0), Image.eval(b.getchannel("A"), lambda v: 255 if v > 127 else 0))
+    box = both.getbbox()
+    if not box:
+        return {}
+    out = {}
+    ar, br_ = list(a.convert("RGB").getdata()), list(b.convert("RGB").getdata())
+    mask = list(both.getdata())
+    w = a.width
+    for name, lo, hi in REGIONS:
+        y0, y1 = int(box[1] + lo * (box[3] - box[1])), int(box[1] + hi * (box[3] - box[1]))
+        idx = [y * w + x for y in range(y0, y1) for x in range(box[0], box[2], 2) if mask[y * w + x]]
+        if len(idx) < 50:
+            continue
+        med = lambda px: [sorted(px[i][k] for i in idx)[len(idx) // 2] for k in range(3)]  # noqa: E731
+        out[name] = round(delta_e(med(ar), med(br_)), 1)
+    return out
+
+
+RIDER_VIEWS = {"front": [0, 0], "side": [90, 0], "front34": [45, 12]}  # a person faces -Z; a horse is seen from the side
+
+
+def compare_sheet(br, out: Path, basecolor: Path, game_texture: Path | None = None, views: dict | None = None) -> dict:
+    """The raw model (fitted only) and the game version through one camera per view, their overlay, and their
+    colours by region (``region_colours``). ``game_texture``: the game version as the game tints it (``tinted``)."""
     from PIL import Image, ImageChops, ImageDraw, ImageFont
-    views = {"side": [90, 0], "front34": [45, 12], "rear34": [225, 12]}
+    views = views or {"side": [90, 0], "front34": [45, 12], "rear34": [225, 12]}
+    colour_de = {}
+    game_tex = game_texture or out / "horseb_diffuse.png"
     r = br.run_job("render_compare", {"models": {"raw": {"obj": str(out / "fitted.obj"), "texture": str(basecolor)},
-                                                 "game": {"obj": str(out / "low.obj"), "texture": str(out / "horseb_diffuse.png")}},
+                                                 "game": {"obj": str(out / "low.obj"), "texture": str(game_tex)}},
                                       "views": views, "size": 900, "out_dir": str(out / "compare")}).result
     try:
         font = ImageFont.truetype("arial.ttf", 22)
@@ -1173,6 +1336,7 @@ def compare_sheet(br, out: Path, basecolor: Path) -> dict:
         ov.paste((150, 150, 150), mask=ImageChops.multiply(a1, a2))
         both, union = ImageChops.multiply(a1, a2).histogram()[255], ImageChops.lighter(a1, a2).histogram()[255]
         iou[v] = round(both / max(union, 1), 3)
+        colour_de[v] = region_colours(r["raw"][v], r["game"][v])
         y = P + i * (C + H + P)
         for j, (label, im) in enumerate([(f"raw TRELLIS.2, fitted only ({v})", raw), (f"game version ({v})", game),
                                          (f"overlay: grey both, red raw only, blue game only; IoU {iou[v]:.3f}", ov)]):
@@ -1181,7 +1345,8 @@ def compare_sheet(br, out: Path, basecolor: Path) -> dict:
             sheet.paste(cell.convert("RGB"), (P + j * (C + P), y + H))
             d.text((P + j * (C + P) + 4, y + 6), label, fill=(20, 20, 24), font=font)
     sheet.save(out / "compare_sheet.png")
-    return {"sheet": str(out / "compare_sheet.png"), "iou": iou, "images": {k: dict(r[k]) for k in ("raw", "game")}}
+    return {"sheet": str(out / "compare_sheet.png"), "iou": iou, "colour_de": colour_de,
+            "images": {k: dict(r[k]) for k in ("raw", "game")}}
 
 
 def deform(br, out: Path, base: bytes) -> dict:

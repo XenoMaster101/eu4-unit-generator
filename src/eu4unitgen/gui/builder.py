@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QScrollArea, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from eu4unitgen.gui.base import Page, card, framed, ghost, label, primary, thumb
@@ -126,6 +126,11 @@ class BuildUnitScreen(Page):
         self.name.textChanged.connect(lambda *_: self._ready())
         bl.addWidget(self.name)
         self.why = label("", "hint")
+        self.own_colours = QCheckBox("Let each country paint its cloth")
+        self.own_colours.setChecked(True)
+        self.own_colours.setToolTip("On: the cloth takes each country's unit colour in game, like the game's own units. "
+                                    "Off: it keeps your pictures' colours everywhere.")
+        bl.addWidget(self.own_colours)
         bl.addWidget(self.why, 1)
         bl.addWidget(ghost("Make a part", lambda: self.window_.go("new"),
                            "Make a horse, a soldier or a gun from a picture (needs the AI setup)"))
@@ -338,7 +343,7 @@ class BuildUnitScreen(Page):
             return self.show_message(self._problem(), error=True)
         try:
             f = library.new_unit(self.name.text().strip(), self.utype, self.tiers(), self.tag.text().strip(),
-                                 self.gfx.currentData() or "")
+                                 self.gfx.currentData() or "", country_colours=self.own_colours.isChecked())
         except (ValueError, FileExistsError, OSError) as exc:
             return self.show_message(str(exc), error=True)
         from eu4unitgen.ref3d import flow

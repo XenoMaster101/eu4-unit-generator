@@ -306,10 +306,15 @@ def stage_build(folder: Path, req: dict, cfg) -> dict:
                             country_mask=opts.get("country_mask", bool(o.get("country_mask"))), cfg=opts.get("cfg"))
     else:  # a soldier alone has no horse: its own palette, its legs as built
         cache = glb.parent / "parts_cache"  # a cavalry unit shares its soldier's part models (cached by crop)
+        soldier = req["kind"] == "soldier"
         m = trellis.process_rider(glb, folder / "trellis" / "game", palette_from=horse_textures(req.get("horse")),
-                                  part_cache=cache, **opts)
-        if req["kind"] == "soldier":  # on foot: its hand parts in the base game's convention for its stance
+                                  part_cache=cache, fit="standing" if soldier else "seated", **opts)
+        if soldier:  # two fits (the user, T37): standing for infantry and the crew, its hand parts strapped for its
+            # stance; seated for riding (ref3d.assemble seats it on a horse from this one)
             trellis.to_foot(folder / "trellis" / "game" / m["version"], cfg.blender())
+            seat = trellis.process_rider(glb, folder / "trellis" / "game_seated", palette_from=None, part_cache=cache,
+                                         fit="seated", **opts)
+            return {"version": m["version"], "seated": seat["version"]}
     return {"version": m["version"]}
 
 
@@ -319,7 +324,10 @@ def stage_finish(folder: Path, req: dict, cfg) -> dict:
     if v is None:
         raise RuntimeError("there is no built version to finish")
     ed.finish(v, req.get("edits"), body_kind(req["kind"]), folder / "finished")
-    return {"from": v.name}
+    seated = _latest(folder / "trellis" / "game_seated") if req["kind"] == "soldier" else None
+    if seated is not None:  # the seated fit, with the same edits, for riding
+        ed.finish(seated, req.get("edits"), body_kind(req["kind"]), folder / "finished_seated")
+    return {"from": v.name, **({"seated": seated.name} if seated else {})}
 
 
 def gun_report(m: dict) -> dict:

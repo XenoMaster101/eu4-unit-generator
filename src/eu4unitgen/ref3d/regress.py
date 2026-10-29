@@ -25,12 +25,18 @@ SET = {
     "cataphract_rider": {"kind": "rider", "palette_from": "cataphract_horse"},
     # the bay coat kept out of the country mask (its reddish shades were masked: 40% of the horse, 2026-10-28)
     "horse2_mask": {"kind": "horse", "country_mask": True, "from": "horse2"},
-    # a soldier without a shield, holding a poleaxe (its forearm was cut off as a shield, its blade left behind)
-    "english_soldier": {"kind": "rider"},
+    # a soldier without a shield, holding a poleaxe (its forearm was cut off as a shield, its blade left behind);
+    # standing (the user, T38): his boots kept, his colours the raw model's
+    "english_soldier": {"kind": "soldier"},
+    # the cataphract on foot (the user, T37: his shield floated, he stood hunched in the rider build): standing, his
+    # shield strapped to the forearm through every frame
+    "cataphract_foot": {"kind": "soldier", "from": "cataphract_rider"},
 }
 # what must hold whatever the baseline says: (metric, test, value)
 EXPECT = {"horse2_mask": [("mask_share", "at most", 0.05)],
-          "english_soldier": [("parts", "without", "shield"), ("parts", "with", "lance")]}
+          "english_soldier": [("parts", "without", "shield"), ("parts", "with", "lance"), ("feet_ratio", "at least", 0.75),
+                              ("colour_de_front_middle", "at most", 15.0)],
+          "cataphract_foot": [("strap_gap", "at most", 0.6), ("parts", "with", "shield")]}
 # a metric worse than the baseline by more than this is flagged ("higher": bigger is better)
 RULES = {"flips": ("lower", lambda b: max(6.0, 0.25 * b)), "max": ("lower", lambda b: 1.0),
          "iou": ("higher", lambda b: 0.02), "ref_iou": ("higher", lambda b: 0.02), "uv_used": ("higher", lambda b: 0.03),
@@ -39,7 +45,9 @@ RULES = {"flips": ("lower", lambda b: max(6.0, 0.25 * b)), "max": ("lower", lamb
          "bake_reached": ("higher", lambda b: 0.02), "silver_cap": ("lower", lambda b: 0.03),
          "gloss_gold": ("higher", lambda b: max(0.01, 0.4 * b)), "gloss_silver": ("higher", lambda b: max(0.01, 0.4 * b)),
          "head_marks": ("higher", lambda b: 0.5), "emblem_texels": ("higher", lambda b: 0.25 * b),
-         "locate_fit": ("higher", lambda b: 0.05), "group_flips": ("lower", lambda b: max(5.0, 0.3 * b))}
+         "locate_fit": ("higher", lambda b: 0.05), "group_flips": ("lower", lambda b: max(5.0, 0.3 * b)),
+         "colour_de": ("lower", lambda b: 4.0), "feet_ratio": ("higher", lambda b: 0.08),
+         "strap_gap": ("lower", lambda b: 0.2)}
 # colours: compared by distance from the baseline, either way (Lab for colours, plain for shares)
 NEAR = {"cloth_primary": 8.0, "mask_share": 0.04}
 # measures that are there or not (True in the baseline, False now: worse)
@@ -49,7 +57,8 @@ METRICS = ("tris", "flips_idle", "flips_moving", "flips_attack", "max_idle", "ma
            "iou_front34", "iou_rear34", "uv_used", "ref_iou", "parts", "part_iou_shield", "part_de_shield",
            "part_method_shield", "seat_gap", "side_ratio", "bake_reached", "silver_cap", "gloss_gold", "gloss_silver",
            "head_band", "head_marks", "emblem_texels", "reins", "mane", "tail", "locate_fit", "group_flips_head",
-           "group_flips_arms", "group_flips_legs", "group_flips_torso", "cloth_primary", "mask_share")
+           "group_flips_arms", "group_flips_legs", "group_flips_torso", "cloth_primary", "mask_share", "colour_de",
+           "feet_ratio", "strap_gap")
 NOTE_ONLY = {"tris": 0.03}  # changes reported, never flagged
 
 
@@ -74,6 +83,8 @@ def expectations(name: str, m: dict) -> list[str]:
         have = m.get(metric)
         if test == "at most" and not (have is not None and have <= value) and not (have is None and metric == "mask_share"):
             out.append(f"{metric}: {have}, must be at most {value}")
+        elif test == "at least" and not (have is not None and have >= value):
+            out.append(f"{metric}: {have}, must be at least {value}")
         elif test == "without" and value in (have or []):
             out.append(f"{metric}: has {value}, must not")
         elif test == "with" and value not in (have or []):
@@ -142,6 +153,15 @@ def metrics(manifest: dict, kind: str, quality: dict | None = None) -> dict:
                 m[f"part_iou_{key}"] = used["iou"]
                 m[f"part_de_{key}"] = used["colour_de"]
             m[f"part_method_{key}"] = rec.get("method")
+    for view, regions in ((manifest.get("compare") or {}).get("colour_de") or {}).items():
+        for region, de in regions.items():  # the game version's colours against the raw model's, by region
+            m[f"colour_de_{view}_{region}"] = de
+    feet = ((manifest.get("fresh") or {}).get("feet") or {})
+    if feet.get("ratio") is not None:
+        m["feet_ratio"] = feet["ratio"]
+    straps = [c.get("max_gap") for c in (manifest.get("on_foot_checks") or {}).values() if c.get("max_gap") is not None]
+    if straps:
+        m["strap_gap"] = max(straps)
     sil = ((quality or {}).get("measures") or {}).get("silhouette") or {}
     if sil.get("iou") is not None:
         m["ref_iou"] = sil["iou"]
@@ -215,14 +235,16 @@ def build(name: str, built: dict, blender: str | None = None) -> Path:
                   "primary": (hm.get("colour") or {}).get("default_primary"), "geometry": hm["geometry"]}
         m = trellis.process_rider(src / "raw.glb", src / "runs", blender=blender, palette_from=pf,
                                   reference={"image": str(src / "input" / "input_rgb.png"), "fg": str(src / "input" / "input_fg.png")},
-                                  part_cache=src / "parts_cache")
+                                  part_cache=src / "parts_cache", fit="standing" if s["kind"] == "soldier" else "seated")
+        if s["kind"] == "soldier":
+            m = trellis.to_foot(Path(m["geometry"]).parent, blender)
     return Path(m["geometry"]).parent
 
 
 def measure(name: str, vdir: Path) -> tuple[dict, dict]:
     """(metrics, the quality report) of a built version."""
     from eu4unitgen.ref3d import quality as q
-    kind = SET[name]["kind"]
+    kind = "rider" if SET[name]["kind"] == "soldier" else SET[name]["kind"]
     manifest = json.loads((Path(vdir) / "manifest.json").read_text(encoding="utf-8"))
     view = "side" if kind == "horse" else "front"
     game = ((manifest.get("compare") or {}).get("images") or {}).get("game", {}).get(view)

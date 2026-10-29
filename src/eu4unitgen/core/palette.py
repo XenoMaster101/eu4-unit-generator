@@ -118,5 +118,12 @@ def snap(colour, palette: list, max_de: float = 25.0) -> tuple[int, int, int]:
     return tuple(best) if best is not None and delta_e(colour, best) <= max_de else tuple(int(x) for x in colour[:3])
 
 
+def hue(c) -> float:
+    """A colour's hue in degrees (0-360; the same formula as the bake's)."""
+    import math
+    r, g, b = (float(x) for x in c[:3])
+    return (math.degrees(math.atan2(math.sqrt(3) * (g - b), 2 * r - g - b)) + 360) % 360
+
+
 def lum(c) -> float:
     return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]

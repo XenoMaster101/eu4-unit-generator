@@ -460,8 +460,9 @@ class Session:
 
     def gallery(self, spec: SetSpec, units: list[tuple[str, int]] | None = None, size: int = 256,
                 result: SetResult | None = None, thumbs: int = 0, camera: dict | None = None,
-                lit: dict | None = None, dump_dir: Path | None = None) -> "Gallery":
-        """Whole units, posed at their idle frame, as the game assembles them (Track F, F9): the
+                lit: dict | None = None, dump_dir: Path | None = None, state: str = "idle",
+                frame: int = 1) -> "Gallery":
+        """Whole units, posed at ``frame`` of their ``state`` (idle, walk, attack), as the game assembles them (Track F, F9): the
         generated set (``result``: a validation already run, else one now) over the mod and the
         game, each unit's entity tree staged and rendered in one background Blender run.
         ``units``: (unit type, tier), default all 12. ``camera``: one fixed framing for every tile
@@ -498,14 +499,14 @@ class Session:
                 for utype, tier in wanted:
                     name = f"{utype}_{tier}"
                     try:
-                        tree = entity_tree(world, naming.unit_entity(owner, utype, tier))
+                        tree = entity_tree(world, naming.unit_entity(owner, utype, tier), state)
                         parts[(utype, tier)] = parts_of(tree)
                         jobs.append({"name": name, "root": stage(tree, world, colours, folder / name)})
                     except GalleryError as exc:
                         notes.append(f"{utype} tier {tier}: {exc}")
                 if jobs:
                     try:
-                        res = self.runner().run_job("render_unit", {"units": jobs, "frame": 1, "size": size,
+                        res = self.runner().run_job("render_unit", {"units": jobs, "frame": int(frame), "size": size,
                                                                     "thumbs": thumbs, "out_dir": tmp, "camera": camera,
                                                                     "lit": lit, "dump": bool(dump_dir)},
                                                  timeout=900)

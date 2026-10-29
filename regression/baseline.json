@@ -207,59 +207,6 @@
      "uv_used"
     ]
    }
-  },
-  "english_soldier": {
-   "from": "regression run 20261028-222636",
-   "metrics": {
-    "tris": 2600,
-    "flips_idle": 38,
-    "max_idle": 2.43,
-    "flips_moving": 23,
-    "max_moving": 1.7,
-    "flips_attack": 60,
-    "max_attack": 3.23,
-    "cloth_primary": [
-     255,
-     115,
-     111
-    ],
-    "mask_share": 0.124,
-    "bake_reached": 1.0,
-    "gloss_silver": 0.382,
-    "gloss_gold": 0.0,
-    "parts": [
-     "lance"
-    ],
-    "group_flips_head": 0,
-    "group_flips_arms": 10,
-    "group_flips_legs": 1,
-    "group_flips_torso": 27,
-    "locate_fit": 0.666,
-    "ref_iou": 0.393
-   },
-   "added": {
-    "20261028-222636": [
-     "bake_reached",
-     "cloth_primary",
-     "flips_attack",
-     "flips_idle",
-     "flips_moving",
-     "gloss_gold",
-     "gloss_silver",
-     "group_flips_arms",
-     "group_flips_head",
-     "group_flips_legs",
-     "group_flips_torso",
-     "locate_fit",
-     "mask_share",
-     "max_attack",
-     "max_idle",
-     "max_moving",
-     "parts",
-     "ref_iou",
-     "tris"
-    ]
-   }
   }
  },
  "note": "the regression set's last good numbers (Track P1.4); derived numbers only, no assets"

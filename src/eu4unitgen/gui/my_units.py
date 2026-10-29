@@ -265,7 +265,10 @@ class UnitDetail(QWidget):
         self.copy_btn = ghost("Make a copy", self._copy, "A copy of this starter part in your library, to edit")
         self.tags_btn = ghost("Tags", lambda: self._toggle(self.tags_box), "Its style and regions: they drive the "
                               "suggestions when you build a unit for a country")
-        for b in (self.ride_btn, self.add_btn, self.resume, self.edit_btn, self.tags_btn, self.copy_btn, self.details_btn):
+        self.colours_btn = ghost("", self._toggle_colours, "On: the cloth takes each country's unit colour in game. "
+                                 "Off: it keeps the pictures' colours. Switching rebuilds the unit (a few minutes, no AI).")
+        for b in (self.ride_btn, self.add_btn, self.resume, self.edit_btn, self.tags_btn, self.colours_btn, self.copy_btn,
+                  self.details_btn):
             actions.addWidget(b)
         actions.addStretch(1)
         actions.addWidget(self.del_btn)
@@ -396,6 +399,11 @@ class UnitDetail(QWidget):
         self.ride_btn.setVisible(part)
         self.ride_btn.setEnabled(done)
         self.tags_btn.setVisible(part)
+        self.colours_btn.setVisible(kind == "unit")
+        if kind == "unit":
+            on = req.get("country_colours", True)
+            self.colours_btn.setText("Country colours: on" if on else "Country colours: off")
+            self.colours_btn.setEnabled(state != "running")
         self.copy_btn.setVisible(False)
         for b in (self.del_btn, self.sheet_btn, self.folder_btn, self.details_btn):
             b.setVisible(True)
@@ -495,6 +503,21 @@ class UnitDetail(QWidget):
         self.quality.setText("".join(rows))
         self.show_message("Read-only: it comes with the app. Use it in a unit as it is, or make a copy to change its "
                           "colours, emblem or tags.")
+
+    def _toggle_colours(self) -> None:
+        """A unit's "Let each country paint its cloth", flipped: the unit put together again with it."""
+        import json as _json
+
+        from eu4unitgen.ref3d import flow
+        f = Path(self.folder)
+        req = flow.request(f)
+        req["country_colours"] = not req.get("country_colours", True)
+        (f / "request.json").write_text(_json.dumps(req, indent=1), encoding="utf-8")
+        flow.redo(f, "assemble")
+        flow.start(f)
+        self.show_message("Putting it together again " + ("with each country's colours." if req["country_colours"]
+                                                            else "in your pictures' own colours."))
+        QTimer.singleShot(1500, self.refresh)
 
     def _set_summary(self, dot: str, words: str) -> None:
         from eu4unitgen.gui.theme import tokens
@@ -598,6 +621,8 @@ class UnitDetail(QWidget):
         self.e_bright.setRange(70, 130)
         self.e_bright.setValue(100)
         self.e_bright.setToolTip("Brightness of every texture, 70-130% (seconds). Units that are too dark vanish at map zoom.")
+        self.e_sword = QCheckBox("Sword at the hip")
+        self.e_sword.setToolTip("A sword in its scabbard on the belt, in the soldier's own colours (rebuilds, a few minutes)")
         self.e_side = QComboBox()
         for text, key in (("as in the picture", "auto"), ("left forearm", "left"), ("right forearm", "right")):
             self.e_side.addItem(text, key)
@@ -607,7 +632,7 @@ class UnitDetail(QWidget):
         self.e_hem.setRange(50, 100)
         self.e_hem.setValue(100)
         self.e_hem.setToolTip("How far the cloth hangs: 50-100% of what was built (seconds)")
-        self.e_rows = [("3D model", self.e_cand), ("", self.e_plume), ("", self.e_tassels), ("", self.e_mask),
+        self.e_rows = [("3D model", self.e_cand), ("", self.e_plume), ("", self.e_sword), ("", self.e_tassels), ("", self.e_mask),
                        ("Emblem", self.e_emblem), ("", self.e_colour), ("Brightness", self.e_bright),
                        ("Shield side", self.e_side), ("Hem length", self.e_hem)]
         self.e_labels = {}
@@ -626,7 +651,8 @@ class UnitDetail(QWidget):
         from eu4unitgen.ref3d import flow
         kind = req["kind"]
         person = kind != "horse"
-        shown = {self.e_plume: person, self.e_side: person, self.e_tassels: not person, self.e_emblem: not person,
+        shown = {self.e_plume: person, self.e_side: person, self.e_sword: person, self.e_tassels: not person,
+                 self.e_emblem: not person,
                  self.e_hem: True, self.e_cand: kind != "cavalry"}
         for w, vis in shown.items():
             w.setVisible(vis)
@@ -645,6 +671,7 @@ class UnitDetail(QWidget):
             self.e_cand.addItem("one model", None)
         self.e_cand.blockSignals(False)
         self.e_plume.setChecked(e.get("plume", True))
+        self.e_sword.setChecked(bool(e.get("sword", False)))
         self.e_tassels.setChecked(e.get("tassels", True))
         self.e_mask.setChecked(bool(e.get("country_mask", (req.get("options") or {}).get("country_mask"))))
         self.e_bright.setValue(int(100 * float(e.get("brightness", 1.0))))
@@ -668,7 +695,7 @@ class UnitDetail(QWidget):
                 self.e_emblem.setCurrentIndex(0)
 
     def current_edits(self) -> dict:
-        e = {"plume": self.e_plume.isChecked(), "tassels": self.e_tassels.isChecked(),
+        e = {"plume": self.e_plume.isChecked(), "tassels": self.e_tassels.isChecked(), "sword": self.e_sword.isChecked(),
              "country_mask": self.e_mask.isChecked(), "brightness": self.e_bright.value() / 100.0,
              "shield_side": self.e_side.currentData(), "hem": self.e_hem.value() / 100.0, "cloth_colour": self.cloth,
              "candidate": self.e_cand.currentData()}

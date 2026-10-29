@@ -171,9 +171,12 @@ def unit_entities(owner: str, chain: BaseChain, naming: Naming, version: int) ->
 
         if not inf.get("pdxmesh") or not inf.get("weapon_node"):
             raise GenerationError(f"{inf['entity']}: no pdxmesh or weapon attach to copy")
+        # every attach of the base infantry (a spearman's shield too: the Indian infantry lost its shield when only the
+        # weapon was copied, 2026-10-28)
+        attaches = chain.flat(inf["entity"])["attaches"] or [{"name": None, "nodes": [(inf["weapon_node"],
+                                                                                       inf["weapon_entity"])]}]
         out.append(_entity(
-            infantry, version=version, pdxmesh=inf["pdxmesh"], states=chain.states(inf["entity"]),
-            attaches=[{"name": None, "nodes": [(inf["weapon_node"], inf["weapon_entity"])]}]))
+            infantry, version=version, pdxmesh=inf["pdxmesh"], states=chain.states(inf["entity"]), attaches=attaches))
 
         # Rider: the vanilla rider's horse_* states and weapon, on this tier's infantry pdxmesh
         # (same .mesh as the infantry, SPEC §5, §7.2).

@@ -26,8 +26,8 @@ from pathlib import Path
 from PIL import Image
 
 DEFAULTS = {"plume": True, "tassels": True, "emblem": None, "country_mask": None, "cloth_colour": None,
-            "brightness": 1.0, "shield_side": "auto", "hem": 1.0, "candidate": None}
-BUILD = ("tassels", "emblem", "country_mask", "shield_side", "candidate")
+            "brightness": 1.0, "shield_side": "auto", "hem": 1.0, "candidate": None, "sword": False}
+BUILD = ("tassels", "emblem", "country_mask", "shield_side", "candidate", "sword")
 FINISH = ("plume", "cloth_colour", "brightness", "hem")
 
 
@@ -56,7 +56,7 @@ def build_options(edits: dict | None, kind: str) -> dict:
         if e["emblem"]:
             out["emblem"] = e["emblem"]
         return out
-    out = {"shield_side": e["shield_side"], "plume": "part"}
+    out = {"shield_side": e["shield_side"], "plume": "part", "sword": bool(e["sword"])}
     if e["country_mask"] is not None:
         out["country_mask"] = bool(e["country_mask"])
     return out

@@ -288,7 +288,8 @@ def suggest(kind: str, gfx: str | None = None, tech_group: str | None = None, cu
 
 
 # ------------------------------------------------------------------ units
-def new_unit(name: str, utype: str, tiers: dict, country_tag: str = "", gfx: str = "") -> Path:
+def new_unit(name: str, utype: str, tiers: dict, country_tag: str = "", gfx: str = "",
+             country_colours: bool = True) -> Path:
     """A unit (kind ``unit``): ``tiers`` {1: {"horse": ref, "soldier": ref, "gun": ref}}; empty tiers are the game's
     own. Refused if the name is taken, the type is unknown, or no tier has its parts."""
     from eu4unitgen.ref3d import flow
@@ -318,6 +319,7 @@ def new_unit(name: str, utype: str, tiers: dict, country_tag: str = "", gfx: str
     first = part(next(iter(clean[min(clean, key=int)].values())))
     req = {"schema": 1, "name": name, "kind": "unit", "type": utype, "tiers": clean, "country": country_tag.upper(),
            "gfx": gfx, "rights": rights, "image": first.image if first else None, "tier": int(min(clean, key=int)),
+           "country_colours": bool(country_colours),
            "created": time.time()}
     (f / "request.json").write_text(json.dumps(req, indent=1), encoding="utf-8")
     return f

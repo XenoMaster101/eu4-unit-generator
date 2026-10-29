@@ -1,9 +1,11 @@
 """Track L3: a unit put together from library parts (a run of kind ``unit``; ``core.library.new_unit`` writes its
 request). No AI: the parts' built files go into a test-mod spec; Blender only draws the previews.
 
-  infantry    each tier's soldier on foot (its stance's animations, its hand parts in the on-foot convention)
-  cavalry     each tier's horse, and its soldier as the rider: the seated hand parts (``seated_parts``) and the
-              legs spread for that horse's width (``trellis.leg_spread``; geometry only, on a copy)
+  infantry    each tier's soldier on foot: its standing fit (its stance's animations, its shield strapped to the
+              forearm through them)
+  cavalry     each tier's horse, and its soldier as the rider: its seated fit (``finished_seated``; older soldiers:
+              the seated hand parts, ``seated_geometry``) and the legs spread for that horse's width
+              (``trellis.leg_spread``; geometry only, on a copy)
   artillery   each tier's crew is the tier's infantry entity (the base game attaches ``<TAG>_INFANTRY_<n>`` at the
               gun's ``infantry_node``), so the crew soldier is that tier's infantry too; the gun is a gun part (its
               own cannon entity, Track A) or the game's own
@@ -66,6 +68,9 @@ def rider_for(soldier: Path, subject: dict, horse: Path | None, out: Path) -> tu
     for a horse wider than the game's, its legs spread (on a copy of its geometry). -> rider_entry's pair."""
     from eu4unitgen.ref3d import trellis
     out.mkdir(parents=True, exist_ok=True)
+    seated_fit = soldier.parent / "finished_seated"  # the soldier's seated fit (the standing one is for foot)
+    if (seated_fit / "manifest.json").is_file():
+        soldier = seated_fit
     m = json.loads((soldier / "manifest.json").read_text(encoding="utf-8"))
     for p in (m.get("parts") or {}).values():
         if p.get("kind") in HAND_KINDS and "mesh" in p:
@@ -85,6 +90,31 @@ def rider_for(soldier: Path, subject: dict, horse: Path | None, out: Path) -> tu
     return unitstage.rider_entry(out, subject)
 
 
+def own_colours(entry: dict, parts: list, primary, out: Path) -> None:
+    """Country colours off for this unit (the user, T38: "Let each country paint its cloth" switchable per unit): each
+    texture set's masked cloth given back its own colour (the default primary, as ``trellis.tinted`` draws it) and
+    the mask cleared (the specular's red to 0), on copies under ``out``."""
+    from PIL import Image
+
+    from eu4unitgen.ref3d import trellis
+    out.mkdir(parents=True, exist_ok=True)
+
+    def one(tex: dict, stem: str) -> None:
+        if not tex.get("diffuse") or not tex.get("specular") or not primary:
+            return
+        d = trellis.tinted(Path(tex["diffuse"]), Path(tex["specular"]), primary, out / f"{stem}_diffuse.png")
+        s = Image.open(tex["specular"]).convert("RGBA")
+        r, g, b, a = s.split()
+        Image.merge("RGBA", (r.point(lambda _: 0), g, b, a)).save(out / f"{stem}_specular.png")
+        tex["diffuse"], tex["specular"] = str(d), str(out / f"{stem}_specular.png")
+    one(entry["textures"], "body")
+    entry.pop("unit_colours", None)
+    for i, p in enumerate(parts):
+        if "mesh" in p:
+            one(p["mesh"], f"part{i}")
+        p.pop("colours", None)
+
+
 def spec(folder: Path, req: dict) -> dict:
     """The test-mod spec of the whole unit: every tier with parts, the game's own elsewhere."""
     utype = req["type"]
@@ -96,16 +126,22 @@ def spec(folder: Path, req: dict) -> dict:
         if utype == "cavalry":
             hdir, hsub = part_dir(slots["horse"])
             he = unitstage.horse_entry(hdir, hsub)
+            if not req.get("country_colours", True):
+                own_colours(he, [], _primary(hdir), Path(folder) / "assembled" / f"horse_{t}")
             loadout.setdefault("horses", {})[str(t)] = he
             colours = he.get("unit_colours") or colours
             sdir, ssub = part_dir(slots["soldier"])
             re_, parts = rider_for(sdir, ssub, hdir, Path(folder) / "assembled" / f"rider_{t}")
+            if not req.get("country_colours", True):
+                own_colours(re_, parts, _primary(sdir), Path(folder) / "assembled" / f"rider_{t}" / "own")
             loadout.setdefault("riders", {})[str(t)] = re_
             if parts:
                 loadout.setdefault("slots", {})[f"{t}/rider"] = {"parts": parts}
         else:  # infantry, and artillery's crew: the tier's infantry on foot
             sdir, ssub = part_dir(slots["soldier"])
             se, parts = unitstage.rider_entry(sdir, ssub)
+            if not req.get("country_colours", True):
+                own_colours(se, parts, _primary(sdir), Path(folder) / "assembled" / f"soldier_{t}")
             loadout.setdefault("soldiers", {})[str(t)] = se
             if parts:
                 loadout.setdefault("slots", {})[f"{t}/infantry"] = {"parts": parts}
@@ -116,6 +152,12 @@ def spec(folder: Path, req: dict) -> dict:
             "set": {"tags": [test["tag"]], "gfx": test["gfx"], "set_name": test["set_name"], "base_gfx": test["base_gfx"],
                     "unit_colours": {test["tag"]: colours}, "unit_names": unitstage.unit_names(req["name"])},
             "loadout": loadout, "test": {"sprite_techs": test["sprite_techs"]}}
+
+
+def _primary(vdir: Path):
+    """A built part's cloth colour as it was baked (the default primary its mask carries)."""
+    m = json.loads((Path(vdir) / "manifest.json").read_text(encoding="utf-8"))
+    return (m.get("colour") or {}).get("default_primary")
 
 
 def stage_assemble(folder: Path, req: dict, cfg) -> dict:

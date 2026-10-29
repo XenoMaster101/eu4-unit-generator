@@ -14,7 +14,8 @@ The node's frame is the game's (render_unit's): the posed bone matrix times the 
 to the bind pose the .mesh records (``bind``: the skeleton summary's 12 numbers). On western_generic_01_type1 the
 offset is the identity (checked for Left_hand_node, test 33's round); applied anyway, as render_unit does.
 
-args: {"mesh", "anim", "node", "elbow", "shoulder", "bind", "result_path"}
+args: {"mesh", "anim", "node", "elbow", "shoulder", "bind", "frames": [n, ...] | "all" (optional: ``per_frame``
+       as well, about 13 frames over the action for "all"), "result_path"}
 """
 import os
 import sys
@@ -43,31 +44,41 @@ def main():
     bpy.context.view_layer.objects.active = rig
     rig.select_set(True)
     cd.import_anim(ie, rig, a["anim"])
-    bpy.context.scene.frame_set(1)
-    bpy.context.view_layer.update()
     pb = rig.pose.bones
     world = lambda name: rig.matrix_world @ pb[name].matrix  # noqa: E731
-    P = world(a["node"])
-    if a.get("bind"):  # as render_unit.place: the bone's rest -> the .mesh's bind pose, the scale taken out
-        b = a["bind"]
-        rest_local = S4 @ Matrix([b[0:4], b[4:8], b[8:12], [0, 0, 0, 1]]) @ S4
-        P = P @ (rig.data.bones[a["node"]].matrix_local.inverted() @ rest_local)
-        loc, rot, _ = P.decompose()
-        P = Matrix.Translation(loc) @ rot.to_matrix().to_4x4()
-    inv = P.inverted()
-    rot_inv = inv.to_3x3()
     to_part = lambda v: S @ v  # Blender (the node's) local -> the part's PDX coordinates (S is its own inverse)  # noqa: E731
-    elbow = to_part((inv @ world(a["elbow"]).translation))
-    spine, shoulder = world("mid_spine").translation, world(a["shoulder"]).translation
-    out = shoulder - spine
-    out.z = 0.0
-    out.normalize()
-    up = Vector((0.0, 0.0, 1.0))
-    # forward (the rider faces PDX -Z, Blender -Y): out x up on the left, up x out on the right (checked in the
-    # gallery: with the other order a sword hung "back" pointed at the horse's head)
-    fwd = out.cross(up) if a["node"].startswith("Left") else up.cross(out)
-    res = {"elbow": list(elbow), "out": list(to_part(rot_inv @ out).normalized()), "up": list(to_part(rot_inv @ up).normalized()),
-           "forward": list(to_part(rot_inv @ fwd).normalized()), "node_world": list(P.translation)}
+
+    def sample(frame):
+        bpy.context.scene.frame_set(frame)
+        bpy.context.view_layer.update()
+        P = world(a["node"])
+        if a.get("bind"):  # as render_unit.place: the bone's rest -> the .mesh's bind pose, the scale taken out
+            b = a["bind"]
+            rest_local = S4 @ Matrix([b[0:4], b[4:8], b[8:12], [0, 0, 0, 1]]) @ S4
+            P = P @ (rig.data.bones[a["node"]].matrix_local.inverted() @ rest_local)
+            loc, rot, _ = P.decompose()
+            P = Matrix.Translation(loc) @ rot.to_matrix().to_4x4()
+        inv = P.inverted()
+        rot_inv = inv.to_3x3()
+        elbow = to_part((inv @ world(a["elbow"]).translation))
+        spine, shoulder = world("mid_spine").translation, world(a["shoulder"]).translation
+        out = shoulder - spine
+        out.z = 0.0
+        out.normalize()
+        up = Vector((0.0, 0.0, 1.0))
+        # forward (the rider faces PDX -Z, Blender -Y): out x up on the left, up x out on the right (checked in the
+        # gallery: with the other order a sword hung "back" pointed at the horse's head)
+        fwd = out.cross(up) if a["node"].startswith("Left") else up.cross(out)
+        return {"elbow": list(elbow), "out": list(to_part(rot_inv @ out).normalized()),
+                "up": list(to_part(rot_inv @ up).normalized()), "forward": list(to_part(rot_inv @ fwd).normalized()),
+                "node_world": list(P.translation)}
+    res = sample(1)
+    if a.get("frames"):  # the frame in every sampled frame: a strapped part checked through the whole animation
+        act = rig.animation_data.action if rig.animation_data else None
+        lo, hi = (int(act.frame_range[0]), int(act.frame_range[1])) if act else (1, 1)
+        want = range(lo, hi + 1, max(1, (hi - lo) // 12 or 1)) if a["frames"] == "all" else a["frames"]
+        res["per_frame"] = [{"frame": f, **sample(f)} for f in want]
+        res["frame_range"] = [lo, hi]
     _pdx.write_result(a, res)
 
 

@@ -140,7 +140,34 @@ def silver_mask(px, cov, chroma_max=0.18, lum_min=0.38):
     return cov & ((mx - mn) / np.maximum(mx, 1e-6) < chroma_max) & (c @ np.array([0.299, 0.587, 0.114]) > lum_min)
 
 
-def gloss_map(px, cov, gloss):
+METAL_TRUST = (0.2, 0.5)  # TRELLIS.2's metallic map is used where it varies: its 10th percentile under 0.2, its 90th over 0.5
+
+
+def baked_metal(low, high, size, path, cov):
+    """TRELLIS.2's metallic map (the glTF metallicRoughness image's blue channel) baked onto the low mesh, or None
+    when it doesn't tell metal from the rest: horse 2's reads 0.63 over coat and hair alike, the cataphract horse's 1
+    everywhere; the English soldier's 0 on his quilted jack and 0.5-1 on his mail and helmet (the colour rule took the
+    pale jack for steel and darkened it: 41% "silver", 2026-10-28). -> (metal mask or None, the record)."""
+    node = next(n for n in high.data.materials[0].node_tree.nodes if n.type == "TEX_IMAGE")
+    keep = node.image
+    node.image = bpy.data.images.load(path)
+    node.image.colorspace_settings.name = "Non-Color"
+    img = target(low, "metal", size, (0, 0, 0, 1))
+    bpy.ops.object.bake(type="EMIT")
+    node.image = keep
+    m = pixels(img)[..., 2]
+    vals = m[cov]
+    if not len(vals):
+        return None, {"used": False}
+    p10, p90 = float(np.percentile(vals, 10)), float(np.percentile(vals, 90))
+    rec = {"p10": round(p10, 3), "p90": round(p90, 3)}
+    if not (p10 < METAL_TRUST[0] and p90 > METAL_TRUST[1]):
+        return None, {**rec, "used": False}
+    mask = cov & (m > 0.5)
+    return mask, {**rec, "used": True, "metal_share": round(float(mask.sum() / max(cov.sum(), 1)), 3)}
+
+
+def gloss_map(px, cov, gloss, metal=None):
     """The specular map's gloss (alpha; RGB 0: no unit colour) by colour class of the base colour:
     silver (bright, colourless), gold (bright, yellow-orange, saturated), the rest matte (coat, cloth,
     leather, hair). TRELLIS.2's metallic map isn't used (horse 2: 0.65 over coat and hair alike)."""
@@ -151,6 +178,8 @@ def gloss_map(px, cov, gloss):
     r, g, b = c[..., 0], c[..., 1], c[..., 2]
     hue = (np.degrees(np.arctan2(np.sqrt(3) * (g - b), 2 * r - g - b)) + 360) % 360
     silver = cov & (chroma < gloss.get("silver_chroma", 0.18)) & (lum > gloss.get("silver_lum", 0.38))
+    if metal is not None:  # pale isn't steel unless TRELLIS.2's metallic map says so (``baked_metal``)
+        silver &= metal
     gold = cov & ~silver & (hue > 28) & (hue < 58) & (chroma > 0.35) & (lum > gloss.get("gold_lum", 0.36))
     out = np.full(cov.shape, float(gloss.get("matte", 5)))
     out[silver] = gloss.get("silver", 14)
@@ -477,6 +506,9 @@ def main():
                 q.append((yy, xx))
     px[..., 3] = 1.0
     result = {}
+    metal = None
+    if a.get("metallic_image"):
+        metal, result["metallic"] = baked_metal(low, high, size, a["metallic_image"], filled)
     posmap = hit = None
     if a.get("head_band") or a.get("emblem") or a.get("bones"):
         posmap, hit = texel_positions(json.loads(open(a["low"], encoding="utf-8").read()), size)
@@ -489,9 +521,9 @@ def main():
                                         cloth_hue=cloth_h)
     g = None
     if a.get("gloss") is not None:  # from the colour as baked (before any transfer); written at the end
-        g, result["gloss_shares"] = gloss_map(px, filled, a["gloss"])
+        g, result["gloss_shares"] = gloss_map(px, filled, a["gloss"], metal)
     if a.get("colour_render"):
-        silver_before = silver_mask(px, filled)
+        silver_before = silver_mask(px, filled) & (metal if metal is not None else True)
         result["colour_transfer"] = colour_transfer(px, filled, a["colour_render"], a.get("colour_strength", (0.5, 1.0, 1.0)))
         if silver_before.sum() > 100:  # the metal's diffuse kept under the raw model's (module doc of silver_mask)
             src = bpy.data.images.load(a["image"])

@@ -290,8 +290,11 @@ def test_the_regression_set_expects_no_shield_and_a_bare_coat():
     the regression set; their rules hold whatever the baseline says."""
     from eu4unitgen.ref3d import regress
     assert regress.SET["horse2_mask"]["from"] == "horse2" and regress.source("horse2_mask").name == "horse2"
-    assert regress.expectations("english_soldier", {"parts": ["lance"]}) == []
-    assert regress.expectations("english_soldier", {"parts": ["lance", "shield"]}) == ["parts: has shield, must not"]
+    good = {"parts": ["lance"], "feet_ratio": 0.9, "colour_de_front_middle": 6.0}
+    assert regress.expectations("english_soldier", good) == []
+    assert regress.expectations("english_soldier", {**good, "feet_ratio": 0.4}) == ["feet_ratio: 0.4, must be at least 0.75"]
+    assert regress.expectations("cataphract_foot", {"parts": ["shield"], "strap_gap": 1.1}) ==         ["strap_gap: 1.1, must be at most 0.6"]
+    assert regress.expectations("english_soldier", {**good, "parts": ["lance", "shield"]}) == ["parts: has shield, must not"]
     assert regress.expectations("horse2_mask", {"mask_share": 0.4}) == ["mask_share: 0.4, must be at most 0.05"]
     assert regress.expectations("horse2_mask", {}) == []  # no mask at all: nothing was taken for cloth
 
@@ -380,3 +383,39 @@ def test_a_starter_part_is_packed_raw_and_fitted_on_first_use(tmp_path, monkeypa
     assert [p.ref for p in library.parts()] == ["run:bay"]  # now a part of your own: the starter is hidden
     u = library.new_unit("bays", "cavalry", {1: {"horse": "starter:bay", "soldier": "run:bay"}})
     assert flow.request(u)["tiers"]["1"]["horse"] == "run:bay" and flow.waiting_for(flow.request(u)) == ["bay"]
+
+
+def test_a_shield_is_strapped_to_the_forearm_through_every_frame():
+    """On foot the shield follows the forearm (the elbow's place in the hand's frame, per frame): its back on the
+    forearm's mean middle, the gap recorded per frame; a frame whose forearm points elsewhere shows as a gap."""
+    from eu4unitgen.ref3d import trellis
+    seated = {"out": [1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]}
+    kite = [x for v in ([0, 0, 0], [0.2, 0, 0], [0, 2, 0], [0.2, 2, 0], [0, 1, 1], [0.2, 1, 1], [0, 1, -1], [0.2, 1, -1])
+            for x in v]
+    frames = [{"elbow": [0.0, 3.0, 0.0], "out": [1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]} for _ in range(5)]
+    pts, chk = trellis.strap_part(kite, seated, frames)
+    assert chk["ok"] and chk["max_gap"] == trellis.STRAP["out"] and chk["frames"] == 5
+    xs = pts[0::3]
+    assert abs(min(xs) - trellis.STRAP["out"]) < 1e-6  # its back the strap's distance out from the forearm
+    bent = frames + [{"elbow": [-2.9, 1.2, -0.7], "out": [1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]}]
+    assert trellis.strap_part(kite, seated, bent)[1]["max_gap"] > chk["max_gap"]
+
+
+def test_the_game_version_is_shown_tinted_and_compared_by_region(tmp_path):
+    """The masked cloth is stored grey for the game to tint: shown with its default colour it is the picture's again;
+    the colours compared region by region."""
+    from eu4unitgen.ref3d import trellis
+    Image.new("RGB", (8, 8), (128, 128, 128)).save(tmp_path / "d.png")
+    spec = Image.new("RGBA", (8, 8), (255, 0, 0, 10))
+    spec.save(tmp_path / "s.png")
+    out = trellis.tinted(tmp_path / "d.png", tmp_path / "s.png", [255, 0, 0], tmp_path / "t.png")
+    r, g, b = Image.open(out).getpixel((4, 4))
+    assert r > 120 and g < 10 and b < 10  # grey cloth back to red
+    raw = Image.new("RGBA", (60, 100), (0, 0, 0, 0))
+    ImageDraw.Draw(raw).rectangle([10, 0, 50, 99], fill=(200, 30, 30, 255))
+    game = raw.copy()
+    ImageDraw.Draw(game).rectangle([10, 60, 50, 99], fill=(120, 120, 120, 255))  # the legs gone grey
+    raw.save(tmp_path / "raw.png")
+    game.save(tmp_path / "game.png")
+    de = trellis.region_colours(tmp_path / "raw.png", tmp_path / "game.png")
+    assert de["top"] < 1 and de["middle"] < 1 and de["bottom"] > 30
