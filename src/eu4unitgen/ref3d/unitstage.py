@@ -242,3 +242,61 @@ def turntable(folder: Path, name: str, tier: int, eu4: Path, utype: str = "caval
             im.save(p)
             paths.append(str(p))
     return paths
+
+
+def lineup(cols: list[dict], out: Path, eu4: Path, rows=("close", "near"), view: str = "three_quarter",
+           state: str = "idle", frame: int = 1, title: str = "") -> Path:
+    """Units side by side through the game's camera at the same zoom (the user, after T38: ours before and after
+    next to the base game's own). ``cols``: {"label", and "spec" (a staged spec's .json) with "unit" ((type, tier)),
+    or "entity" (a base-game entity)}, left to right; one row per zoom in ``rows``. -> the sheet."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    from eu4unitgen.core.character import CharacterSpec
+    from eu4unitgen.export.gallery import GAME_CLOSE
+    from eu4unitgen.export.pipeline import Session, Settings
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    v = GAME_CLOSE["view"]
+    el = math.atan2(-v[2], math.hypot(v[0], v[1]))
+    hx, hy = VIEWS[view]
+    tiles: dict = {}
+    for row in rows:
+        r = ROWS[row]
+        cam = dict(GAME_CLOSE, ortho_scale=GAME_CLOSE["ortho_scale"] * r.get("ortho_k", 1.0),
+                   **{k: r[k] for k in ("target", "width", "height") if k in r},
+                   view=[hx * math.cos(el), hy * math.cos(el), -math.sin(el)])
+        by_spec: dict = {}
+        for i, c in enumerate(cols):
+            by_spec.setdefault(str(c.get("spec") or cols[0].get("spec") or ""), []).append((i, c))
+        for spec, group in by_spec.items():
+            ch = CharacterSpec.load(Path(spec))
+            s = Session(Settings(eu4_path=Path(eu4), owned_dlc=[], prefix="hr_", stage_dir=out.parent / f"lineup_stage_{len(tiles)}"))
+            units = [tuple(c["unit"]) for _, c in group if c.get("unit")]
+            ents = [c["entity"] for _, c in group if c.get("entity")]
+            g = s.gallery(ch.set_spec(), units=units, camera=cam, lit={"normal_maps": True}, state=state, frame=frame,
+                          entities=ents)
+            for i, c in group:
+                key = tuple(c["unit"]) if c.get("unit") else ("entity", c["entity"])
+                if key in g.images:
+                    tiles[(row, i)] = g.images[key]
+    try:
+        font, bold = ImageFont.truetype("arial.ttf", 18), ImageFont.truetype("arialbd.ttf", 22)
+    except OSError:
+        font = bold = ImageFont.load_default()
+    cell = 360
+    sheet = Image.new("RGB", (len(cols) * cell, 44 + len(rows) * (cell + 28)), (232, 232, 236))
+    d = ImageDraw.Draw(sheet)
+    d.text((8, 10), title, fill=(10, 10, 14), font=bold)
+    for ri, row in enumerate(rows):
+        for i, c in enumerate(cols):
+            im = tiles.get((row, i))
+            y = 44 + ri * (cell + 28)
+            d.text((i * cell + 8, y + 2), f"{c['label']} ({row})", fill=(20, 20, 24), font=font)
+            if im is None:
+                continue
+            w, h = im.size
+            im = im.crop((int(w * 0.2), 0, int(w * 0.8), h)) if row == "close" else im
+            im.thumbnail((cell - 8, cell - 8))
+            sheet.paste(im, (i * cell + (cell - im.width) // 2, y + 26))
+    sheet.save(out)
+    return out

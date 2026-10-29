@@ -533,7 +533,7 @@ class Session:
                             if path:
                                 with Image.open(path) as im:
                                     images[(utype, tier, i)] = im.convert("RGB")
-                        path = res.result["tiles"].get(f"{utype}_{tier}")
+                        path = res.result["tiles"].get(tier if utype == "entity" else f"{utype}_{tier}")
                         if path:
                             with Image.open(path) as im:
                                 images[(utype, tier)] = im.convert("RGB")
