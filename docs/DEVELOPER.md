@@ -36,6 +36,9 @@ image ──cut-out──> RGBA ──TRELLIS.2 (WSL)──> raw.glb ──build
 | checks, guide, errors, setup | `core/checks.py`, `core/guide.py`, `core/errors.py`, `core/setup.py` | |
 | GUI | `gui/app.py` (window, top bar), `gui/home.py`, `gui/new_unit.py` (the guided flow), `gui/progress.py`, `gui/my_units.py`, `gui/help_page.py` (example, guide, updates), `gui/tour.py`, `gui/setup_page.py` (Setup, About), `gui/base.py` | |
 | runs | `ref3d/flow.py` (kinds horse, soldier, cavalry; stages, resume, waiting for units and the GPU) | |
+| the part library | `core/library.py` (parts, units, tags, suggestions, starter packing and fitting), `core/thumbs.py` (thumbnails), `ref3d/assemble.py` (run kind `unit`), `gui/builder.py` (Build a unit) | |
+| guns (Track A) | `blender/jobs/fresh_gun.py`, `ref3d/trellis.py:process_gun`, `core/fresh_mesh.py:_own_cannon` | |
+| the design | `gui/theme.py` (Admiralty, Campaign), `gui/icons.py` (the icon set) | |
 | example, picture guide, updates | `core/example.py`, `core/guide_pictures.py`, `core/updates.py` (GitHub Releases; `update_repo` in the settings) | |
 
 The app's own process has no numpy: everything it runs directly is pure Python + Pillow. numpy code lives in Blender jobs (`blender/jobs/`) and AI jobs (`ai/jobs/`). Blender is never imported into the app (CLAUDE.md).
