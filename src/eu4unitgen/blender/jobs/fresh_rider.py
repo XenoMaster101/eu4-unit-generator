@@ -355,7 +355,9 @@ def joint_fit(co, keep, vanilla_co, bones, legs=True):
 
 # the base game's proportions are a little stylised for reading at a distance (big head, hands and shoulders): ours
 # are brought up to at least vanilla's, never down, and by at most these factors
-STYLISE_MAX = {"head": 1.25, "hand": 1.3, "shoulders": 1.15}
+# shoulders off (1.0): their width at shoulder height depends on how the arms hang, not only the build; it widened the
+# cataphract's cloak 15% into a heavy top (the review, 2026-10-29)
+STYLISE_MAX = {"head": 1.25, "hand": 1.3, "shoulders": 1.0}
 HAND_R = 1.0  # a hand: what lies within this of its hand bone
 
 
