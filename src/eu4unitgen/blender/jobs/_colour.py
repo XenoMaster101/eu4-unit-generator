@@ -51,6 +51,19 @@ def dominant_hue(c, mask, chroma_min=0.4, lum_min=0.06, bin_deg=10.0):
     return h0, float(near_hue(hue, h0, 20.0)[sel].sum() / max(mask.sum(), 1))
 
 
+def lab(c):
+    """sRGB 0-1 -> CIE Lab (D65), for colour distances."""
+    c = np.asarray(c, dtype=np.float64)[..., :3]
+    lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    m = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]])
+    xyz = lin @ m.T / np.array([0.95047, 1.0, 1.08883])
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
+    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
+
+
+COAT_DE = 22.0  # a texel this close (Lab) to the coat's colour is coat, never cloth
+
+
 def cloth_and_coat(c, cov, posmap=None, bones=None):
     """The cloth's hue and, for a horse, its coat's: the coat is the dominant saturated hue of the head and neck
     (ahead of and above the neck's base) when it covers more than 40% of them (a bare head; a chanfron's gold and
@@ -64,8 +77,13 @@ def cloth_and_coat(c, cov, posmap=None, bones=None):
         h, share = dominant_hue(c, head, chroma_min=0.3)
         if h is not None and share > 0.4:
             out["coat"] = round(h, 1)
-            hue, _, _ = hcl(c)
+            hue, chroma, _ = hcl(c)
             rest = cov & ~near_hue(hue, h, 15.0)
+            # its colour too (the median of the head's coat texels): the cloth mask leaves out what is close to it
+            # (a bay coat's reddish shades fell in a red cloth's hue window: the bay horse's coat went grey, 2026-10-28)
+            coat_px = c[head & near_hue(hue, h, 15.0) & (chroma > 0.3)][..., :3]
+            if len(coat_px) > 50:
+                out["coat_rgb"] = [round(float(v), 4) for v in np.median(coat_px, axis=0)]
     h, share = dominant_hue(c, rest)
     if h is None and out["coat"] is not None:  # nothing else saturated: the coat itself is the only colour
         h, share = dominant_hue(c, cov)

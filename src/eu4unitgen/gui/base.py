@@ -144,6 +144,11 @@ QWidget#front QPushButton#card QLabel#dot_error {{ color: {t['card_error']}; fon
 QWidget#front QPushButton#card QLabel#dot_none {{ color: {t['card_muted']}; font-size: 12px; }}
 QFrame#card QComboBox, QFrame#card QLineEdit {{ background: #fffaf0; color: {t['card_text']}; border-color: {t['card_border']}; }}
 QFrame#card QComboBox::down-arrow {{ image: url({arrow(t['card_muted'])}); }}
+QWidget#front QPushButton#card QLabel#badge {{ background: {t['accent']}; color: {t['accent_text']}; border-radius: 8px;
+                                               padding: 1px 8px; font-size: 11px; font-weight: 700; }}
+QPushButton#tileaction {{ background: transparent; color: {t['card_text']}; border: 1px solid {t['card_border']};
+                         border-radius: 6px; padding: 3px 12px; font-size: 12px; }}
+QPushButton#tileaction:hover {{ border-color: {t['accent']}; background: {t['card_selected']}; }}
 QFrame#sticky {{ background: {t['topbar']}; border-top: 1px solid {t['topbar_line']}; border-image: none; }}
 QLabel#drop {{ background: {t['surface']}; color: {t['muted']}; border: 2px dashed {t['accent_off']}; border-radius: 12px; }}
 QLabel#cardpic, QWidget#front QLabel#cardpic {{ background: {t['thumb_inner']}; border-radius: 8px;
@@ -375,6 +380,100 @@ class Card(QPushButton):
 def card(title: str, text: str, tip: str = "", checkable: bool = False, picture: QPixmap | None = None,
          **kw) -> Card:
     return Card(title, text, tip, checkable, picture, **kw)
+
+
+class Tile(QPushButton):
+    """A gallery tile (the Library): a big picture on top, the name, one line of tag chips (the rest as "+2"), a
+    "Starter" badge, a status dot with its words and one action button (``action``: (text, fn)). Click anywhere to
+    open it (``clicked``)."""
+
+    PIC_H = 168
+
+    def __init__(self, title: str, picture: QPixmap | None, chips: list[str] | None = None,
+                 status: tuple[str, str] | None = None, starter: bool = False, action: tuple | None = None,
+                 tip: str = ""):
+        from PySide6.QtWidgets import QHBoxLayout
+        super().__init__()
+        self.setObjectName("card")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(tip)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(10, 10, 10, 10)
+        col.setSpacing(6)
+        self.pic = QLabel()
+        self.pic.setObjectName("cardpic")
+        self.pic.setAlignment(Qt.AlignCenter)
+        self.pic.setFixedHeight(self.PIC_H)
+        self.picture = picture
+        col.addWidget(self.pic)
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("cardtitle")
+        col.addWidget(self.title_label)
+        self.chip_box = QWidget()
+        self.chip_row = QHBoxLayout(self.chip_box)
+        self.chip_row.setContentsMargins(0, 0, 0, 0)
+        self.chip_row.setSpacing(4)
+        self.chips = []
+        for c in chips or []:
+            ch = QLabel(c)
+            ch.setObjectName("chip")
+            ch.setMinimumWidth(ch.fontMetrics().horizontalAdvance(c) + 20)
+            self.chips.append(ch)
+            self.chip_row.addWidget(ch)
+        self.more = QLabel()
+        self.more.setObjectName("chip")
+        self.chip_row.addWidget(self.more)
+        self.chip_row.addStretch(1)
+        col.addWidget(self.chip_box)
+        foot = QHBoxLayout()
+        foot.setSpacing(8)
+        self.status_label = QLabel()
+        if status:
+            self.status_label.setObjectName(f"dot_{status[0]}")
+            self.status_label.setText(f"●  {status[1]}")
+        foot.addWidget(self.status_label, 1)
+        self.badge = QLabel("Starter")
+        self.badge.setObjectName("badge")
+        self.badge.setVisible(starter)
+        foot.addWidget(self.badge)
+        self.action = None
+        if action:
+            self.action = QPushButton(action[0])
+            self.action.setObjectName("tileaction")
+            self.action.setCursor(Qt.PointingHandCursor)
+            self.action.clicked.connect(lambda _=False: action[1]())
+            foot.addWidget(self.action)
+        col.addLayout(foot)
+        for lab in (self.pic, self.title_label, self.status_label, self.badge, self.chip_box, self.more, *self.chips):
+            lab.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setFixedHeight(self.PIC_H + 118)
+
+    def resizeEvent(self, e):  # noqa: N802 - Qt name: the picture and the chips fit the tile's width
+        super().resizeEvent(e)
+        w = max(40, self.width() - 22)
+        if self.picture is not None and not self.picture.isNull():
+            self.pic.setPixmap(self.picture.scaled(int(w * self.picture.devicePixelRatio()),
+                                                   int(self.PIC_H * self.picture.devicePixelRatio()),
+                                                   Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.fit_chips(w)
+
+    def fit_chips(self, width: int) -> None:
+        """One line of chips: as many as fit, the rest counted in "+N"."""
+        used, shown = 0, 0
+        more_w = self.more.fontMetrics().horizontalAdvance("+99") + 22
+        for i, ch in enumerate(self.chips):
+            need = ch.minimumWidth() + 4
+            left = len(self.chips) - i - 1
+            if used + need + (more_w if left else 0) <= width:
+                ch.show()
+                used += need
+                shown += 1
+            else:
+                ch.hide()
+        hidden = len(self.chips) - shown
+        self.more.setText(f"+{hidden}")
+        self.more.setMinimumWidth(self.more.fontMetrics().horizontalAdvance(f"+{hidden}") + 20)
+        self.more.setVisible(hidden > 0)
 
 
 def danger(text: str, fn=None, tip: str = "") -> QPushButton:

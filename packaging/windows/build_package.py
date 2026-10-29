@@ -79,6 +79,14 @@ def main() -> dict:
     wheels = dist / "wheel"
     if wheels.exists():
         shutil.rmtree(wheels)
+    # the starter library from the author's finished runs (raw TRELLIS.2 models, tags, rights; not in git)
+    starter = ROOT / "src" / "eu4unitgen" / "library" / "starter"
+    if starter.exists():
+        shutil.rmtree(starter)
+    sys.path.insert(0, str(ROOT / "src"))
+    from eu4unitgen.core import library
+    packed = library.pack_starters(starter)
+    print("starter library:", packed)
     subprocess.run([sys.executable, "-m", "pip", "wheel", str(ROOT), "--no-deps", "-w", str(wheels)], check=True)
     wheel = next(wheels.glob(f"eu4unitgen-{v}-*.whl"))
     with zipfile.ZipFile(wheel) as z:
@@ -88,11 +96,15 @@ def main() -> dict:
                  "eu4unitgen/gui/icon.png", "eu4unitgen/gui/eu4unitgen.ico", "eu4unitgen/core/layout.py",
                  "eu4unitgen/core/example_pictures/RIGHTS.txt"):
         assert must in names, f"{must} is missing from the wheel"
-    # the only pictures: the app's icon and the Example's three (the author's, bundling allowed 2026-10-28)
-    pics = {n for n in names if n.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))}
+    # the only pictures: the app's icon, the Example's three and the starter library's (the author's, bundling
+    # allowed 2026-10-28: their pictures, cut-outs, part crops and raw renders)
+    pics = {n for n in names if n.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+            and not n.startswith("eu4unitgen/library/starter/")}
     assert pics == {"eu4unitgen/gui/icon.png"} | {f"eu4unitgen/core/example_pictures/{n}" for n in (
         "cataphract_rider.png", "cataphract_side_clean.png", "horse2_light_cavalry.png")}, sorted(pics)
-    assert not any(n.lower().endswith((".dds", ".mesh", ".anim")) for n in names), "game files in the wheel"
+    assert not any(n.lower().endswith((".dds", ".mesh", ".anim", ".asset", ".gfx")) for n in names), "game files in the wheel"
+    got = {n.split("/")[3] for n in names if n.startswith("eu4unitgen/library/starter/") and n.endswith("/part.json")}
+    assert got == {k for k, v in packed.items() if v == "packed"}, f"starter parts in the wheel: {sorted(got)}"
     shutil.copy(wheel, files / wheel.name)
     for f in ("install.ps1", "uninstall.ps1"):
         shutil.copy(HERE / f, files / f)

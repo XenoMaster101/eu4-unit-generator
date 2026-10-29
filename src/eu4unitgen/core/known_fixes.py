@@ -184,6 +184,20 @@ FIXES: tuple[Fix, ...] = (
         "the cataphract on foot, 2026-10-28: the lance hung point down and the kite sat behind the body",
         "ref3d/trellis.py:foot_part", ("tests/test_app_flow.py::test_a_soldiers_hand_parts_follow_the_base_game_on_foot",),
         "parts"),
+    Fix("shield_is_a_plate", "a shield is split off only when it is a broad flat plate (its thinnest spread under 0.3 of "
+        "its width, its width over 0.035 of the height); an arm held out is left on the body",
+        "the English soldier, 2026-10-28: his left forearm was cut off as a shield (0.571 flat, 0.022 broad; the "
+        "cataphract's kite: 0.089, 0.062), so he took the spear-and-shield stance and crouched",
+        "blender/jobs/fresh_rider.py:split", ("regress:parts", "tests/test_app_flow.py::test_the_regression_set_expects_no_shield_and_a_bare_coat"), "parts"),
+    Fix("blade_by_place", "a polearm's broad head (within 0.09 of the height round the shaft, from 0.08 H over the grip, "
+        "on the weapon's side) goes with the weapon, by place: it is often a separate piece",
+        "the English soldier's poleaxe, 2026-10-28: only the shaft was kept",
+        "blender/jobs/fresh_rider.py:split", ("regress:parts", "tests/test_app_flow.py::test_the_regression_set_expects_no_shield_and_a_bare_coat"), "parts"),
+    Fix("coat_not_cloth", "a horse's coat is never its cloth: texels within 22 (Lab) of the coat's colour (the head's "
+        "median) stay out of the country mask",
+        "the bay horse, 2026-10-28: its reddish coat fell in the red cloth's hue window; 40% of it was masked and its "
+        "game version came out grey",
+        "blender/jobs/bake_colour.py:cloth_mask", ("regress:mask_share", "tests/test_app_flow.py::test_the_regression_set_expects_no_shield_and_a_bare_coat"), "colour"),
 )
 
 

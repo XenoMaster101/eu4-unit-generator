@@ -153,6 +153,13 @@ def check_horse(key, raw) -> dict:
     return {"base": "cavalry_horse", **raw}
 
 
+def check_gun(key, raw) -> dict:
+    """A loadout's fresh gun (Track A): as a fresh horse, on the base game's gun (``base`` default artillery_mesh, the
+    pdxmesh every culture's cannon wears); worn by the tier's own cannon entity."""
+    out = check_horse(key, raw)
+    return {**out, "base": raw.get("base") or "artillery_mesh"}
+
+
 def check_rider(key, raw) -> dict:
     """A loadout's fresh rider (M23): as a fresh horse, on the base infantry body (``base`` default
     western_generic_01_type1, whose pdxmesh carries the horse_* animation ids)."""
@@ -182,6 +189,7 @@ class Loadout:
     horses: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh horse (core.fresh_mesh: geometry, textures, rights)
     riders: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh rider (M23; as horses, on the infantry body)
     soldiers: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh soldier on foot (as riders, on the infantry entity)
+    guns: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh gun (Track A, on the cannon entity)
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -244,6 +252,10 @@ class Loadout:
             if not str(key).isdigit() or int(key) not in TIERS:
                 raise LoadoutError(f"riders: {key!r} must be a tier {TIERS}")
             out.riders[int(key)] = check_rider(key, raw)
+        for key, raw in (doc.get("guns") or {}).items():
+            if not str(key).isdigit() or int(key) not in TIERS:
+                raise LoadoutError(f"guns: {key!r} must be a tier {TIERS}")
+            out.guns[int(key)] = check_gun(key, raw)
         for key, raw in (doc.get("soldiers") or {}).items():
             if not str(key).isdigit() or int(key) not in TIERS:
                 raise LoadoutError(f"soldiers: {key!r} must be a tier {TIERS}")
@@ -270,6 +282,8 @@ class Loadout:
             out["riders"] = {str(t): dict(h) for t, h in sorted(self.riders.items())}
         if self.soldiers:
             out["soldiers"] = {str(t): dict(h) for t, h in sorted(self.soldiers.items())}
+        if self.guns:
+            out["guns"] = {str(t): dict(h) for t, h in sorted(self.guns.items())}
         points = {r: p for r, p in sorted(self.points.items()) if p != DEFAULT_POINTS[r]}
         if points:
             out["weapon_point"] = points
@@ -286,7 +300,8 @@ class Loadout:
                 if s.parts or s.resolved_stance() != "base" or k[1] == "crew"}
 
     def changes_anything(self) -> bool:
-        return bool(self.active() or self.bodies or self.derived or self.horses or self.riders or self.soldiers)
+        return bool(self.active() or self.bodies or self.derived or self.horses or self.riders or self.soldiers
+                    or self.guns)
 
     def needs_blender(self) -> bool:
         return any(d["add"] for d in self.derived.values()) or any(s.parts for s in self.active().values())
@@ -338,6 +353,7 @@ class LoadoutResult:
     horses: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse (rule fresh_mesh)
     riders: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a fresh rider (rule fresh_mesh)
     soldiers: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a fresh soldier on foot
+    guns: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a fresh gun (its cannon entity)
     texture_files: list[GeneratedFile] = field(default_factory=list)  # derived bodies' derived textures (Q5)
 
 
@@ -728,6 +744,15 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
         for fs in res.soldiers.values():  # the stance now lives on the fresh soldier's pdxmesh
             if fs.entity in res.stances:
                 res.stances[fs.entity] = (res.stances[fs.entity][0], fs.pdxmesh)
+        derived_files += files
+        res.notes += notes
+    if loadout.guns:  # Track A: each tier's own cannon entity, written in full, wearing the fresh gun
+        from eu4unitgen.core.fresh_mesh import apply_horses
+
+        added: list[dict] = []
+        files, res.guns, notes = apply_horses(naming, set_name, owner, by_name, pdx.records, pdx.by_name, loadout,
+                                              game, idx, kind="gun", new_entities=added)
+        entities.extend(added)
         derived_files += files
         res.notes += notes
     built = build_parts(runner, naming, set_name, builds, version, cache)

@@ -106,7 +106,7 @@ def keep_graphics(paths: list[str], name: str, gfx: str, tier: int, rules) -> tu
     return keep, rewrite, notes
 
 
-def entities_only(data: bytes, gfx: str, tier: int, tag: str, utype: str = "cavalry") -> tuple[bytes | None, int, int]:
+def entities_only(data: bytes, gfx: str, tier: int | list[int], tag: str, utype: str = "cavalry") -> tuple[bytes | None, int, int]:
     """Entity definitions (the set's .asset files joined) cut down to the tag's unit of type ``utype`` (cavalry or
     infantry) at ``tier``, a cavalry's rider and every entity they attach (the parts), the unit (and rider) renamed to
     the culture's own (``<gfx>_CAVALRY_<tier>`` and its ``_rider``; ``<gfx>_INFANTRY_<tier>``, which the culture's
@@ -115,13 +115,16 @@ def entities_only(data: bytes, gfx: str, tier: int, tag: str, utype: str = "cava
     from eu4unitgen.core.naming import Naming
     n = Naming()
     blocks = dict(_entity_blocks(data.decode("utf-8-sig")))
-    root = n.unit_entity(tag, utype, tier)
-    if root not in blocks:
+    tiers = [tier] if isinstance(tier, int) else list(tier)  # a unit from the library: each tier with parts
+    roots = [n.unit_entity(tag, utype, t) for t in tiers]
+    if not all(r in blocks for r in roots):
         return None, 0, len(blocks)
-    rename = {root: n.unit_entity(gfx, utype, tier)}
-    if utype == "cavalry":
-        rename[n.rider_entity(tag, tier)] = n.rider_entity(gfx, tier)
-    keep, todo = [], [root]
+    rename = {}
+    for t in tiers:
+        rename[n.unit_entity(tag, utype, t)] = n.unit_entity(gfx, utype, t)
+        if utype == "cavalry":
+            rename[n.rider_entity(tag, t)] = n.rider_entity(gfx, t)
+    keep, todo = [], list(roots)
     while todo:
         n = todo.pop()
         if n in keep or n not in blocks:
@@ -161,7 +164,7 @@ def _entity_blocks(text: str) -> list[tuple[str, str]]:
         i = j + 1
 
 
-def add_to_mod(preview_spec: Path, subject: str, mode: str, tag: str, gfx: str, tier: int, mod_dir: Path,
+def add_to_mod(preview_spec: Path, subject: str, mode: str, tag: str, gfx: str, tier: int | list[int], mod_dir: Path,
                eu4: Path, stage_root: Path, write: bool = True, utype: str = "cavalry") -> AddResult:
     """Write the finished unit (its preview spec: the loadout and set) into ``mod_dir`` as mod ``<subject>_units``.
     ``mode``: "normal" (for ``tag``, graphical culture ``gfx``) or "achievement_safe" (``gfx``'s ``utype`` at

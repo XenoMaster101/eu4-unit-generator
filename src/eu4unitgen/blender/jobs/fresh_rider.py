@@ -52,6 +52,9 @@ def pca_axis(pts):
     return c, vt
 
 
+SHIELD_FLAT, SHIELD_BROAD = 0.3, 0.035  # a shield: its thinnest spread under 0.3 of its width, its width over 0.035 H
+
+
 def split(obj):
     """The lance and shield masks (module doc, 2), in the model's own units. -> (lance, shield, info)."""
     co = hs.verts(obj)
@@ -85,6 +88,13 @@ def split(obj):
         lim = np.where(t > tg + 0.12 * H, np.maximum(lim, 0.035 * H), lim)
         lance = (r < lim) & (t >= tmin - 0.01 * H) & (t <= tmax + 0.01 * H)
         side = float(np.sign(xl - x0))
+        # a broad head above the hand (a poleaxe's or a bill's blade, wider than a lance's 0.035): within 0.09 of the
+        # height round the shaft, from 0.08 H over the grip (the hand stays below), on the weapon's side of the body
+        # (the helmet is nearer the centre line). Measured on the English soldier: the head at 0.75-0.95 H, the hand
+        # under 0.7; often a separate piece, so taken by place, not by connection
+        head = (r < 0.09 * H) & (t > tg + 0.08 * H) & ((co[:, 0] - x0) * side > 0.14 * H)
+        info["blade_added"] = int((head & ~lance).sum())
+        lance = lance | head
         info["lance"] = {"axis": a.tolist(), "centre": c.tolist(), "shaft_radius": rs, "grip_t": tg,
                          "grip": (c + tg * a).tolist(), "t": [tmin, tmax], "vertices": int(lance.sum())}
     shield = np.zeros(len(co), dtype=bool)
@@ -101,6 +111,16 @@ def split(obj):
         plane = co - d[:, None] * n
         ok = (np.abs(d) < thick) & (np.linalg.norm(plane - sc, axis=1) < 0.35 * H) & ~lance
         shield = fh.flood(ok, sure & ok, e)
+        # a shield is a broad flat plate; the outermost points of an arm held out (a soldier without one) are a
+        # forearm: long and round. Measured (the user's references, 2026-10-28): the cataphract's kite 0.089 flat,
+        # 0.062 of the height broad; the English soldier's left forearm 0.571 and 0.022
+        pts = co[shield]
+        sv = np.sqrt(np.maximum(np.sort(np.linalg.eigvalsh(np.cov((pts - pts.mean(0)).T)))[::-1], 0))             if len(pts) > 50 else np.zeros(3)
+        flat, broad = float(sv[2] / max(sv[1], 1e-9)), float(sv[1] / H)
+        info["shield_shape"] = {"flat": round(flat, 3), "broad": round(broad, 4)}
+        if not (flat < SHIELD_FLAT and broad > SHIELD_BROAD):
+            info["shield_rejected"] = "not a plate (an arm or a hand): no shield"
+            return lance, np.zeros(len(co), dtype=bool), info
         # the hand behind it: body points just behind the plate near its middle
         behind = ~shield & ~lance & (d < 0) & (d > -0.08 * H) & (np.linalg.norm(plane - sc, axis=1) < 0.12 * H)
         grip = co[behind].mean(0) if behind.any() else sc - 0.03 * H * n
@@ -164,7 +184,7 @@ def slim_body(co, keep, vanilla_co, low=0.7, edge=2.0):
     return kx, kz, {"vanilla": [vx, vz], "ours": [ox, oz]}
 
 
-def swing_arm(co, movable, grip, target, shoulder, side):
+def swing_arm(co, movable, grip, target, shoulder, side, edges=None):
     """``movable`` points on one arm turned about the shoulder so the grip points where the target is (arm length
     kept: the hands were 4.6 and 5.9 from vanilla's, holding the lance in front and the shield at the hip; sliding
     them stretched the arms), blended in over the arm's first quarter; then the rest of the gap (length) slid,
@@ -174,6 +194,13 @@ def swing_arm(co, movable, grip, target, shoulder, side):
     t = np.clip(((co - sh) @ g) / max(g @ g, 1e-9), 0, 1.2)
     near = np.linalg.norm(co - (sh + np.clip(t, 0, 1)[:, None] * g), axis=1) < 1.3
     m = movable & (co[:, 0] * side > 0) & near & (t > 0.0)
+    if edges is not None:  # the arm: what joins the hand along the surface past the shoulder seam (t > 0.1), not all
+        # that lies near the line: a hand held at the chest brought the jack's side along (the English soldier,
+        # 2026-10-28: a sheet from the shoulder to the wrist)
+        seed = m & (t > 0.85)
+        if seed.any():
+            arm = fh.flood(m & (t > 0.1), seed, edges)
+            m = arm | (m & (t <= 0.1))
     k = np.cross(g, tg)
     ang = math.atan2(np.linalg.norm(k), g @ tg)
     k = k / max(np.linalg.norm(k), 1e-9)
@@ -285,6 +312,9 @@ def main():
     fh.merge_seams(obj, float(a["source"].get("merge", 1e-5)))
     res["imported"] = {"tris": fh.tri_count(obj), "pieces": fh.count_pieces(obj)}
     lance, shield, res["split"] = split(obj)
+    edges = np.empty(len(obj.data.edges) * 2, dtype=np.int64)  # the arms are found along them (swing_arm)
+    obj.data.edges.foreach_get("vertices", edges)
+    edges = edges.reshape(-1, 2)
     s, off, _ = place(obj, bones, ~lance & ~shield)
     res["place"] = {"scale": float(s), "offset": off.tolist()}
     if a.get("fitted_out"):
@@ -301,7 +331,7 @@ def main():
         node = "Right_hand_node" if side < 0 else "Left_hand_node"
         sh = bones["R_shoulder" if side < 0 else "L_shoulder"]
         before = co.copy()
-        ang, slide = swing_arm(co, ~lance & ~shield, grip, bones[node], sh, side)
+        ang, slide = swing_arm(co, ~lance & ~shield, grip, bones[node], sh, side, edges)
         co[lance] = carry(before[lance], grip, bones[node], sh)
         ax = carry(np.array([grip, grip + np.array(li["axis"])]), grip, bones[node], sh)
         dirs["lance"] = (ax[1] - ax[0], None)
@@ -313,7 +343,7 @@ def main():
         node = "Right_hand_node" if side < 0 else "Left_hand_node"
         sh = bones["R_shoulder" if side < 0 else "L_shoulder"]
         before = co.copy()
-        ang, slide = swing_arm(co, ~lance & ~shield, grip, bones[node], sh, side)
+        ang, slide = swing_arm(co, ~lance & ~shield, grip, bones[node], sh, side, edges)
         co[shield] = carry(before[shield], grip, bones[node], sh)
         ax = carry(np.array([grip, grip + np.array(si["normal"]), grip + np.array([0.0, 1.0, 0.0])]), grip, bones[node], sh)
         dirs["shield"] = (ax[1] - ax[0], ax[2] - ax[0])

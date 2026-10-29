@@ -155,7 +155,7 @@ def test_my_units_gallery_and_page(win, tmp_path):
     assert mu.flow_layout.count() == 1 and not mu.empty.isVisibleTo(mu)
     mu.open(str(f))
     d = mu.detail
-    assert d.title.text() == "guard" and d.ride_btn.text() == "Use in a unit"
+    assert d.title.text() == "Guard" and d.ride_btn.text() == "Use in a unit"  # shown capitalised; the folder stays guard
     assert d.ride_btn.objectName() == "generate" and d.del_btn.objectName() == "danger"  # one primary; Delete danger
     assert not d.add_btn.isVisibleTo(d)  # a part goes into a unit first; units go into mods
     assert "Made by you" in d.state.text() and "mine" not in d.state.text() or "mine" in d.rights_full.text()

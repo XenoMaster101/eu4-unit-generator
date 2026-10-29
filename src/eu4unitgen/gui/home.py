@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from eu4unitgen.gui.base import Page, card, clear_layout, ghost, label
 
@@ -34,6 +34,8 @@ class HomeScreen(Page):
         col.addWidget(h1)
         col.addWidget(sub)
         col.addSpacing(6)
+        from eu4unitgen.gui import icons
+        from eu4unitgen.gui.theme import tokens
         grid = QGridLayout()
         grid.setHorizontalSpacing(16)
         self.cards = {}
@@ -45,13 +47,30 @@ class HomeScreen(Page):
             self.cards[key] = c
         col.addLayout(grid)
         self.build_card = self.cards["build"]
+        strip = QHBoxLayout()
+        strip.addStretch(1)
+        self.steps = []
+        for i, (ic, text) in enumerate((("part", "Make parts"), ("build", "Build a unit"), ("check", "Add to mod"))):
+            if i:
+                strip.addWidget(label("→", "muted", wrap=False))
+            pic = QLabel()
+            pic.setPixmap(icons.pixmap(ic, tokens()["accent_fg"], 18))
+            strip.addWidget(pic)
+            step = label(f"{i + 1}  {text}", "h3", wrap=False)
+            self.steps.append(step)
+            strip.addWidget(step)
+        strip.addStretch(1)
+        how = QWidget()
+        how.setLayout(strip)
+        how.setToolTip("Parts (horses, soldiers, guns) are made once from pictures; a unit is put together from them "
+                       "tier by tier; Add to mod writes it into your EU4 mod.")
+        col.addWidget(label("How it works", "step"), 0, Qt.AlignHCenter)
+        col.addWidget(how)
         self.ai_note = label("", "explain")
         self.ai_note.setAlignment(Qt.AlignCenter)
         col.addWidget(self.ai_note)
         row = QHBoxLayout()
         row.addStretch(1)
-        from eu4unitgen.gui import icons
-        from eu4unitgen.gui.theme import tokens
         self.example = ghost("Show me an example", lambda: window.help_page.show_example(),
                              "Walks through a finished unit (the cataphract), step by step, with its real results")
         self.example.setIcon(icons.icon("example", tokens()["secondary"], 18))
@@ -109,7 +128,7 @@ class HomeScreen(Page):
         for r in rs:
             from eu4unitgen.gui.progress import state_text
             src = library.part_render(r) if r["kind"] in library.KINDS else library.run_thumb(r)
-            b = card(r["name"].replace("_", " "), "", "Open it in the Library", picture=thumb(src, 72, 64),
+            b = card(library.display(r["name"]), "", "Open it in the Library", picture=thumb(src, 72, 64),
                      status=status_of(r, state_text(r)))
             b.setFixedWidth(240)
             b.setMinimumHeight(88)

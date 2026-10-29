@@ -24,6 +24,12 @@ from pathlib import Path
 
 KINDS = ("horse", "soldier", "gun")
 UNIT_TYPES = {"infantry": ("soldier",), "cavalry": ("horse", "soldier"), "artillery": ("gun", "soldier")}
+# slots that may stay "the game's own" while the others are yours: artillery with the game's gun and your crew
+OPTIONAL = {"artillery": ("gun",)}
+
+
+def needed(utype: str) -> tuple[str, ...]:
+    return tuple(k for k in UNIT_TYPES[utype] if k not in OPTIONAL.get(utype, ()))
 # what each slot is called in a unit of that type
 SLOT_TEXT = {("infantry", "soldier"): "Soldier", ("cavalry", "horse"): "Horse", ("cavalry", "soldier"): "Rider",
              ("artillery", "gun"): "Gun", ("artillery", "soldier"): "Crew"}
@@ -56,7 +62,7 @@ class Part:
 
     @property
     def title(self) -> str:
-        return self.name.replace("_", " ")
+        return display(self.name)
 
     def tag_text(self) -> str:
         bits = []
@@ -64,6 +70,11 @@ class Part:
             bits.append(self.tags["style"])
         bits += list(self.tags.get("regions") or [])
         return ", ".join(bits)
+
+
+def display(name: str) -> str:
+    """A folder name as people read it: "bay_horse" -> "Bay Horse" (folders keep their own names)."""
+    return " ".join(w[:1].upper() + w[1:] for w in (name or "").replace("-", "_").split("_") if w)
 
 
 def rights_text(rights: str, starter: bool = False) -> str:
@@ -287,7 +298,7 @@ def new_unit(name: str, utype: str, tiers: dict, country_tag: str = "", gfx: str
     for t, slots in tiers.items():
         s = {k: v for k, v in (slots or {}).items() if k in UNIT_TYPES[utype] and v}
         if s:
-            missing = [k for k in UNIT_TYPES[utype] if k not in s]
+            missing = [k for k in needed(utype) if k not in s]
             if missing:
                 raise ValueError(f"tier {t} needs a {' and a '.join(missing)} too")
             clean[str(int(t))] = s
@@ -299,6 +310,11 @@ def new_unit(name: str, utype: str, tiers: dict, country_tag: str = "", gfx: str
     f.mkdir(parents=True)
     rights = "; ".join(sorted({f"{ref.split(':', 1)[1]}: {(part(ref) or Part(ref, '', '', f)).rights}"
                                for s in clean.values() for ref in s.values()}))
+    for s in clean.values():
+        for k, ref in list(s.items()):
+            if ref.startswith("starter:"):
+                fit(ref.split(":", 1)[1])
+                s[k] = "run:" + ref.split(":", 1)[1]
     first = part(next(iter(clean[min(clean, key=int)].values())))
     req = {"schema": 1, "name": name, "kind": "unit", "type": utype, "tiers": clean, "country": country_tag.upper(),
            "gfx": gfx, "rights": rights, "image": first.image if first else None, "tier": int(min(clean, key=int)),
@@ -307,13 +323,14 @@ def new_unit(name: str, utype: str, tiers: dict, country_tag: str = "", gfx: str
     return f
 
 
-def unit_preview(utype: str, slots: dict[str, str]) -> tuple[str | None, bool]:
-    """A picture of the whole unit at a tier (horse with rider, gun with crew): (path, True) when one has been drawn
-    for these parts (an assembled unit's preview, or an older cavalry run of the same horse and soldier), else its
-    main part's picture and False. (None, False) for the game's own."""
+def unit_preview(utype: str, slots: dict[str, str]) -> tuple[str | None, bool, str | None]:
+    """A picture of the whole unit at a tier (horse with rider, gun with crew): (path, True, None) when one has been
+    drawn for these parts (an assembled unit's preview, or an older cavalry run of the same horse and soldier), else
+    the picture of its main part that is picked, False, and that part's slot. (None, False, None) for the game's
+    own."""
     from eu4unitgen.ref3d import flow
     if not slots:
-        return None, False
+        return None, False, None
     for r in flow.runs():
         if not (r.get("status") or {}).get("done"):
             continue
@@ -326,10 +343,11 @@ def unit_preview(utype: str, slots: dict[str, str]) -> tuple[str | None, bool]:
             if s == slots:
                 g = Path(r["folder"]) / "preview" / "gallery" / f"close_three_quarter_{t}.png"
                 if g.is_file():
-                    return str(g), True
+                    return str(g), True, None
     main = {"infantry": "soldier", "cavalry": "horse", "artillery": "gun"}[utype]
-    p = part(slots.get(main) or next(iter(slots.values())))
-    return ((p.thumb or p.image) if p else None), False
+    shown = main if slots.get(main) else next(iter(slots))
+    p = part(slots[shown])
+    return ((p.thumb or p.image) if p else None), False, shown
 
 
 def uses(ref: str) -> list[str]:
@@ -352,51 +370,123 @@ def set_tags(folder: Path, style: str | None, regions_text: str) -> dict:
 
 
 # ------------------------------------------------------------------ starter parts
-def pack(folder: Path, out: Path, tags: dict | None = None) -> Path:
-    """A finished part run packed for the starter library: ``out/part.json`` with relative paths, its geometry and
-    textures (PNG), the parts' geometry and textures, its picture and the game version's render. Never a .mesh, .dds
-    or anything read from the install."""
+STARTER_RIGHTS = ("Starter part that comes with the app: made by the app's author with ChatGPT from their own picture, "
+                  "TRELLIS.2 from it; CC BY 4.0 (credit: the EU4 Unit Generator's author)")
+# the starter library (the user, 2026-10-28): run name -> tags. Packed from the author's finished runs when the
+# installer is built (``pack_starters``; the folder isn't in git), never from anything of the game's
+STARTER = {"bay_horse": {"style": "light", "regions": ["Western", "European"]},
+           "english_horse": {"style": "light", "regions": ["English", "Western", "generic"]},
+           "cataphract_horse": {"style": "barded", "regions": ["Byzantine", "Greek"]},
+           "english_soldier": {"regions": ["English", "Western", "generic"]},
+           "cataphract": {"regions": ["Byzantine", "Greek"]},
+           "bombard": {"regions": ["European", "generic"]}}
+
+
+def pack_starters(dest: Path | None = None) -> dict[str, str]:
+    """Every ``STARTER`` part packed into ``dest`` (default: the app's starter folder). -> {name: "packed" or why
+    not}."""
+    from eu4unitgen.ref3d import flow
+    dest = Path(dest or starter_root())
+    dest.mkdir(parents=True, exist_ok=True)
+    out = {}
+    for name, tags in STARTER.items():
+        f = flow.folder_of(name)
+        if not (flow.status(f) or {}).get("done"):
+            out[name] = "not finished: not packed"
+            continue
+        pack(f, dest / name, tags=tags)
+        out[name] = "packed"
+    return out
+
+
+def pack(folder: Path, out: Path, tags: dict | None = None, rights: str = STARTER_RIGHTS) -> Path:
+    """A finished part run packed for the starter library (the user, 2026-10-28: the raw TRELLIS.2 model, its tags and
+    rights; fitted and weighted on each PC on first use): ``out/part.json`` with relative paths, ``raw.glb``, the
+    cut-out picture (``input/``), the part crops cut from the picture (``crops_cache/``: no SAM 2 needed to fit it)
+    and TRELLIS.2's models of them (``parts_cache/``), the picture, and a render of the raw model. Nothing fitted to
+    the game: no geometry on the game's skeleton, no weights, never a .mesh or .dds."""
     from eu4unitgen.ref3d import flow
     folder, out = Path(folder), Path(out)
     req = flow.request(folder)
+    tr = folder / "trellis"
     fin = folder / "finished"
     m = _json(fin / "manifest.json")
-    if not m:
+    if not m or not (tr / "raw.glb").is_file():
         raise FileNotFoundError(f"{req['name']} isn't finished")
     if out.exists():
         shutil.rmtree(out)
-    (out / "files").mkdir(parents=True)
-    taken: dict[str, str] = {}
-
-    def keep(src) -> str:
-        src = Path(src)
-        if src.suffix.lower() in (".mesh", ".dds", ".anim", ".asset", ".gfx"):
-            raise ValueError(f"{src.name}: a game format isn't packed")
-        if str(src) in taken:
-            return taken[str(src)]
-        rel = f"files/{src.parent.name}_{src.name}" if (out / "files" / src.name).exists() else f"files/{src.name}"
-        shutil.copyfile(src, out / rel)
-        taken[str(src)] = rel
-        return rel
-    geometry = keep(m["geometry"])
-    textures = {k: keep(v) for k, v in (m.get("textures") or {}).items() if v}
-    parts_ = {}
-    for key, p in (m.get("parts") or {}).items():
-        q = json.loads(json.dumps(p))
-        mesh = q.get("mesh") or {}
-        q["mesh"] = {k: keep(v) for k, v in mesh.items() if v}
-        parts_[key] = q
-    image = keep(req["image"]) if req.get("image") and Path(req["image"]).is_file() else None
-    view = "side" if req["kind"] == "horse" else "front"
-    render = ((m.get("compare") or {}).get("images") or {}).get("game", {}).get(view)
-    thumb = keep(render) if render and Path(render).is_file() else image
-    q = _json(folder / "preview" / "quality.json")
-    d = {"schema": 1, "name": req["name"], "kind": req["kind"], "tags": tags if tags is not None else (req.get("tags") or {}),
-         "rights": req.get("rights", ""), "image": image, "thumb": thumb, "geometry": geometry, "textures": textures,
-         "parts": parts_, "on_foot": m.get("on_foot"), "colour": {k: v for k, v in (m.get("colour") or {}).items()
-                                                                  if k in ("default_primary",)},
-         "quality": {"summary": q.get("summary"), "measures": {k: {"verdict": v.get("verdict"), "text": v.get("text")}
-                                                                for k, v in (q.get("measures") or {}).items()}},
-         "made_by": "eu4unitgen (TRELLIS.2 from the picture; fitted, weighted and baked by the app)"}
+    out.mkdir(parents=True)
+    shutil.copyfile(tr / "raw.glb", out / "raw.glb")
+    shutil.copytree(tr / "input", out / "input")
+    crops = Path(m.get("edited_from") or fin) / "parts" / "crops"
+    if not (crops / "crops.json").is_file():
+        v = sorted((tr / "game").glob("v[0-9][0-9][0-9]"))
+        crops = (v[-1] / "parts" / "crops") if v else crops
+    if (crops / "crops.json").is_file():
+        shutil.copytree(crops, out / "crops_cache", ignore=shutil.ignore_patterns("*_hint.png"))
+    if (tr / "parts_cache").is_dir():
+        shutil.copytree(tr / "parts_cache", out / "parts_cache", ignore=shutil.ignore_patterns("*.log", "logs"))
+    for bad in out.rglob("*"):
+        if bad.suffix.lower() in (".mesh", ".dds", ".anim", ".asset", ".gfx"):
+            raise ValueError(f"{bad.name}: a game format isn't packed")
+    image = None
+    if req.get("image") and Path(req["image"]).is_file():
+        image = "picture" + Path(req["image"]).suffix.lower()
+        shutil.copyfile(req["image"], out / image)
+    raw = ((m.get("compare") or {}).get("images") or {}).get("raw") or {}
+    view = next((v for v in ("front34", "side", "front") if raw.get(v) and Path(raw[v]).is_file()), None)
+    thumb = None
+    if view:
+        thumb = "render.png"
+        shutil.copyfile(raw[view], out / thumb)
+    d = {"schema": 2, "name": req["name"], "kind": req["kind"],
+         "tags": tags if tags is not None else (req.get("tags") or {}), "rights": rights, "image": image,
+         "thumb": thumb or image, "options": req.get("options") or {},
+         "edits": {k: v for k, v in (req.get("edits") or {}).items() if k != "candidate"},
+         "made_by": "TRELLIS.2 from the picture (the raw model); fitted to the game on the PC that uses it"}
     (out / "part.json").write_text(json.dumps(d, indent=1), encoding="utf-8")
     return out
+
+
+def fit(name: str, starter: Path | None = None) -> Path:
+    """A starter part fitted on this PC: a run of its own in the projects folder (its raw model in place of the AI
+    steps), started if it isn't finished. A run of that name already there (your own) is used as it is."""
+    from eu4unitgen.ref3d import flow
+    f = flow.folder_of(name)
+    if (f / "request.json").is_file():
+        if not (flow.status(f) or {}).get("done") and (flow.status(f) or {}).get("state") != "running":
+            flow.start(f)
+        return f
+    src = Path(starter or starter_root()) / name
+    d = _json(src / "part.json")
+    if d.get("kind") not in KINDS:
+        raise FileNotFoundError(f"no starter part called {name}")
+    image = src / (d.get("image") or "picture.png")
+    f = flow.new_request(name, image, d.get("rights", STARTER_RIGHTS), d["kind"], 1, options=d.get("options") or {})
+    tr = f / "trellis"
+    shutil.copyfile(src / "raw.glb", tr / "raw.glb")
+    shutil.copytree(src / "input", tr / "input", dirs_exist_ok=True)
+    for sub in ("crops_cache", "parts_cache"):
+        if (src / sub).is_dir():
+            shutil.copytree(src / sub, tr / sub, dirs_exist_ok=True)
+    (tr / "candidates.json").write_text(json.dumps({"candidates": [{"seed": 0, "glb": str((tr / "raw.glb").resolve()),
+                                                                     "note": "the starter part's model"}], "best": 0}),
+                                        encoding="utf-8")
+    req = flow.request(f)
+    req.update(tags=d.get("tags") or {}, edits=d.get("edits") or {}, starter=True)
+    (f / "request.json").write_text(json.dumps(req, indent=1), encoding="utf-8")
+    now = time.time()
+    flow._write(f, {"name": name, "kind": d["kind"], "state": "stopped", "done": False, "started": now,
+                    "stages": {s: {"state": "done", "seconds": 0, "from": "the starter part"} for s in ("cutout", "trellis")}})
+    flow.start(f)
+    return f
+
+
+def fitted(name: str) -> tuple[Path, dict]:
+    """A starter part's fitted, finished folder and subject (``fit`` first; ``ref3d.assemble`` waits for it)."""
+    from eu4unitgen.ref3d import flow
+    f = flow.folder_of(name)
+    if not (f / "finished" / "manifest.json").is_file():
+        fit(name)
+        raise FileNotFoundError(f"the starter part {display(name)} is being fitted to the game on this PC first")
+    return f / "finished", json.loads((f / "subject.json").read_text(encoding="utf-8"))

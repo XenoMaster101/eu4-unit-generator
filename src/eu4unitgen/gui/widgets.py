@@ -88,3 +88,26 @@ class FlowLayout(QLayout):
             x += hint.width() + self.spacing()
             line = max(line, hint.height())
         return y + line - rect.y()
+
+
+class TileLayout(FlowLayout):
+    """A gallery grid: tiles all the same size, as many columns as fit (each at least ``min_width``), the row filling
+    the width."""
+
+    def __init__(self, parent=None, min_width: int = 240, spacing: int = 14):
+        super().__init__(parent, spacing)
+        self.min_width = min_width
+
+    def _place(self, rect, move: bool) -> int:
+        if not self._items:
+            return 0
+        sp = self.spacing()
+        cols = max(1, (rect.width() + sp) // (self.min_width + sp))
+        w = max(1, (rect.width() - sp * (cols - 1)) // cols)
+        h = max(item.sizeHint().height() for item in self._items)
+        for i, item in enumerate(self._items):
+            r, c = divmod(i, cols)
+            if move:
+                item.setGeometry(QRect(rect.x() + c * (w + sp), rect.y() + r * (h + sp), w, h))
+        rows = (len(self._items) + cols - 1) // cols
+        return rows * h + (rows - 1) * sp

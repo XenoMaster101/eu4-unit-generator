@@ -278,7 +278,7 @@ class BuildUnitScreen(Page):
         if pv is None:
             return
         slots = {k: b.currentData() for (tt, k), b in self.slots.items() if tt == t and b.currentData()}
-        render, whole = library.unit_preview(self.utype, slots)
+        render, whole, shown = library.unit_preview(self.utype, slots)
         if not slots:
             pv.setPixmap(icon_pixmap({"infantry": "soldier", "cavalry": "horse", "artillery": "gun"}[self.utype],
                                      tokens()["card_muted"], 36, 1.3))
@@ -289,9 +289,10 @@ class BuildUnitScreen(Page):
             pv.setPixmap(pix)
             pv.setToolTip("The whole unit at this tier, as the game draws it" if whole else
                           "The full preview (the whole unit together) is drawn when you build it")
-            main = {"infantry": "soldier", "cavalry": "horse", "artillery": "gun"}[self.utype]
+            what = library.SLOT_TEXT[(self.utype, shown)].lower() if shown else ""
+            gun = " with the game's own gun" if self.utype == "artillery" and "gun" not in slots else ""
             cap.setText("the whole unit" if whole or self.utype == "infantry" else
-                        f"the {main}; the whole unit is drawn when you build it")
+                        f"the {what}{gun}; the whole unit is drawn when you build it")
         self._ready()
 
     def copy_first(self) -> None:
@@ -318,9 +319,8 @@ class BuildUnitScreen(Page):
         tiers = self.tiers()
         if not tiers:
             return "Pick the parts for at least one tier."
-        kinds = library.UNIT_TYPES[self.utype]
         for t, s in sorted(tiers.items()):
-            missing = [library.SLOT_TEXT[(self.utype, k)].lower() for k in kinds if k not in s]
+            missing = [library.SLOT_TEXT[(self.utype, k)].lower() for k in library.needed(self.utype) if k not in s]
             if missing:
                 return f"Tier {t} needs a {' and a '.join(missing)} too."
         return name_problem(self.name.text().strip())
@@ -341,7 +341,9 @@ class BuildUnitScreen(Page):
                                  self.gfx.currentData() or "")
         except (ValueError, FileExistsError, OSError) as exc:
             return self.show_message(str(exc), error=True)
-        self.show_message(f"Saved {f.name}. Opening it in the Library.")
+        from eu4unitgen.ref3d import flow
+        flow.start(f)  # assembling needs no AI: a few minutes, in its own process
+        self.show_message(f"Building {f.name}. Opening it in the Library.")
         self.window_.go("units", folder=str(f))
 
 

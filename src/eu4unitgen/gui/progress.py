@@ -18,6 +18,10 @@ STATE_TEXT = {"running": "being made", "done": "ready", "failed": "stopped with 
 def state_text(r: dict) -> str:
     st = r.get("status") or {}
     if r.get("state") == "running":
+        ram = next((s for s in (st.get("stages") or {}).values() if s.get("state") == "waiting_ram"), None)
+        if ram:
+            close = ", ".join(n for n, _ in ram.get("close") or [])
+            return f"waiting for memory" + (f": close {close}" if close else "")
         left = time_left(r["folder"])
         return f"being made: about {minutes(left)} left" if left else "being made"
     return STATE_TEXT.get(r.get("state"), r.get("state", ""))
@@ -105,6 +109,11 @@ class StageList(QFrame):
                 text, name = "waiting: close EU4 (it holds the graphics card)", "bad"
             elif ss == "waiting_gpu":
                 text, name = "waiting its turn: another unit is using the graphics card", "warn"
+            elif ss == "waiting_ram":
+                close = ", ".join(f"{n} ({gb:.1f} GB)" for n, gb in s.get("close") or [])
+                text = (f"waiting for memory: {s.get('free', '?')} GB free, it needs {s.get('need', '?'):.0f} GB"
+                        + (f"; close {close}" if close else "; close programs you don't need"))
+                name = "bad"
             elif ss == "waiting_units":
                 text, name = "waiting for its horse and soldier to be ready", "warn"
             else:

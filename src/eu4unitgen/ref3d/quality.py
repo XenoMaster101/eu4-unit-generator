@@ -231,7 +231,8 @@ def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path
 
 
 TITLES = {"silhouette": "Outline vs the reference", "deformation": "Deformation vs vanilla", "parts": "Parts",
-          "texture": "Texture", "map_zoom": "At map zoom", "seating": "Seated on the horse"}
+          "texture": "Texture", "map_zoom": "At map zoom", "seating": "Seated on the horse",
+          "muzzle": "The muzzle", "wheels": "The wheels", "budget": "Size"}  # the last three: a gun's (Track A)
 
 
 def markdown(rep: dict) -> str:

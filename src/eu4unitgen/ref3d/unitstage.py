@@ -42,6 +42,13 @@ def horse_entry(vdir: Path, subject: dict) -> dict:
     return e
 
 
+def gun_entry(vdir: Path, subject: dict) -> dict:
+    """The loadout's gun entry (Track A): as a horse's, on the base game's gun (artillery_mesh)."""
+    e = horse_entry(vdir, subject)
+    e.pop("unit_colours", None)  # a gun has no country colour (the base game's is PdxMeshStandard)
+    return {**e, "base": "artillery_mesh"}
+
+
 def rider_entry(vdir: Path, subject: dict) -> tuple[dict, list]:
     """(the loadout's rider entry, its parts for the slot)."""
     m = json.loads((Path(vdir) / "manifest.json").read_text(encoding="utf-8"))
@@ -64,7 +71,7 @@ def unit_names(name: str) -> dict:
 
 
 def spec(title: str, tier: int, horse: dict | None, rider: tuple | None, names: dict, test: dict,
-         vanilla_next: bool = True, soldier: tuple | None = None) -> dict:
+         vanilla_next: bool = True, soldier: tuple | None = None, gun: dict | None = None) -> dict:
     """The test-mod spec: the unit at ``tier`` (its horse and/or rider, or its soldier on foot: ``rider_entry``'s
     pair as the infantry; the vanilla rest), vanilla at the next tier."""
     horses = {str(tier): horse} if horse else {}
@@ -82,6 +89,8 @@ def spec(title: str, tier: int, horse: dict | None, rider: tuple | None, names: 
         loadout["riders"] = riders
     if soldier:
         loadout["soldiers"] = {str(tier): soldier[0]}
+    if gun:
+        loadout["guns"] = {str(tier): gun}
     if slots:
         loadout["slots"] = slots
     sprite_techs = [t for t in test["sprite_techs"] if t > tier] or test["sprite_techs"]

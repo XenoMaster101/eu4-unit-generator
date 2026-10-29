@@ -264,9 +264,18 @@ def deskew(crop: Image.Image) -> tuple[Image.Image, float]:
 
 def crops(reference: Path, fg: Path, located: dict, out: Path, ai_python: str, weights: str,
           keys=("shield", "helmet", "crest", "lance")) -> dict:
-    """SAM 2 cuts each located part out of ``reference`` -> {key: {"crop", "mask", "box", "added", ...}}."""
+    """SAM 2 cuts each located part out of ``reference`` -> {key: {"crop", "mask", "box", "added", ...}}. Crops already
+    in ``out`` (``crops.json``: a starter part's, cut when it was made) are used as they are, paths made local."""
     from eu4unitgen.ai.env import AIJobRunner
     out.mkdir(parents=True, exist_ok=True)
+    if (out / "crops.json").is_file():
+        res = json.loads((out / "crops.json").read_text(encoding="utf-8"))
+        for r in res.values():
+            if isinstance(r, dict):
+                for k in ("crop", "mask", "hint"):
+                    if r.get(k):
+                        r[k] = str(out / Path(r[k]).name)
+        return res
     parts = {}
     for key in keys:
         if key not in located:

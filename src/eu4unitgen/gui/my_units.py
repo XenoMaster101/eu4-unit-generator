@@ -19,14 +19,26 @@ from PySide6.QtWidgets import (
 )
 
 from eu4unitgen.gui.base import (
-    Page, Turntable, card, danger, ghost, label, open_file, open_folder, pixmap, primary, thumb,
+    Page, Tile, Turntable, danger, ghost, label, open_file, open_folder, pixmap, primary, thumb,
 )
 from eu4unitgen.gui.progress import StageList, state_text
-from eu4unitgen.gui.widgets import FlowLayout
+from eu4unitgen.gui.widgets import TileLayout
 
 KIND_TEXT = {"soldier": "soldier", "horse": "horse", "gun": "gun", "cavalry": "cavalry unit", "rider": "cavalry unit",
              "unit": "unit"}
 FILTERS = (("all", "All"), ("horse", "Horses"), ("soldier", "Soldiers"), ("gun", "Guns"), ("unit", "Units"))
+PIC = 360  # the part page's two pictures, side by side
+SECTIONS = (("horse", "Horses"), ("soldier", "Soldiers"), ("gun", "Guns"), ("unit", "Units"))
+
+
+class _AllParts:
+    """``flow_layout``'s old meaning: every part tile, whichever section it is in (count only)."""
+
+    def __init__(self, screen):
+        self.screen = screen
+
+    def count(self) -> int:
+        return sum(self.screen.sections[k][2].count() for k in ("horse", "soldier", "gun"))
 EMBLEMS = [("none", None), ("the Palaiologan cross (tetragrammatic)", "tetragrammatic")]
 VERDICT_COLOUR = {"good": "ok", "ok": "warn", "check": "error"}
 
@@ -39,11 +51,12 @@ def thumb_of(r: dict) -> str | None:
 
 def unit_text(r: dict) -> str:
     """A unit card's line: each tier's parts ("tier 1: bay horse + cataphract")."""
+    from eu4unitgen.core.library import display
     if r.get("kind") != "unit":
-        return f"tier {r.get('tier', 1)}: {r.get('horse')} + {r.get('soldier')}".replace("_", " ")
+        return f"tier {r.get('tier', 1)}: {display(r.get('horse'))} + {display(r.get('soldier'))}"
     bits = []
     for t, s in sorted((r.get("tiers") or {}).items()):
-        bits.append(f"tier {t}: " + " + ".join(ref.split(":", 1)[1].replace("_", " ") for ref in s.values()))
+        bits.append(f"tier {t}: " + " + ".join(display(ref.split(":", 1)[1]) for ref in s.values()))
     return "; ".join(bits)
 
 
@@ -84,16 +97,18 @@ class MyUnitsScreen(Page):
         gl.addWidget(self.empty)
         box = QWidget()
         bl = QVBoxLayout(box)
-        self.parts_title = label("Parts", "h2")
-        bl.addWidget(self.parts_title)
-        pw = QWidget()
-        self.flow_layout = FlowLayout(pw)
-        bl.addWidget(pw)
-        self.units_title = label("Units", "h2")
-        bl.addWidget(self.units_title)
-        uw = QWidget()
-        self.units_layout = FlowLayout(uw)
-        bl.addWidget(uw)
+        bl.setContentsMargins(0, 0, 10, 0)
+        self.sections: dict[str, tuple] = {}
+        for key, title in SECTIONS:
+            head_ = label(title, "h2")
+            bl.addWidget(head_)
+            w = QWidget()
+            grid = TileLayout(w, min_width=250)
+            bl.addWidget(w)
+            bl.addSpacing(8)
+            self.sections[key] = (head_, w, grid)
+        self.flow_layout = _AllParts(self)
+        self.units_layout = self.sections["unit"][2]
         bl.addStretch(1)
         sc = QScrollArea()
         sc.setWidgetResizable(True)
@@ -134,38 +149,50 @@ class MyUnitsScreen(Page):
     def fill(self) -> None:
         from eu4unitgen.core import library
         from eu4unitgen.ref3d import flow
-        self.flow_layout.clear()
-        self.units_layout.clear()
-        ps = [p for p in library.parts() if self.filter in ("all", p.kind)]
-        for p in ps:
-            chips = [KIND_TEXT[p.kind]] + (["starter"] if p.starter else []) + (
-                [p.tags["style"]] if p.tags.get("style") else []) + list(p.tags.get("regions") or [])[:2]
+        for _, _, grid in self.sections.values():
+            grid.clear()
+        shown = {k: 0 for k in self.sections}
+        for p in library.parts():
+            if self.filter not in ("all", p.kind):
+                continue
+            chips = ([p.tags["style"]] if p.tags.get("style") else []) + list(p.tags.get("regions") or [])
+            stopped = p.state in ("stopped", "failed") and not p.done
             if p.done:
-                status = ("ok", "ready")
+                status = ("ok", "Ready")
             else:
                 status = ("error" if p.state == "failed" else "warn",
                           state_text({"status": flow.status(p.folder) or {}, "state": p.state, "folder": str(p.folder)}))
-            b = card(p.title, "", "A starter part that comes with the app: use it in a unit, or make a copy to edit it"
-                     if p.starter else "Open it: its preview, how it came out, tags, edits, Use in a unit",
-                     picture=thumb(p.thumb or p.image, 128, 112), chips=chips, status=status)
-            b.setFixedSize(340, 140)
-            b.clicked.connect(lambda _=False, ref=p.ref: self.open_part(ref))
-            self.flow_layout.addWidget(b)
-        us = library.units() if self.filter in ("all", "unit") else []
-        for r in us:
+            act = ("Resume", lambda f=str(p.folder): self._resume_run(f)) if stopped else (
+                "View", lambda ref=p.ref: self.open_part(ref))
+            tile = Tile(p.title, thumb(p.thumb or p.image, 300, Tile.PIC_H), chips, status, p.starter, act,
+                        "A starter part that comes with the app: use it in a unit, or make a copy to edit it"
+                        if p.starter else "Open it: its preview, how it came out, tags, edits, Use in a unit")
+            tile.clicked.connect(lambda _=False, ref=p.ref: self.open_part(ref))
+            self.sections[p.kind][2].addWidget(tile)
+            shown[p.kind] += 1
+        for r in (library.units() if self.filter in ("all", "unit") else []):
             st = r.get("status") or {}
-            status = ("ok", "ready") if st.get("done") else (
-                ("warn", "not built yet") if r.get("kind") == "unit" and not st else
-                ("error" if r.get("state") == "failed" else "warn", state_text(r)))
-            b = card(r["name"].replace("_", " "), unit_text(r), "Open it: its tiers, preview, Add to mod",
-                     picture=thumb(thumb_of(r), 128, 112),
-                     chips=[library.TYPE_TEXT.get(r.get("type"), "Cavalry").lower()], status=status)
-            b.setFixedSize(340, 140)
-            b.clicked.connect(lambda _=False, f=r["folder"]: self.open(f))
-            self.units_layout.addWidget(b)
-        self.parts_title.setVisible(bool(ps))
-        self.units_title.setVisible(bool(us))
-        self.empty.setVisible(not ps and not us)
+            if st.get("done"):
+                status = ("ok", "Ready")
+            elif r.get("kind") == "unit" and not st:
+                status = ("warn", "Not built yet")
+            else:
+                status = ("error" if r.get("state") == "failed" else "warn", state_text(r))
+            stopped = r.get("state") in ("stopped", "failed") and not st.get("done")
+            act = ("Resume", lambda f=r["folder"]: self._resume_run(f)) if stopped else (
+                "View", lambda f=r["folder"]: self.open(f))
+            chips = [library.TYPE_TEXT.get(r.get("type"), "Cavalry")] + [
+                f"tier {t}" for t in sorted((r.get("tiers") or {str(r.get("tier", 1)): 1}))]
+            tile = Tile(library.display(r["name"]), thumb(thumb_of(r), 300, Tile.PIC_H), chips, status, False, act,
+                        "Open it: its tiers, preview, Add to mod")
+            tile.clicked.connect(lambda _=False, f=r["folder"]: self.open(f))
+            self.units_layout.addWidget(tile)
+            shown["unit"] += 1
+        for key, (head_, w, _) in self.sections.items():
+            vis = self.filter in ("all", key) and (shown[key] > 0 or self.filter == key)
+            head_.setVisible(vis)
+            w.setVisible(vis)
+        self.empty.setVisible(not any(shown.values()))
         ok, why = library.ai_ready()
         self.ai_note.setText(why)
         self.ai_note.setVisible(not ok)
@@ -173,6 +200,12 @@ class MyUnitsScreen(Page):
     def open(self, folder: str) -> None:
         self.detail.show_unit(folder)
         self.stack.setCurrentWidget(self.detail)
+
+    def _resume_run(self, folder: str) -> None:
+        from eu4unitgen.ref3d import flow
+        flow.start(Path(folder))
+        self.show_message(f"Resumed {Path(folder).name}. You can close the app: it keeps going.")
+        QTimer.singleShot(1500, self.fill)
 
     def open_part(self, ref: str) -> None:
         from eu4unitgen.core import library
@@ -216,23 +249,9 @@ class UnitDetail(QWidget):
         outer.addLayout(sumrow)
         self.state = label("", "explain")
         outer.addWidget(self.state)
-        body = QHBoxLayout()
-        left = QVBoxLayout()
-        self.turn = Turntable(330)
-        left.addWidget(label("In the game", "h3"))
-        left.addWidget(self.turn)
-        self.ref_title = label("From your picture", "h3")
-        left.addWidget(self.ref_title)
-        self.ref_pic = label("")
-        self.ref_pic.setAlignment(Qt.AlignLeft)
-        left.addWidget(self.ref_pic)
-        self.sheet_btn = ghost("Open the result sheet", self._open_sheet,
-                               "The picture next to the unit in game (close, side and map zoom) and the report, full size")
-        self.folder_btn = ghost("Open its folder", lambda: open_folder(Path(self.folder)) if self.folder else None,
-                                "Every file of this unit (the models, textures, logs)")
-        left.addStretch(1)
-        body.addLayout(left)
-        right = QVBoxLayout()
+        # one column, scrolled: the buttons, the two pictures side by side, then the details and the edit boxes
+        col = QVBoxLayout()
+        col.setSpacing(10)
         actions = QHBoxLayout()
         self.resume = ghost("Resume", self._resume, "Carry on from the last finished step")
         self.edit_btn = ghost("Edit the look", lambda: self._toggle(self.edits_box),
@@ -246,15 +265,37 @@ class UnitDetail(QWidget):
         self.copy_btn = ghost("Make a copy", self._copy, "A copy of this starter part in your library, to edit")
         self.tags_btn = ghost("Tags", lambda: self._toggle(self.tags_box), "Its style and regions: they drive the "
                               "suggestions when you build a unit for a country")
-        for b in (self.ride_btn, self.add_btn, self.resume, self.edit_btn, self.tags_btn, self.copy_btn, self.details_btn,
-                  self.del_btn):
+        for b in (self.ride_btn, self.add_btn, self.resume, self.edit_btn, self.tags_btn, self.copy_btn, self.details_btn):
             actions.addWidget(b)
         actions.addStretch(1)
-        right.addLayout(actions)
+        actions.addWidget(self.del_btn)
+        col.addLayout(actions)
         self.used = label("", "explain")
-        right.addWidget(self.used)
+        col.addWidget(self.used)
+        pics = QHBoxLayout()
+        pics.setSpacing(16)
+        game = QVBoxLayout()
+        game.addWidget(label("In the game", "h3"))
+        self.turn = Turntable(PIC)
+        game.addWidget(self.turn)
+        pics.addLayout(game)
+        ref = QVBoxLayout()
+        self.ref_title = label("From your picture", "h3")
+        ref.addWidget(self.ref_title)
+        self.ref_pic = label("")
+        self.ref_pic.setObjectName("cardpic")
+        self.ref_pic.setAlignment(Qt.AlignCenter)
+        self.ref_pic.setFixedSize(PIC, PIC)
+        ref.addWidget(self.ref_pic)
+        pics.addLayout(ref)
+        pics.addStretch(1)
+        col.addLayout(pics)
+        self.sheet_btn = ghost("Open the result sheet", self._open_sheet,
+                               "The picture next to the unit in game (close, side and map zoom) and the report, full size")
+        self.folder_btn = ghost("Open its folder", lambda: open_folder(Path(self.folder)) if self.folder else None,
+                                "Every file of this unit (the models, textures, logs)")
         self.stages = StageList()
-        right.addWidget(self.stages)
+        col.addWidget(self.stages)
         self.details_box = QGroupBox("Details")
         dl = QVBoxLayout(self.details_box)
         self.quality = label("", rich=True)
@@ -267,22 +308,21 @@ class UnitDetail(QWidget):
         files.addStretch(1)
         dl.addLayout(files)
         self.details_box.hide()
-        right.addWidget(self.details_box)
-        right.addWidget(self._tags())
-        right.addWidget(self._edits())
-        right.addWidget(self._add())
+        col.addWidget(self.details_box)
+        col.addWidget(self._tags())
+        col.addWidget(self._edits())
+        col.addWidget(self._add())
         self.message = label("", rich=True)
         self.message.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        right.addWidget(self.message)
-        right.addStretch(1)
+        col.addWidget(self.message)
+        col.addStretch(1)
         rw = QWidget()
-        rw.setLayout(right)
+        rw.setLayout(col)
         sc = QScrollArea()
         sc.setWidgetResizable(True)
         sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # the text wraps: no sideways scrolling
         sc.setWidget(rw)
-        body.addWidget(sc, 1)
-        outer.addLayout(body, 1)
+        outer.addWidget(sc, 1)
 
     # the page protocol the window's ``run`` uses
     def show_message(self, text: str, error: bool = False) -> None:
@@ -315,25 +355,26 @@ class UnitDetail(QWidget):
         from eu4unitgen.core import library
         req = flow.request(Path(self.folder))
         kind = req["kind"]
-        st = self.stages.show_run(self.folder) if kind != "unit" else (flow.status(Path(self.folder)) or {})
+        st = self.stages.show_run(self.folder)
         state = st.get("state", "new")
         done = bool(st.get("done"))
         part = kind in library.KINDS
-        self.title.setText(req["name"].replace("_", " "))
+        self.title.setText(library.display(req["name"]))
         if kind == "unit":
             bits = [f"{library.TYPE_TEXT[req['type']]} unit", unit_text(req)]
         elif kind in ("cavalry", "rider"):
-            bits = ["Cavalry unit", f"tier {req.get('tier', 1)}: {req.get('soldier')} riding {req.get('horse')}"]
+            bits = ["Cavalry unit", f"tier {req.get('tier', 1)}: {library.display(req.get('soldier'))} riding "
+                                    f"{library.display(req.get('horse'))}"]
         else:
             tags = library.Part("", "", kind, Path(), tags=req.get("tags") or {}).tag_text()
             bits = [f"A {KIND_TEXT.get(kind, kind)}" + (f" · {tags}" if tags else "")]
         bits.append(library.rights_text(req.get("rights", "")))
-        self.state.setText("  ·  ".join(b.replace("_", " ") for b in bits))
+        self.state.setText("  ·  ".join(bits))
         self.rights_full.setText(f"Rights, as recorded: {req.get('rights', '')}")
-        self.ref_pic.setPixmap(pixmap(req.get("image"), 200, 150))
+        self.ref_pic.setPixmap(pixmap(req.get("image"), PIC - 8, PIC - 8))
         self.ref_title.setVisible(bool(req.get("image")))
         used = library.uses(f"run:{req['name']}") if part else []
-        self.used.setText(("Used in: " + ", ".join(u.replace("_", " ") for u in used)) if used else
+        self.used.setText(("Used in: " + ", ".join(library.display(u) for u in used)) if used else
                           ("Not used in a unit yet. Press Use in a unit to build one with it." if part and done else ""))
         rep = None
         qp = Path(self.folder) / "preview" / "quality.json"
@@ -341,13 +382,13 @@ class UnitDetail(QWidget):
             rep = json.loads(qp.read_text(encoding="utf-8"))
         if done:
             dot, words = library.summary(rep)
-        elif kind == "unit" and not st:
-            dot, words = "warn", "Not built yet: putting units together comes in the next step"
+        elif kind == "unit" and not st.get("stages"):
+            dot, words = "warn", "Not built yet: press Resume to put it together"
         else:
             dot, words = ("error" if state == "failed" else "warn"), state_text({"status": st, "state": state, "folder": self.folder})
         self._set_summary(dot, words)
-        self.stages.setVisible(not done and kind != "unit")
-        self.resume.setVisible(state in ("stopped", "failed", "new") and kind != "unit")
+        self.stages.setVisible(not done)
+        self.resume.setVisible(state in ("stopped", "failed", "new"))
         self.edit_btn.setEnabled(done)
         self.add_btn.setEnabled(done)
         self.edit_btn.setVisible(kind != "unit")
@@ -426,8 +467,8 @@ class UnitDetail(QWidget):
                            + (f" · {p.tag_text()}" if p.tag_text() else "") + "  ·  "
                            + library.rights_text(p.rights, starter=True))
         self.rights_full.setText(f"Rights, as recorded: {p.rights}")
-        self.ref_pic.setPixmap(pixmap(p.image, 200, 150))
-        self.used.setText(("Used in: " + ", ".join(u.replace("_", " ") for u in library.uses(p.ref)))
+        self.ref_pic.setPixmap(pixmap(p.image, PIC - 8, PIC - 8))
+        self.used.setText(("Used in: " + ", ".join(library.display(u) for u in library.uses(p.ref)))
                           if library.uses(p.ref) else "")
         self.stages.hide()
         self.details_box.hide()
@@ -463,7 +504,15 @@ class UnitDetail(QWidget):
         self.summary.setText(words)
 
     def _copy(self) -> None:
-        self.show_message("Copying starter parts comes with the starter library (next steps).")
+        """A starter part into your library: fitted to the game on this PC (Blender only, a few minutes), then yours
+        to edit like any part."""
+        from eu4unitgen.core import library
+        if self.starter is None:
+            return
+        f = library.fit(self.starter.name)
+        self.show_message(f"Copying {self.starter.title} into your library: it's fitted to the game on this PC first "
+                          "(a few minutes, no AI needed).")
+        self.screen.open(str(f))
 
     # ------------------------------------------------------------------ tags
     def _tags(self) -> QGroupBox:
@@ -678,6 +727,10 @@ class UnitDetail(QWidget):
         from eu4unitgen.core import config
         if not self.a_dir.text():
             self.a_dir.setText(str(config.load().mods()))
+        if req.get("country"):  # a unit built for a country: its tag and culture as the defaults
+            self.a_tag.setText(req["country"])
+        if req.get("gfx") and not self.a_gfx.text():
+            self.a_gfx.setText(req["gfx"])
 
     def _mode_changed(self) -> None:
         safe = self.a_mode.currentData() == "achievement_safe"
@@ -700,19 +753,21 @@ class UnitDetail(QWidget):
         folder = Path(self.folder)
         req = flow.request(folder)
         mode = self.a_mode.currentData()
-        utype = flow.FOOT_TYPE[req["kind"]]
+        utype = req["type"] if req["kind"] == "unit" else flow.FOOT_TYPE[req["kind"]]
+        tiers = sorted(int(t) for t in req["tiers"]) if req["kind"] == "unit" else int(req["tier"])
         gfx = self.a_gfx.text().strip() or ("westerngfx" if mode == "achievement_safe" else f"{req['name']}gfx")
-        tag = self.a_tag.text().strip().upper() or "BYZ"
+        tag = self.a_tag.text().strip().upper() or req.get("country") or "BYZ"
         cfg = config.load()
         mod_dir = Path(self.a_dir.text().strip() or cfg.mods())
         what = (f"Write {modexport.mod_name(req['name'])} into {mod_dir}"
                 + (f" for {tag} (graphical culture {gfx})?" if mode == "normal" else
-                   f", re-dressing {gfx}'s {utype} at tier {req['tier']} (graphics only)?"))
+                   f", re-dressing {gfx}'s {utype} at tier {req.get('tier', 1) if isinstance(tiers, int) else ', '.join(map(str, tiers))}"
+                   " (graphics only)?"))
         if not self.window_.confirm("Add to mod", what):
             return
 
         def work():
-            return modexport.add_to_mod(folder / "preview" / "preview.json", req["name"], mode, tag, gfx, int(req["tier"]),
+            return modexport.add_to_mod(folder / "preview" / "preview.json", req["name"], mode, tag, gfx, tiers,
                                         mod_dir, cfg.eu4(), cfg.exports(), utype=utype)
 
         def done(r) -> None:

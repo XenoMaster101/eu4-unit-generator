@@ -339,6 +339,63 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     return manifest
 
 
+GUN = {"target_tris": 1500, "budget": 1500, "uv_margin": 0.003, "size": 1024}  # the base game's gun: 682 triangles
+
+
+def gun_base() -> dict:
+    """The base game's gun (``artillery.mesh``, read at run time): its bones, its cannon_muzzle locator in world
+    space (the locator's p is relative to its parent bone, Cannon) and its extent."""
+    from eu4unitgen.core.fresh_mesh import base_arrays
+    from eu4unitgen.library.scanner import parse_pdx_mesh
+    data = (eu4() / "gfx" / "models" / "Units" / "artillery.mesh").read_bytes()
+    van = base_arrays(data)
+    tree = parse_pdx_mesh(data)
+    loc = next((c for c in tree["children"] if c["name"] == "locator"), {"children": []})
+    mz = next((c for c in loc["children"] if c["name"] == "cannon_muzzle"), None)
+    parent = van["bones"][mz["props"]["pa"][0]] if mz else [0.0, 0.0, 0.0]
+    muzzle = [mz["props"]["p"][k] + parent[k] for k in range(3)] if mz else None
+    p = van["p"]
+    lo = [min(p[k::3]) for k in range(3)]
+    hi = [max(p[k::3]) for k in range(3)]
+    return {"bones": van["bones"], "muzzle": muzzle, "extent": [lo, hi], "bytes": data}
+
+
+def process_gun(glb: Path, root: Path, blender: str | None = None, cfg: dict | None = None) -> dict:
+    """Track A: a TRELLIS.2 gun (``glb``) into ``root/vNNN``: the rigid model on the base game's gun skeleton
+    (job ``fresh_gun``), its colours baked from the raw model, a normal map, the raw-against-game comparison.
+    -> the manifest."""
+    from eu4unitgen.blender.runner import BlenderRunner
+    out = next_version(Path(root)).resolve()
+    br = BlenderRunner(blender or _config().blender(), log_dir=out / "logs", timeout=3600)
+    P = {**GUN, **(cfg or {})}
+    t0 = time.time()
+    base = gun_base()
+    basecolor = glb_basecolor(glb, out / "raw_basecolor.png")
+    fr = br.run_job("fresh_gun", {"source": str(Path(glb).resolve()),
+                                  "vanilla": {k: base[k] for k in ("bones", "muzzle", "extent")},
+                                  "target_tris": P["target_tris"], "uv_margin": P["uv_margin"],
+                                  "geometry_out": str(out / "low_geometry.json"), "preview_out": str(out / "low.obj"),
+                                  "textured_out": str(out / "fitted.obj")}).result
+    (out / "fresh.json").write_text(json.dumps(fr, indent=1, default=str), encoding="utf-8")
+    raw = br.run_job("render_model", {"model": str(Path(glb).resolve()), "engine": "EEVEE", "out_dir": str(out / "raw"),
+                                      "name": "raw", "size": 900, "views": {"side": [90, 5]}}).result
+    bc = br.run_job("bake_colour", {"low": str(out / "low_geometry.json"), "high": str(out / "fitted.obj"),
+                                    "image": str(basecolor), "part_colours": {}, "gloss": PROCESS["gloss"],
+                                    "bones": base["bones"], "country_mask": False, "colour_render": raw["images"]["side"],
+                                    "size": P["size"], **PROCESS["bake"], "out_dir": str(out), "name": "gun"}).result
+    nb = br.run_job("bake_horse", {"low": str(out / "low_geometry.json"), "high": [str(out / "fitted.obj")],
+                                   "diffuse": bc["diffuse"], "size": P["size"], **PROCESS["normal"], "preview": False,
+                                   "out_dir": str(out), "name": "horseb"}).result
+    tex = {"diffuse": str(out / "horseb_diffuse.png"), "specular": bc["specular"], "normal": str(out / "horseb_normal.png")}
+    manifest = {"stage": "gun game version (Track A)", "glb": str(glb), "version": out.name, "fresh": fr, "colour": bc,
+                "normal": {k: nb.get(k) for k in ("tilt", "match")}, "textures": tex,
+                "geometry": str(out / "low_geometry.json"), "budget": P["budget"]}
+    manifest["compare"] = compare_sheet(br, out, basecolor)
+    manifest["seconds"] = round(time.time() - t0, 1)
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str), encoding="utf-8")
+    return manifest
+
+
 # the rider (M23, test 30 round): slimmed to at least 0.75 of its width towards vanilla's rider, the low mesh evened
 # (3 passes) and its weights smoothed 24 times: flips idle 30 / moving 29 / attack 41 (12 / 0 / 12 for vanilla's)
 RIDER = {"target_tris": 2600, "part_tris": {"lance": 200, "shield": 400}, "close_voxel": 0.1, "slim_low": 0.75,
@@ -771,7 +828,12 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     checks, crops_res = {}, {}
     ref = reference if reference is not None else default_reference(glb)
     ai_py = ai_python or _config().ai()
-    if part_method != "procedural" and ref and ai_py and (out / "parts" / "fitted_points.json").is_file():
+    cached = Path(glb).parent / "crops_cache"  # a starter part's crops (cut from its picture when it was made)
+    if (cached / "crops.json").is_file() and not (out / "parts" / "crops" / "crops.json").is_file():
+        import shutil
+        shutil.copytree(cached, out / "parts" / "crops", dirs_exist_ok=True)
+    have_crops = (out / "parts" / "crops" / "crops.json").is_file()
+    if part_method != "procedural" and ref and (ai_py or have_crops) and (out / "parts" / "fitted_points.json").is_file():
         try:
             loc = part_gen.locate(json.loads((out / "parts" / "fitted_points.json").read_text(encoding="utf-8")),
                                   Image.open(ref["fg"]).convert("L"))
@@ -977,6 +1039,7 @@ def to_foot(vdir: Path, blender: str | None = None) -> dict:
         g["p"] = foot_part(g["p"], part["kind"], frames[("seated", node)], frames[("foot", node)])
         dst = src.with_name(f"{key}_foot.json")
         dst.write_text(json.dumps(g), encoding="utf-8")
+        part["mesh"]["seated_geometry"] = str(src)  # the rider's (ref3d.assemble seats the soldier on a horse)
         part["mesh"]["geometry"] = str(dst)
     m["on_foot"] = {"stance": stance, "frames": {f"{p}/{n}": {k: fr[k] for k in ("out", "up", "forward")}
                                                   for (p, n), fr in frames.items()}}

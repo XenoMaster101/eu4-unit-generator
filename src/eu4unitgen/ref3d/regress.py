@@ -23,7 +23,14 @@ SET = {
     "horse2": {"kind": "horse"},
     "cataphract_horse": {"kind": "horse", "country_mask": True, "emblem": "emblem.png"},
     "cataphract_rider": {"kind": "rider", "palette_from": "cataphract_horse"},
+    # the bay coat kept out of the country mask (its reddish shades were masked: 40% of the horse, 2026-10-28)
+    "horse2_mask": {"kind": "horse", "country_mask": True, "from": "horse2"},
+    # a soldier without a shield, holding a poleaxe (its forearm was cut off as a shield, its blade left behind)
+    "english_soldier": {"kind": "rider"},
 }
+# what must hold whatever the baseline says: (metric, test, value)
+EXPECT = {"horse2_mask": [("mask_share", "at most", 0.05)],
+          "english_soldier": [("parts", "without", "shield"), ("parts", "with", "lance")]}
 # a metric worse than the baseline by more than this is flagged ("higher": bigger is better)
 RULES = {"flips": ("lower", lambda b: max(6.0, 0.25 * b)), "max": ("lower", lambda b: 1.0),
          "iou": ("higher", lambda b: 0.02), "ref_iou": ("higher", lambda b: 0.02), "uv_used": ("higher", lambda b: 0.03),
@@ -57,7 +64,21 @@ def baseline_path() -> Path:
 
 def source(name: str) -> Path:
     from eu4unitgen.core import config
-    return config.load().work() / "assets_in" / "regression" / name
+    return config.load().work() / "assets_in" / "regression" / SET.get(name, {}).get("from", name)
+
+
+def expectations(name: str, m: dict) -> list[str]:
+    """``EXPECT``'s rules for ``name`` that its metrics break (each a sentence)."""
+    out = []
+    for metric, test, value in EXPECT.get(name, []):
+        have = m.get(metric)
+        if test == "at most" and not (have is not None and have <= value) and not (have is None and metric == "mask_share"):
+            out.append(f"{metric}: {have}, must be at most {value}")
+        elif test == "without" and value in (have or []):
+            out.append(f"{metric}: has {value}, must not")
+        elif test == "with" and value not in (have or []):
+            out.append(f"{metric}: lacks {value}")
+    return out
 
 
 def _rule(metric: str):
@@ -233,6 +254,7 @@ def run(only: list[str] | None = None, blender: str | None = None) -> dict:
             built[name] = vdir
             m, rep = measure(name, vdir)
             cmp_ = compare(m, (base["models"].get(name) or {}).get("metrics", {}))
+            cmp_["worse"] += expectations(name, m)
             res["models"][name] = {"version": str(vdir), "metrics": m, "compare": cmp_, "quality": rep["summary"],
                                    "seconds": round(time.time() - t0, 1)}
         except Exception as exc:  # noqa: BLE001 - a model that fails to build is the worst regression

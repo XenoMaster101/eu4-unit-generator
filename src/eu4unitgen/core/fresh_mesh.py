@@ -208,11 +208,36 @@ class FreshHorse:
     source: str = ""
 
 
+def _own_cannon(naming, owner: str, tier: int, entities: dict, idx, new_entities: list | None) -> dict:
+    """The tier's own cannon entity (``<owner>_ARTILLERY_<tier>_cannon``): a full copy of the one the tier's artillery
+    entity attaches at ``cannon_node`` (its pdxmesh, states and their events, attaches: the clone chain resolved),
+    added to ``entities`` and ``new_entities``; the artillery entity now attaches it."""
+    from eu4unitgen.core.generator import BaseChain, GenerationError
+    art = entities.get(naming.unit_entity(owner, "artillery", tier))
+    if art is None:
+        raise GenerationError(f"tier {tier}: no artillery entity to put a fresh gun on")
+    gunman = next((a for a in art["attaches"] if any(n == "cannon_node" for n, _ in a["nodes"])), None)
+    if gunman is None:
+        raise GenerationError(f"tier {tier}: {art['name']} attaches no cannon (no cannon_node)")
+    vanilla = dict(gunman["nodes"])["cannon_node"]
+    name = naming.cannon_entity(owner, tier)
+    if name not in entities:
+        flat = BaseChain(idx, "westerngfx").flat(vanilla)
+        own = {"name": name, "pdxmesh": flat["pdxmesh"], "version": art["version"], "states": flat["states"],
+               "attaches": flat["attaches"]}
+        entities[name] = own
+        if new_entities is not None:
+            new_entities.append(own)
+    gunman["nodes"] = [(n, name if n == "cannon_node" else e) for n, e in gunman["nodes"]]
+    return entities[name]
+
+
 HORSE_TRIANGLES = 3000  # Track C, test 15: the budget for a fresh horse (the base-game horse has 1,874)
+GUN_TRIANGLES = 1500  # Track A: the budget for a fresh gun (the base-game gun has 682)
 
 
 def apply_horses(naming, set_name: str, owner: str, entities: dict, records: list, by_name: dict, loadout,
-                 game, idx, kind: str = "horse") -> tuple[list, dict, list[str]]:
+                 game, idx, kind: str = "horse", new_entities: list | None = None) -> tuple[list, dict, list[str]]:
     """Put each tier's fresh horse (``loadout.horses``) on its cavalry entity: the .mesh (the base
     horse's skeleton, locators and skin count with the new geometry), its textures (from the PNGs,
     procedural DDS in the base textures' formats, full mips) beside it in the set's model folder,
@@ -221,20 +246,27 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
     skeleton (the rider plays its horse_* ids). With ``kind`` "soldier": each tier's fresh soldier
     (``loadout.soldiers``) on its infantry entity, on the same skeleton; its pdxmesh plays the base body's
     animation ids with the infantry's own on top (its stance, and artillery_attack: the infantry is the gun
-    crew). -> (files, records, notes)."""
+    crew). With ``kind`` "gun" (Track A): each tier's fresh gun (``loadout.guns``) on the base game's gun skeleton,
+    worn by the tier's own cannon entity (``naming.cannon_entity``: written in full from the one the artillery entity
+    attached, its states and muzzle event kept; never ``clone =``, SPEC §3), which the artillery entity now attaches
+    at ``cannon_node``; the new entities go into ``new_entities``. -> (files, records, notes)."""
     from eu4unitgen.core.generator import OWNED, GeneratedFile, GenerationError
     from eu4unitgen.core.loadout import LoadoutError
     from eu4unitgen.library.scanner import summarize_mesh
     from eu4unitgen.textures.dds import DDSFormat, full_mip_count, read_header, write_dds
 
     files, out, notes = [], {}, []
-    rider, soldier = kind == "rider", kind == "soldier"
+    rider, soldier, gun = kind == "rider", kind == "soldier", kind == "gun"
     body = rider or soldier
-    source = loadout.riders if rider else getattr(loadout, "soldiers", {}) if soldier else loadout.horses
+    source = (loadout.riders if rider else getattr(loadout, "soldiers", {}) if soldier else getattr(loadout, "guns", {})
+              if gun else loadout.horses)
     for tier, h in sorted(source.items()):
-        entity = entities[naming.rider_entity(owner, tier) if rider else naming.unit_entity(owner, "infantry", tier)
-                          if soldier else naming.unit_entity(owner, "cavalry", tier)]
-        if not body and entity["pdxmesh"] == naming.pdxmesh(set_name, "horse", tier):
+        if gun:
+            entity = _own_cannon(naming, owner, tier, entities, idx, new_entities)
+        else:
+            entity = entities[naming.rider_entity(owner, tier) if rider else naming.unit_entity(owner, "infantry", tier)
+                              if soldier else naming.unit_entity(owner, "cavalry", tier)]
+        if not body and not gun and entity["pdxmesh"] == naming.pdxmesh(set_name, "horse", tier):
             raise GenerationError(f"tier {tier}: a texture recipe's horse slot and a fresh horse; pick one")
         rec = idx.pdxmesh(h["base"], base_only=True)
         if rec is None or not game.in_base_game(rec.get("file") or ""):
@@ -257,7 +289,7 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
                 raise GenerationError(f"tier {tier}: the fresh {kind}'s {tex} is {w}x{hh}; sizes must be powers of two")
             fmt = read_header(game.read(f"{folder}/{shape[tex]}"))["format"]
             names[tex] = (naming.fresh_rider_texture if rider else naming.fresh_soldier_texture if soldier
-                          else naming.fresh_horse_texture)(set_name, tier, tex)
+                          else naming.fresh_gun_texture if gun else naming.fresh_horse_texture)(set_name, tier, tex)
             paths[tex] = f"{naming.part_dir(set_name)}/{names[tex]}"
             files.append(GeneratedFile(paths[tex], write_dds(img, DDSFormat(fmt, w, hh, full_mip_count(w, hh))), OWNED,
                                        procedural=True))
@@ -267,7 +299,8 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
             raise GenerationError(f"tier {tier}: fresh {kind}: {exc}") from exc
         file, name = ((naming.fresh_rider_file(set_name, tier), naming.fresh_rider_pdxmesh(set_name, tier)) if rider
                       else (naming.fresh_soldier_file(set_name, tier), naming.fresh_soldier_pdxmesh(set_name, tier))
-                      if soldier else (naming.fresh_horse_file(set_name, tier), naming.fresh_horse_pdxmesh(set_name, tier)))
+                      if soldier else (naming.fresh_gun_file(set_name, tier), naming.fresh_gun_pdxmesh(set_name, tier))
+                      if gun else (naming.fresh_horse_file(set_name, tier), naming.fresh_horse_pdxmesh(set_name, tier)))
         files.append(GeneratedFile(file, data, OWNED, derived_from=rec["file"]))
         anims = dict(rec.get("animations") or {})
         if soldier:  # the infantry's own ids (its stance pdxmesh's, or the culture's) over the body's

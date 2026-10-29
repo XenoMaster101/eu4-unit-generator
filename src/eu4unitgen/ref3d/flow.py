@@ -35,7 +35,7 @@ from pathlib import Path
 STAGES = ("cutout", "trellis", "build", "finish", "preview")
 LABELS = {"cutout": "Cut the subject out of the image", "trellis": "Make two 3D models (TRELLIS.2) and pick the better",
           "build": "Build the game model (shape, parts, textures, checks)", "finish": "Apply your edits",
-          "preview": "Stage it and draw the result sheet"}
+          "preview": "Stage it and draw the result sheet", "assemble": "Put the parts together and check them"}
 # what each stage does and why, in plain words (the Make it step and the Library show these)
 EXPLAIN = {"cutout": "The background is removed so only the subject becomes part of the model.",
            "trellis": "An AI (TRELLIS.2) guesses the 3D shape and colours from your one picture. It makes two "
@@ -44,13 +44,22 @@ EXPLAIN = {"cutout": "The background is removed so only the subject becomes part
                     "the game's animations, and painted. Shields, plumes and weapons are made as separate parts.",
            "finish": "Your edits (colour, brightness, plume and so on) are applied to a copy.",
            "preview": "The unit is put into a test copy of the game's files and drawn the way the game draws it, next to "
-                      "the game's own unit, and checked."}
+                      "the game's own unit, and checked.",
+           "assemble": "Your parts are put together for each tier (the soldier seated on the horse, or on foot) and "
+                       "checked against the game's rules. No AI is needed."}
 GPU = {"trellis", "build"}
-KIND_STAGES = {"cavalry": ("build", "finish", "preview")}  # the rest run every stage
+# free RAM each AI step needs before it starts (GB): TRELLIS.2 in WSL takes up to 20 GB (killed at 3.2 GB free,
+# exit 137, 2026-10-28); the build runs SAM 2 and may make a part with TRELLIS.2
+NEED_RAM = {"cutout": 4.0, "trellis": 14.0, "build": 8.0}
+RAM_POLL = 30.0
+KIND_STAGES = {"cavalry": ("build", "finish", "preview"),  # the rest run every stage
+               "unit": ("assemble", "preview")}  # a unit from library parts (ref3d.assemble): no AI
 # horse 2's and the cataphract rider's runs (2026-10-23/24) until this machine has its own
-DEFAULT_SECONDS = {"cutout": 45, "trellis": 910, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150}
-KINDS = ("horse", "soldier", "cavalry", "rider")
-FOOT_TYPE = {"horse": "cavalry", "soldier": "infantry", "cavalry": "cavalry", "rider": "cavalry"}  # the unit slot's type
+DEFAULT_SECONDS = {"cutout": 45, "trellis": 910, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150,
+                   "assemble": 40}
+KINDS = ("horse", "soldier", "cavalry", "rider", "gun")
+FOOT_TYPE = {"horse": "cavalry", "soldier": "infantry", "cavalry": "cavalry", "rider": "cavalry",
+             "gun": "artillery"}  # the unit slot's type
 
 
 def stages_of(kind: str) -> tuple[str, ...]:
@@ -58,8 +67,9 @@ def stages_of(kind: str) -> tuple[str, ...]:
 
 
 def body_kind(kind: str) -> str:
-    """How the build, edits and quality report treat it: a horse, or a person on the infantry skeleton."""
-    return "horse" if kind == "horse" else "rider"
+    """How the build, edits and quality report treat it: a horse, a gun (rigid, Track A), or a person on the
+    infantry skeleton."""
+    return kind if kind in ("horse", "gun") else "rider"
 EU4_POLL = 20.0
 
 
@@ -177,7 +187,7 @@ def runs() -> list[dict]:
 
 def estimates(kind: str) -> dict[str, float]:
     """Each stage's expected seconds: the median of this machine's finished runs, else the defaults."""
-    seen: dict[str, list] = {s: [] for s in STAGES}
+    seen: dict[str, list] = {s: [] for s in stages_of(kind)}
     for r in runs():
         if r.get("kind") != kind:
             continue
@@ -221,7 +231,8 @@ def stage_trellis(folder: Path, req: dict, cfg) -> dict:
         c.update(trellis.score_candidate(br, Path(c["glb"]), tr / "input" / "input_fg.png", out))
         c["colour_de"] = trellis.score_colour(br, Path(c["glb"]), tr / "input" / "input_rgba.png", out, c["azimuth"])
         try:
-            c.update(trellis.trial_deform(Path(c["glb"]), build_kind, out / "trial", cfg.blender()))
+            if build_kind != "gun":  # a gun is rigid: nothing stretches
+                c.update(trellis.trial_deform(Path(c["glb"]), build_kind, out / "trial", cfg.blender()))
         except Exception as exc:  # noqa: BLE001 - scored on outline and colour alone; recorded
             c["trial_error"] = f"{type(exc).__name__}: {exc}"
         c["score"] = trellis.pick_score(c)
@@ -285,7 +296,9 @@ def stage_build(folder: Path, req: dict, cfg) -> dict:
         pick = (req.get("edits") or {}).get("candidate")
         use_candidate(folder, (int(pick) - 1) if pick else c["best"])
     opts = ed.build_options(req.get("edits"), body_kind(req["kind"]))
-    glb = soldier_glb(req) if req["kind"] != "horse" else folder / "trellis" / "raw.glb"
+    glb = soldier_glb(req) if req["kind"] not in ("horse", "gun") else folder / "trellis" / "raw.glb"
+    if req["kind"] == "gun":  # Track A: rigid, on the base game's gun skeleton
+        return {"version": trellis.process_gun(glb, folder / "trellis" / "game", cfg.blender())["version"]}
     if req["kind"] == "horse":
         o = dict(req.get("options") or {})
         emblem = ed.emblem_file(opts.pop("emblem", None) or o.get("emblem"), folder)
@@ -309,10 +322,64 @@ def stage_finish(folder: Path, req: dict, cfg) -> dict:
     return {"from": v.name}
 
 
+def gun_report(m: dict) -> dict:
+    """A gun's quality report (Track A) in plain words: its outline against the raw model's, where its muzzle is
+    against the base game's flash, its wheels, its size against the budget."""
+    fr = m.get("fresh") or {}
+    iou = ((m.get("compare") or {}).get("iou") or {})
+    best = max(iou.values()) if iou else None
+    mz = fr.get("muzzle") or {}
+    tris = (fr.get("final") or {}).get("tris", 0)
+    wheels = (fr.get("shares") or {}).get("wheels", 0)
+    meas = {
+        "silhouette": {"verdict": "good" if (best or 0) > 0.8 else "ok" if (best or 0) > 0.65 else "check",
+                       "text": f"The game version's outline overlaps TRELLIS.2's model by {best:.0%}." if best is not None
+                       else "Not measured."},
+        "muzzle": {"verdict": "good" if mz.get("off", 9) < 0.6 else "ok" if mz.get("off", 9) < 1.2 else "check",
+                   "text": f"Its muzzle is {mz.get('off', '?')} from where the game fires the flash (the base game's "
+                           "cannon_muzzle point, kept as it is)."},
+        "wheels": {"verdict": "good" if 0.08 < wheels < 0.6 else "check",
+                   "text": f"{wheels:.0%} of it turns with the wheels; the rest recoils with the barrel."},
+        "budget": {"verdict": "good" if tris <= m.get("budget", 1500) else "ok",
+                   "text": f"{tris} triangles (the base game's gun has 682; budget {m.get('budget', 1500)})."}}
+    worst = max((x["verdict"] for x in meas.values()), key=["good", "ok", "check"].index)
+    return {"verdict": worst, "summary": {"good": "Good.", "ok": "Usable; see the notes.",
+                                          "check": "Look at it in game first."}[worst], "measures": meas}
+
+
+def stage_preview_gun(folder: Path, req: dict, cfg) -> dict:
+    """A gun at its tier with the game's own crew, the game's gun at the next tier; gallery, turntable, report."""
+    from eu4unitgen.ref3d import unitstage
+    fin = folder / "finished"
+    m = json.loads((fin / "manifest.json").read_text(encoding="utf-8"))
+    subj = json.loads((folder / "subject.json").read_text(encoding="utf-8"))
+    tier = int(req.get("tier", 1))
+    pv = folder / "preview"
+    if pv.exists():
+        shutil.rmtree(pv)
+    sp = unitstage.spec(f"{req['name']}: preview (tier {tier}; vanilla at tier {tier + 1})", tier, None, None,
+                        unitstage.unit_names(req["name"]), unitstage.TEST, gun=unitstage.gun_entry(fin, subj))
+    st = unitstage.stage(pv, sp, "preview")
+    if st["exit"] != 0:
+        raise RuntimeError(f"staging the preview failed; see {pv / 'log.txt'}")
+    g = unitstage.gallery(pv, "preview", [tier, tier + 1], {tier: req["name"], tier + 1: "vanilla"}, cfg.eu4(),
+                          utype="artillery")
+    rep = gun_report(m)
+    (pv / "quality.json").write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    sheet = result_sheet(folder, req, g, rep)
+    try:
+        frames = len(unitstage.turntable(pv, "preview", tier, cfg.eu4(), "artillery"))
+    except Exception as exc:  # noqa: BLE001 - recorded, not fatal
+        frames = f"failed: {type(exc).__name__}: {exc}"
+    return {"sheet": str(sheet), "quality": rep["summary"], "verdict": rep["verdict"], "turntable": frames}
+
+
 def stage_preview(folder: Path, req: dict, cfg) -> dict:
     """Staged with vanilla at the next tier, the gallery (close, near, map zoom), the seated clearance, the quality
     report and the result sheet."""
     from eu4unitgen.ref3d import quality, unitstage
+    if req["kind"] == "gun":
+        return stage_preview_gun(folder, req, cfg)
     fin = folder / "finished"
     m = json.loads((fin / "manifest.json").read_text(encoding="utf-8"))
     subj = json.loads((folder / "subject.json").read_text(encoding="utf-8"))
@@ -387,10 +454,15 @@ def gpu_busy(folder: Path) -> str | None:
 
 
 def waiting_for(req: dict) -> list[str]:
-    """A cavalry unit's horse and soldier runs that aren't finished yet (its build waits for them)."""
-    if req["kind"] != "cavalry":
+    """The part runs a unit needs that aren't finished yet (its first stage waits for them): a cavalry run's horse
+    and soldier; a library unit's parts (a starter part is fitted into a run of its own on first use)."""
+    if req["kind"] == "cavalry":
+        names = [req.get("horse"), req.get("soldier")]
+    elif req["kind"] == "unit":
+        names = sorted({ref.split(":", 1)[1] for s in (req.get("tiers") or {}).values() for ref in s.values()})
+    else:
         return []
-    return [n for n in (req.get("horse"), req.get("soldier")) if n and not (status(folder_of(n)) or {}).get("done")]
+    return [n for n in names if n and not (status(folder_of(n)) or {}).get("done")]
 
 
 def result_sheet(folder: Path, req: dict, gallery: dict, rep: dict) -> Path:
@@ -444,6 +516,25 @@ RUN = {"cutout": stage_cutout, "trellis": stage_trellis, "build": stage_build, "
 
 
 # ------------------------------------------------------------------ the run (a detached process)
+def ram_short(stage: str, free: float | None = None, top=None) -> dict | None:
+    """None when stage ``stage`` has the RAM it needs (``NEED_RAM``), else what to tell the user: {"free", "need",
+    "close": [(program, GB), ...]} (the largest programs now)."""
+    need = NEED_RAM.get(stage)
+    if need is None:
+        return None
+    if free is None:
+        from eu4unitgen.ref3d import memory
+        free = memory.ram_gb()[1]
+    if free >= need:
+        return None
+    if top is None:
+        from eu4unitgen.core import checks
+        top = checks.top_programs(4)
+    mine = ("python", "pythonw", "blender", "vmmem", "vmmemwsl", "wsl", "wslhost", "eu4unitgen")
+    return {"free": round(free, 1), "need": need,
+            "close": [(n, round(gb, 1)) for n, gb in top if n.lower().removesuffix(".exe") not in mine][:3]}
+
+
 def go(folder: Path) -> dict:
     from eu4unitgen.core import checks, config
     from eu4unitgen.ref3d.runstate import Status as _Status
@@ -456,7 +547,7 @@ def go(folder: Path) -> dict:
     stages = (old or {}).get("stages", {})
     plan = stages_of(req["kind"])
     for s in stages.values():  # a stage cut off by the stop runs again
-        if s.get("state") in ("running", "waiting_eu4", "waiting_units", "waiting_gpu"):
+        if s.get("state") in ("running", "waiting_eu4", "waiting_units", "waiting_gpu", "waiting_ram"):
             s["state"] = "waiting"
         if not isinstance(s.get("seconds", 0), (int, float)):  # a time recorded wrongly (0.1.0's trellis stage)
             s.pop("seconds")
@@ -480,8 +571,15 @@ def go(folder: Path) -> dict:
                 while checks.eu4_running():  # never while EU4 is open
                     st.stage(s, "waiting_eu4")
                     time.sleep(EU4_POLL)
+            while (short := ram_short(s)):  # an AI step waits for the RAM it needs, naming what to close
+                st.stage(s, "waiting_ram", **short)
+                time.sleep(RAM_POLL)
             st.stage(s, "running")
-            res = RUN[s](folder, request(folder), cfg)
+            if req["kind"] == "unit":
+                from eu4unitgen.ref3d import assemble
+                res = assemble.RUN[s](folder, request(folder), cfg)
+            else:
+                res = RUN[s](folder, request(folder), cfg)
             st.stage(s, "done", **{k: v for k, v in res.items() if k != "sheet"})
             if res.get("sheet"):
                 st.write(sheet=res["sheet"], quality=res.get("quality"), verdict=res.get("verdict"))
@@ -492,6 +590,19 @@ def go(folder: Path) -> dict:
     finally:
         st.close()
     return st.d
+
+
+def redo(folder: Path, stage: str) -> None:
+    """Mark ``stage`` and every stage after it to run again (a pipeline fix: rebuilt from the models already made)."""
+    folder = Path(folder)
+    st = read_status(folder) or {}
+    plan = stages_of(request(folder)["kind"])
+    if stage not in plan:
+        raise ValueError(f"{stage} isn't one of {plan}")
+    for s in plan[plan.index(stage):]:
+        (st.get("stages") or {}).pop(s, None)
+    st.update(done=False, state="stopped", error=None)
+    _write(folder, st)
 
 
 def start(folder: Path) -> subprocess.Popen:

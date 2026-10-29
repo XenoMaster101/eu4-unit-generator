@@ -21,3 +21,6 @@ assets_in/
 .eu4unitgen-root
 # build tools (Inno Setup, portable)
 .tools/
+
+# the starter library: packed from the author's runs when the installer is built (core.library.pack_starters)
+src/eu4unitgen/library/starter/

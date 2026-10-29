@@ -356,7 +356,7 @@ def emblem(px, posmap, hit, bones, decal, gold, red, size=0.7, sides=(1, -1), cl
     return out, painted, cleaned
 
 
-def cloth_mask(px, cov, exclude, cloth_hue=None):
+def cloth_mask(px, cov, exclude, cloth_hue=None, coat_rgb=None):
     """M21 (the user, optional): the red cloth as the country colour's mask (PdxMeshColor: col = lerp(col,
     col * spec.r * Primary, spec.r), SPEC §4): spec R 1 on red cloth (not the decal or trim), its diffuse
     turned to a neutral grey whose product with the cloth's own red (the default primary colour, the
@@ -366,6 +366,8 @@ def cloth_mask(px, cov, exclude, cloth_hue=None):
     chroma = (mx - mn) / np.maximum(mx, 1e-6)
     hue = (np.degrees(np.arctan2(np.sqrt(3) * (c[..., 1] - c[..., 2]), 2 * c[..., 0] - c[..., 1] - c[..., 2])) + 360) % 360
     m = cov & ~exclude & cc.cloth_window(cloth_hue)(hue) & (chroma > 0.45)
+    if coat_rgb is not None:  # a horse's coat is never its cloth (a bay's reddish shades: _colour.COAT_DE)
+        m &= np.linalg.norm(cc.lab(c) - cc.lab(np.array(coat_rgb)), axis=-1) > cc.COAT_DE
     if m.sum() < 500:
         return m, None
     prim = np.median(c[m], axis=0)
@@ -523,7 +525,7 @@ def main():
             g[decal_px] = gl.get("gold", 12)
     mask = np.zeros((size, size), dtype=bool)
     if a.get("country_mask"):
-        mask, result["default_primary"] = cloth_mask(px, filled, decal_px, cloth_h)
+        mask, result["default_primary"] = cloth_mask(px, filled, decal_px, cloth_h, result["classes"].get("coat_rgb"))
         result["country_mask_share"] = round(float(mask.sum() / max(filled.sum(), 1)), 3)
     if g is not None:
         spec = bpy.data.images.new("specular", size, size, alpha=True)

@@ -418,7 +418,7 @@ class NewUnitScreen(Page):
             w._group.removeButton(b)
         rs = [r for r in flow.runs() if r["kind"] == w._kind and r["state"] != "failed"]
         for i, r in enumerate(rs):
-            b = card(r["name"].replace("_", " "), state_text(r), "Pick this one", checkable=True,
+            b = card(" ".join(w.capitalize() for w in r["name"].split("_")), state_text(r), "Pick this one", checkable=True,
                      picture=pixmap(thumb_of(r), 96, 96))
             b.setFixedWidth(360)
             b.setChecked(r["name"] == self.picks[w._kind])

@@ -2,7 +2,7 @@
 mode, accent colours) can't leak into a widget. Every stylesheet in the GUI takes its colours from ``tokens()``;
 nothing relies on the system's defaults.
 
-Two designs, both dark and warm, for a game about historical warfare (the user picks one; SPEC Track L design pass):
+Two designs, both dark and warm, for a game about historical warfare (the user chose admiralty as the default, 2026-10-28):
   campaign   deep charcoal-brown with a faint grain, gold accents, parchment cards, Palatino headings
   admiralty  deep navy with a faint grain, bronze accents, parchment cards, Georgia headings
 Each has its own status colours for the dark ground and for the parchment cards (``card_ok`` etc.), every pair
@@ -18,7 +18,7 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QStyleFactory
 
 DESIGNS = ("campaign", "admiralty")
-DEFAULT = "campaign"
+DEFAULT = "admiralty"  # the user, 2026-10-28; Campaign stays in Help → Design
 THEMES = DESIGNS  # what Help offers
 
 CAMPAIGN = {
@@ -59,10 +59,10 @@ ADMIRALTY = {
 }
 _DESIGN = {"campaign": CAMPAIGN, "admiralty": ADMIRALTY}
 # the older names, kept so tests and settings that ask for them still work: both mean the default design
-LIGHT = CAMPAIGN
-DARK = CAMPAIGN
-_current = dict(CAMPAIGN)
-_name = "campaign"
+LIGHT = ADMIRALTY
+DARK = ADMIRALTY
+_current = dict(ADMIRALTY)
+_name = "admiralty"
 
 
 def tokens() -> dict[str, str]:

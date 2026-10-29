@@ -572,18 +572,20 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
     count, aabb, no boundingsphere); the pdxmesh plays every animation id of the base's; the
     textures its material names are generated beside it; the cavalry entity wears it; the file
     takes no game file's name; within the triangle budget."""
-    from eu4unitgen.core.fresh_mesh import HORSE_TRIANGLES, check_fresh
+    from eu4unitgen.core.fresh_mesh import GUN_TRIANGLES, HORSE_TRIANGLES, check_fresh
     from eu4unitgen.library.scanner import parse_pdx_mesh, summarize_mesh
 
     res = ctx.generated.loadout
-    if res is None or not (res.horses or getattr(res, "riders", None) or getattr(res, "soldiers", None)):
+    if res is None or not (res.horses or getattr(res, "riders", None) or getattr(res, "soldiers", None)
+                           or getattr(res, "guns", None)):
         return []
     w, game, out = ctx.world, ctx.world.game, []
     # M23: fresh riders the same way (on the base infantry body, wearing the cavalry rider entity); soldiers on foot
     # too (the same body, wearing the infantry entity)
     every = ([(t, r, "horse") for t, r in sorted(res.horses.items())]
              + [(t, r, "rider") for t, r in sorted((getattr(res, "riders", None) or {}).items())]
-             + [(t, r, "soldier") for t, r in sorted((getattr(res, "soldiers", None) or {}).items())])
+             + [(t, r, "soldier") for t, r in sorted((getattr(res, "soldiers", None) or {}).items())]
+             + [(t, r, "gun") for t, r in sorted((getattr(res, "guns", None) or {}).items())])
     for tier, rec, what in every:
         f = ctx.generated.files.get(rec.file)
         if f is None:
@@ -612,8 +614,15 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
                 path = f"{folder}/{shape.get(kind)}"
                 if shape.get(kind) and path not in ctx.generated.files:
                     out.append(Issue(ERROR, "fresh_mesh", f"its {kind} texture {path} isn't generated", f.path))
-        if rec.triangles > HORSE_TRIANGLES:
-            out.append(Issue(WARNING, "fresh_mesh", f"{rec.triangles} triangles (budget {HORSE_TRIANGLES})", f.path))
+        budget = GUN_TRIANGLES if what == "gun" else HORSE_TRIANGLES
+        if rec.triangles > budget:
+            out.append(Issue(WARNING, "fresh_mesh", f"{rec.triangles} triangles (budget {budget})", f.path))
+        if what == "gun":  # Track A: the tier's artillery attaches the cannon entity that wears it
+            art = rec.entity.removesuffix("_cannon")
+            nodes = {n: e for a in (w.resolve(art, "attach") or []) for n, e in
+                     (a.items() if isinstance(a, dict) else []) if n != "name"}
+            if nodes.get("cannon_node") != rec.entity:
+                out.append(Issue(ERROR, "fresh_mesh", f"{art} doesn't attach {rec.entity} at cannon_node", subject=art))
         out.append(Issue(INFO, "fresh_mesh", f"tier {tier}: {rec.entity} on a fresh {what} ({rec.triangles} triangles, "
                                              f"{rec.base_pdxmesh}'s skeleton); rights: {rec.rights}", f.path))
     return out

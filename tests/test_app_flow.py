@@ -1,6 +1,7 @@
 """Track P2: the app's flow (ref3d.flow), edits (ref3d.edits), Add to mod's checksum and filters (export.modexport),
 plain errors (core.errors), setup steps (core.setup), the input guide (core.guide) and the licences list."""
 import json
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 
@@ -282,3 +283,100 @@ def test_a_soldiers_hand_parts_follow_the_base_game_on_foot():
     assert max(xs) - min(xs) < 0.05 and abs(min(xs) - trellis.FOOT["shield_back_x"]) < 1e-6  # its face along +x
     assert abs((min(ys) + max(ys)) / 2 - trellis.FOOT["shield_centre_y"]) < 1e-6 and max(ys) - min(ys) > 4.5
     assert abs(min(zs) + max(zs)) < 1e-6
+
+
+def test_the_regression_set_expects_no_shield_and_a_bare_coat():
+    """The English soldier (no shield, a poleaxe) and horse 2 with its country mask on (the bay coat stays out) are in
+    the regression set; their rules hold whatever the baseline says."""
+    from eu4unitgen.ref3d import regress
+    assert regress.SET["horse2_mask"]["from"] == "horse2" and regress.source("horse2_mask").name == "horse2"
+    assert regress.expectations("english_soldier", {"parts": ["lance"]}) == []
+    assert regress.expectations("english_soldier", {"parts": ["lance", "shield"]}) == ["parts: has shield, must not"]
+    assert regress.expectations("horse2_mask", {"mask_share": 0.4}) == ["mask_share: 0.4, must be at most 0.05"]
+    assert regress.expectations("horse2_mask", {}) == []  # no mask at all: nothing was taken for cloth
+
+
+def test_an_ai_step_waits_for_ram_and_names_what_to_close():
+    from eu4unitgen.ref3d import flow
+    assert flow.ram_short("trellis", free=20.0) is None and flow.ram_short("preview", free=0.5) is None
+    s = flow.ram_short("trellis", free=3.2, top=[("chrome", 4.1), ("vmmemWSL", 9.0), ("blender.exe", 2.0),
+                                                 ("Discord.exe", 1.2), ("code", 0.9)])
+    assert s["need"] == 14.0 and [n for n, _ in s["close"]] == ["chrome", "Discord.exe", "code"]  # not the app's own
+
+
+def test_achievement_safe_takes_every_tier_of_a_unit():
+    asset = "".join(f'entity = {{\n\tname = "BYZ_CAVALRY_{t}_rider"\n\tpdxmesh = "r{t}"\n}}\n'
+                    f'entity = {{\n\tname = "BYZ_CAVALRY_{t}"\n\tpdxmesh = "h{t}"\n'
+                    f'\tattach = {{ name = "rider" Saddle_Node = "BYZ_CAVALRY_{t}_rider" }}\n}}\n' for t in (1, 2, 3))
+    data, kept, of = modexport.entities_only(asset.encode(), "westerngfx", [1, 3], "BYZ")
+    text = data.decode()
+    assert kept == 4 and of == 6 and "westerngfx_CAVALRY_3_rider" in text and "CAVALRY_2" not in text
+
+
+def test_a_soldier_rides_with_its_seated_parts(tmp_path):
+    """On foot a hand part is the seated one turned and moved (same triangles): the rider gets the seated file back,
+    from the record (new builds) or by its triangles (older ones)."""
+    from eu4unitgen.ref3d import assemble
+    seated = {"p": [0, 0, 0, 1, 0, 0, 0, 1, 0], "tri": [0, 1, 2]}
+    (tmp_path / "lance_part.json").write_text(json.dumps(seated), encoding="utf-8")
+    (tmp_path / "kite_part.json").write_text(json.dumps({"p": [0] * 12, "tri": [0, 1, 2, 0, 2, 3]}), encoding="utf-8")
+    (tmp_path / "lance_foot.json").write_text(json.dumps({"p": [5, 5, 5, 6, 5, 5, 5, 6, 5], "tri": [0, 1, 2]}),
+                                              encoding="utf-8")
+    foot = {"kind": "mesh_weapon", "mesh": {"geometry": str(tmp_path / "lance_foot.json")}}
+    assert assemble.seated_geometry(foot) == str(tmp_path / "lance_part.json")
+    rec = {"kind": "mesh_weapon", "mesh": {"geometry": "x_foot.json", "seated_geometry": "kept.json"}}
+    assert assemble.seated_geometry(rec) == "kept.json"
+
+
+def test_a_gun_has_its_own_names_and_loadout_entry():
+    from eu4unitgen.core import loadout
+    from eu4unitgen.core.naming import Naming
+    n = Naming()
+    assert n.fresh_gun_pdxmesh("mac", 1) == "hr_mac_fresh_gun_1_mesh"
+    assert n.fresh_gun_file("mac", 2).endswith("/hr_mac_fresh_gun_2.mesh")
+    assert n.cannon_entity("MAC", 1) == "MAC_ARTILLERY_1_cannon"
+    lo = loadout.Loadout.from_json({"schema": 1, "guns": {"1": {
+        "geometry": "g.json", "textures": {"diffuse": "d.png", "specular": "s.png", "normal": "n.png"}, "rights": "mine"}}})
+    assert lo.guns[1]["base"] == "artillery_mesh" and lo.changes_anything()
+    assert lo.to_json()["guns"]["1"]["base"] == "artillery_mesh"
+
+
+def test_a_starter_part_is_packed_raw_and_fitted_on_first_use(tmp_path, monkeypatch):
+    """Packed: the raw model, the cut-out, the crops, the picture, tags and rights; nothing fitted to the game. Fitted:
+    a run of its own with the AI steps marked done (only Blender left), the unit waiting for it."""
+    from eu4unitgen.core import library
+    from eu4unitgen.ref3d import flow
+    monkeypatch.setenv("EU4UNITGEN_WORKSPACE", str(tmp_path / "ws"))
+    started = []
+    monkeypatch.setattr(flow, "start", lambda f: started.append(Path(f).name))
+    img = tmp_path / "horse.png"
+    Image.new("RGB", (64, 40), (120, 80, 40)).save(img)
+    f = flow.new_request("bay", img, "mine; bundling allowed", "horse", 1)
+    tr = f / "trellis"
+    (tr / "raw.glb").write_bytes(b"glTF raw model")
+    (tr / "input").mkdir()
+    Image.new("RGBA", (8, 8)).save(tr / "input" / "input_rgba.png")
+    v = tr / "game" / "v001"
+    (v / "compare").mkdir(parents=True)
+    Image.new("RGBA", (8, 8)).save(v / "compare" / "raw_side.png")
+    (f / "finished").mkdir()
+    (f / "finished" / "manifest.json").write_text(json.dumps({"geometry": "x", "textures": {}, "compare": {
+        "images": {"raw": {"side": str(v / "compare" / "raw_side.png")}}}}), encoding="utf-8")
+    (f / "status.json").write_text(json.dumps({"done": True, "state": "done", "stages": {}}), encoding="utf-8")
+    out = library.pack(f, tmp_path / "starter" / "bay", tags={"style": "light"})
+    d = json.loads((out / "part.json").read_text(encoding="utf-8"))
+    assert d["kind"] == "horse" and d["tags"] == {"style": "light"} and "CC BY 4.0" in d["rights"]
+    assert (out / "raw.glb").is_file() and (out / "render.png").is_file() and (out / d["image"]).is_file()
+    assert not list(out.rglob("*.mesh")) and not list(out.rglob("*.dds")) and not (out / "low_geometry.json").exists()
+    import shutil
+    shutil.rmtree(f)  # a PC without the author's run
+    monkeypatch.setattr(library, "starter_root", lambda: tmp_path / "starter")
+    assert [p.ref for p in library.parts()] == ["starter:bay"]
+    g = library.fit("bay")
+    st = flow.status(g)
+    assert started == ["bay"] and st["stages"]["trellis"]["state"] == "done" and not st["done"]
+    assert (g / "trellis" / "raw.glb").read_bytes() == b"glTF raw model"
+    assert flow.request(g)["tags"] == {"style": "light"} and "CC BY 4.0" in flow.request(g)["rights"]
+    assert [p.ref for p in library.parts()] == ["run:bay"]  # now a part of your own: the starter is hidden
+    u = library.new_unit("bays", "cavalry", {1: {"horse": "starter:bay", "soldier": "run:bay"}})
+    assert flow.request(u)["tiers"]["1"]["horse"] == "run:bay" and flow.waiting_for(flow.request(u)) == ["bay"]

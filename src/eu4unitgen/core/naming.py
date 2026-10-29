@@ -208,6 +208,22 @@ class Naming:
             raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
         return f"{self.fresh_rider(set_name, tier)}_{kind}.dds"
 
+    def fresh_gun(self, set_name: str, tier: int) -> str:
+        """hr_mac_fresh_gun_1: a gun from a picture (Track A) on the base game's gun skeleton (artillery.mesh), worn by
+        the tier's own cannon entity (``cannon_entity``)."""
+        return f"{self.prefix}{check_set_name(set_name)}_fresh_gun_{_check_tier(tier)}"
+
+    def fresh_gun_pdxmesh(self, set_name: str, tier: int) -> str:
+        return f"{self.fresh_gun(set_name, tier)}_mesh"
+
+    def fresh_gun_file(self, set_name: str, tier: int) -> str:
+        return f"{self.part_dir(set_name)}/{self.fresh_gun(set_name, tier)}.mesh"
+
+    def fresh_gun_texture(self, set_name: str, tier: int, kind: str) -> str:
+        if kind not in TEXTURE_KINDS:
+            raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
+        return f"{self.fresh_gun(set_name, tier)}_{kind}.dds"
+
     def fresh_soldier(self, set_name: str, tier: int) -> str:
         """hr_mac_fresh_soldier_1: a soldier from a picture on foot (the infantry entity, and so the gun crew), the
         same body as a fresh rider on the base infantry skeleton, playing the infantry animations."""
