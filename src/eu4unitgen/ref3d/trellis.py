@@ -431,11 +431,11 @@ RIDER = {"target_tris": 2600, "part_tris": {"lance": 200, "shield": 400}, "close
          "weight_smooth": 24, "even": 3}
 # the standing fit (infantry and the gun crew; the user, T37/T38): slimmed further towards vanilla's infantry (the
 # rider build stood bulky), and more triangles for the hands and boots (the English soldier's came out as blobs and
-# spikes at 2,600; the budget is the fresh_mesh rule's 3,000). With the joint fit its weights aren't smoothed after the
-# region rules (the share of his surface squashed past 0.8 in polearm_twohanded_attack, same frames: the English
-# soldier 25.7% smoothed 12 times, 20.3% at 3, 18.6% at none; the cataphract in spear_shield 26.7 / 21.0 / 20.3;
-# vanilla's body 10.5)
-STANDING = {"slim_low": 0.6, "target_tris": 2950, "weight_smooth": 0}
+# spikes at 2,600; the budget is the fresh_mesh rule's 3,000). Its weights smoothed 12 times after the region rules, as
+# the rider's: unsmoothed they squashed less overall (the English soldier's attack 18.6% of his surface against 25.7%)
+# but folded triangles at the hard borders (60-102 flips, stretch 13-16 against 19-31 and 3.6-4.3; the T38 rebuild);
+# with the joint fit, 12 passes: 18 / 25 / 25 flips, stretch 3.3-6.6, 20.5% squashed (vanilla's body 10.5%)
+STANDING = {"slim_low": 0.6, "target_tris": 2950, "weight_smooth": 12}
 # the sword in its scabbard (the user, test 30: decoration, never drawn): in the reference's colours; hung at 65 degrees
 # from vertical for a rider, 25 for a man standing (at 65 the English soldier's stuck out behind him like a pole)
 SWORD = {"hang_deg": 65.0, "length": 6.5, "grip": 1.3, "guard": 1.4, "out": 1.0, "up": 0.2, "forward": 0.6}  # out 0.35: inside the skirt
