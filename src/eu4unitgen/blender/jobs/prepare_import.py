@@ -9,7 +9,9 @@ TRELLIS.2 hands the build (the user, 2026-10-29: "the imported model replaces th
      given; turned in quarter turns;
   4. centred and scaled so its largest side is 1 (TRELLIS.2's unit cube);
   5. one material with one base-colour texture: kept if it already is (one material, an image on its base colour,
-     UVs), else the materials' colours baked (Cycles, diffuse colour only) onto new UVs at ``bake_size``;
+     UVs); plain-coloured materials put on a small palette texture (``palette``: exact, no bake); else the
+     materials' colours baked (Cycles, diffuse colour only) onto new UVs at ``bake_size`` (twice that over 150k
+     triangles);
   6. written as a .glb (``out_glb``);
   7. the reference picture (the cut-out the build's part crops, the outline check and the result sheet read): an
      orthographic render on a transparent ground from the kind's view (``views``: soldier front, horse side, gun
@@ -137,6 +139,67 @@ def one_texture(obj) -> bool:
     return bool(link and link[0].from_node.type == "TEX_IMAGE" and link[0].from_node.image)
 
 
+def plain_colours(obj) -> list | None:
+    """Each material's colour when none uses an image or the mesh's colour attributes (plain values only), else
+    None."""
+    if obj.data.color_attributes:
+        return None
+    out = []
+    for m in obj.data.materials:
+        if m is None:
+            out.append((0.6, 0.6, 0.6))
+            continue
+        if m.use_nodes:
+            if any(n.type in ("TEX_IMAGE", "VERTEX_COLOR", "ATTRIBUTE") for n in m.node_tree.nodes):
+                return None
+            bsdf = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+            c = bsdf.inputs["Base Color"].default_value if bsdf else m.diffuse_color
+        else:
+            c = m.diffuse_color
+        out.append(tuple(c[:3]))
+    return out or [(0.6, 0.6, 0.6)]
+
+
+def palette(obj, colours: list, cell: int = 16) -> None:
+    """Plain-coloured materials onto one texture without a bake: each material a flat cell of a small palette image,
+    its faces' UVs all at the cell's middle (exact colours; a bake of a dense mesh's thousands of small UV islands
+    left black texels: 289k triangles, 2026-10-29)."""
+    n = max(1, len(colours))
+    side = math.ceil(math.sqrt(n))
+    size = side * cell
+    img = bpy.data.images.new("palette", size, size, alpha=False)
+    px = [0.0] * (size * size * 4)
+    for i, c in enumerate(colours):
+        cx, cy = (i % side) * cell, (i // side) * cell
+        for y in range(cy, cy + cell):
+            for x in range(cx, cx + cell):
+                k = 4 * (y * size + x)
+                px[k:k + 4] = [c[0], c[1], c[2], 1.0]
+    img.pixels = px
+    img.pack()
+    while obj.data.uv_layers:
+        obj.data.uv_layers.remove(obj.data.uv_layers[0])
+    uv = obj.data.uv_layers.new(name="UV")
+    for p in obj.data.polygons:
+        i = min(p.material_index, n - 1)
+        u, v = ((i % side) + 0.5) / side, ((i // side) + 0.5) / side
+        for li in p.loop_indices:
+            uv.data[li].uv = (u, v)
+    _one_material(obj, img)
+
+
+def _one_material(obj, img) -> None:
+    mat = bpy.data.materials.new("imported")
+    mat.use_nodes = True
+    t = mat.node_tree.nodes.new("ShaderNodeTexImage")
+    t.image = img
+    bsdf = mat.node_tree.nodes["Principled BSDF"]
+    mat.node_tree.links.new(t.outputs["Color"], bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = 0.8
+    obj.data.materials.clear()
+    obj.data.materials.append(mat)
+
+
 def bake_colours(obj, size: int) -> None:
     """The materials' base colours (images, vertex colours or plain values) baked onto new UVs, one material."""
     scene = bpy.context.scene
@@ -151,7 +214,7 @@ def bake_colours(obj, size: int) -> None:
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.003)
+    bpy.ops.uv.smart_project(angle_limit=math.radians(80), island_margin=0.001)  # few, large islands
     bpy.ops.object.mode_set(mode="OBJECT")
     img = bpy.data.images.new("baked_colour", size, size, alpha=False)
     if not obj.data.materials:
@@ -175,16 +238,8 @@ def bake_colours(obj, size: int) -> None:
     bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"}, margin=8, use_clear=True, uv_layer="baked")
     for uv in [u for u in obj.data.uv_layers if u.name != "baked"]:
         obj.data.uv_layers.remove(uv)
-    mat = bpy.data.materials.new("baked")
-    mat.use_nodes = True
-    t = mat.node_tree.nodes.new("ShaderNodeTexImage")
-    t.image = img
     img.pack()
-    bsdf = mat.node_tree.nodes["Principled BSDF"]
-    mat.node_tree.links.new(t.outputs["Color"], bsdf.inputs["Base Color"])
-    bsdf.inputs["Roughness"].default_value = 0.8
-    obj.data.materials.clear()
-    obj.data.materials.append(mat)
+    _one_material(obj, img)
 
 
 def render_reference(obj, kind: str, out_dir: Path, size: int) -> str:
@@ -247,14 +302,19 @@ def main() -> None:
     res["turn"] = turn
     normalise(obj)
     obj.data.update()
-    res["baked"] = not one_texture(obj)
-    if res["baked"]:
-        bake_colours(obj, int(a.get("bake_size", 2048)))
+    plain = None if one_texture(obj) else plain_colours(obj)
+    res["colours"] = "kept" if one_texture(obj) else "palette" if plain else "baked"
+    res["baked"] = res["colours"] == "baked"
+    if plain:
+        palette(obj, plain)
+    elif res["baked"]:  # a dense mesh's islands are small: a bigger texture
+        bake_colours(obj, int(a.get("bake_size", 2048)) * (2 if len(obj.data.polygons) > 150000 else 1))
     lo, hi = extent(obj)
     res["dimensions"] = [round(x, 4) for x in (hi - lo)]
     res["triangles"] = len(obj.data.polygons)
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
+    Path(a["out_glb"]).parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.export_scene.gltf(filepath=str(a["out_glb"]), export_format="GLB", use_selection=True,
                               export_animations=False, export_skins=False, export_morph=False, export_yup=True)
     res["reference"] = render_reference(obj, a.get("kind", "soldier"), Path(a["out_dir"]), int(a.get("size", 1024)))
