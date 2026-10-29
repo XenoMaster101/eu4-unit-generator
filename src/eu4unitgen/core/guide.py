@@ -37,6 +37,7 @@ GUIDE = {
     "all": ["Use your own image or one you have the right to use, and say so in the rights statement."],
 }
 GUIDE["soldier"] = GUIDE["rider"]
+GUIDE["gun"] = GUIDE["artillery"]  # a gun part (Track A)
 # why each kind's picture matters, in one sentence (the New unit screen's first step)
 WHY = {
     "soldier": "The 3D model is guessed from this one picture, so the app needs to see the whole figure from the front, "
@@ -48,9 +49,10 @@ WHY = {
                  "hides.",
 }
 WHY["rider"] = WHY["soldier"]
+WHY["gun"] = WHY["artillery"]
 # what each kind's picture should look like, in a few words (shown with the warnings)
 VIEW = {"soldier": "front view, arms a little out (A-pose)", "rider": "front view, arms a little out (A-pose)",
-        "horse": "side view", "artillery": "three-quarter view"}
+        "horse": "side view", "artillery": "three-quarter view", "gun": "three-quarter view"}
 
 
 def horse_check(image: Path) -> list[str]:
@@ -141,6 +143,7 @@ def check(image: Path, kind: str) -> list[str]:
     """Warnings for an image (empty: it follows the guide as far as can be told), by what it should show: a horse's
     side view, a soldier's front A-pose, a gun's three-quarter view."""
     out = []
+    kind = "artillery" if kind == "gun" else kind
     full = Image.open(image).size
     if kind == "horse":
         out += horse_check(image)

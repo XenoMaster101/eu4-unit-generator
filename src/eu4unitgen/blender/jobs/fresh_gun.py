@@ -10,7 +10,8 @@ on Cannon, the wheels rolling on wheels). PDX mesh space (Y up), as fresh_horse.
   4. one uniform scale so the wheels' radius is the base game's (the wheels bone's height: they touch the ground),
      the axle on the wheels bone, the barrel towards -x as the base game's (its cannon_muzzle locator is at the
      low-x end);
-  5. the bake source written as it now stands (``textured_out``), then quadric collapse to ``target_tris``,
+  5. the bake source written as it now stands (``textured_out``), then a voxel remesh (``voxel``, every piece but
+     specks kept) and quadric collapse to ``target_tris``,
      packed UVs; every vertex on one bone (rigid, as the base game's): within the wheels' radius of the axle and
      outside their inner face -> wheels, the rest -> Cannon; ``geometry_out``.
 
@@ -116,6 +117,12 @@ def main():
     t, y, s = rel @ U, rel[:, 1], rel @ S
     # the barrel along -x (the base game's muzzle at its low-x end), the axle on the wheels bone
     new = np.stack([axle[0] - k * (t - wh["t"]), axle[1] + k * (y - wh["y"]), k * s], -1)
+    # no wider than the base game's gun (the bombard's track was 1.85 times it: two crews' worth at map zoom); only
+    # sideways, so the wheels stay round (they turn in x-y)
+    half = float(np.abs(van["extent"][0][2])) if van.get("extent") else None
+    sz = min(1.0, half / float(np.abs(new[:, 2]).max())) if half else 1.0
+    new[:, 2] *= sz
+    res["width_squeeze"] = round(sz, 3)
     hs.set_verts(obj, new)
     res["scale"] = round(k, 4)
     res["wheels"] = {**{kk: round(v, 4) if isinstance(v, float) else v for kk, v in wh.items()},
@@ -130,12 +137,23 @@ def main():
         fh.write_obj(obj, a["textured_out"], uv=True)
     while obj.data.uv_layers:
         obj.data.uv_layers.remove(obj.data.uv_layers[0])
+    # TRELLIS.2's surface is open and non-manifold: the collapse stalls on it (18,012 for 1,500 on the bombard).
+    # A voxel remesh first, as for horses, but every piece kept (the wheels may stand apart from the carriage) and
+    # small voxels with no closing, so the spokes stay open
+    fh.activate(obj)
+    mod = obj.modifiers.new("close", "REMESH")
+    mod.mode, mod.voxel_size, mod.adaptivity = "VOXEL", float(a.get("voxel", 0.03)), 0.0  # the trail's planks: 0.045 tore them
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    res["remeshed"] = {"tris": fh.tri_count(obj), **drop_specks(obj, 0.01)}
+    mod = obj.modifiers.new("relax", "SMOOTH")
+    mod.factor, mod.iterations = 0.5, 2
+    bpy.ops.object.modifier_apply(modifier=mod.name)
     res["tris"] = fh.collapse_to(obj, int(a.get("target_tris", 1500)), None)
     obj.data.uv_layers.new(name="UV")
     fh.packed_uv(obj, float(a.get("uv_margin", 0.003)))
     co = hs.verts(obj)
     rad = k * wh["radius"] * 1.06
-    inner = k * wh["inner"] * 0.92
+    inner = k * sz * wh["inner"] * 0.92
     on_wheel = (np.hypot(co[:, 0] - axle[0], co[:, 1] - axle[1]) < rad) & (np.abs(co[:, 2]) > inner)
     for g in list(obj.vertex_groups):
         obj.vertex_groups.remove(g)

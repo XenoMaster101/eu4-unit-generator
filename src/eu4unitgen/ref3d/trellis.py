@@ -339,7 +339,7 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     return manifest
 
 
-GUN = {"target_tris": 1500, "budget": 1500, "uv_margin": 0.003, "size": 1024}  # the base game's gun: 682 triangles
+GUN = {"target_tris": 2400, "budget": 2500, "uv_margin": 0.003, "size": 1024}  # the base game's gun: 682; at 1,500 the trail tore
 
 
 def gun_base() -> dict:
@@ -382,6 +382,9 @@ def process_gun(glb: Path, root: Path, blender: str | None = None, cfg: dict | N
     bc = br.run_job("bake_colour", {"low": str(out / "low_geometry.json"), "high": str(out / "fitted.obj"),
                                     "image": str(basecolor), "part_colours": {}, "gloss": PROCESS["gloss"],
                                     "bones": base["bones"], "country_mask": False, "colour_render": raw["images"]["side"],
+                                    # the brightness only: the raw render's hues are dull and the transfer greyed the
+                                    # bombard's wood and bronze
+                                    "colour_strength": (1.0, 0.0, 0.0),
                                     "size": P["size"], **PROCESS["bake"], "out_dir": str(out), "name": "gun"}).result
     nb = br.run_job("bake_horse", {"low": str(out / "low_geometry.json"), "high": [str(out / "fitted.obj")],
                                    "diffuse": bc["diffuse"], "size": P["size"], **PROCESS["normal"], "preview": False,

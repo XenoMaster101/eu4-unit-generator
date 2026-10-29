@@ -29,7 +29,7 @@ TIERS = ((1, "Tier 1", "From the start (1444); the game's first look"),
          (2, "Tier 2", "From military tech 12 (about 1557)"),
          (3, "Tier 3", "From military tech 21 (about 1674)"),
          (4, "Tier 4", "From military tech 26 (about 1745); the last look"))
-WORD = {"soldier": "soldier", "horse": "horse", "cavalry": "cavalry unit"}
+WORD = {"soldier": "soldier", "horse": "horse", "cavalry": "cavalry unit", "gun": "gun"}
 FLOWS = {
     "soldier": (("picture", "Your picture", "Drop in a picture of one soldier."),
                 ("about", "Name and rights", "Give it a name and say where the picture comes from."),
@@ -39,6 +39,10 @@ FLOWS = {
               ("about", "Name and rights", "Give it a name and say where the picture comes from."),
               ("slot", "Where it goes", "Choose when it appears in game, and its colours."),
               ("make", "Make it", "Check everything is ready, then let the app build it.")),
+    "gun": (("picture", "Your picture", "Drop in a picture of the gun, from three-quarter."),
+            ("about", "Name and rights", "Give it a name and say where the picture comes from."),
+            ("slot", "Where it goes", "Choose when it appears in game."),
+            ("make", "Make it", "Check everything is ready, then let the app build it.")),
     "cavalry": (("horse", "The horse", "Pick the horse, or make a new one from a picture."),
                 ("rider", "The rider", "Pick the soldier who rides it, or make a new one."),
                 ("slot", "Name and tier", "Name the unit and choose when it appears in game."),
@@ -140,7 +144,7 @@ class NewUnitScreen(Page):
         what = WORD[self.kind]
         sub = f" (for the cavalry unit {self.parent_draft['name']})" if self.parent_draft and self.parent_draft.get("name") else (
             " (for a cavalry unit)" if self.parent_draft else "")
-        part = "NEW PART: " if self.kind in ("soldier", "horse") else "NEW "
+        part = "NEW PART: " if self.kind in ("soldier", "horse", "gun") else "NEW "
         self.step_label.setText(f"{part}{what.upper()}{sub.upper()}  ·  STEP {self.i + 1} OF {n}")
         self.title.setText(title)
         self.explain.setText(explain + " " + self._why(key))
@@ -196,7 +200,22 @@ class NewUnitScreen(Page):
     # ------------------------------------------------------------------ step 1: the picture
     def _picture_step(self) -> QWidget:
         w = QWidget()
-        row = QHBoxLayout(w)
+        outer = QVBoxLayout(w)
+        kinds = QHBoxLayout()
+        self.kind_group = QButtonGroup(self)
+        self.kind_cards = {}
+        for key, ic, title, text in (("soldier", "soldier", "A soldier", "From the front, arms a little out"),
+                                     ("horse", "horse", "A horse", "From the side"),
+                                     ("gun", "gun", "A gun", "From three-quarter")):
+            c = card(title, text, f"Make {title.lower()} part from a picture", checkable=True, icon=ic)
+            c.setMaximumHeight(72)
+            c.clicked.connect(lambda _=False, k=key: self._switch_kind(k))
+            self.kind_group.addButton(c)
+            self.kind_cards[key] = c
+            kinds.addWidget(c)
+        outer.addLayout(kinds)
+        row = QHBoxLayout()
+        outer.addLayout(row, 1)
         left = QVBoxLayout()
         self.drop = DropImage(w=380, h=380)
         self.drop.picked.connect(self.set_picture)
@@ -218,12 +237,22 @@ class NewUnitScreen(Page):
         row.addLayout(right, 1)
         return w
 
+    def _switch_kind(self, kind: str) -> None:
+        """What the part is: its guide, checks and steps follow (the picture, if any, is checked again)."""
+        image = self.image
+        self.enter(kind=kind)
+        if image:
+            self.set_picture(image)
+
     def _enter_picture(self) -> None:
         from eu4unitgen.core import example, guide, guide_pictures
         self.rules.setText("<ul>" + "".join(f"<li>{x}</li>" for x in guide.GUIDE[self.kind] + guide.GUIDE["all"]) + "</ul>")
         if getattr(self, "_examples_kind", None) == self.kind:
             return
         self._examples_kind = self.kind
+        for k, c in self.kind_cards.items():
+            c.setChecked(k == self.kind)
+            c.setVisible(not self.parent_draft)  # a horse or soldier for a cavalry run stays what it is
         clear_layout(self.example_row)
         for caption, path in example.pictures(self.kind):
             self.example_row.addWidget(ghost("Use the example picture" if len(example.pictures(self.kind)) == 1
@@ -546,7 +575,7 @@ class NewUnitScreen(Page):
                                           self.tier_group.checkedId(), options={"country_mask": self.mask.isChecked()})
         except (FileExistsError, ValueError, OSError) as exc:
             return self.show_message(str(exc), error=True)
-        if self.kind in ("soldier", "horse"):
+        if self.kind in ("soldier", "horse", "gun"):
             from eu4unitgen.core import library
             library.set_tags(folder, self.style.currentData(), self.regions.text())
         flow.start(folder)

@@ -80,8 +80,12 @@ def test_soldier_steps_open_one_at_a_time(win, tmp_path):
     win.go("home")
     win.go("new", kind="soldier")  # opened again: the old cells are gone, not left drawn over the drop box
     cells = [c for c in nu.steps["picture"].findChildren(QtWidgets.QWidget) if c.layout() is not None
+             and c.objectName() != "card"  # the kind choice above the picture
              and c.layout().count() == 2 and isinstance(c.layout().itemAt(0).widget(), QtWidgets.QLabel)]
     assert nu.examples.count() == 5 and len(cells) == 5
+    nu.kind_cards["gun"].click()  # the kind chosen on the first step: its guide follows
+    assert nu.kind == "gun" and "NEW PART: GUN" in nu.step_label.text() and "three-quarter" in nu.rules.text()
+    nu.kind_cards["soldier"].click()
     nu.set_picture(_soldier_png(tmp_path / "Royal Guard.png"))
     assert nu.next.isEnabled() and "✓" in nu.checks_out.text()
     nu.go_next()

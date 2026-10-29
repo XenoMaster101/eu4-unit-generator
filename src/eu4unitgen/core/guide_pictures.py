@@ -112,7 +112,8 @@ def gun(view: str = "three_quarter", busy: bool = False) -> Image.Image:
 
 
 def examples(kind: str) -> list[tuple[bool, str, Image.Image]]:
-    """The guide's pictures for ``kind`` (soldier / rider, horse, artillery): good first."""
+    """The guide's pictures for ``kind`` (soldier / rider, horse, artillery / gun): good first."""
+    kind = "artillery" if kind == "gun" else kind
     if kind in ("soldier", "rider"):
         return [(True, "Front view, arms a little out, lance and shield clear of the body, plain background", soldier()),
                 (False, "Arms down and the shield over the body: they melt into one shape", soldier(arms="down")),

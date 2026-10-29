@@ -58,8 +58,8 @@ def rider_entry(vdir: Path, subject: dict) -> tuple[dict, list]:
     parts = []
     for p in (m.get("parts") or {}).values():
         q = json.loads(json.dumps(p))
-        if "mesh" in q:
-            q["mesh"] = {k: _abs(v) for k, v in q["mesh"].items()}
+        if "mesh" in q:  # the loadout's four keys (the seated version is ref3d.assemble's to use)
+            q["mesh"] = {k: _abs(v) for k, v in q["mesh"].items() if k != "seated_geometry"}
         parts.append(q)
     return e, parts
 

@@ -233,7 +233,7 @@ def _own_cannon(naming, owner: str, tier: int, entities: dict, idx, new_entities
 
 
 HORSE_TRIANGLES = 3000  # Track C, test 15: the budget for a fresh horse (the base-game horse has 1,874)
-GUN_TRIANGLES = 1500  # Track A: the budget for a fresh gun (the base-game gun has 682)
+GUN_TRIANGLES = 2500  # Track A: the budget for a fresh gun (the base-game gun has 682; at 1,500 its trail tore)
 
 
 def apply_horses(naming, set_name: str, owner: str, entities: dict, records: list, by_name: dict, loadout,

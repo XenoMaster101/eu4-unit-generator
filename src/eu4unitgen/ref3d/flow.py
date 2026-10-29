@@ -601,7 +601,7 @@ def redo(folder: Path, stage: str) -> None:
         raise ValueError(f"{stage} isn't one of {plan}")
     for s in plan[plan.index(stage):]:
         (st.get("stages") or {}).pop(s, None)
-    st.update(done=False, state="stopped", error=None)
+    st.update(done=False, state="stopped", error=None, heartbeat=0, pid=None)  # a run stopped just now isn't "alive"
     _write(folder, st)
 
 

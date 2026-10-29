@@ -5,8 +5,8 @@ request). No AI: the parts' built files go into a test-mod spec; Blender only dr
   cavalry     each tier's horse, and its soldier as the rider: the seated hand parts (``seated_parts``) and the
               legs spread for that horse's width (``trellis.leg_spread``; geometry only, on a copy)
   artillery   each tier's crew is the tier's infantry entity (the base game attaches ``<TAG>_INFANTRY_<n>`` at the
-              gun's ``infantry_node``), so the crew soldier is that tier's infantry too; the gun is the game's own
-              until guns are parts (Track A)
+              gun's ``infantry_node``), so the crew soldier is that tier's infantry too; the gun is a gun part (its
+              own cannon entity, Track A) or the game's own
 
   stages      assemble (the spec, staged and validated: rule 4)  ->  preview (each tier through the game's camera, a
               turntable of the first tier, a sheet)
@@ -109,8 +109,9 @@ def spec(folder: Path, req: dict) -> dict:
             loadout.setdefault("soldiers", {})[str(t)] = se
             if parts:
                 loadout.setdefault("slots", {})[f"{t}/infantry"] = {"parts": parts}
-            if slots.get("gun"):  # UNVERIFIED until Track A: guns as parts
-                raise NotImplementedError("guns as parts come with Track A; pick the game's own gun for now")
+            if slots.get("gun"):  # Track A: the tier's own cannon entity wears it (UNVERIFIED in game: test 37)
+                gdir, gsub = part_dir(slots["gun"])
+                loadout.setdefault("guns", {})[str(t)] = unitstage.gun_entry(gdir, gsub)
     return {"schema": 1, "name": f"{req['name']}: {utype}, tiers {', '.join(sorted(req['tiers']))}",
             "set": {"tags": [test["tag"]], "gfx": test["gfx"], "set_name": test["set_name"], "base_gfx": test["base_gfx"],
                     "unit_colours": {test["tag"]: colours}, "unit_names": unitstage.unit_names(req["name"])},
