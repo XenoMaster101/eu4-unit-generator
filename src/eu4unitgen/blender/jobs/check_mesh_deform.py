@@ -215,4 +215,5 @@ def main():
     _pdx.write_result(a, out)
 
 
-main()
+if __name__ == "__main__":  # pose_frames imports the helpers
+    main()
