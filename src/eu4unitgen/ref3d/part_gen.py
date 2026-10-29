@@ -372,7 +372,7 @@ def build(br, glb: Path, crop: Path, out: Path, key: str, size: float, country_m
     nb = br.run_job("bake_horse", {"low": str(out / f"{key}_gen_low.json"), "high": [str(out / f"{key}_gen_textured.obj")],
                                    "diffuse": bc["diffuse"], "size": 512, "cage": 0.05, "distance": 0.2,
                                    "high_smooth": 0, "strength": 0.8, "samples": 16, "ao_strength": 0.25,
-                                   "preview": False, "out_dir": str(out), "name": f"{key}_genb"}).result
+                                   "preview": False, "out_dir": str(out), "name": f"{key}_genb", "paint": True}).result
     return {"geometry": str(out / f"{key}_gen_low.json"), "diffuse": str(out / f"{key}_genb_diffuse.png"),
             "specular": bc["specular"], "normal": str(out / f"{key}_genb_normal.png"), "view": fp["view"],
             "tris": fp["tris"], "default_primary": bc.get("default_primary"), "normal_tilt": nb.get("tilt")}

@@ -353,6 +353,60 @@ def joint_fit(co, keep, vanilla_co, bones, legs=True):
     return (lambda p: np.asarray(p, dtype=np.float64) + np.array([0.0, 0.0, float(tz(p[1]))])), rep
 
 
+# the base game's proportions are a little stylised for reading at a distance (big head, hands and shoulders): ours
+# are brought up to at least vanilla's, never down, and by at most these factors
+STYLISE_MAX = {"head": 1.25, "hand": 1.3, "shoulders": 1.15}
+HAND_R = 1.0  # a hand: what lies within this of its hand bone
+
+
+def head_height(co):
+    """How far the head rises over the neck (vanilla's body: 2.75 with its hat)."""
+    return float(np.percentile(co[co[:, 1] > NECK - 0.2][:, 1], 99.5) - NECK) if (co[:, 1] > NECK).sum() > 10 else 0.0
+
+
+def hand_span(co, bones, side):
+    q = co[np.linalg.norm(co - np.array(bones[f"{side}_hand"]), axis=1) < HAND_R]
+    return float(np.ptp(q, axis=0).max()) if len(q) > 5 else 0.0
+
+
+def shoulder_width(co):
+    s = co[(co[:, 1] > 12.0) & (co[:, 1] < 13.2) & (np.abs(co[:, 0]) < 3.0)]
+    return float(np.percentile(s[:, 0], 98) - np.percentile(s[:, 0], 2)) if len(s) > 10 else 0.0
+
+
+def stylise(co, keep, vanilla_co, bones):
+    """In place: the head (above the neck, about the neck's centre), each hand (about its hand bone) and the shoulders
+    (x above the chest, faded in from 11 to 12) scaled up to at least vanilla's size (``STYLISE_MAX`` at most).
+    -> the factors and measures."""
+    out = {}
+    body = co[keep]
+    vh, oh = head_height(vanilla_co), head_height(body)
+    k = float(np.clip(vh / oh, 1.0, STYLISE_MAX["head"])) if oh > 0.3 else 1.0
+    if k > 1.0:
+        sel = keep & (co[:, 1] > NECK)
+        centre = np.array([0.0, NECK, float(np.median(co[sel, 2]))])
+        f = np.clip((co[sel, 1] - NECK) / 0.4, 0.0, 1.0)[:, None]  # faded in over the collar
+        co[sel] = co[sel] + f * (k - 1.0) * (co[sel] - centre)
+    out["head"] = {"vanilla": round(vh, 3), "ours": round(oh, 3), "k": round(k, 3)}
+    for side in ("L", "R"):
+        vs, os_ = hand_span(vanilla_co, bones, side), hand_span(co[keep], bones, side)
+        k = float(np.clip(vs / os_, 1.0, STYLISE_MAX["hand"])) if os_ > 0.2 else 1.0
+        if k > 1.0:
+            h = np.array(bones[f"{side}_hand"])
+            d = np.linalg.norm(co - h, axis=1)
+            sel = keep & (d < HAND_R * 1.4)
+            f = np.clip((HAND_R * 1.4 - d[sel]) / (HAND_R * 0.4), 0.0, 1.0)[:, None]  # full inside HAND_R, faded out
+            co[sel] = co[sel] + f * (k - 1.0) * (co[sel] - h)
+        out[f"{side}_hand"] = {"vanilla": round(vs, 3), "ours": round(os_, 3), "k": round(k, 3)}
+    vw, ow = shoulder_width(vanilla_co), shoulder_width(co[keep])
+    k = float(np.clip(vw / ow, 1.0, STYLISE_MAX["shoulders"])) if ow > 0.5 else 1.0
+    if k > 1.0:
+        f = np.clip(co[:, 1] - 11.0, 0.0, 1.0) * keep
+        co[:, 0] *= 1.0 + f * (k - 1.0)
+    out["shoulders"] = {"vanilla": round(vw, 3), "ours": round(ow, 3), "k": round(k, 3)}
+    return out
+
+
 def joints_report(co, vanilla_co, bones):
     """The check (rule ``joints_inside``): each spine bone's distance from where ``spine_targets`` puts it, the
     fractions (for reading), and each leg's distance from vanilla's at the knee and the ankle."""
@@ -549,6 +603,8 @@ def main():
         dirs["shield"] = (ax[1] - ax[0], ax[2] - ax[0])
         moves["shield"] = {"node": node, "grip": grip.round(3).tolist(), "turned_deg": round(ang, 1),
                            "slid": round(float(np.linalg.norm(slide)), 3)}
+    if a.get("stylise", True):
+        res["stylise"] = stylise(co, ~lance & ~shield, van_co, bones)
     hs.set_verts(obj, co)
     res["arms"] = moves
     # the crest: the crest's own colour over the helmet (the cataphract's is red)
@@ -640,7 +696,15 @@ def main():
         for i, q in enumerate(crest_pts):
             tree.insert(q, i)
         tree.balance()
-        cut = [i for i, q in enumerate(hs.verts(obj)) if q[1] > NECK + 1.2 and tree.find(q)[2] < 0.4]
+        steel_tree = None
+        if helmet_pts is not None and len(helmet_pts):  # what is nearer the helmet's steel stays: the cut took the
+            # cataphract's dome with the plume on it (his head 1.71 over the neck against vanilla's 2.75)
+            steel_tree = KDTree(len(helmet_pts))
+            for i, q in enumerate(helmet_pts):
+                steel_tree.insert(q, i)
+            steel_tree.balance()
+        cut = [i for i, q in enumerate(hs.verts(obj)) if q[1] > NECK + 1.2 and (d := tree.find(q)[2]) < 0.4
+               and (steel_tree is None or d < steel_tree.find(q)[2])]
         fh.delete_vertices(obj, cut)
         fh.keep_largest(obj)
         res["plume_voxels_cut"] = len(cut)

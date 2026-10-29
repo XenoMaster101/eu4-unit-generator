@@ -12,7 +12,8 @@ default bake axes are the base game's convention (green up the image; SPEC Q3).
   * normal: tangent space, selected to active, rays from ``cage`` outside, ``distance`` deep;
     our own parts' texels flat afterwards (they have no detail source);
   * ao: ambient occlusion of the low mesh itself (the panels darken the body under them);
-  * colour: the painted diffuse times (1 - ao_strength + ao_strength x ao).
+  * colour: the painted diffuse times (1 - ao_strength + ao_strength x ao); with ``paint`` (true or _paint's
+    settings) then the game-painted pass (_paint: contrast per material, creases, material borders, light from above).
 Reports each map's path, the normal map's mean tilt from flat (base game 4-20 deg) on the texels
 the UVs cover, and how much of the low surface found the high one.
 
@@ -43,6 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402 - Blender module
 import numpy as np  # noqa: E402 - Blender's numpy
 
+import _paint  # noqa: E402
 import _pdx  # noqa: E402
 
 
@@ -327,6 +329,13 @@ def main():
     aimg = bake_target(low, "ao", size)
     bpy.ops.object.bake(type="AO")
     ao = pixels(aimg)[..., 0]
+    up = None
+    if a.get("paint"):  # the painted pass's light from above: the low surface's own normal, object space (Y up)
+        bk.normal_space = "OBJECT"
+        oimg = bake_target(low, "objn", size)
+        bpy.ops.object.bake(type="NORMAL")
+        up = pixels(oimg)[..., 1] * 2 - 1
+        bk.normal_space = "TANGENT"
     vec = nrm[..., :3] * 2 - 1
     k = float(a.get("strength", 1.0))  # blended towards flat, renormalised
     if k != 1.0:
@@ -367,6 +376,9 @@ def main():
     diff = pixels(dimg).copy()
     s = float(a.get("ao_strength", 0.45))
     diff[..., :3] *= (1 - s + s * ao)[..., None]
+    if a.get("paint"):  # the game-painted pass (_paint)
+        cfg = a["paint"] if isinstance(a["paint"], dict) else None
+        diff[..., :3], out["paint"] = _paint.game_paint(diff[..., :3], mask, vec[..., :2], up, cfg)
     diff[..., 3] = 1.0
     paths["diffuse"] = save(diff, f"{name}_diffuse", od)
     out["paths"] = paths

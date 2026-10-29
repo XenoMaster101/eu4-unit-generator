@@ -42,6 +42,9 @@ WSL = {"python": "~/eu4unitgen_ai/trellis2_env/bin/python", "repo": "TRELLIS.2",
        "seed": 42, "pipeline_type": "1024_cascade"}
 # a masked horse's secondary and tertiary unit colours (its primary is its cloth's red): gold and off-white
 BYZ_GOLD, BYZ_WHITE = (212, 175, 55), (230, 225, 210)
+# the game-painted pass after every body's bake (blender/jobs/_paint.py; the user, after T38: the base game's textures
+# are hand-painted, ours soft and low in contrast): True takes _paint.PAINT
+PAINT = True
 PROCESS = {"target_tris": 2800, "smooth": 12, "influences": 3, "chain_weights": True, "uv_margin": 0.002,
            "hair": {"mane": True, "tail": True}, "size": 1024,
            "gloss": {"silver": 14, "gold": 12, "matte": 5},
@@ -346,7 +349,7 @@ def process(glb: Path, root: Path, emblem: Path | None = None, country_mask: boo
     bc = br.run_job("bake_colour", args).result
     nb = br.run_job("bake_horse", {"low": str(out / "low_geometry.json"), "high": [str(out / "textured.obj")],
                                    "diffuse": bc["diffuse"], "size": P["size"], **P["normal"], "preview": False,
-                                   "out_dir": str(out), "name": "horseb"}).result
+                                   "out_dir": str(out), "name": "horseb", "paint": PAINT}).result
     tex = {"diffuse": str(out / "horseb_diffuse.png"), "specular": bc["specular"], "normal": str(out / "horseb_normal.png")}
     manifest = {"stage": "game version (M21 standard horse pipeline)", "glb": str(glb), "version": out.name,
                 "fresh": {k: fr.get(k) for k in ("fit", "pose", "hair", "reins", "final", "back", "uv", "stages")},
@@ -411,7 +414,7 @@ def process_gun(glb: Path, root: Path, blender: str | None = None, cfg: dict | N
                                        else {})}).result
     nb = br.run_job("bake_horse", {"low": str(out / "low_geometry.json"), "high": [str(out / "fitted.obj")],
                                    "diffuse": bc["diffuse"], "size": P["size"], **PROCESS["normal"], "preview": False,
-                                   "out_dir": str(out), "name": "horseb"}).result
+                                   "out_dir": str(out), "name": "horseb", "paint": PAINT}).result
     tex = {"diffuse": str(out / "horseb_diffuse.png"), "specular": bc["specular"], "normal": str(out / "horseb_normal.png")}
     manifest = {"stage": "gun game version (Track A)", "glb": str(glb), "version": out.name, "fresh": fr, "colour": bc,
                 "normal": {k: nb.get(k) for k in ("tilt", "match")}, "textures": tex,
@@ -857,7 +860,7 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
                                     "out_dir": str(out), "name": "rider"}).result
     nb = br.run_job("bake_horse", {"low": str(out / "low_geometry.json"), "high": [str(out / "textured.obj")],
                                    "diffuse": bc["diffuse"], "size": PROCESS["size"], **PROCESS["normal"], "preview": False,
-                                   "out_dir": str(out), "name": "riderb"}).result
+                                   "out_dir": str(out), "name": "riderb", "paint": PAINT}).result
     tex_body = {"diffuse": str(out / "riderb_diffuse.png")}
     parts = {}
     for key in ("lance", "shield"):
