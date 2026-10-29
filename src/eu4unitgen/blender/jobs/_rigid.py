@@ -5,7 +5,8 @@ the regression set: measured) share one measure.
   bow          how far a long weapon's shaft strays from the straight line between its ends, as a share of its
                length. The shaft is the thin part: its length cut into ``BINS`` slices, each slice's middle (its
                points' mean across the axis) and spread (the median distance from that middle); slices spread more than
-               ``WIDE`` times the median slice are the head (a bill's blade, a tassel) and left out
+               ``WIDE`` times the median slice are the head (a bill's blade, a tassel); the shaft is the longest
+               unbroken run of the rest, less the slice touching a head at either end
   straighten   each point moved by the shaft's bend at its place along the length: the slices' middles (interpolated
                between slices, across the head's) less the straight chord between the end slices; past the end
                slices, none. The ends stay where they were and the head rides on the shaft. TRELLIS.2's cataphract
@@ -71,7 +72,24 @@ def shaft(pts, bins=BINS, wide=WIDE):
         r = _median([math.hypot(uv[i][0] - mu, uv[i][1] - mv) for i in g])
         rows.append((lo + (b + 0.5) * span / bins, mu, mv, r))
     rmed = _median([r[3] for r in rows]) if rows else 0.0
-    slices = [(tc, mu, mv) for tc, mu, mv, r in rows if r <= wide * rmed]
+    # the longest unbroken run of thin slices (a bill's spike over its blade is not the shaft), less the slice next
+    # to a head at either end (it holds the blade's root: on a low part, 0.13 off the line beside the English bill's)
+    runs, cur, prev = [], [], None
+    for tc, mu, mv, r in rows:
+        b = round((tc - lo) / span * bins - 0.5)
+        if r <= wide * rmed and (prev is None or b == prev + 1) and (cur or r <= wide * rmed):
+            cur.append((b, tc, mu, mv))
+        else:
+            runs.append(cur)
+            cur = [(b, tc, mu, mv)] if r <= wide * rmed else []
+        prev = b
+    runs.append(cur)
+    best = max(runs, key=len) if runs else []
+    if best and best[0][0] > 0:
+        best = best[1:]
+    if best and best[-1][0] < bins - 1:
+        best = best[:-1]
+    slices = [(tc, mu, mv) for _, tc, mu, mv in best]
     return {"centre": c, "axis": ax, "e1": e1, "e2": e2, "lo": lo, "hi": hi, "t": t, "uv": uv, "slices": slices}
 
 
