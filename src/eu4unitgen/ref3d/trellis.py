@@ -431,7 +431,8 @@ RIDER = {"target_tris": 2600, "part_tris": {"lance": 200, "shield": 400}, "close
 # rider build stood bulky), and more triangles for the hands and boots (the English soldier's came out as blobs and
 # spikes at 2,600; the budget is the fresh_mesh rule's 3,000)
 STANDING = {"slim_low": 0.6, "target_tris": 2950}
-# the sword in its scabbard (the user, test 30: decoration, never drawn): in the reference's colours
+# the sword in its scabbard (the user, test 30: decoration, never drawn): in the reference's colours; hung at 65 degrees
+# from vertical for a rider, 25 for a man standing (at 65 the English soldier's stuck out behind him like a pole)
 SWORD = {"hang_deg": 65.0, "length": 6.5, "grip": 1.3, "guard": 1.4, "out": 1.0, "up": 0.2, "forward": 0.6}  # out 0.35: inside the skirt
 SWORD_COLOURS = {"gold": (200, 160, 70), "grip": (60, 38, 26), "scabbard": (150, 38, 32), "steel": (150, 150, 152)}  # lit, 105 read black
 SWORD_GLOSS = {"gold": 12, "grip": 4, "scabbard": 4, "steel": 14}
@@ -450,9 +451,9 @@ def sword_colours(pal: dict) -> dict:
             out["gold"] = tuple(int(v * 0.85) for v in silver)
     browns = [m["colour"] for m in pal.get("matte") or []
               if 10 <= palmod.hue(m["colour"]) <= 45 and palmod.lum(m["colour"]) < 120]
-    if browns:
-        out["scabbard"] = tuple(int(v) for v in min(browns, key=palmod.lum))
-        out["grip"] = tuple(int(v * 0.7) for v in out["scabbard"])
+    # his darkest brown, else plain leather (the fixed red is the cataphract's: on the English soldier it read red)
+    out["scabbard"] = tuple(int(v) for v in min(browns, key=palmod.lum)) if browns else (88, 58, 38)
+    out["grip"] = tuple(int(v * 0.7) for v in out["scabbard"])
     return out
 
 
@@ -947,6 +948,7 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
         hip_frame = br.run_job("rider_frames", {"mesh": str(base_file), "anim": str(hip_anim), "node": "hip",
                                                 "elbow": "R_thigh", "shoulder": "R_shoulder", "bind": node_bind(base, "hip")}).result
         parts["sword"] = sword_part(out / "parts", hip_frame, float(fr.get("slim", {}).get("hip_half", 1.9)),
+                                    cfg={"hang_deg": 25.0} if fit == "standing" else None,
                                     gold=(pal.get("gold") or {}).get("colour") if (pal.get("gold") or {}).get("share", 0) > 0.005
                                     else None, colours=sword_colours(pal))
     if palette_from and palette_from.get("geometry"):  # the legs clear of the horse it rides
@@ -1068,7 +1070,9 @@ def foot_part(p: list, kind: str, seated: dict, foot: dict) -> list:
     return [round(x, 5) for v in q for x in v]
 
 
-STRAP = {"out": 0.15, "max_gap": 0.6}  # the shield's back this far out from the forearm; flagged if a frame strays further
+# the shield's back this far out from the forearm; flagged past the base game's own: its Indian shield strays up to
+# 0.89 from the forearm's middle (0.27 on average) through spear_shield's 50 sampled frames (measured 2026-10-29)
+STRAP = {"out": 0.15, "max_gap": 0.95, "mean_gap": 0.3}
 
 
 def strap_part(p: list, seated: dict, frames: list[dict]) -> tuple[list, dict]:
@@ -1104,7 +1108,8 @@ def strap_part(p: list, seated: dict, frames: list[dict]) -> tuple[list, dict]:
         gaps.append(abs(sum(rel[k] * B[0][k] for k in range(3))))
         off.append(max(abs(sum(rel[k] * B[i][k] for k in range(3))) - half[j] for j, i in enumerate((1, 2))))
     check = {"frames": len(frames), "max_gap": round(max(gaps), 3), "mean_gap": round(sum(gaps) / len(gaps), 3),
-             "max_off_shield": round(max(off), 3), "ok": max(gaps) <= STRAP["max_gap"] and max(off) <= 0.0}
+             "max_off_shield": round(max(off), 3),
+             "ok": max(gaps) <= STRAP["max_gap"] and sum(gaps) / len(gaps) <= STRAP["mean_gap"] and max(off) <= 0.0}
     return [round(x, 5) for v in q for x in v], check
 
 

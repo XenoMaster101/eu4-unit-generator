@@ -293,7 +293,7 @@ def test_the_regression_set_expects_no_shield_and_a_bare_coat():
     good = {"parts": ["lance"], "feet_ratio": 0.9, "colour_de_front_middle": 6.0}
     assert regress.expectations("english_soldier", good) == []
     assert regress.expectations("english_soldier", {**good, "feet_ratio": 0.4}) == ["feet_ratio: 0.4, must be at least 0.75"]
-    assert regress.expectations("cataphract_foot", {"parts": ["shield"], "strap_gap": 1.1}) ==         ["strap_gap: 1.1, must be at most 0.6"]
+    assert regress.expectations("cataphract_foot", {"parts": ["shield"], "strap_gap": 1.1}) ==         ["strap_gap: 1.1, must be at most 0.95"]
     assert regress.expectations("english_soldier", {**good, "parts": ["lance", "shield"]}) == ["parts: has shield, must not"]
     assert regress.expectations("horse2_mask", {"mask_share": 0.4}) == ["mask_share: 0.4, must be at most 0.05"]
     assert regress.expectations("horse2_mask", {}) == []  # no mask at all: nothing was taken for cloth

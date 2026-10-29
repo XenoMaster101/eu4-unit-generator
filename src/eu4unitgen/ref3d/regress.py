@@ -36,7 +36,7 @@ SET = {
 EXPECT = {"horse2_mask": [("mask_share", "at most", 0.05)],
           "english_soldier": [("parts", "without", "shield"), ("parts", "with", "lance"), ("feet_ratio", "at least", 0.75),
                               ("colour_de_front_middle", "at most", 15.0)],
-          "cataphract_foot": [("strap_gap", "at most", 0.6), ("parts", "with", "shield")]}
+          "cataphract_foot": [("strap_gap", "at most", 0.95), ("parts", "with", "shield")]}  # vanilla's: 0.89
 # a metric worse than the baseline by more than this is flagged ("higher": bigger is better)
 RULES = {"flips": ("lower", lambda b: max(6.0, 0.25 * b)), "max": ("lower", lambda b: 1.0),
          "iou": ("higher", lambda b: 0.02), "ref_iou": ("higher", lambda b: 0.02), "uv_used": ("higher", lambda b: 0.03),
