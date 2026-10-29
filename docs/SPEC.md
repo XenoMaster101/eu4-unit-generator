@@ -3252,6 +3252,60 @@ The brief: make the app as hand-holding as possible; the test is "could someone 
 - **Results (final builds; `build/review_t39`: the review sheets and the lineups, idle, walk and attack, T38 as shipped next to now and the game's native and western infantry):** joints good on both (English 0.16 / 0.12, cataphract 0.15 / 0.26); the animation review 8 flags (English: T38's 13) and 6 (cataphract); weapons held at the game's grip (in walk both now carry them like the western halberdier; T38's English bill trailed head down). **Folds** under their own stance (the same check on T38's builds): English 13 / 25 / 36 (T38 18 / 23 / 33), cataphract 17 / 50 / 58 (T38 13 / 26 / 55): **the cataphract's walk folds doubled (open)**; the game's body 8 / 4 / 14 and 8 / 5 / 23. Squash in attack (share of the surface under 0.8 of its area): English 20.5% (T38 25.7%; the game's 10.5%).
 - **Regression run (20261029-113341):** horses unchanged by the painted pass (no worse measure); the rider better (flips 32 / 33 -> 15 / 18, feet 0.46 -> 0.81) but its shield now passes as TRELLIS.2's own (outline 0.889 -> 0.847) and its top colour moved (dE 5.4 -> 10.5: the painted pass); the soldiers now measured under their own stance (before: under the rider's, the build's own check), against baselines measured seated: not comparable until the baselines are refreshed after the user's in-game approval. Colour by region moved by the painted pass (English bottom 1.1 -> 5.7, cataphract top 2.9 -> 8.7; the limit 15).
 - **Open:** the cataphract's walk folds; the cloth between a weapon arm and the torso (the English bill arm's web: 0.03 at the wrist); squash about twice the game's in walk and attack; the soldiers' overall value at map zoom (the English soldier 40% brighter than the game's: his white jack, not his texture's lightness: median 102 against the game body's 93).
+- **Superseded for soldiers by Track W** (the user, after T39's review sheets). T39 not staged.
+
+### Track W: a base body, the outfit over it (PLAN, the user, 2026-10-29; shown before building)
+**Why:** the T39 review sheets. TRELLIS.2 gives one fused shape: body, cloak, armour and arms glued together. Whatever joint fit and weights we give it, the skeleton bends a lump: it folds where the joints turn, there's no outline of a person, and the cloth under an arm webs it to the torso. Tuning the fit won't fix this (Track V: joints inside the body, and still about twice the game's squash, the cataphract's walk folds doubled). The horse's lesson applies: a normal body, cloak it, shrink it.
+
+**Found first and fixed (W0, done 2026-10-29):** the lance and the bill bent in walk and attack. They were already rigid (every vertex on the hand node; their shape is identical in every frame), so the bend was TRELLIS.2's own: the cataphract's lance waves about one and a half times along its length, 2.3% of it off the line; the bill 0.35%. `blender/jobs/_rigid.py`: the shaft straightened when it is split off (`fresh_rider`; 2.3% -> 0.09%, the bill 0.35% -> 0.07%), its head riding on it; the review flags any part that changes shape between poses ("bent: ... a part must be rigid"); the regression's `weapon_bow` (at most 0.4% of the length) and `part_rigid` (at most 0.2%), expected on the English soldier, the cataphract on foot and the rider.
+
+**The layers** (every soldier: the same base body, only the outfit changes):
+1. **The base body (B):** one plain human, ours, made once (from an A-pose picture of a plain person in tight clothing, through TRELLIS.2), rigged and tuned until it moves like the game's body. It ships in the starter library as our geometry (like the parts: no game bytes; the skeleton read from the install).
+2. **The outfit (O):** the soldier's own shape and colours from his TRELLIS.2 model, moved onto the base body: the base body's vertices pushed out to his surface (the base body's topology, weights and UVs kept; his colours baked onto its UVs).
+3. **Loose cloth (C):** cloaks, skirts, tassets: separate sheets in the same mesh with simple weights, cut where they would fold.
+4. **Rigid parts (R):** weapons, shields, plumes, brimmed helmets: every vertex on one node (hand, head; the belt's on the hip). W0's checks hold them.
+
+**B. The base body**
+- **The picture (the user's, from ChatGPT; prompt below):** front view, full body, A-pose as the game's rest pose: arms 35 degrees below horizontal, a little forward; feet under the hips. A plain person in tight grey clothing, a plain close cap, simple shoes; the hands open, fingers together; a plain light background, even light.
+- **Shape from TRELLIS.2, topology our own:** not TRELLIS.2's triangles collapsed (they have no edge loops where joints turn: the fold). A template built on the game's bones (read from the install at run time): each limb a tube of rings along its bones, the torso a ring stack along the spine, the neck and head, the hands as mittens and the feet as boots. Extra rings round each joint (elbow, knee, shoulder, hip, wrist, ankle: three each, as the game's body has), so bends happen on loops. Each ring's radius at each angle is measured from TRELLIS.2's body: rays cast out from the bone where the picture's limb is, then carried into the game's rest pose. The arms and legs are their own tubes, so there's nothing to web between arm and torso or between the legs. Shoulders and hips are bridged ring to ring. Budget about 2,000 triangles (the game's body 2,883), leaving room for the cloth layers inside our 2,950.
+- **Weights by rule, not transfer:** along each chain by the ring's place (a joint's middle ring half and half, the rings either side 75/25, like the game's), the torso rings blended along the spine, the shoulder bridge three ways (top_spine, shoulder, arm). Smoothed only along the rings.
+- **UVs once:** an island per limb, the torso front and back, the head; the outfit's colours bake onto these, so every soldier's texture has the same layout.
+- **Tuned until it moves like the game's body (the gate):** under polearm_twohanded, spear_shield, rifleman and the rider's animations, against `western_generic_01_type1` in the same frames: folds (`check_mesh_deform` flips) at most the game's plus 25% (at least 3); squash (the review's bends) at most the game's plus 3 points per state; joints inside the body (`joints_spine` and `joints_legs` at most 0.2); the arm-torso and leg gaps at least the game's. If it misses, I tune the rings and weights, not the soldier. The review sheet of the base body alone (ours against the game's, as the soldiers' now) shows it.
+
+**O. The outfit**
+- The soldier's TRELLIS.2 model is split (weapons, shield, plume: R) and fitted as now (scale, joint fit, the stance). Then each base-body vertex is moved along its normal, out or in, to the soldier's surface, at most `push` (about 0.6; the armour and padding). A hit only counts if its nearest bone is in the vertex's own chain: an arm vertex never lands on the torso's cloth. That keeps limbs clear, so no web.
+- Whatever of his surface lies farther out than `push` is not outfit. Above the neck it's a brimmed helmet (R, rigid on head: the English kettle hat's brim). Hanging below the hips or behind the back it's loose cloth (C). Anything else is dropped and recorded.
+- "Shrink it" (as the horse): the pushed shape is pulled back towards the base body by `shrink` (about 0.15 of its push), so it stays slim and joints keep their volume. The outfit's thickness is kept below `push` at the joints' rings (about 0.3), so elbows and knees don't bulge.
+- **Colours:** baked from his TRELLIS.2 model onto the base body's UVs (the bake as now, the painted pass after). Measured against his raw model by region (colour dE) and outline (the compare sheet).
+
+**C. Loose cloth**
+- **Skirt or tassets:** a ring of panels from the hips down to his hem (measured from his model), split front, back and at each side, so a leg can swing between panels. Each panel's top row is on `hip`; down the panel it blends to the nearer thigh, by at most half, so it follows the leg without stretching. Shaped by projecting it onto his model's skirt.
+- **Cloak:** a sheet from the shoulders, its shape projected onto his cloak, on `top_spine` and `mid_spine` only (no leg weights: the T38 lesson). Its hem is kept above the knees' swing and split up the middle when it hangs below the hips.
+- Each sheet is one-sided with its back face drawn (as the game's banners), a piece of the body mesh: one mesh, one texture. No new EU4 syntax.
+- The review measures each layer's squash and clipping (a leg through the skirt) separately.
+
+**R. Rigid parts:** as W0. A brimmed helmet becomes a head part (`mesh_head`, as the cataphract's plume), every vertex on `head`.
+
+**Seated:** the same outfit body rides (the base body is tuned under the rider's animations too); the seated fit then needs only the legs spread for the horse (`spread_legs`) and the skirt or cloak lifted over the saddle. One build per soldier instead of two (`finished` and `finished_seated`).
+
+**Where it goes:**
+- `blender/jobs/base_body.py`: builds the base body from TRELLIS.2's model and the game's bones (B). A new starter part kind `body` (`library`).
+- `blender/jobs/fresh_soldier.py`: replaces the standing and seated fits in `fresh_rider` for soldiers. Reuses `split`, `place`, `joint_fit` and `_rigid`, plus the outfit, cloth and helmet steps. `trellis.process_soldier` calls it.
+- `ref3d.review`: the layers' measures. `ref3d.quality`: **Moves like the game's body** (the base body's gate, read from its starter record). `ref3d.regress`: the base body as an entry with the gate as rules whatever the baseline says; the English soldier and the cataphract rebuilt.
+- Validator: rule `fresh_mesh` checks a soldier's body has the base body's vertex count for its outfit part (the layers counted apart), every weight row sums to one, and every rigid part sits on one node.
+
+**Order (each step committed; the regression after each):**
+- W0 the rigid parts: done.
+- W1 the base body from the user's picture, until it passes the gate; its review sheet.
+- W2 the English soldier's outfit and helmet (no loose cloth: his jack ends at the hips), then his review sheet and a lineup next to T38 and the game's infantry. **Shown to the user before touching the cataphract.**
+- W3 the cataphract: the outfit, the cloak and skirt layers, the plume and shield as now. Review sheet.
+- W4 the seated fit from the same build; the rider and the cavalry units rebuilt; the regression's soldier baselines refreshed only after the user approves them in game.
+- W5 T39: both soldiers, the lineups and the review sheets.
+
+**Risks:**
+- The bridges at the shoulders and hips are where the game's body folds too. If our bridge can't reach the gate, the fallback is the arm tube overlapping into the torso (closed shells, a common low-poly trick; at map zoom it doesn't show).
+- A bulky outfit (a padded jack, plate) pushed to `push` may still squash at the elbows. That's why `shrink` and the joint-ring cap exist; both are measured, not guessed.
+- A picture that isn't in the rest pose (arms down, legs apart) is measured from where its limbs actually are. It's carried into the rest pose by rotating each ring about its joint, so a different A-pose still works. A hand in a fist or holding something doesn't.
 
 ### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
 
