@@ -796,6 +796,9 @@ def collapse_to(obj, target, close=None, keep=None):
         bm.from_mesh(obj.data)
         bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=1e-3)
         bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 3])
+        # every face outwards (the cataphract's lance, 2026-10-29: a third of its thin shaft came out of the voxel
+        # solid inside out, 69% of its faces outward against T38's 92%, and back-face culling shredded it)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
         bm.to_mesh(obj.data)
         bm.free()
         obj.data.update()

@@ -75,7 +75,8 @@ class Builder:
             self.face(list(reversed(tri)) if reverse else tri, zone)
 
     def finish(self, name):
-        bmesh.ops.recalc_face_normals(self.bm, faces=self.bm.faces)
+        if not getattr(self, "keep_winding", False):  # (build_mesh: our own geometry is wound already)
+            bmesh.ops.recalc_face_normals(self.bm, faces=self.bm.faces)
         # io_pdx_mesh computes tangents, which Blender only does for tris/quads: no n-gons
         bmesh.ops.triangulate(self.bm, faces=self.bm.faces)
         mesh = bpy.data.meshes.new(name)
@@ -334,6 +335,10 @@ def build_mesh(b, p):
     per vertex in image coordinates, v down): a part split off a TRELLIS.2 model (the rider's lance and
     shield), textured by its own baked images rather than zone swatches."""
     g = p["geometry"]
+    # its winding kept: split at its UV seams into separate patches, recalc_face_normals guessed each patch's outside
+    # on its own and turned 54 of the cataphract's 200 lance triangles inside out (2026-10-29: back-face culling
+    # shredded the shaft); the fit job's collapse leaves every face outwards
+    b.keep_winding = True
     pos, uv = g["p"], g["uv"]
     verts = [b.vert(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]) for i in range(len(pos) // 3)]
     tri = g["tri"]

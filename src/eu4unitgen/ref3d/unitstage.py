@@ -248,7 +248,9 @@ def lineup(cols: list[dict], out: Path, eu4: Path, rows=("close", "near"), view:
            state: str = "idle", frame: int = 1, title: str = "") -> Path:
     """Units side by side through the game's camera at the same zoom (the user, after T38: ours before and after
     next to the base game's own). ``cols``: {"label", and "spec" (a staged spec's .json) with "unit" ((type, tier)),
-    or "entity" (a base-game entity)}, left to right; one row per zoom in ``rows``. -> the sheet."""
+    or "entity" (a base-game entity), or "mod" (a staged mod folder, e.g. an in-game test's) with "entity" (one of
+    its entities: what was really shipped, whatever its run folders hold now)}, left to right; one row per zoom in
+    ``rows``. -> the sheet."""
     from PIL import Image, ImageDraw, ImageFont
 
     from eu4unitgen.core.character import CharacterSpec
@@ -267,10 +269,21 @@ def lineup(cols: list[dict], out: Path, eu4: Path, rows=("close", "near"), view:
                    view=[hx * math.cos(el), hy * math.cos(el), -math.sin(el)])
         by_spec: dict = {}
         for i, c in enumerate(cols):
-            by_spec.setdefault(str(c.get("spec") or cols[0].get("spec") or ""), []).append((i, c))
-        for spec, group in by_spec.items():
-            ch = CharacterSpec.load(Path(spec))
-            s = Session(Settings(eu4_path=Path(eu4), owned_dlc=[], prefix="hr_", stage_dir=out.parent / f"lineup_stage_{len(tiles)}"))
+            key = (str(c.get("mod") or ""), str(c.get("spec") or "" if c.get("mod") else c.get("spec") or cols[0].get("spec") or ""))
+            by_spec.setdefault(key, []).append((i, c))
+        for (mod, spec), group in by_spec.items():
+            if mod:  # a placeholder set on another tag and culture: nothing generated shadows the mod's entities
+                sp = dict(json.loads(Path(cols[0]["spec"]).read_text(encoding="utf-8")) if not spec else json.loads(Path(spec).read_text(encoding="utf-8")))
+                sp["set"] = {**sp["set"], "tags": ["ENG"], "gfx": "lineupgfx", "set_name": "lineup",
+                             "unit_colours": {"ENG": sp["set"]["unit_colours"][next(iter(sp["set"]["unit_colours"]))]}}
+                sp["loadout"] = {"schema": 1}
+                tmp = out.parent / f"lineup_placeholder_{len(tiles)}.json"
+                tmp.write_text(json.dumps(sp), encoding="utf-8")
+                ch = CharacterSpec.load(tmp)
+            else:
+                ch = CharacterSpec.load(Path(spec))
+            s = Session(Settings(eu4_path=Path(eu4), owned_dlc=[], prefix="hr_", mod_folder=Path(mod) if mod else None,
+                                 stage_dir=out.parent / f"lineup_stage_{len(tiles)}"))
             units = [tuple(c["unit"]) for _, c in group if c.get("unit")]
             ents = [c["entity"] for _, c in group if c.get("entity")]
             g = s.gallery(ch.set_spec(), units=units, camera=cam, lit={"normal_maps": True}, state=state, frame=frame,
