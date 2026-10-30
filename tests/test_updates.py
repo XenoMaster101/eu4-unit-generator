@@ -39,6 +39,9 @@ def test_a_newer_release_with_an_installer_can_be_installed_in_place(tmp_path):
     cmd = updates.install_command(tmp_path / "files", tmp_path / "root", 123, tmp_path / "pythonw.exe")
     assert cmd[0] == "powershell" and "Wait-Process -Id 123" in cmd[-1] and "install.ps1" in cmd[-1]
     assert f"-Root '{tmp_path / 'root'}'" in cmd[-1] and "Start-Process" in cmd[-1]
+    assert "-NoSystem" not in cmd[-1] and "update.log" in cmd[-1]
+    other = updates.install_command(tmp_path / "files", tmp_path / "root", 123, tmp_path / "pythonw.exe", system=False)
+    assert "-NoSystem" in other[-1]  # a copy Windows doesn't list keeps the user's shortcuts alone
 
 
 def test_the_update_uses_the_zip_and_unpacks_its_installer(tmp_path):
@@ -69,7 +72,7 @@ def test_a_release_without_an_installer_points_to_its_page():
 
 def test_this_copy_knows_its_repository_and_version():
     from eu4unitgen import __version__
-    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.4"
+    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.5"
     assert updates.expected_sha256(f"{'b' * 64} *a.exe\n", "a.exe") == "b" * 64
 
 

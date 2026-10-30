@@ -177,14 +177,32 @@ def unpack(package: Path) -> Path:
     return files
 
 
-def install_command(files: Path, root: Path, pid: int, pythonw: Path) -> list[str]:
+def registered_root() -> Path | None:
+    """The install folder Windows' Apps list has for the app (install.ps1 writes it), or None."""
+    if sys.platform != "win32":
+        return None
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Uninstall\eu4unitgen") as k:
+            return Path(winreg.QueryValueEx(k, "InstallLocation")[0])
+    except OSError:
+        return None
+
+
+def install_command(files: Path, root: Path, pid: int, pythonw: Path, system: bool = True) -> list[str]:
     """PowerShell, hidden: wait for this app (``pid``) to close, run the release's install.ps1 into ``root`` (in
-    place: it sees its own app\\layout.json), then start the app again."""
+    place: it sees its own app\\layout.json), then start the app again; logged to settings\\logs\\update.log.
+    ``system`` False: a copy Windows' Apps list doesn't have (a second copy, a test) keeps its shortcuts and the Apps
+    entry as they are (-NoSystem; 1.0.4: an update of a test copy took over the user's shortcuts)."""
     q = lambda p: "'" + str(p).replace("'", "''") + "'"  # noqa: E731 - a PowerShell single-quoted string
-    script = (f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue; "
+    log = Path(root) / "settings" / "logs" / "update.log"
+    script = (f"Start-Transcript -Path {q(log)} -Force | Out-Null; "
+              f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue; "
               f"& powershell -NoProfile -ExecutionPolicy Bypass -File {q(files / 'install.ps1')} -Quiet -NoLaunch "
-              f"-Root {q(root)}; "
-              f"Start-Process -FilePath {q(pythonw)} -ArgumentList '-m','eu4unitgen.gui' -WorkingDirectory {q(root)}")
+              f"-Root {q(root)}{'' if system else ' -NoSystem'}; "
+              f"Start-Process -FilePath {q(pythonw)} -ArgumentList '-m','eu4unitgen.gui' -WorkingDirectory {q(root)}; "
+              "Stop-Transcript | Out-Null")
     return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", script]
 
 
@@ -200,8 +218,14 @@ def launch(package: Path) -> None:
         raise OSError("this copy isn't an installed app (no install folder): download the new version from its page")
     files = unpack(Path(package))
     pythonw = root / "app" / "python" / "pythonw.exe"
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen(install_command(files, root, os.getpid(), pythonw), creationflags=flags, close_fds=True)  # noqa: S603
+    reg = registered_root()
+    system = reg is not None and reg.resolve() == root.resolve()
+    cmd = install_command(files, root, os.getpid(), pythonw, system=system)
+    base = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:  # out of whatever job started the app, so closing the app doesn't end the update
+        subprocess.Popen(cmd, creationflags=base | 0x01000000, close_fds=True)  # noqa: S603 - CREATE_BREAKAWAY_FROM_JOB
+    except OSError:  # a job that doesn't allow it
+        subprocess.Popen(cmd, creationflags=base, close_fds=True)  # noqa: S603
 
 
 MUTEX = "eu4unitgen_running"  # held while the app runs; setup.exe waits for it to go (setup.iss)
