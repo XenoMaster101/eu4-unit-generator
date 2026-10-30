@@ -2,6 +2,14 @@
 
 Each version's section is the text of its GitHub release and what the app's Help → Check for updates shows.
 
+## 1.0.7
+
+- TRELLIS.2 counts as ready only when its GPU extensions (CuMesh, FlexGEMM, o-voxel) are really built. A build that
+  stopped half way (usually out of memory) showed as ready, and the first picture then failed with
+  "No module named 'o_voxel'". If yours did, run Setup's step 5 again with games and browsers closed.
+- Setup writes what each step printed to settings\logs\setup.log.
+- Deleting a run that's already deleted goes back to the Library instead of showing an error.
+
 ## 1.0.6
 
 - Setup is one list of seven steps, all needed, each saying why: Blender (the 3D program the app works in),

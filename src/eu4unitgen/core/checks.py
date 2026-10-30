@@ -171,8 +171,11 @@ def check_wsl() -> Check:
                      "needs a restart).")
     # its GPU extensions load, not only its Python there (1.0.6, the user's PC: a TRELLIS.2 build that stopped half
     # way showed as ready, and the first run failed on "No module named 'o_voxel'")
+    # (o_voxel is found, not imported: it imports nvdiffrast, which the app never installs; its jobs put
+    # ai/jobs/_uv_raster.py in its place first)
     rc, out = _run(cfg.wsl_base() + ["-e", "bash", "-lc", f"cd /tmp && {sh_python(cfg.wsl_python)} -c "
-                                     "'import cumesh, flex_gemm, o_voxel' && echo ok"], 120)
+                                     "'import cumesh, flex_gemm, importlib.util as u; "
+                                     "assert u.find_spec(\"o_voxel\")' && echo ok"], 120)
     if "ok" not in out:
         return Check("wsl", False, "WSL is there, but TRELLIS.2 isn't set up in it, or its build didn't finish.",
                      "Open Setup and run step 5, TRELLIS.2, again (it builds what's missing; about 40 minutes). "
