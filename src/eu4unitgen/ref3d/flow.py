@@ -332,6 +332,8 @@ def stage_build(folder: Path, req: dict, cfg) -> dict:
         soldier = req["kind"] == "soldier"
         from eu4unitgen.ref3d import base_body
         body = base_body.current() if soldier else None  # Track W: the outfit over the base body, once it passed
+        if "country_mask" not in opts:  # the request's choice (the soldier's build ignored it: always on)
+            opts["country_mask"] = bool((req.get("options") or {}).get("country_mask", True))
         m = trellis.process_rider(glb, folder / "trellis" / "game", palette_from=horse_textures(req.get("horse")),
                                   part_cache=cache, fit="standing" if soldier else "seated", body=body, **opts)
         if soldier:  # two fits (the user, T37): standing for infantry and the crew, its hand parts strapped for its

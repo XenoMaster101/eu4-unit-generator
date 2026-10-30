@@ -306,6 +306,7 @@ class NewUnitScreen(Page):
         self.from_picture.setChecked(not model)
         self.model_box.setVisible(model)
         self.picture_box.setVisible(not model)
+        self.mask.setChecked(not model)  # an imported model keeps its own colours (1:1) unless asked
         if hasattr(self, "next_why"):
             self._ready()
 

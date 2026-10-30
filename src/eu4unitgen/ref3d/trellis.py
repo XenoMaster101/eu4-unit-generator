@@ -812,7 +812,11 @@ HAND = {"left": "Left_hand_node", "right": "Right_hand_node"}
 HAND_KIND = {"Right_hand_node": "mesh_weapon", "Left_hand_node": "mesh_shield"}  # core.parts: the kind gives the bone
 
 
-IMPORT_TRIS = 4400  # an imported model's budget: the largest base-game infantry body has 4,360 (rules.DERIVED_TRI_BUDGET)
+# an imported model's budget, its back sides included (Mambo, 2026-10-29: cut from 17,000 to 4,400, her 151 pieces
+# shrank apart at their edges: gaps, detached ears and ribbon, faceted hair in game; whole, 23,600 with back sides,
+# clean but heavy; the user: "a bit increased, not too much"); the app's check warns over the largest base-game
+# infantry body's 4,500
+IMPORT_TRIS = 8000
 
 
 def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str | None = None, plume: str = "part",
