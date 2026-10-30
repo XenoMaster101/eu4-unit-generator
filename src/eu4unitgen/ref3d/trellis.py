@@ -859,6 +859,7 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
     marks = imported.get("landmarks")
     fr = br.run_job("fresh_rider", {"vanilla": base_arrays(base), "source": {"path": str(Path(glb).resolve()), "merge": 1e-5},
                                     **({"landmarks": marks, "regions": imported.get("regions"), "keep_mesh": True,
+                                        "landmark_points": imported.get("landmark_points"),
                                         "slim": False, "stylise": False, "import_tris": IMPORT_TRIS,
                                         "two_sided": bool(imported.get("double_sided"))}
                                        if imp.is_file() else {}),

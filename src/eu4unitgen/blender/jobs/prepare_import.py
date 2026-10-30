@@ -470,6 +470,15 @@ def main() -> None:
         if mark_at:
             res["landmarks"] = {k: round(sum((obj.data.vertices[i].co.z - z0) / (z1 - z0) for i in v) / len(v), 4)
                                 for k, v in mark_at.items()}
+            # and each joint where it is, per side (the figure's left at +x), in glTF axes as the .glb is written
+            pts = {}
+            for k, v in mark_at.items():
+                for i in v:
+                    c = obj.data.vertices[i].co
+                    key = k if abs(c.x) < 1e-3 else f"{k}_{'L' if c.x > 0 else 'R'}"
+                    pts.setdefault(key, []).append((c.x, c.z, -c.y))
+            res["landmark_points"] = {k: [round(sum(p[j] for p in v) / len(v), 5) for j in range(3)]
+                                      for k, v in pts.items()}
         bm = bmesh.new()
         bm.from_mesh(obj.data)
         bm.verts.ensure_lookup_table()

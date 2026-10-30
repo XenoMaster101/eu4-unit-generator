@@ -266,6 +266,58 @@ def back_sides(obj):
     return len(new)
 
 
+REGION_ARM, REGION_LEG = 2, 3
+
+
+def rig_points(points, s, off, shift):
+    """An imported rig's joints (``prepare_import``'s landmark points, glTF axes: PDX is (x, y, -z)) moved as the
+    fit moved the model (its scale and place, then the joint fit's shift). -> {name: point}."""
+    out = {}
+    for k, p in (points or {}).items():
+        raw = np.array([p[0], p[1], -p[2]], dtype=np.float64)
+        out[k] = np.asarray(shift(raw * s + off), dtype=np.float64)
+    return out
+
+
+def rig_swing(co, arm, shoulder, wrist, game_shoulder, game_hand, blend=0.15):
+    """The points in ``arm`` turned about ``shoulder`` so the shoulder-to-wrist line points along the game's
+    shoulder-to-hand line; its length kept, nothing slid; the turn faded in over the arm's first ``blend`` (the
+    seam with the torso doesn't tear). -> the record."""
+    sh = np.asarray(shoulder, dtype=np.float64)
+    g = np.asarray(wrist, dtype=np.float64) - sh
+    tg = np.asarray(game_hand, dtype=np.float64) - np.asarray(game_shoulder, dtype=np.float64)
+    k = np.cross(g, tg)
+    ang = math.atan2(np.linalg.norm(k), g @ tg)
+    k = k / max(np.linalg.norm(k), 1e-9)
+    rel = co[arm] - sh
+    t = np.clip((rel @ g) / max(g @ g, 1e-9), 0.0, 1.0)
+    th = (ang * fh.smoothstep(t, 0.0, blend))[:, None]
+    co[arm] = sh + rel * np.cos(th) + np.cross(k[None], rel) * np.sin(th) + k[None] * (rel @ k)[:, None] * (1 - np.cos(th))
+    return {"turned_deg": round(math.degrees(ang), 1), "points": int(arm.sum()), "from": "rig"}
+
+
+def limbs_on_chains(obj, region, bones):
+    """Each vertex its rig calls an arm or a leg weighted along the game's chain on its side (``chain_rows``: the
+    two nearest segments blended). -> {chain: vertices}."""
+    co = hs.verts(obj)
+    out = {}
+    for cls, chains in ((REGION_ARM, ARMS), (REGION_LEG, LEGS)):
+        for side, chain in chains.items():
+            sel = np.flatnonzero((region == cls) & ((co[:, 0] > 0) == (side == "L")))
+            if not len(sel):
+                continue
+            rows, _ = chain_rows(co[sel], bones, chain)
+            idx = [int(i) for i in sel]
+            for vg in obj.vertex_groups:
+                vg.remove(idx)
+            for i, row in zip(idx, rows):
+                for bone, w in row.items():
+                    g = obj.vertex_groups.get(bone) or obj.vertex_groups.new(name=bone)
+                    g.add([i], float(w), "REPLACE")
+            out[f"{'arm' if cls == REGION_ARM else 'leg'}_{side}"] = len(idx)
+    return out
+
+
 def set_rigid(obj, mask, bone):
     """Every vertex in ``mask`` 100% on ``bone``. -> how many."""
     g = obj.vertex_groups.get(bone) or obj.vertex_groups.new(name=bone)
@@ -843,8 +895,17 @@ def main():
         moves["shield"] = {"node": node, "grip": grip.round(3).tolist(), "turned_deg": round(ang, 1),
                            "slid": round(float(np.linalg.norm(slide)), 3)}
     held = {m["node"] for m in moves.values()}
+    lm = rig_points(a.get("landmark_points"), s, off, shift)  # an imported rig's joints, where the fit put them
     for side, s_, node in (("L", 1.0, "Left_hand_node"), ("R", -1.0, "Right_hand_node")):
         if node in held or not a.get("free_arm", True):
+            continue
+        if region is not None and lm.get(f"wrist_{side}") is not None and lm.get(f"shoulder_{side}") is not None:
+            # the whole arm its rig names, turned about its own shoulder to the game's arm angle (Mambo, 2026-10-29:
+            # fitted by her neck her hand was 10 out, past free_hand's 9; it took a hanging strand for her hand and
+            # left her arm out in a T)
+            arm = (region == REGION_ARM) & ((co[:, 0] > 0) == (side == "L"))
+            moves[f"free_{side}"] = rig_swing(co, arm, lm[f"shoulder_{side}"], lm[f"wrist_{side}"],
+                                              bones[f"{side}_shoulder"], bones[f"{side}_hand"])
             continue
         # an empty hand to vanilla's hand too (the user, after T38: the English soldier's free arm hung about 20 degrees
         # under vanilla's, his forearm 0.19 from his side at the wrist against vanilla's 1.07)
@@ -1040,6 +1101,10 @@ def main():
         # rig moves them (Mambo, 2026-10-29: hair below her neck took the arm's and spine's weights and creased: 24 of
         # 38 idle folds on head-weighted hair, 21 of 32 walking on the right hand's)
         res["rigid_head"] = set_rigid(obj, region == REGION_HEAD, "head")
+        # its arms and legs on the game's arm and leg chains, by where they lie along them (Mambo, 2026-10-29: her
+        # long puffy sleeves were nearest the game's torso, so the nearest-surface weights put her arms 34-43% on
+        # the spine and 2% on the upper arm: they stayed out in a T in game while the torso stood still)
+        res["limbs_on_chains"] = limbs_on_chains(obj, region, bones)
     feet_game = feet_span(hs.verts(obj))
     res["joints"] = joints_report(surface_points(obj), van_co, bones)  # rule joints_inside
     res["feet"] = {"raw": feet_raw, "game": feet_game,
