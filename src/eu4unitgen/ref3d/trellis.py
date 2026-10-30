@@ -936,8 +936,9 @@ def process_rider(glb: Path, root: Path, country_mask: bool = True, blender: str
             loc = part_gen.locate(json.loads((out / "parts" / "fitted_points.json").read_text(encoding="utf-8")),
                                   Image.open(ref["fg"]).convert("L"))
             checks["locate"] = {"mirror": loc["mirror"], "fit_iou": loc["fit_iou"]}
+            # a starter part's cached crops need no AI (the fresh-install test: ai_paths stopped a PC without it)
             crops_res = part_gen.crops(Path(ref["image"]), Path(ref["fg"]), loc, out / "parts" / "crops", ai_py,
-                                       ai_paths(ai_py)["sam2"])
+                                       ai_paths(ai_py)["sam2"] if ai_py else None)
         except Exception as exc:  # noqa: BLE001 - the parts fall back to procedural; recorded
             checks["crops_error"] = f"{type(exc).__name__}: {exc}"
     frames = {"Left_hand_node": frame}
