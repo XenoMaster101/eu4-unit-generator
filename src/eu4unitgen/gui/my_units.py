@@ -736,6 +736,9 @@ class UnitDetail(QWidget):
         self.a_folder.setPlaceholderText("the mod's folder name, e.g. tracen_academy (blank: <unit>_units)")
         self.a_display = QLineEdit()
         self.a_display.setPlaceholderText("its name in the launcher, e.g. Tracen Academy (blank: the folder name)")
+        self.a_folder.setToolTip("The mod's folder in the EU4 mod folder (lower-case, no spaces). Blank: named after "
+                                 "the unit")
+        self.a_display.setToolTip("The name the EU4 launcher shows for the mod. Blank: the folder name")
         self.a_note = label("", "explain")
         self.a_go = primary("Add to mod", self.add_to_mod, "Checks it, asks you once, then writes it into the mod folder")
         g.addWidget(label("Kind", wrap=False), 0, 0)
