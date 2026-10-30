@@ -381,7 +381,10 @@ STARTER = {"bay_horse": {"style": "light", "regions": ["Western", "European"]},
            "cataphract_horse": {"style": "barded", "regions": ["Byzantine", "Greek"]},
            # "english_soldier": out until he's fixed (the user, 2026-10-28; rerun from the arms-out picture)
            "cataphract": {"regions": ["Byzantine", "Greek"]},
-           "bombard": {"regions": ["European", "generic"]}}
+           "bombard": {"regions": ["European", "generic"]},
+           # the app's example of a stylised (exaggerated) imported model (the user, 2026-10-29: Mambo, a chibi; kept as
+           # an example of an overexaggerated model; the private mod's Tracen Academy cavalry)
+           "mambo_import_test": {"regions": ["stylised example", "Tracen Academy"], "example": "stylised"}}
 
 
 def pack_starters(dest: Path | None = None) -> dict[str, str]:
@@ -401,7 +404,7 @@ def pack_starters(dest: Path | None = None) -> dict[str, str]:
     return out
 
 
-def pack(folder: Path, out: Path, tags: dict | None = None, rights: str = STARTER_RIGHTS) -> Path:
+def pack(folder: Path, out: Path, tags: dict | None = None, rights: str | None = None) -> Path:
     """A finished part run packed for the starter library (the user, 2026-10-28: the raw TRELLIS.2 model, its tags and
     rights; fitted and weighted on each PC on first use): ``out/part.json`` with relative paths, ``raw.glb``, the
     cut-out picture (``input/``), the part crops cut from the picture (``crops_cache/``: no SAM 2 needed to fit it)
@@ -428,6 +431,8 @@ def pack(folder: Path, out: Path, tags: dict | None = None, rights: str = STARTE
         shutil.copytree(crops, out / "crops_cache", ignore=shutil.ignore_patterns("*_hint.png"))
     if (tr / "parts_cache").is_dir():
         shutil.copytree(tr / "parts_cache", out / "parts_cache", ignore=shutil.ignore_patterns("*.log", "logs"))
+    if (tr / "import.json").is_file():  # an imported model: its rig's joints and regions (the fit's 1:1 path)
+        shutil.copyfile(tr / "import.json", out / "import.json")
     for bad in out.rglob("*"):
         if bad.suffix.lower() in (".mesh", ".dds", ".anim", ".asset", ".gfx"):
             raise ValueError(f"{bad.name}: a game format isn't packed")
@@ -441,11 +446,15 @@ def pack(folder: Path, out: Path, tags: dict | None = None, rights: str = STARTE
     if view:
         thumb = "render.png"
         shutil.copyfile(raw[view], out / thumb)
+    imported = req.get("source")
+    rights = rights or (req.get("rights") if imported else STARTER_RIGHTS)
     d = {"schema": 2, "name": req["name"], "kind": req["kind"],
          "tags": tags if tags is not None else (req.get("tags") or {}), "rights": rights, "image": image,
+         **({"source": imported} if imported else {}),
          "thumb": thumb or image, "options": req.get("options") or {},
          "edits": {k: v for k, v in (req.get("edits") or {}).items() if k != "candidate"},
-         "made_by": "TRELLIS.2 from the picture (the raw model); fitted to the game on the PC that uses it"}
+         "made_by": ("an imported 3D model" if imported else "TRELLIS.2 from the picture (the raw model)")
+                    + "; fitted to the game on the PC that uses it"}
     (out / "part.json").write_text(json.dumps(d, indent=1), encoding="utf-8")
     return out
 
@@ -471,15 +480,20 @@ def fit(name: str, starter: Path | None = None) -> Path:
     for sub in ("crops_cache", "parts_cache"):
         if (src / sub).is_dir():
             shutil.copytree(src / sub, tr / sub, dirs_exist_ok=True)
+    if (src / "import.json").is_file():
+        shutil.copyfile(src / "import.json", tr / "import.json")
     (tr / "candidates.json").write_text(json.dumps({"candidates": [{"seed": 0, "glb": str((tr / "raw.glb").resolve()),
                                                                      "note": "the starter part's model"}], "best": 0}),
                                         encoding="utf-8")
     req = flow.request(f)
-    req.update(tags=d.get("tags") or {}, edits=d.get("edits") or {}, starter=True)
+    req.update(tags=d.get("tags") or {}, edits=d.get("edits") or {}, starter=True,
+               **({"source": d["source"]} if d.get("source") else {}))
     (f / "request.json").write_text(json.dumps(req, indent=1), encoding="utf-8")
     now = time.time()
     flow._write(f, {"name": name, "kind": d["kind"], "state": "stopped", "done": False, "started": now,
-                    "stages": {s: {"state": "done", "seconds": 0, "from": "the starter part"} for s in ("cutout", "trellis")}})
+                    "stages": {s: {"state": "done", "seconds": 0, "from": "the starter part"}
+                               for s in ("import",) if d.get("source")} | {s: {"state": "done", "seconds": 0, "from":
+                               "the starter part"} for s in ("cutout", "trellis") if not d.get("source")}})
     flow.start(f)
     return f
 
