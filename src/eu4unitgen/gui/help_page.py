@@ -37,9 +37,11 @@ FAQ = (
     ("Windows said “Windows protected your PC”.", "The installer isn't code-signed (that needs a paid yearly "
      "certificate). Click More info → Run anyway. The release page's SHA256SUMS.txt lets you check the download. "
      "Updates installed from inside the app don't show the warning."),
-    ("What does the app download?", "Setup's first page lists every download: what it is, why it's needed, its "
-     "size, licence, where it comes from and where it goes. Only Blender and io_pdx_mesh are required; the AI "
-     "(about 40 GB) is only for making parts from your own pictures."),
+    ("What does the app download, and why?", "Setup's first page lists every download: what it is, why it's "
+     "needed, its size, licence, where it comes from and where it goes. Blender is the 3D program the app works in; "
+     "TRELLIS.2 is the AI that turns your picture into a 3D model, and it only runs on Linux, which is why setup "
+     "installs WSL and Ubuntu; BiRefNet and SAM 2 cut your subject and its parts out of the picture. About 40 GB "
+     "in all."),
     ("What makes a good picture?", "One subject on a plain background, the whole of it in frame: a soldier from the "
      "front with the arms a little out, a horse from the side. The picture guide shows good and bad examples."),
     ("What does “achievement-safe” mean?", "EU4 turns achievements off when a mod changes the game's rules. An "

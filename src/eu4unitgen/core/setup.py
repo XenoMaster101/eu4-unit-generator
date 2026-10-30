@@ -68,51 +68,47 @@ class Download:
     required: bool
 
 
-# the two groups the setup wizard shows (the user, 2026-10-30: seven rows each saying "optional" read as unorganized)
-GROUPS = (
-    (True, "Needed for everything",
-     "The 3D program the app works in. Enough to build units from the library and the example, import 3D models and "
-     "add units to a mod."),
-    (False, "Optional: the AI pack (make parts from your own pictures)",
-     "Turns a picture of a soldier, horse or gun into a 3D model. The model, TRELLIS.2 (Microsoft Research), only runs "
-     "on Linux, so the pack installs Windows' own Linux layer (WSL) with Ubuntu inside it, NVIDIA's CUDA, and the AI "
-     "models. Needs an NVIDIA graphics card (8 GB or more), 32 GB of RAM, about 40 GB of disk and 1 to 2 hours. Skip it "
-     "if you only use the library and imported models; you can add it any time from Setup."),
-)
-AI_STEPS = ("wsl", "ubuntu", "trellis_env", "ai_env", "weights")
-DOWNLOADS = (
-    Download("installer", "PySide6, Pillow, Jinja2", "the app's window, pictures and DDS textures, script templates",
-             260, "LGPL-3.0 / MIT-CMU / BSD-3", "pypi.org (by the installer)", r"app\python", True),
-    Download("blender", "Blender 4.2.23 LTS (portable)", "every 3D step: fitting, rigging, rendering the previews",
+DOWNLOADS = (  # every one needed (the user, 2026-10-30: "no need for optional; tell them the reason why")
+    Download("installer", "PySide6, Pillow, Jinja2", "The app's own window, its picture handling and EU4's DDS "
+             "textures, and the templates it writes the mod's script files from", 260, "LGPL-3.0 / MIT-CMU / BSD-3",
+             "pypi.org (by the installer)", r"app\python", True),
+    Download("blender", "Blender 4.2.23 LTS (portable)", "The 3D program the app works in, in the background: it "
+             "fits every model to EU4's skeleton and animations, paints and checks it, and renders the previews",
              380, "GPL-2.0-or-later", "download.blender.org", r"tools\blender (about 940 MB unpacked)", True),
-    Download("io_pdx_mesh", "io_pdx_mesh 0.91", "lets Blender read and write EU4's .mesh files", 1, "GPL-3.0-or-later",
-             "github.com/ross-g/io_pdx_mesh", r"tools\blender\portable", True),
-    Download("wsl", "Windows Subsystem for Linux", "Windows' own Linux layer; TRELLIS.2 runs in it", 150,
-             "Microsoft", "Microsoft (Windows' own installer)", "Windows", False),
-    Download("ubuntu", "Ubuntu 26.04", "the Linux TRELLIS.2 runs in", 1000, "free software (Canonical)",
-             "Microsoft's WSL catalogue", r"wsl\ (a Linux disk that grows to about 25 GB)", False),
-    Download("trellis_env", "TRELLIS.2 code (commit 75fbf01)", "turns a cut-out picture into a 3D model",
-             40, "MIT", "github.com/microsoft/TRELLIS.2", r"ai\TRELLIS.2", False),
-    Download("trellis_env", "CUDA 12.9 and build tools", "builds and runs TRELLIS.2 on your NVIDIA card",
-             7500, "NVIDIA CUDA EULA / GPL", "developer.download.nvidia.com, Ubuntu's archive", r"wsl\ (the Linux disk)",
-             False),
-    Download("trellis_env", "TRELLIS.2's environment (PyTorch and its GPU extensions)", "TRELLIS.2's libraries",
-             7000, "BSD / MIT / Apache-2.0", "pypi.org, download.pytorch.org, github.com", r"wsl\ (the Linux disk)",
-             False),
-    Download("ai_env", "PyTorch 2.14 (CUDA)", "runs the cut-out and the part cut-outs on your card", 3000,
-             "BSD-3", "download.pytorch.org", r"ai\ai_env", False),
-    Download("ai_env", "transformers, rembg, onnxruntime-gpu, SciPy, OpenCV", "the cut-out and SAM 2 libraries",
-             2000, "Apache-2.0 / MIT / BSD", "pypi.org", r"ai\ai_env", False),
-    Download("weights", "BiRefNet-general", "cuts the subject out of your picture", 930, "MIT",
-             "github.com/danielgatis/rembg", r"ai\rembg_models", False),
-    Download("weights", "TRELLIS.2-4B", "the 3D model's weights", 16000, "MIT",
-             "huggingface.co/microsoft", r"ai\weights", False),
-    Download("weights", "TRELLIS-image-large (decoder)", "TRELLIS.2's shape decoder", 140, "MIT",
-             "huggingface.co/microsoft", r"ai\weights", False),
-    Download("weights", "DINOv3 ViT-L/16", f"TRELLIS.2's picture reader; gated: a free Hugging Face account, "
-             "its licence accepted, a read token", 1200, "DINOv3 License", "huggingface.co/facebook", r"ai\weights", False),
-    Download("weights", "SAM 2.1 hiera-large", "cuts each part (helmet, shield, weapon) out of the picture",
-             860, "Apache-2.0", "huggingface.co/facebook", r"ai\weights", False),
+    Download("io_pdx_mesh", "io_pdx_mesh 0.91", "Lets Blender read the game's own units and write EU4's .mesh "
+             "files: without it nothing can go into the game", 1, "GPL-3.0-or-later", "github.com/ross-g/io_pdx_mesh",
+             r"tools\blender\portable", True),
+    Download("wsl", "Windows Subsystem for Linux", "Windows' built-in way to run Linux. TRELLIS.2, the AI that turns "
+             "your picture into a 3D model, only runs on Linux", 150, "Microsoft", "Microsoft (Windows' own "
+             "installer)", "Windows", True),
+    Download("ubuntu", "Ubuntu 26.04", "The Linux TRELLIS.2 runs in, kept in the app's own folder so it doesn't mix "
+             "with anything else on your PC", 1000, "free software (Canonical)", "Microsoft's WSL catalogue",
+             r"wsl\ (a Linux disk that grows to about 25 GB)", True),
+    Download("trellis_env", "TRELLIS.2 code (commit 75fbf01)", "The AI that turns the cut-out picture into the 3D "
+             "model of your soldier, horse or gun (Microsoft Research)", 40, "MIT", "github.com/microsoft/TRELLIS.2",
+             r"ai\TRELLIS.2", True),
+    Download("trellis_env", "CUDA 12.9 and build tools", "Lets TRELLIS.2 use your NVIDIA graphics card, which does "
+             "the heavy work (on the processor alone it would take hours)", 7500, "NVIDIA CUDA EULA / GPL",
+             "developer.download.nvidia.com, Ubuntu's archive", r"wsl\ (the Linux disk)", True),
+    Download("trellis_env", "TRELLIS.2's environment (PyTorch and its GPU extensions)", "The libraries TRELLIS.2 is "
+             "built on", 7000, "BSD / MIT / Apache-2.0", "pypi.org, download.pytorch.org, github.com",
+             r"wsl\ (the Linux disk)", True),
+    Download("ai_env", "PyTorch 2.14 (CUDA)", "Runs the two cut-out AIs below on your graphics card", 3000, "BSD-3",
+             "download.pytorch.org", r"ai\ai_env", True),
+    Download("ai_env", "transformers, rembg, onnxruntime-gpu, SciPy, OpenCV", "The libraries the cut-out AIs are "
+             "built on", 2000, "Apache-2.0 / MIT / BSD", "pypi.org", r"ai\ai_env", True),
+    Download("weights", "BiRefNet-general", "Cuts your soldier, horse or gun out of the picture's background, so "
+             "TRELLIS.2 sees only the subject", 930, "MIT", "github.com/danielgatis/rembg", r"ai\rembg_models", True),
+    Download("weights", "TRELLIS.2-4B", "What TRELLIS.2 has learned: the AI model itself", 16000, "MIT",
+             "huggingface.co/microsoft", r"ai\weights", True),
+    Download("weights", "TRELLIS-image-large (decoder)", "The part of TRELLIS.2 that builds the model's rough shape",
+             140, "MIT", "huggingface.co/microsoft", r"ai\weights", True),
+    Download("weights", "DINOv3 ViT-L/16", "TRELLIS.2's eyes: it reads your picture for TRELLIS.2. Meta makes you "
+             "accept its licence first, so this one download needs a free Hugging Face account and a read token "
+             "(used once, never saved)", 1200, "DINOv3 License", "huggingface.co/facebook", r"ai\weights", True),
+    Download("weights", "SAM 2.1 hiera-large", "Cuts the helmet, shield and weapon out of the picture so they "
+             "become clean, separate parts (without it they'd be rough stand-ins)", 860, "Apache-2.0",
+             "huggingface.co/facebook", r"ai\weights", True),
 )
 
 
@@ -125,7 +121,8 @@ def size_text(mb: float) -> str:
 
 
 def _table(rows: list[Download]) -> str:
-    head = ("<tr><th align=left>What</th><th align=left>Why the app needs it</th><th align=right>Size</th>"
+    head = ("<tr><th align=left width=\"17%\">What</th><th align=left width=\"38%\">Why the app needs it</th>"
+            "<th align=right width=\"7%\">Size</th>"
             "<th align=left>Licence</th><th align=left>From</th><th align=left>Goes to</th></tr>")
     body = "".join(f"<tr><td><b>{d.name}</b></td><td>{d.why}</td><td align=right>{size_text(d.size_mb)}</td>"
                    f"<td>{d.licence}</td><td>{d.source}</td><td>{d.where}</td></tr>" for d in rows)
@@ -133,19 +130,14 @@ def _table(rows: list[Download]) -> str:
 
 
 def downloads_html(step: str | None = None) -> str:
-    """The downloads as HTML: one step's table, the AI pack's (``step="ai_pack"``), or all of them in their two groups
-    with each group's total (the setup wizard's overview, the About page)."""
-    if step == "ai_pack":
-        rows = [d for d in DOWNLOADS if not d.required]
-        return _table(rows) + f"<p><b>The AI pack in all: {size_text(sum(d.size_mb for d in rows))}</b>.</p>"
+    """The downloads as HTML: one step's table, or all of them with the total (the setup wizard's overview, About)."""
+    rows = downloads(step)
+    if not rows:
+        return "<p>Nothing is downloaded in this step.</p>"
     if step is not None:
-        rows = downloads(step)
-        return _table(rows) if rows else "<p>Nothing is downloaded in this step.</p>"
-    out = []
-    for required, title, text in GROUPS:
-        rows = [d for d in DOWNLOADS if d.required == required]
-        out.append(f"<h3>{title}: {size_text(sum(d.size_mb for d in rows))}</h3><p>{text}</p>{_table(rows)}")
-    return "".join(out) + "<p>Everything goes inside the app's folder.</p>"
+        return _table(rows)
+    return (_table(rows) + f"<p><b>In all: {size_text(sum(d.size_mb for d in rows))}</b>, everything inside the "
+            "app's folder.</p>")
 
 
 ENV_NAME = "ai_env"
@@ -219,20 +211,28 @@ def distro() -> str:
 def steps() -> list[Step]:
     rooted = layout.root() is not None
     out = [
-        Step("blender", "Blender 4.2 LTS", "The free 3D program the app runs in the background for every mesh step.",
+        Step("blender", "Blender 4.2 LTS", "The 3D program the app works in, in the background: every model is fitted "
+             "to EU4's skeleton and animations, painted, checked and previewed in it.",
              "about 380 MB to download" if rooted else "administrator rights if it has to be installed (about 400 MB)", 5),
-        Step("io_pdx_mesh", "The io_pdx_mesh add-on", "Lets Blender read and write EU4's .mesh files.", "", 1),
+        Step("io_pdx_mesh", "The io_pdx_mesh add-on", "Lets Blender read the game's own units and write EU4's .mesh "
+             "files: without it nothing can go into the game.", "", 1),
         Step("ai_folder", "Where the AI parts go", f"About {NEED_GB} GB: TRELLIS.2, its weights, DINOv3, SAM 2.1.", "", 0),
-        Step("wsl", "Windows Subsystem for Linux", "Windows' own Linux layer; TRELLIS.2 runs in it.",
+        Step("wsl", "Windows Subsystem for Linux", "TRELLIS.2, the AI that turns your picture into a 3D model, only "
+             "runs on Linux. WSL is Windows' built-in way to run it.",
              "administrator rights; Windows restarts afterwards", 5, restart=True),
-        Step("ubuntu", "Ubuntu in WSL", "Ubuntu 26.04, set up to run as its own administrator: no Linux user or "
-             "password to make." + (" It goes in the app's wsl folder." if rooted else ""), "about 1 GB", 5),
-        Step("trellis_env", "TRELLIS.2", "Downloads TRELLIS.2 and builds its environment in Ubuntu (CUDA 12.9, PyTorch, "
-             "its GPU extensions).", "about 40 minutes, 16 GB", 40),
-        Step("ai_env", "The Windows AI environment", "Runs the cut-out (BiRefNet) and the part cut-outs (SAM 2).",
+        Step("ubuntu", "Ubuntu in WSL", "The Linux TRELLIS.2 runs in, set up to run as its own administrator: no Linux "
+             "user or password to make." + (" It goes in the app's wsl folder, apart from anything else on your PC."
+                                           if rooted else ""), "about 1 GB", 5),
+        Step("trellis_env", "TRELLIS.2", "The AI that turns your cut-out picture into the 3D model. This downloads it "
+             "and builds it for your NVIDIA card (CUDA 12.9, PyTorch, its GPU extensions).", "about 40 minutes, 16 GB",
+             40),
+        Step("ai_env", "The Windows AI environment", "Runs the two cut-out AIs: BiRefNet takes your subject off the "
+             "picture's background, SAM 2 cuts out the helmet, shield and weapon as separate parts.",
              "about 10 minutes, 5 GB", 10),
-        Step("weights", "The AI weights", "TRELLIS.2, its decoder, DINOv3, SAM 2.1 and BiRefNet (about 20 GB).",
-             "DINOv3 is gated: accept its licence on Hugging Face and paste a read token", 30),
+        Step("weights", "The AI models", "What each AI has learned: TRELLIS.2 and its decoder, DINOv3 (TRELLIS.2's "
+             "eyes), SAM 2.1 and BiRefNet (about 20 GB).",
+             "DINOv3 is gated by Meta: accept its licence on Hugging Face and paste a read token (used for this "
+             "download only, never saved)", 30),
     ]
     return [s for s in out if not (rooted and s.key == "ai_folder")]  # with a root the AI folder is fixed: ai\
 

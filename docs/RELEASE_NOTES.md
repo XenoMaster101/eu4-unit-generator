@@ -2,6 +2,13 @@
 
 Each version's section is the text of its GitHub release and what the app's Help → Check for updates shows.
 
+## 1.0.6
+
+- Setup is one list of seven steps, all needed, each saying why: Blender (the 3D program the app works in),
+  io_pdx_mesh (EU4's mesh files), WSL and Ubuntu (TRELLIS.2, the AI that turns your picture into a 3D model, only
+  runs on Linux), TRELLIS.2, the Windows AI environment (the cut-outs) and the AI models. Its first page lists every
+  download with the reason for it.
+
 ## 1.0.5
 
 - Check for updates: the update now keeps running after the app closes, writes its own log

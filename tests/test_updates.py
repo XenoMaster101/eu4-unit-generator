@@ -72,7 +72,7 @@ def test_a_release_without_an_installer_points_to_its_page():
 
 def test_this_copy_knows_its_repository_and_version():
     from eu4unitgen import __version__
-    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.5"
+    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.6"
     assert updates.expected_sha256(f"{'b' * 64} *a.exe\n", "a.exe") == "b" * 64
 
 
@@ -81,11 +81,10 @@ def test_every_setup_step_lists_its_downloads_before_it_runs():
     keys = {s.key for s in setup.steps()} - {"ai_folder"}
     assert keys <= {d.step for d in setup.DOWNLOADS}
     assert all(d.size_mb > 0 and d.licence and d.source and d.where for d in setup.DOWNLOADS)
-    required = {d.step for d in setup.DOWNLOADS if d.required}
-    assert required == {"installer", "blender", "io_pdx_mesh"}  # the AI is only for parts from pictures
+    assert all(d.required for d in setup.DOWNLOADS)  # every one needed, each with its reason (the user, 2026-10-30)
+    assert all(len(d.why) > 30 for d in setup.DOWNLOADS)
     html = setup.downloads_html()
-    assert "Needed for everything" in html and "the AI pack" in html and "DINOv3 License" in html
-    assert "only to make parts" not in html  # said once, in the group's heading, not on every row
+    assert "In all:" in html and "DINOv3 License" in html and "optional" not in html.lower()
 
 
 def test_setup_never_takes_another_blender_version(tmp_path, monkeypatch):
@@ -111,9 +110,9 @@ def test_the_setup_wizard_closes(monkeypatch):
     monkeypatch.setattr(setup, "state", lambda: {"blender": True})
     w = SetupWizard()
     keys = [s.key for s in w.steps]
-    assert keys.index("ai_pack") < keys.index("wsl") and keys[:3] == ["overview", "blender", "io_pdx_mesh"]
-    w.list.setCurrentRow(keys.index("ai_pack"))
-    w.run_step()  # the AI pack's page goes to its first step not done
-    assert w.steps[w.list.currentRow()].key == "wsl"
+    assert keys[:3] == ["overview", "blender", "io_pdx_mesh"] and "ai_pack" not in keys
+    w.list.setCurrentRow(0)
+    w.run_step()  # the overview goes to the first step not done
+    assert w.steps[w.list.currentRow()].key == "io_pdx_mesh"
     w.accept()  # crashed
     app.processEvents()

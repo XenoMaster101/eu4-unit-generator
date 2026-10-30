@@ -7,10 +7,11 @@ It never copies Paradox files: everything from the game is read from your own EU
 ## What you need
 
 - Windows 10 or 11 (64-bit) and Europa Universalis IV (Steam).
-- **To build units from the library and from 3D models you import:** about 2 GB of disk space (the app and Blender). No special graphics card.
-- **To make parts from your own pictures (the AI):** an NVIDIA graphics card (8 GB or more; tested on an RTX 3060 12 GB), 32 GB of RAM, about 60 GB of free disk space, and a free Hugging Face account (for one AI model's licence).
+- An NVIDIA graphics card (8 GB or more; tested on an RTX 3060 12 GB) and 32 GB of RAM: the AI that makes the 3D models runs on it.
+- About 60 GB of free disk space on one drive: everything the app needs goes in one folder.
+- An internet connection for the setup (about 40 GB of downloads, 1 to 2 hours) and a free Hugging Face account (for one AI model's licence).
 
-Nothing else: the app brings its own Python, and its setup wizard fetches Blender and, if you want them, Linux (WSL) and the AI models.
+Nothing else: the app brings its own Python, and its setup wizard fetches everything else for you, saying what each piece is for.
 
 ## Install
 
@@ -19,9 +20,14 @@ Download **`eu4unitgen-1.0.0-setup.exe`** from the [Releases page](https://githu
 **"Windows protected your PC"**: the installer isn't code-signed (a signing certificate costs a yearly fee), so Windows SmartScreen warns about it the first time. Click **More info**, then **Run anyway**. To check the download is the one published, compare its SHA-256 with `SHA256SUMS.txt` on the release page (in PowerShell: `Get-FileHash .\eu4unitgen-1.0.0-setup.exe`).
 
 1. Read the licence, press **Next**, choose the folder (default `D:\EU4 Unit Generator`), keep or untick the shortcuts, and press **Install**. It takes a minute or two (about 260 MB to download), then the app starts.
-2. The first time, the app opens its **setup wizard**. Its first page, **What gets downloaded**, lists every download the app can make: what it is, why the app needs it, its size, its licence, where it comes from and where it goes, and whether it's required. Nothing downloads until you press a step's button.
-   - **Required** (about 640 MB): **Blender 4.2 LTS** and **the io_pdx_mesh add-on** (lets Blender read and write EU4's mesh files).
-   - **Optional, only to make parts from pictures** (about 40 GB): **Windows Subsystem for Linux** (Windows asks for permission, then restart), **Ubuntu in WSL**, **TRELLIS.2** (about 40 minutes), **the Windows AI environment**, and **the AI weights**. One of them, DINOv3, needs you to accept its licence on Hugging Face first: the step's buttons open its page and the token page; paste a read token in the box (it's used for that download only and never saved).
+2. The first time, the app opens its **setup wizard**. Its first page, **What gets downloaded, and why**, lists every download: what it is, why the app needs it, its size, its licence, where it comes from and where it goes. Then work down the steps; each has a button, a progress bar and plain instructions, and nothing is typed in a terminal:
+   1. **Blender 4.2 LTS**: the 3D program the app works in, in the background (fitting, painting, checking, previews).
+   2. **The io_pdx_mesh add-on**: lets Blender read the game's units and write EU4's mesh files.
+   3. **Windows Subsystem for Linux**: TRELLIS.2, the AI that turns your picture into a 3D model, only runs on Linux; WSL is Windows' built-in way to run it. Windows asks for permission; restart afterwards and open the app again.
+   4. **Ubuntu in WSL**: the Linux TRELLIS.2 runs in, kept in the app's folder; no Linux user or password to make.
+   5. **TRELLIS.2**: downloads it and builds it for your graphics card (about 40 minutes).
+   6. **The Windows AI environment**: runs the two cut-out AIs (your subject off the background; the helmet, shield and weapon as separate parts). About 10 minutes.
+   7. **The AI models**: about 20 GB. One of them, DINOv3 (TRELLIS.2's "eyes"), is gated by Meta: the step's buttons open its licence page and the token page; accept the licence and paste a read token in the box (it's used for that download only and never saved).
 3. On the **Setup** screen, check the **EU4 install** and the **EU4 mod folder** (usually found for you) and press **Save settings**.
 
 **Smart App Control** (Windows 11) blocks unsigned installers outright, with no Run anyway. On those PCs use the zip (`eu4unitgen-<version>-windows.zip`): right-click it → **Properties** → tick **Unblock** → **OK**, unzip it, and double-click **Install EU4 Unit Generator**. It runs on the app's own Python, which is signed, and installs or updates in place exactly like setup.exe.
