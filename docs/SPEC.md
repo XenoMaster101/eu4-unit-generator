@@ -3426,6 +3426,21 @@ stylised profiles, the checks before showing, cavalry on foot, culture packs, th
 **R5 tests on a fresh system:** uninstall the current app and its folders, install 1.0.0 as a new user, every flow end
 to end; then an upgrade test (a 1.0.1 built over it: in place, nothing lost).
 
+**Results (2026-10-30, overnight).** R1-R4 built (commits 26670d2, 372e2a7, 4bf5d23, 4aca83b, 71a5ef3). R5, run in a
+separate folder (`D:\EU4UG-test`, `install.ps1 -NoSystem`: the user's own install and its Apps entry untouched; a real
+uninstall would also remove the ~60 GB of AI downloads and the WSL disk, so it was left for the user to decide): the
+installer from dist/1.0.0 installs a fresh copy (its own signed Python, PySide6, the root found); Setup's required
+steps (Blender, io_pdx_mesh) run with the wizard's own commands; EU4, the mod folder and Blender found by themselves;
+the worked example built from the default library **with no AI** after two fixes the test found: (1) a starter part's
+one candidate is its own raw.glb, copied onto itself (`flow.use_candidate`); (2) the soldier's cached crops were
+fine but SAM 2's path was looked up anyway and its SystemExit escaped the fallback (`trellis.process_rider`). Add to
+mod (normal, BYZ): 48 files, 7.6 MB, its README, validator 0 errors. Reinstalling over it, and a 1.0.1 package
+(built in a separate worktree) installed over it: in place, all files in work, tools and settings kept (6,827), the
+unit, the settings and Blender kept. Published as v1.0.0 on GitHub (XenoMaster101/eu4-unit-generator). Not tested:
+the setup.exe wizard's pages by hand (it runs the same install.ps1; its Pascal code compiles), the in-app updater's
+run-and-relaunch against a real newer release (its download and checksum are tested against the published release
+and in the tests), the AI steps on a new PC.
+
 ### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
 
 | Tool, model or library | For | Where | Size | Licence | Status | Safe to remove |
