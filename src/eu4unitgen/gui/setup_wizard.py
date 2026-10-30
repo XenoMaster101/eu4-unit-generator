@@ -6,6 +6,7 @@ The steps and their commands are ``core.setup``'s; this window only runs them an
 from __future__ import annotations
 
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -271,9 +272,21 @@ class SetupWizard(QDialog):
         self.state.setText("running…")
         self.runner = StepRunner(cmds)
         self.runner.line.connect(self.log.appendPlainText)
+        self.runner.line.connect(self._to_file)  # settings\logs\setup.log: what a step printed, to read afterwards
+        self._to_file(f"\n######## {s.title} ({time.strftime('%Y-%m-%d %H:%M:%S')})")
         self.runner.progress.connect(self._progress)
         self.runner.finished.connect(self._after)
         self.runner.start()
+
+    def _to_file(self, line: str) -> None:
+        from eu4unitgen.core import config
+        try:
+            d = config.logs_dir()
+            d.mkdir(parents=True, exist_ok=True)
+            with open(d / "setup.log", "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
 
     def _progress(self, done, total):
         if total:
@@ -289,6 +302,7 @@ class SetupWizard(QDialog):
         self.bar.setValue(1 if ok else 0)
         self.go.setEnabled(True)
         s = self.steps[self.list.currentRow()]
+        self._to_file(f"== {'finished' if ok else 'stopped: ' + msg}")
         if ok:
             setup.adopt(self.root)
             self.state.setText("done" + (": restart Windows, then open the app again; setup continues here." if s.restart else ""))
