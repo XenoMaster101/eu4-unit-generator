@@ -3324,6 +3324,48 @@ The brief: make the app as hand-holding as possible; the test is "could someone 
 - **The screen:** Make a part → "From a picture" or "Import a 3D model"; Choose a model file, what works; the Name step asks for the licence and credit instead of the picture's rights.
 - **Found on the way:** a Blender job given a relative output path writes under `C:\` (Blender's working folder): the import stage resolves its paths. Older stray output from the same cause sits in `C:\assets_in` (39 files from earlier runs, not deleted).
 
+### Import profiles: standard and stylised (PLAN, the user, 2026-10-29, after the Mambo test)
+**Why:** the user's Mambo test (a rigged chibi from Sketchfab, local test only, rule 8 waived for it) made every rule
+below necessary, but a plain soldier needn't take the complex route. "Rule out the complex parts and use those rules
+to create a more linear and coherent normal unit a user wants to import."
+
+**Built and enforced (each from a failure in the Mambo test, 2026-10-29):**
+- Import: only the model's own meshes (Blender's glTF reader adds an Icosphere for a rig's bones: joined in, she became
+  a ball); a see-through material's clear faces dropped before the bake (a black patch over her face); no turning
+  without clear feet; a warning when a soldier isn't shaped like a standing person; the file's own licence suggested
+  (CC0 or plain CC BY only); a rule-8 waiver written into the run.
+- 1:1: an import keeps its own mesh, UVs and texture (TRELLIS.2's closed solid sealed her hair round her face into a
+  dark column); at most 8,000 triangles with its back sides (4,400 left gaps and facets in game; 23,600 folded
+  412 / 465 / 652; the user chose 8,000 from the game-angle renders); its own face winding (recalculated, her face
+  faced in and the game hid it); a double-sided model's open sheets get a back side; no slimming or stylising;
+  country colour off by default.
+- Proportions: a head over 0.30 of the height fitted by the neck (from the rig's neck bone, else measured; her face
+  between gaps in her hair read as a neck at 0.55 against the rig's 0.40); the rig's head region rigid on the head
+  bone (hair, ears, beret: folds 38 / 32 / 115 -> 13 / 27 / 55); the rig's arms turned about its own shoulders to the
+  game's arm angle (free_hand's reach missed her hand: a T-pose in game); its arms and legs weighted along the game's
+  chains (her sleeves were 34-43% on the spine); the unit's own pdxmesh scale to the game's height (in game: right).
+- Parts: a weapon must be long (0.45 of the height) and straight (bow under 2%); a plume a narrow fin on the centre
+  line (her ribbon was both).
+- Tried and dropped: arms kept at their own length (her forearm bent at the game's wrist, inside it: worse).
+
+**The plan: profile every import first, then one of two routes.**
+- **The profile** (measured at the import, shown in the report with its reasons, the user can override it): head
+  share of the height; rig or none; double-sided materials; piece count; limb lengths against the game's skeleton
+  (arm and leg from the rig, or measured); a weapon or none; triangle count.
+- **Standard human** (head 0.12-0.22 of the height, limbs within 15% of the game's, a handful of pieces): the linear
+  route: its own mesh to 8,000 triangles, fitted by the top as TRELLIS.2's soldiers are, weights along the chains, a
+  weapon in the hand at the base game's grip; in the final review **clipping is flagged** (a weapon through the body
+  is an error for a normal soldier).
+- **Stylised** (a big head, long or short limbs, many loose pieces, double-sided sheets): the standard route plus the
+  rules above (fit by the neck, the rigid head region, the rig's arm turn, back sides, the unit's scale); clipping the
+  shape forces is accepted and only noted (Mambo's spear through her hair).
+- **Later, for stylised models whose limbs don't fit the game's skeleton:** a skeleton of their own with the game's
+  animations retargeted onto it (rule 2: derived animations allowed in the mod folder only).
+- **To build with it:** a rigged CC0 import in the regression set (Mambo can't be); fold measures that don't grow with
+  triangle count (a share of the surface folded); the diagnostic renders (each build step, the game's camera angle,
+  folds by bone) as standard outputs; each test mod under its own name (eu4unitgen_test merged three tests in the
+  user's mod folder: the cataphract showed instead of Mambo); a weapon chosen from the library, or empty hands.
+
 ### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
 
 | Tool, model or library | For | Where | Size | Licence | Status | Safe to remove |
