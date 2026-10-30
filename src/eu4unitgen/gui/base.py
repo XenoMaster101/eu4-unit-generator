@@ -144,6 +144,9 @@ QWidget#front QPushButton#card QLabel#dot_error {{ color: {t['card_error']}; fon
 QWidget#front QPushButton#card QLabel#dot_none {{ color: {t['card_muted']}; font-size: 12px; }}
 QFrame#card QComboBox, QFrame#card QLineEdit {{ background: #fffaf0; color: {t['card_text']}; border-color: {t['card_border']}; }}
 QFrame#card QComboBox::down-arrow {{ image: url({arrow(t['card_muted'])}); }}
+QFrame#card QComboBox QAbstractItemView {{ background: #fffaf0; color: {t['card_text']};
+    border: 1px solid {t['card_border']}; selection-background-color: {t['card_selected']};
+    selection-color: {t['card_text']}; outline: 0; }}
 QWidget#front QPushButton#card QLabel#badge {{ background: {t['accent']}; color: {t['accent_text']}; border-radius: 8px;
                                                padding: 1px 8px; font-size: 11px; font-weight: 700; }}
 QPushButton#tileaction {{ background: transparent; color: {t['card_text']}; border: 1px solid {t['card_border']};
