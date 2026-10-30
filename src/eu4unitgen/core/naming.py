@@ -229,6 +229,22 @@ class Naming:
         same body as a fresh rider on the base infantry skeleton, playing the infantry animations."""
         return f"{self.prefix}{check_set_name(set_name)}_fresh_soldier_{_check_tier(tier)}"
 
+    def fresh_foot_cavalry(self, set_name: str, tier: int) -> str:
+        """hr_tracen_fresh_cavalry_1: a soldier from a picture or model standing in as the cavalry itself, no horse
+        (Track T): the cavalry entity wears it and plays infantry animations."""
+        return f"{self.prefix}{check_set_name(set_name)}_fresh_cavalry_{_check_tier(tier)}"
+
+    def fresh_foot_cavalry_pdxmesh(self, set_name: str, tier: int) -> str:
+        return f"{self.fresh_foot_cavalry(set_name, tier)}_mesh"
+
+    def fresh_foot_cavalry_file(self, set_name: str, tier: int) -> str:
+        return f"{self.part_dir(set_name)}/{self.fresh_foot_cavalry(set_name, tier)}.mesh"
+
+    def fresh_foot_cavalry_texture(self, set_name: str, tier: int, kind: str) -> str:
+        if kind not in TEXTURE_KINDS:
+            raise NamingError(f"texture kind {kind!r} must be one of {TEXTURE_KINDS}")
+        return f"{self.fresh_foot_cavalry(set_name, tier)}_{kind}.dds"
+
     def fresh_soldier_pdxmesh(self, set_name: str, tier: int) -> str:
         return f"{self.fresh_soldier(set_name, tier)}_mesh"
 

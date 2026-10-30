@@ -3366,6 +3366,23 @@ to create a more linear and coherent normal unit a user wants to import."
   folds by bone) as standard outputs; each test mod under its own name (eu4unitgen_test merged three tests in the
   user's mod folder: the cataphract showed instead of Mambo); a weapon chosen from the library, or empty hands.
 
+### Track T: Tracen Academy (the user, 2026-10-29; private mod for the user's friend group, rule 8's copyright part dropped)
+**The pack:** a mod of its own (`tracen_academy`), a new graphical culture `tracenacademygfx` (base westerngfx), graphics
+only (no unit stats, no tech): any nation with `graphical_culture = tracenacademygfx` shows it; the user's custom
+nation will name it. Infantry and artillery stay the base culture's until the user replaces them.
+**Cavalry tiers 1-4: Mambo standing, no horse** (the user: "test if an entire model can be removed and reanimated"):
+the culture's `<gfx>_CAVALRY_<n>` entity wears her soldier pdxmesh and plays infantry animations (states idle, walk,
+attack, retreat with her pdxmesh's own ids), no Saddle_Node, no rider; a weapon per tier, a base-game entity named
+(never copied): 1 `muslim_spear` (polearm_twohanded), 2 `cavalry_saber` (polearm_onehanded), 3 `western_musket` and
+4 `western_musket_2` (musketeer: `musketeer_02_idle_animation`, `musketeer_02_moving_animation`,
+`rifleman_attack_animation`, read from western_generic_02_type1, 1.37). Verified from the install: a cavalry entity
+is the horse pdxmesh, states horse_idle/walk/attack, Saddle_Node -> the rider; an infantry entity states idle, walk,
+attack, retreat. **UNVERIFIED in game:** a cavalry entity without a horse; a musket in Left_hand_node with her rig.
+**Steps:** T1 loadout (a named weapon per tier, the musketeer stance, cavalry on foot; validator rules for each);
+T2 Add to mod's culture pack mode (graphics for a new culture, no tag); T3 her four tiers built and reviewed;
+T4 the checks before presentation (1-3 passes of build, review, known fixes, as the import profile says: stylised
+or standard); T5 Mambo kept as the app's example of a stylised model; T6 clean-up.
+
 ### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
 
 | Tool, model or library | For | Where | Size | Licence | Status | Safe to remove |

@@ -67,6 +67,10 @@ STANCE_TYPES = {  # base-game animation types (1.37.5), same 28-bone skeleton as
                           "attack": "polearm_onehanded_attack_animation"},
     "polearm_twohanded": {"idle": "polearm_twohanded_idle_animation", "walk": "polearm_twohanded_moving_animation",
                           "attack": "polearm_twohanded_attack_animation"},
+    # western_generic_02_type1's musket set (read from 1.37: its idle and walk are musketeer_02's, its attack the
+    # rifleman's; the gun in Left_hand_node)
+    "musketeer": {"idle": "musketeer_02_idle_animation", "walk": "musketeer_02_moving_animation",
+                  "attack": "rifleman_attack_animation"},
 }
 STANCES = ("auto", "base", *STANCE_TYPES)
 
@@ -171,6 +175,27 @@ def check_rider(key, raw) -> dict:
     return {**out, "base": raw.get("base") or "western_generic_01_type1"}
 
 
+FOOT_CAVALRY_KEYS = {"stance", "weapons"}
+WEAPON_NODES = ("Right_hand_node", "Left_hand_node")
+
+
+def check_foot_cavalry(key, raw) -> dict:
+    """A tier's cavalry played by a fresh soldier on foot (Track T): a soldier's entry (geometry, textures, rights,
+    optional scale) plus its ``stance`` (one of ``STANCE_TYPES`` or "base") and ``weapons`` {hand node: a base-game
+    entity's name} (referenced, never copied; the validator checks it's in the base game, not DLC)."""
+    if not isinstance(raw, dict):
+        raise LoadoutError(f"foot_cavalry: tier {key} must be an object")
+    body = check_rider(key, {k: v for k, v in raw.items() if k not in FOOT_CAVALRY_KEYS})
+    stance = raw.get("stance", "base")
+    if stance not in ("base", *STANCE_TYPES):
+        raise LoadoutError(f"foot_cavalry: tier {key}: stance {stance!r} must be base or one of {sorted(STANCE_TYPES)}")
+    weapons = raw.get("weapons") or {}
+    if not isinstance(weapons, dict) or any(n not in WEAPON_NODES or not isinstance(e, str) or not e
+                                            for n, e in weapons.items()):
+        raise LoadoutError(f"foot_cavalry: tier {key}: weapons must map {WEAPON_NODES} to entity names")
+    return {**body, "stance": stance, "weapons": dict(weapons)}
+
+
 def slot_warnings(slot: RoleLoadout) -> list[str]:
     """Hints for a slot as the form shows it (the validator checks the generated result)."""
     kinds = {KINDS[p.kind].bone: p.kind for p in slot.parts}
@@ -194,6 +219,9 @@ class Loadout:
     riders: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh rider (M23; as horses, on the infantry body)
     soldiers: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh soldier on foot (as riders, on the infantry entity)
     guns: dict[int, dict] = field(default_factory=dict)  # tier -> a fresh gun (Track A, on the cannon entity)
+    # tier -> a fresh soldier as the cavalry itself, no horse (Track T): its entry as a soldier's plus "stance" and
+    # "weapons" ({hand node: base-game entity name})
+    foot_cavalry: dict[int, dict] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ files
     @classmethod
@@ -264,6 +292,10 @@ class Loadout:
             if not str(key).isdigit() or int(key) not in TIERS:
                 raise LoadoutError(f"soldiers: {key!r} must be a tier {TIERS}")
             out.soldiers[int(key)] = check_rider(key, raw)
+        for key, raw in (doc.get("foot_cavalry") or {}).items():
+            if not str(key).isdigit() or int(key) not in TIERS:
+                raise LoadoutError(f"foot_cavalry: {key!r} must be a tier {TIERS}")
+            out.foot_cavalry[int(key)] = check_foot_cavalry(key, raw)
         for role, point in (doc.get("weapon_point") or {}).items():
             if role not in LOADOUT_ROLES or point not in POINTS:
                 raise LoadoutError(f"weapon_point: {role!r} must be one of {LOADOUT_ROLES} and {point!r} one of {POINTS}")
@@ -288,6 +320,8 @@ class Loadout:
             out["soldiers"] = {str(t): dict(h) for t, h in sorted(self.soldiers.items())}
         if self.guns:
             out["guns"] = {str(t): dict(h) for t, h in sorted(self.guns.items())}
+        if self.foot_cavalry:
+            out["foot_cavalry"] = {str(t): dict(h) for t, h in sorted(self.foot_cavalry.items())}
         points = {r: p for r, p in sorted(self.points.items()) if p != DEFAULT_POINTS[r]}
         if points:
             out["weapon_point"] = points
@@ -305,6 +339,7 @@ class Loadout:
 
     def changes_anything(self) -> bool:
         return bool(self.active() or self.bodies or self.derived or self.horses or self.riders or self.soldiers
+                    or self.foot_cavalry
                     or self.guns)
 
     def needs_blender(self) -> bool:
@@ -358,6 +393,7 @@ class LoadoutResult:
     riders: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a fresh rider (rule fresh_mesh)
     soldiers: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a fresh soldier on foot
     guns: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a fresh gun (its cannon entity)
+    foot_cavalry: dict = field(default_factory=dict)  # tier -> core.fresh_mesh.FreshHorse of a soldier as the cavalry
     texture_files: list[GeneratedFile] = field(default_factory=list)  # derived bodies' derived textures (Q5)
 
 
@@ -757,6 +793,30 @@ def apply_loadout(naming: Naming, set_name: str, owner: str, entities: list[dict
         files, res.guns, notes = apply_horses(naming, set_name, owner, by_name, pdx.records, pdx.by_name, loadout,
                                               game, idx, kind="gun", new_entities=added)
         entities.extend(added)
+        derived_files += files
+        res.notes += notes
+    if loadout.foot_cavalry:  # Track T: the cavalry entity is the soldier itself, no horse, no rider
+        from eu4unitgen.core.fresh_mesh import apply_horses
+
+        for tier, h in loadout.foot_cavalry.items():
+            cav = by_name[naming.unit_entity(owner, "cavalry", tier)]
+            # the soldier's ids: the base body's with its stance on top (states read idle, walk, attack, retreat)
+            cav["pdxmesh"] = pdx.with_anims(h["base"], naming.pdxmesh(set_name, "cavalry", tier),
+                                            pdx.wanted(h["base"], h["stance"]))
+        files, res.foot_cavalry, notes = apply_horses(naming, set_name, owner, by_name, pdx.records, pdx.by_name,
+                                                      loadout, game, idx, kind="foot_cavalry")
+        for tier, h in loadout.foot_cavalry.items():
+            cav = by_name[naming.unit_entity(owner, "cavalry", tier)]
+            # UNVERIFIED in game: a cavalry entity without a horse (the user's test, Track T); every piece of it is
+            # the base game's own: an infantry entity's states, a weapon entity on a hand node
+            cav["states"] = [{"name": s, "animation": s} for s in ("idle", "walk", "attack", "retreat")]
+            cav["attaches"] = [{"name": None, "nodes": list(h["weapons"].items())}] if h["weapons"] else []
+            held = ", ".join(f"{e} ({n})" for n, e in h["weapons"].items()) or "nothing"
+            rider = naming.rider_entity(owner, tier)  # no horse, no rider: its entity would be an orphan
+            entities[:] = [e for e in entities if e["name"] != rider]
+            by_name.pop(rider, None)
+            notes.append(f"tier {tier}: {cav['name']} has no horse: it is the soldier itself ({h['stance']} "
+                         f"animations), holding {held}")
         derived_files += files
         res.notes += notes
     built = build_parts(runner, naming, set_name, builds, version, cache)

@@ -288,16 +288,18 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
     from eu4unitgen.textures.dds import DDSFormat, full_mip_count, read_header, write_dds
 
     files, out, notes = [], {}, []
-    rider, soldier, gun = kind == "rider", kind == "soldier", kind == "gun"
+    foot = kind == "foot_cavalry"  # Track T: a soldier as the cavalry itself, on the cavalry entity
+    rider, soldier, gun = kind == "rider", kind in ("soldier", "foot_cavalry"), kind == "gun"
     body = rider or soldier
-    source = (loadout.riders if rider else getattr(loadout, "soldiers", {}) if soldier else getattr(loadout, "guns", {})
-              if gun else loadout.horses)
+    source = (loadout.riders if rider else getattr(loadout, "foot_cavalry", {}) if foot
+              else getattr(loadout, "soldiers", {}) if soldier else getattr(loadout, "guns", {}) if gun
+              else loadout.horses)
     for tier, h in sorted(source.items()):
         if gun:
             entity = _own_cannon(naming, owner, tier, entities, idx, new_entities)
         else:
             entity = entities[naming.rider_entity(owner, tier) if rider else naming.unit_entity(owner, "infantry", tier)
-                              if soldier else naming.unit_entity(owner, "cavalry", tier)]
+                              if soldier and not foot else naming.unit_entity(owner, "cavalry", tier)]
         if not body and not gun and entity["pdxmesh"] == naming.pdxmesh(set_name, "horse", tier):
             raise GenerationError(f"tier {tier}: a texture recipe's horse slot and a fresh horse; pick one")
         rec = idx.pdxmesh(h["base"], base_only=True)
@@ -320,7 +322,8 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
             if w & (w - 1) or hh & (hh - 1):
                 raise GenerationError(f"tier {tier}: the fresh {kind}'s {tex} is {w}x{hh}; sizes must be powers of two")
             fmt = read_header(game.read(f"{folder}/{shape[tex]}"))["format"]
-            names[tex] = (naming.fresh_rider_texture if rider else naming.fresh_soldier_texture if soldier
+            names[tex] = (naming.fresh_rider_texture if rider else naming.fresh_foot_cavalry_texture if foot
+                          else naming.fresh_soldier_texture if soldier
                           else naming.fresh_gun_texture if gun else naming.fresh_horse_texture)(set_name, tier, tex)
             paths[tex] = f"{naming.part_dir(set_name)}/{names[tex]}"
             files.append(GeneratedFile(paths[tex], write_dds(img, DDSFormat(fmt, w, hh, full_mip_count(w, hh))), OWNED,
@@ -335,6 +338,8 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
         except FreshMeshError as exc:
             raise GenerationError(f"tier {tier}: fresh {kind}: {exc}") from exc
         file, name = ((naming.fresh_rider_file(set_name, tier), naming.fresh_rider_pdxmesh(set_name, tier)) if rider
+                      else (naming.fresh_foot_cavalry_file(set_name, tier), naming.fresh_foot_cavalry_pdxmesh(set_name, tier))
+                      if foot
                       else (naming.fresh_soldier_file(set_name, tier), naming.fresh_soldier_pdxmesh(set_name, tier))
                       if soldier else (naming.fresh_gun_file(set_name, tier), naming.fresh_gun_pdxmesh(set_name, tier))
                       if gun else (naming.fresh_horse_file(set_name, tier), naming.fresh_horse_pdxmesh(set_name, tier)))

@@ -36,7 +36,8 @@ def horse_entry(vdir: Path, subject: dict) -> dict:
     m = json.loads((Path(vdir) / "manifest.json").read_text(encoding="utf-8"))
     e = {"base": "cavalry_horse", "geometry": _abs(m["geometry"]),
          "textures": {k: _abs(v) for k, v in m["textures"].items()}, "rights": subject["rights"],
-         "source": f"TRELLIS.2 from {subject.get('original', '?')}, game {Path(vdir).name}"}
+         "source": f"{'imported model' if subject.get('pipeline') == 'import' else 'TRELLIS.2 from'} "
+                   f"{subject.get('original', '?')}, game {Path(vdir).name}"}
     if (m.get("colour") or {}).get("default_primary"):
         e["unit_colours"] = [m["colour"]["default_primary"], list(GOLD), list(WHITE)]
     return e

@@ -577,7 +577,7 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
 
     res = ctx.generated.loadout
     if res is None or not (res.horses or getattr(res, "riders", None) or getattr(res, "soldiers", None)
-                           or getattr(res, "guns", None)):
+                           or getattr(res, "guns", None) or getattr(res, "foot_cavalry", None)):
         return []
     w, game, out = ctx.world, ctx.world.game, []
     # M23: fresh riders the same way (on the base infantry body, wearing the cavalry rider entity); soldiers on foot
@@ -585,7 +585,9 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
     every = ([(t, r, "horse") for t, r in sorted(res.horses.items())]
              + [(t, r, "rider") for t, r in sorted((getattr(res, "riders", None) or {}).items())]
              + [(t, r, "soldier") for t, r in sorted((getattr(res, "soldiers", None) or {}).items())]
-             + [(t, r, "gun") for t, r in sorted((getattr(res, "guns", None) or {}).items())])
+             + [(t, r, "gun") for t, r in sorted((getattr(res, "guns", None) or {}).items())]
+             # Track T: a soldier as the cavalry itself (the same body as a soldier, worn by the cavalry entity)
+             + [(t, r, "soldier") for t, r in sorted((getattr(res, "foot_cavalry", None) or {}).items())])
     for tier, rec, what in every:
         f = ctx.generated.files.get(rec.file)
         if f is None:
@@ -640,6 +642,36 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
                 out.append(Issue(ERROR, "fresh_mesh", f"{art} doesn't attach {rec.entity} at cannon_node", subject=art))
         out.append(Issue(INFO, "fresh_mesh", f"tier {tier}: {rec.entity} on a fresh {what} ({rec.triangles} triangles, "
                                              f"{rec.base_pdxmesh}'s skeleton); rights: {rec.rights}", f.path))
+    out += foot_cavalry_issues(ctx, res)
+    return out
+
+
+def foot_cavalry_issues(ctx: Context, res) -> list[Issue]:
+    """Track T: a cavalry entity played by a soldier on foot: it wears the fresh soldier's pdxmesh, its states
+    (idle, walk, attack, retreat) are animation ids that pdxmesh has, no rider hangs on it, and each weapon it holds
+    is a base-game entity (never DLC; referenced by name, never copied)."""
+    out = []
+    w = ctx.world
+    for tier, rec in sorted((getattr(res, "foot_cavalry", None) or {}).items()):
+        ent = w.entity(rec.entity) or {}
+        if (w.resolve(rec.entity, "pdxmesh") or "") != rec.pdxmesh:
+            out.append(Issue(ERROR, "fresh_mesh", f"{rec.entity} doesn't wear {rec.pdxmesh}", subject=rec.entity))
+        ids = set(((w.pdxmesh(rec.pdxmesh) or {}).get("animations") or {}))
+        for st in w.resolve(rec.entity, "states") or ent.get("states") or []:
+            if ids and st.get("animation") not in ids:
+                out.append(Issue(ERROR, "fresh_mesh", f"{rec.entity}: state {st.get('name')} plays "
+                                 f"{st.get('animation')!r}, which {rec.pdxmesh} doesn't have", subject=rec.entity))
+        for a in w.resolve(rec.entity, "attach") or []:
+            for node, target in (a.items() if isinstance(a, dict) else []):
+                if node == "name":
+                    continue
+                held = w.entity(target)
+                if node == "Saddle_Node":
+                    out.append(Issue(ERROR, "fresh_mesh", f"{rec.entity} plays the cavalry on foot but still carries a "
+                                     f"rider ({target})", subject=rec.entity))
+                elif held is None or held.get("dlc"):
+                    out.append(Issue(ERROR, "fresh_mesh", f"{rec.entity} holds {target}, which isn't a base-game "
+                                     "entity (DLC weapons are never used)", subject=rec.entity))
     return out
 
 
@@ -649,9 +681,13 @@ def naming(ctx: Context) -> list[Issue]:
     n, tag, gfx = ctx.naming, ctx.owner, ctx.nation.gfx_culture
     expected = set()
     fx = ctx.generated.fixtures
+    # Track T: a tier whose cavalry is a soldier on foot has no rider
+    foot = set((getattr(ctx.generated.loadout, "foot_cavalry", None) or {}) if ctx.generated.loadout else ())
     for owner in (tag, gfx, *(fx.unpacked_owners if fx else [])):
         for t in TIERS:
-            expected |= {n.unit_entity(owner, u, t) for u in UNIT_TYPES} | {n.rider_entity(owner, t)}
+            expected |= {n.unit_entity(owner, u, t) for u in UNIT_TYPES}
+            if not (owner == tag and t in foot):
+                expected.add(n.rider_entity(owner, t))
     out = []
     names = set(ctx.gen_entities())
     # Optional: an owner's own cannon entity, made only when its cannon is retextured (Phase 2).
