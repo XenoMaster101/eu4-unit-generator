@@ -3382,6 +3382,16 @@ attack, retreat. **UNVERIFIED in game:** a cavalry entity without a horse; a mus
 T2 Add to mod's culture pack mode (graphics for a new culture, no tag); T3 her four tiers built and reviewed;
 T4 the checks before presentation (1-3 passes of build, review, known fixes, as the import profile says: stylised
 or standard); T5 Mambo kept as the app's example of a stylised model; T6 clean-up.
+**Built (2026-10-29):** T1 loadout `foot_cavalry` (per tier: a soldier entry, `stance`, `weapons`; the cavalry entity
+wears the fresh soldier, states idle/walk/attack/retreat, the weapons attached by name, its rider dropped), the
+`musketeer` stance, `naming.fresh_foot_cavalry_*`, validator (it wears the mesh, its states are its ids, no rider,
+weapons are base-game entities). T2 Add to mod's `culture_pack` mode (`build/tracen_academy_mod/tracen_academy`,
+22 files: the culture list, its entities with Mambo's cavalry swapped in under `tracenacademygfx_CAVALRY_1-4`, its
+sprite pack, the models and pdxmeshes). T3 the four tiers reviewed (`build/tracen_dev/review_tier1-4.png`): every
+flag is the weapon through her head and hair (9, 7, 7, 2 poses), accepted for a stylised model. T4 `ref3d.prechecks`
+and the flow's `checks` stage (Mambo: stylised, everything passes, clipping accepted, folds open: idle 66 against the
+game's 8, walk 85 against 5; the English soldier: standard, clipping and folds open). T5 Mambo in `library.STARTER`
+(an imported part packs its import record, source and rights). In-game test: `build/tracen_dev/README.txt`.
 
 ### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
 
