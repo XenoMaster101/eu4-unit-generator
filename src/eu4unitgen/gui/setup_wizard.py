@@ -16,11 +16,8 @@ from PySide6.QtWidgets import (
     QPushButton, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-OVERVIEW = ("Before anything is downloaded, here is everything setup can fetch: what it is, why the app needs it, its "
-            "size, its licence, where it comes from and where it goes. Nothing starts until you press a step's button. "
-            "Blender and io_pdx_mesh are all the app needs to build units from the library and from 3D models you "
-            "import; the rest (WSL, Ubuntu, TRELLIS.2 and the AI models) is only for making parts from your own "
-            "pictures, and needs an NVIDIA graphics card.")
+OVERVIEW = ("Everything setup can download, in two groups: what each piece is, why the app needs it, its size, its "
+            "licence, where it comes from and where it goes. Nothing starts until you press a step's button.")
 
 
 class Downloader(QThread):
@@ -123,7 +120,12 @@ class SetupWizard(QDialog):
         self.setWindowTitle("EU4 Unit Generator: setup")
         self.resize(1050, 680)
         from eu4unitgen.core.setup import Step
-        self.steps = [Step("overview", "What gets downloaded", OVERVIEW, "", 0)] + setup.steps()
+        steps = setup.steps()
+        _, ai_title, ai_text = setup.GROUPS[1]
+        self.steps = ([Step("overview", "What gets downloaded", OVERVIEW, "", 0)]
+                      + [s for s in steps if s.key not in setup.AI_STEPS]
+                      + [Step("ai_pack", ai_title, ai_text, "", 0)]
+                      + [s for s in steps if s.key in setup.AI_STEPS])
         self.root = setup.default_ai_root()
         self.runner: StepRunner | None = None
         lay = QHBoxLayout(self)
@@ -203,11 +205,21 @@ class SetupWizard(QDialog):
         cur = self.list.currentRow()
         self.list.blockSignals(True)
         self.list.clear()
-        for i, s in enumerate(self.steps):
+        n = 0
+        for s in self.steps:
             if s.key == "overview":
                 self.list.addItem(QListWidgetItem(f"ⓘ  {s.title}"))
                 continue
-            self.list.addItem(QListWidgetItem(f"{'✔' if self.done.get(s.key) else '○'}  {i}. {s.title}"))
+            if s.key == "ai_pack":  # the optional group's heading
+                item = QListWidgetItem("Optional: the AI pack")
+                f = item.font()
+                f.setBold(True)
+                item.setFont(f)
+                self.list.addItem(item)
+                continue
+            n += 1
+            indent = "      " if s.key in setup.AI_STEPS else ""
+            self.list.addItem(QListWidgetItem(f"{indent}{'✔' if self.done.get(s.key) else '○'}  {n}. {s.title}"))
         self.list.blockSignals(False)
         if cur >= 0:
             self.list.setCurrentRow(cur)
@@ -225,13 +237,14 @@ class SetupWizard(QDialog):
         self.drives.setVisible(s.key == "ai_folder")
         self.token_box.setVisible(s.key == "weights")
         from eu4unitgen.core import setup
-        over = s.key == "overview"
+        over = s.key in ("overview", "ai_pack")
         self.downloads.setHtml(("<p><b>Downloads in this step:</b></p>" if not over else "")
-                               + setup.downloads_html(None if over else s.key))
+                               + setup.downloads_html(None if s.key == "overview" else s.key))
         self.downloads.setVisible(s.key != "ai_folder")
         self.log.setVisible(not over)
         self.bar.setVisible(not over)
-        self.go.setText("Start with step 1" if over else "Use this folder" if s.key == "ai_folder"
+        self.go.setText("Start with step 1" if s.key == "overview" else "Start the AI pack" if s.key == "ai_pack"
+                        else "Use this folder" if s.key == "ai_folder"
                         else ("Run again" if self.done.get(s.key) else "Download and run this step"))
         self.state.setText("done" if self.done.get(s.key) else "")
         if s.key == "blender" and self.done.get("blender"):
@@ -245,9 +258,11 @@ class SetupWizard(QDialog):
     def run_step(self):
         from eu4unitgen.core import config, setup
         s = self.steps[self.list.currentRow()]
-        if s.key == "overview":
-            return self.list.setCurrentRow(next((i for i, t in enumerate(self.steps)
-                                                 if t.key != "overview" and not self.done.get(t.key)), 1))
+        if s.key in ("overview", "ai_pack"):  # to the first step not done (of the AI pack, from its page)
+            start = self.list.currentRow() + 1
+            return self.list.setCurrentRow(next((i for i, t in enumerate(self.steps) if i >= start
+                                                 and t.key not in ("overview", "ai_pack") and not self.done.get(t.key)),
+                                                start))
         self.root = Path(self.folder.text().strip() or self.root)
         if s.key == "ai_folder":
             self.root.mkdir(parents=True, exist_ok=True)

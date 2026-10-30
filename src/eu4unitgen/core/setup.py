@@ -68,7 +68,18 @@ class Download:
     required: bool
 
 
-AI_ONLY = "only to make parts from your own pictures"
+# the two groups the setup wizard shows (the user, 2026-10-30: seven rows each saying "optional" read as unorganized)
+GROUPS = (
+    (True, "Needed for everything",
+     "The 3D program the app works in. Enough to build units from the library and the example, import 3D models and "
+     "add units to a mod."),
+    (False, "Optional: the AI pack (make parts from your own pictures)",
+     "Turns a picture of a soldier, horse or gun into a 3D model. The model, TRELLIS.2 (Microsoft Research), only runs "
+     "on Linux, so the pack installs Windows' own Linux layer (WSL) with Ubuntu inside it, NVIDIA's CUDA, and the AI "
+     "models. Needs an NVIDIA graphics card (8 GB or more), 32 GB of RAM, about 40 GB of disk and 1 to 2 hours. Skip it "
+     "if you only use the library and imported models; you can add it any time from Setup."),
+)
+AI_STEPS = ("wsl", "ubuntu", "trellis_env", "ai_env", "weights")
 DOWNLOADS = (
     Download("installer", "PySide6, Pillow, Jinja2", "the app's window, pictures and DDS textures, script templates",
              260, "LGPL-3.0 / MIT-CMU / BSD-3", "pypi.org (by the installer)", r"app\python", True),
@@ -76,31 +87,31 @@ DOWNLOADS = (
              380, "GPL-2.0-or-later", "download.blender.org", r"tools\blender (about 940 MB unpacked)", True),
     Download("io_pdx_mesh", "io_pdx_mesh 0.91", "lets Blender read and write EU4's .mesh files", 1, "GPL-3.0-or-later",
              "github.com/ross-g/io_pdx_mesh", r"tools\blender\portable", True),
-    Download("wsl", "Windows Subsystem for Linux", f"Windows' own Linux layer; TRELLIS.2 runs in it ({AI_ONLY})", 150,
+    Download("wsl", "Windows Subsystem for Linux", "Windows' own Linux layer; TRELLIS.2 runs in it", 150,
              "Microsoft", "Microsoft (Windows' own installer)", "Windows", False),
-    Download("ubuntu", "Ubuntu 26.04", f"the Linux TRELLIS.2 runs in ({AI_ONLY})", 1000, "free software (Canonical)",
+    Download("ubuntu", "Ubuntu 26.04", "the Linux TRELLIS.2 runs in", 1000, "free software (Canonical)",
              "Microsoft's WSL catalogue", r"wsl\ (a Linux disk that grows to about 25 GB)", False),
-    Download("trellis_env", "TRELLIS.2 code (commit 75fbf01)", f"turns a cut-out picture into a 3D model ({AI_ONLY})",
+    Download("trellis_env", "TRELLIS.2 code (commit 75fbf01)", "turns a cut-out picture into a 3D model",
              40, "MIT", "github.com/microsoft/TRELLIS.2", r"ai\TRELLIS.2", False),
-    Download("trellis_env", "CUDA 12.9 and build tools", f"builds and runs TRELLIS.2 on your NVIDIA card ({AI_ONLY})",
+    Download("trellis_env", "CUDA 12.9 and build tools", "builds and runs TRELLIS.2 on your NVIDIA card",
              7500, "NVIDIA CUDA EULA / GPL", "developer.download.nvidia.com, Ubuntu's archive", r"wsl\ (the Linux disk)",
              False),
-    Download("trellis_env", "TRELLIS.2's environment (PyTorch and its GPU extensions)", f"TRELLIS.2's libraries ({AI_ONLY})",
+    Download("trellis_env", "TRELLIS.2's environment (PyTorch and its GPU extensions)", "TRELLIS.2's libraries",
              7000, "BSD / MIT / Apache-2.0", "pypi.org, download.pytorch.org, github.com", r"wsl\ (the Linux disk)",
              False),
-    Download("ai_env", "PyTorch 2.14 (CUDA)", f"runs the cut-out and the part cut-outs on your card ({AI_ONLY})", 3000,
+    Download("ai_env", "PyTorch 2.14 (CUDA)", "runs the cut-out and the part cut-outs on your card", 3000,
              "BSD-3", "download.pytorch.org", r"ai\ai_env", False),
-    Download("ai_env", "transformers, rembg, onnxruntime-gpu, SciPy, OpenCV", f"the cut-out and SAM 2 libraries ({AI_ONLY})",
+    Download("ai_env", "transformers, rembg, onnxruntime-gpu, SciPy, OpenCV", "the cut-out and SAM 2 libraries",
              2000, "Apache-2.0 / MIT / BSD", "pypi.org", r"ai\ai_env", False),
-    Download("weights", "BiRefNet-general", f"cuts the subject out of your picture ({AI_ONLY})", 930, "MIT",
+    Download("weights", "BiRefNet-general", "cuts the subject out of your picture", 930, "MIT",
              "github.com/danielgatis/rembg", r"ai\rembg_models", False),
-    Download("weights", "TRELLIS.2-4B", f"the 3D model's weights ({AI_ONLY})", 16000, "MIT",
+    Download("weights", "TRELLIS.2-4B", "the 3D model's weights", 16000, "MIT",
              "huggingface.co/microsoft", r"ai\weights", False),
-    Download("weights", "TRELLIS-image-large (decoder)", f"TRELLIS.2's shape decoder ({AI_ONLY})", 140, "MIT",
+    Download("weights", "TRELLIS-image-large (decoder)", "TRELLIS.2's shape decoder", 140, "MIT",
              "huggingface.co/microsoft", r"ai\weights", False),
-    Download("weights", "DINOv3 ViT-L/16", f"TRELLIS.2's picture reader ({AI_ONLY}); gated: a free Hugging Face account, "
+    Download("weights", "DINOv3 ViT-L/16", f"TRELLIS.2's picture reader; gated: a free Hugging Face account, "
              "its licence accepted, a read token", 1200, "DINOv3 License", "huggingface.co/facebook", r"ai\weights", False),
-    Download("weights", "SAM 2.1 hiera-large", f"cuts each part (helmet, shield, weapon) out of the picture ({AI_ONLY})",
+    Download("weights", "SAM 2.1 hiera-large", "cuts each part (helmet, shield, weapon) out of the picture",
              860, "Apache-2.0", "huggingface.co/facebook", r"ai\weights", False),
 )
 
@@ -113,21 +124,30 @@ def size_text(mb: float) -> str:
     return f"{mb / 1000:.1f} GB" if mb >= 1000 else f"{mb:.0f} MB"
 
 
-def downloads_html(step: str | None = None) -> str:
-    """The downloads as an HTML table (the setup wizard's overview and each step's list)."""
-    rows = downloads(step)
-    if not rows:
-        return "<p>Nothing is downloaded in this step.</p>"
+def _table(rows: list[Download]) -> str:
     head = ("<tr><th align=left>What</th><th align=left>Why the app needs it</th><th align=right>Size</th>"
-            "<th align=left>Licence</th><th align=left>From</th><th align=left>Goes to</th><th align=left>Needed?</th></tr>")
+            "<th align=left>Licence</th><th align=left>From</th><th align=left>Goes to</th></tr>")
     body = "".join(f"<tr><td><b>{d.name}</b></td><td>{d.why}</td><td align=right>{size_text(d.size_mb)}</td>"
-                   f"<td>{d.licence}</td><td>{d.source}</td><td>{d.where}</td>"
-                   f"<td>{'required' if d.required else 'optional'}</td></tr>" for d in rows)
-    total = sum(d.size_mb for d in rows)
-    req = sum(d.size_mb for d in rows if d.required)
-    foot = (f"<p><b>Total: {size_text(total)}</b>" + (f" (required: {size_text(req)}; the rest only to make parts from "
-            "your own pictures)" if step is None else "") + ". Folders are inside the app's folder.</p>")
-    return f"<table cellspacing=0 cellpadding=4 border=1>{head}{body}</table>{foot}"
+                   f"<td>{d.licence}</td><td>{d.source}</td><td>{d.where}</td></tr>" for d in rows)
+    return f"<table cellspacing=0 cellpadding=4 border=1>{head}{body}</table>"
+
+
+def downloads_html(step: str | None = None) -> str:
+    """The downloads as HTML: one step's table, the AI pack's (``step="ai_pack"``), or all of them in their two groups
+    with each group's total (the setup wizard's overview, the About page)."""
+    if step == "ai_pack":
+        rows = [d for d in DOWNLOADS if not d.required]
+        return _table(rows) + f"<p><b>The AI pack in all: {size_text(sum(d.size_mb for d in rows))}</b>.</p>"
+    if step is not None:
+        rows = downloads(step)
+        return _table(rows) if rows else "<p>Nothing is downloaded in this step.</p>"
+    out = []
+    for required, title, text in GROUPS:
+        rows = [d for d in DOWNLOADS if d.required == required]
+        out.append(f"<h3>{title}: {size_text(sum(d.size_mb for d in rows))}</h3><p>{text}</p>{_table(rows)}")
+    return "".join(out) + "<p>Everything goes inside the app's folder.</p>"
+
+
 ENV_NAME = "ai_env"
 NEED_GB = 60
 

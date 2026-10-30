@@ -57,7 +57,7 @@ def test_a_release_without_an_installer_points_to_its_page():
 
 def test_this_copy_knows_its_repository_and_version():
     from eu4unitgen import __version__
-    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.1"
+    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.2"
     assert updates.expected_sha256(f"{'b' * 64} *a.exe\n", "a.exe") == "b" * 64
 
 
@@ -69,4 +69,5 @@ def test_every_setup_step_lists_its_downloads_before_it_runs():
     required = {d.step for d in setup.DOWNLOADS if d.required}
     assert required == {"installer", "blender", "io_pdx_mesh"}  # the AI is only for parts from pictures
     html = setup.downloads_html()
-    assert "Total:" in html and "required" in html and "DINOv3 License" in html
+    assert "Needed for everything" in html and "the AI pack" in html and "DINOv3 License" in html
+    assert "only to make parts" not in html  # said once, in the group's heading, not on every row

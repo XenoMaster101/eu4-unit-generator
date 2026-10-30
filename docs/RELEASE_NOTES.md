@@ -2,6 +2,12 @@
 
 Each version's section is the text of its GitHub release and what the app's Help → Check for updates shows.
 
+## 1.0.2
+
+- Setup is in two groups: **Needed for everything** (Blender and io_pdx_mesh, about 640 MB) and **Optional: the AI
+  pack** (WSL, Ubuntu, TRELLIS.2 and the AI models, about 40 GB, only to make parts from your own pictures), with one
+  page saying what the AI pack is, why it needs Linux, what it needs from your PC, and that you can skip it.
+
 ## 1.0.1
 
 - Reinstalling after an uninstall that kept your work: the installer refused the folder ("already has other files in
