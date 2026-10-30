@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eu4unitgen"
-version = "0.2.0"
+version = "1.0.0"
 description = "Generates Europa Universalis IV land-unit sets for a nation."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,6 +30,7 @@ where = ["src"]
 "eu4unitgen.setup_scripts" = ["*.sh"]
 "eu4unitgen.gui" = ["icon.png", "eu4unitgen.ico"]
 "eu4unitgen.core" = ["example_pictures/*.png", "example_pictures/RIGHTS.txt"]
+"eu4unitgen" = ["release.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

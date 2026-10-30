@@ -1,4 +1,6 @@
-"""Build the Windows downloads (Track P5): ``dist/eu4unitgen-<version>-windows.zip`` and ``dist/eu4unitgen-setup.exe``.
+"""Build the Windows downloads (Track P5, Release 1.0): ``dist/eu4unitgen-<version>-windows.zip``,
+``dist/eu4unitgen-<version>-setup.exe`` and the release folder ``dist/<version>/`` (both, SHA256SUMS.txt,
+RELEASE_NOTES.md: what packaging/release.py uploads to GitHub).
 
 The zip unzips to one folder holding only:
   Install EU4 Unit Generator.cmd   the one thing to click (opens files\\install.ps1's wizard window)
@@ -132,9 +134,37 @@ def main() -> dict:
     else:
         subprocess.run([str(exe), "/Q", f"/DAppVersion={v}", f"/DFilesDir={files}", f"/DLicense={stage / 'LICENSE.txt'}",
                         f"/DOutDir={dist}", str(HERE / "setup.iss")], check=True)
-        built["setup"] = dist / "eu4unitgen-setup.exe"
+        built["setup"] = dist / f"eu4unitgen-{v}-setup.exe"
         print(built["setup"], f"{built['setup'].stat().st_size / 2 ** 20:.1f} MB")
+    built["release"] = release_folder(v, built)
     return built
+
+
+def notes(v: str) -> str:
+    """This version's section of docs/RELEASE_NOTES.md (the release's notes on GitHub, and what Help shows)."""
+    text = (ROOT / "docs" / "RELEASE_NOTES.md").read_text(encoding="utf-8")
+    m = re.search(rf"^## {re.escape(v)}\b.*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
+    if not m:
+        raise SystemExit(f"docs/RELEASE_NOTES.md has no '## {v}' section")
+    return m.group(1).strip() + "\n"
+
+
+def release_folder(v: str, built: dict) -> Path:
+    """dist/<v>/: what's uploaded to the GitHub release: the setup.exe, the zip, SHA256SUMS.txt (the app's updater
+    checks the download against it) and RELEASE_NOTES.md. The extras (Mambo, Tracen Academy) are never in it."""
+    import hashlib
+    out = ROOT / "dist" / v
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    for k in ("setup", "zip"):
+        if k in built:
+            shutil.copy(built[k], out / built[k].name)
+    sums = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}" for p in sorted(out.iterdir())]
+    (out / "SHA256SUMS.txt").write_text("\n".join(sums) + "\n", encoding="utf-8")
+    (out / "RELEASE_NOTES.md").write_text(notes(v), encoding="utf-8")
+    print("release folder:", out, sorted(p.name for p in out.iterdir()))
+    return out
 
 
 if __name__ == "__main__":

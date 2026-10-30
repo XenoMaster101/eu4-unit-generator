@@ -313,7 +313,8 @@ def main(argv: list[str] | None = None) -> int:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("eu4unitgen.app")
         except (AttributeError, OSError):
             pass
-    from eu4unitgen.core import config
+    from eu4unitgen.core import config, updates
+    app._running = updates.hold_running_mutex()  # an installer updating this copy waits for it to go
     window = MainWindow(store=QSettings(str(config.config_dir() / "gui.ini"), QSettings.IniFormat))  # not the registry
     window.show()
     window.first_screen()

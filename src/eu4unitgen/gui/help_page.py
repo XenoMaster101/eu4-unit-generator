@@ -51,8 +51,8 @@ class HelpPage(Page):
                   self.show_tour),
                  ("part", "The picture guide", "What makes a good picture for a soldier, a horse or a gun, with good and "
                   "bad examples.", self.show_guide),
-                 ("refresh", "Check for updates", "Looks for a newer version (not set up yet: the app has no download "
-                  "page).", self.check_updates),
+                 ("refresh", "Check for updates", "Looks for a newer version on the app's GitHub page, shows what "
+                  "changed, and installs it in place: your units, settings and downloads stay.", self.check_updates),
                  ("info", "About and licences", "The version, the licences of every model and tool, what is installed.",
                   lambda: window.go("about")),
                  ("folder", "Open the logs", "The app's log files, to send with a problem report.", self._logs))
@@ -62,7 +62,14 @@ class HelpPage(Page):
             grid.addWidget(c, i // 3, i % 3)
         lay.addLayout(grid)
         self.update_text = label("", rich=True)
+        self.update_text.setOpenExternalLinks(True)
         lay.addWidget(self.update_text)
+        self.update_btn = primary("Download and install the update", self.install_update,
+                                  "Downloads the new installer (its checksum is checked), closes the app, updates it in "
+                                  "place and starts it again")
+        self.update_btn.setVisible(False)
+        lay.addWidget(self.update_btn, 0, Qt.AlignLeft)
+        self._update = None
         lay.addWidget(label("Questions and answers", "h2"))
         for q, a in FAQ:
             lay.addWidget(label(f"<b>{q}</b><br>{a}", rich=True))
@@ -94,9 +101,50 @@ class HelpPage(Page):
         from eu4unitgen.core import updates
 
         def done(u) -> None:
-            link = f" <a href='{u.url}'>Open the download page</a>" if u.url else ""
-            self.update_text.setText(f"<p><b>{u.text}</b>{link}</p>")
+            import html
+            link = f" <a href='{u.url}'>Open the release page</a>" if u.url else ""
+            notes = ""
+            if u.newer and u.notes:
+                notes = ("<p><b>What's new:</b></p><pre style='white-space: pre-wrap'>"
+                         f"{html.escape(u.notes[:4000])}</pre>")
+            size = f" ({u.setup_size / 2 ** 20:.0f} MB)" if u.setup_size else ""
+            self.update_text.setText(f"<p><b>{html.escape(u.text)}</b>{link}</p>{notes}")
+            self._update = u if (u.newer and u.setup_url and u.sums_url) else None
+            self.update_btn.setText(f"Download and install {u.latest.lstrip('v')}{size}")
+            self.update_btn.setVisible(self._update is not None)
         self.window_.run(self, "Checking for updates", lambda: updates.check(), done)
+
+    def install_update(self) -> None:
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication
+        from eu4unitgen.core import updates
+        u = self._update
+        if u is None:
+            return
+        got = [0, u.setup_size]
+
+        def progress(done_, total) -> None:  # from the download thread: only numbers, read by the timer below
+            got[0], got[1] = done_, total or got[1]
+
+        timer = QTimer(self)
+
+        def tick() -> None:
+            if not self.window_._busy:  # finished or failed (a failure's message stays)
+                return timer.stop()
+            self.show_message(f"Downloading {u.setup_name}: {got[0] / 2 ** 20:.0f}"
+                              + (f" of {got[1] / 2 ** 20:.0f} MB" if got[1] else " MB"))
+        timer.timeout.connect(tick)
+        timer.start(500)
+
+        def done(path) -> None:
+            timer.stop()
+            try:
+                updates.launch(path)
+            except OSError as exc:
+                return self.show_message(str(exc), error=True)
+            self.show_message("Checked. The app closes now; the installer updates it and starts it again.")
+            QTimer.singleShot(1500, QApplication.quit)
+        self.window_.run(self, "Downloading the update", lambda: updates.download(u, progress=progress), done)
 
     def _logs(self) -> None:
         from eu4unitgen.core import config

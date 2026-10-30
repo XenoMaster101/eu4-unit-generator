@@ -28,7 +28,7 @@ CreateUninstallRegKey=no
 LicenseFile={#License}
 SetupIconFile=..\..\src\eu4unitgen\gui\eu4unitgen.ico
 OutputDir={#OutDir}
-OutputBaseFilename=eu4unitgen-setup
+OutputBaseFilename=eu4unitgen-{#AppVersion}-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -46,20 +46,66 @@ Source: "{#License}"; DestDir: "{tmp}"; DestName: "LICENSE.txt"; Flags: deleteaf
 
 [Run]
 Filename: "{app}\app\python\pythonw.exe"; Parameters: "-m eu4unitgen.gui"; WorkingDir: "{app}"; \
-  Description: "Start {#AppName} now (its setup wizard opens)"; Flags: postinstall nowait skipifsilent; \
+  Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent; \
   Check: Installed
+; an update started from the app (/SILENT /RELAUNCH=1): the app starts again when it's done
+Filename: "{app}\app\python\pythonw.exe"; Parameters: "-m eu4unitgen.gui"; WorkingDir: "{app}"; \
+  Flags: nowait; Check: Relaunch
 
 [Code]
 var Ok: Boolean;
 
+const UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\eu4unitgen';
+
+// the folder of the copy already installed (install.ps1 records it in Windows' Apps list), or ''
+function InstalledRoot: String;
+begin
+  Result := '';
+  if RegQueryStringValue(HKCU, UninstallKey, 'InstallLocation', Result) then
+    if not FileExists(AddBackslash(Result) + 'app\layout.json') then Result := '';
+end;
+
 function DefaultRoot(Param: String): String;
 begin
-  if DirExists('D:\') then Result := 'D:\{#AppName}' else Result := ExpandConstant('{sd}\{#AppName}');
+  Result := InstalledRoot;
+  if Result = '' then
+    if DirExists('D:\') then Result := 'D:\{#AppName}' else Result := ExpandConstant('{sd}\{#AppName}');
+end;
+
+function IsUpdate: Boolean;
+begin
+  Result := FileExists(AddBackslash(WizardDirValue) + 'app\layout.json');
 end;
 
 function Installed: Boolean;
 begin
   Result := Ok;
+end;
+
+function Relaunch: Boolean;
+begin
+  Result := Ok and (ExpandConstant('{param:RELAUNCH|0}') = '1');
+end;
+
+function InitializeSetup: Boolean;
+var Waited: Integer;
+begin
+  // an update started from the app: wait (up to a minute) for the app to close (it holds this mutex while open)
+  Waited := 0;
+  while CheckForMutexes('eu4unitgen_running') and (Waited < 60) do begin
+    Sleep(1000);
+    Waited := Waited + 1;
+  end;
+  Result := not CheckForMutexes('eu4unitgen_running');
+  if not Result then
+    MsgBox('{#AppName} is still open. Close it, then run setup again.', mbError, MB_OK);
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpSelectDir) and (InstalledRoot <> '') then
+    WizardForm.SelectDirLabel.Caption := '{#AppName} is already installed here. This updates it to {#AppVersion} ' +
+      'in place: your settings, units, library, Blender and AI downloads stay.';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -70,7 +116,10 @@ begin
               '" -Quiet -NoLaunch -Root "' + ExpandConstant('{app}') + '"';
     if not WizardIsTaskSelected('desktop') then Params := Params + ' -NoDesktop';
     if not WizardIsTaskSelected('startmenu') then Params := Params + ' -NoStartMenu';
-    WizardForm.StatusLabel.Caption := 'Installing the app and its libraries (about 260 MB to download)...';
+    if IsUpdate then
+      WizardForm.StatusLabel.Caption := 'Updating the app to {#AppVersion} (your settings, units and downloads stay)...'
+    else
+      WizardForm.StatusLabel.Caption := 'Installing the app and its libraries (about 260 MB to download)...';
     Ok := Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, Rc) and (Rc = 0);
     if not Ok then
       MsgBox('The installation stopped (exit ' + IntToStr(Rc) + '). Its log: ' +
