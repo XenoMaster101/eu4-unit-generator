@@ -3401,6 +3401,31 @@ unit's cavalry "On foot" switch (a soldier and a base-game weapon per tier, `lib
 game uses it for, how to install it); the pack: `build/tracen_academy_mod`. Also: drop-downs on parchment cards open
 in the card's colours (they opened navy).
 
+### Release 1.0 (PLAN, the user, 2026-10-29: "official installers and updates", for the user's friend group)
+**Decided:** public GitHub repository, its Releases the update channel; no code-signing certificate (Windows
+SmartScreen's "Windows protected your PC" warning is explained in the README and on the download page); version
+**1.0.0**; the default library: the bay horse, the English horse, the cataphract horse, the cataphract soldier and rider,
+the bombard; **Mambo and Tracen Academy kept apart** (an extras pack the user adds to their own build, never in the
+installer); the worked example in the app: a Byzantine cataphract cavalry unit (the cataphract horse and rider, BYZ).
+**R1 the examples:** the default library as above, each fitted on first use (as now); a starter **unit**, "Byzantine
+cataphract cavalry", in the Library for quick edits and Add to mod (a starter unit: its request and parts refs, its
+preview made on first use); Help's worked example walks it from parts to the exported mod and its README breakdown.
+The extras (Mambo's import run, Tracen Academy's unit and pack) packed into `extras/` beside the release, with how to
+add them back.
+**R2 installers and updates:** the version in one place (`eu4unitgen.__version__`, the installer, the About page);
+Inno Setup with a fixed AppId so a newer installer upgrades in place (the app replaced; settings, workspace, projects,
+AI downloads and the library kept); "Check for updates" reads the GitHub repository's latest Release, shows its notes,
+downloads its setup.exe (with progress and its SHA-256 checked against the release's checksums file) and runs it on
+close; a release folder per version (`dist/1.0.0/`: setup.exe, the portable zip, SHA256SUMS.txt, RELEASE_NOTES.md).
+**R3 every download shown before it happens:** Setup lists each external download (Blender, io_pdx_mesh, WSL and
+Ubuntu, CUDA, TRELLIS.2 code and weights, DINOv3, SAM 2, BiRefNet, the Python environments): what it is, why the app
+needs it, its size, its licence, where it goes, required or optional; then progress and a result per item; nothing
+starts without the user's go (`core.inventory` and `core.setup` as the source of the list).
+**R4 the app's words:** every screen, Help, the tour and the examples brought up to date (importing, the standard and
+stylised profiles, the checks before showing, cavalry on foot, culture packs, the export breakdown).
+**R5 tests on a fresh system:** uninstall the current app and its folders, install 1.0.0 as a new user, every flow end
+to end; then an upgrade test (a 1.0.1 built over it: in place, nothing lost).
+
 ### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
 
 | Tool, model or library | For | Where | Size | Licence | Status | Safe to remove |
