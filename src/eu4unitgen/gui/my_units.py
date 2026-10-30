@@ -720,6 +720,7 @@ class UnitDetail(QWidget):
         self.a_mode = QComboBox()
         self.a_mode.addItem("A normal mod: a new unit for one country (stats, tech, colours)", "normal")
         self.a_mode.addItem("Achievement-safe: graphics only, re-dress a graphical culture's unit", "achievement_safe")
+        self.a_mode.addItem("A culture pack: graphics for a new graphical culture any nation can use", "culture_pack")
         self.a_mode.setToolTip("Normal: changes the game's checksum (no achievements while it's on). Achievement-safe: "
                                "only graphics, so achievements stay; every country of that graphical culture shows it.")
         self.a_mode.currentIndexChanged.connect(lambda *_: self._mode_changed())
@@ -731,6 +732,10 @@ class UnitDetail(QWidget):
                               "Normal mode: a new one named after the unit is made when left blank.")
         self.a_dir = QLineEdit()
         self.a_dir.setToolTip("Your EU4 mod folder (Documents\\Paradox Interactive\\Europa Universalis IV\\mod)")
+        self.a_folder = QLineEdit()
+        self.a_folder.setPlaceholderText("the mod's folder name, e.g. tracen_academy (blank: <unit>_units)")
+        self.a_display = QLineEdit()
+        self.a_display.setPlaceholderText("its name in the launcher, e.g. Tracen Academy (blank: the folder name)")
         self.a_note = label("", "explain")
         self.a_go = primary("Add to mod", self.add_to_mod, "Checks it, asks you once, then writes it into the mod folder")
         g.addWidget(label("Kind", wrap=False), 0, 0)
@@ -743,8 +748,14 @@ class UnitDetail(QWidget):
         g.addWidget(label("Mod folder", wrap=False), 3, 0)
         g.addWidget(self.a_dir, 3, 1)
         g.addWidget(ghost("Browse…", self._pick_mod_dir, "Pick the mod folder"), 3, 2)
-        g.addWidget(self.a_note, 4, 0, 1, 3)
-        g.addWidget(self.a_go, 5, 2)
+        g.addWidget(label("Mod name", wrap=False), 4, 0)
+        g.addWidget(self.a_folder, 4, 1)
+        g.addWidget(self.a_display, 4, 2)
+        g.addWidget(self.a_note, 5, 0, 1, 3)
+        self.a_readme = ghost("What's in it", self._show_readme, "The last export's folder, file by file, and how to use it")
+        self.a_readme.hide()
+        g.addWidget(self.a_readme, 6, 1)
+        g.addWidget(self.a_go, 6, 2)
         box.hide()
         self.add_box = box
         self._mode_changed()
@@ -760,13 +771,23 @@ class UnitDetail(QWidget):
             self.a_gfx.setText(req["gfx"])
 
     def _mode_changed(self) -> None:
-        safe = self.a_mode.currentData() == "achievement_safe"
-        self.a_tag.setVisible(not safe)
-        self.a_tag_label.setVisible(not safe)
-        self.a_note.setText("Graphics only: nothing in common/, so the checksum and achievements stay. Every country of "
-                            "that graphical culture shows this unit at its tier." if safe else
-                            "A mod of its own named after the unit, with its stats, tech and colours. It changes the "
-                            "game's checksum: no achievements while it's on.")
+        mode = self.a_mode.currentData()
+        safe = mode == "achievement_safe"
+        pack = mode == "culture_pack"
+        self.a_tag.setVisible(mode == "normal")
+        self.a_tag_label.setVisible(mode == "normal")
+        self.a_note.setText(
+            "Graphics only: nothing in common/, so the checksum and achievements stay. Every country of that graphical "
+            "culture shows this unit at its tier." if safe else
+            "A new graphical culture, graphics only, in a mod of its own: any nation whose country file says "
+            "graphical_culture = <the culture> shows these units; no other country changes (the Tracen Academy "
+            "example)." if pack else
+            "A mod of its own named after the unit, with its stats, tech and colours. It changes the game's checksum: "
+            "no achievements while it's on.")
+
+    def _show_readme(self) -> None:
+        if getattr(self, "_readme", ""):
+            self.window_.inform("What's in the mod", self._readme)
 
     def _pick_mod_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "The EU4 mod folder", self.a_dir.text())
@@ -782,12 +803,16 @@ class UnitDetail(QWidget):
         mode = self.a_mode.currentData()
         utype = req["type"] if req["kind"] == "unit" else flow.FOOT_TYPE[req["kind"]]
         tiers = sorted(int(t) for t in req["tiers"]) if req["kind"] == "unit" else int(req["tier"])
-        gfx = self.a_gfx.text().strip() or ("westerngfx" if mode == "achievement_safe" else f"{req['name']}gfx")
+        gfx = self.a_gfx.text().strip() or ("westerngfx" if mode == "achievement_safe" else f"{req['name'].replace('_', '')}gfx")
+        folder_name = self.a_folder.text().strip() or None
+        display = self.a_display.text().strip() or None
         tag = self.a_tag.text().strip().upper() or req.get("country") or "BYZ"
         cfg = config.load()
         mod_dir = Path(self.a_dir.text().strip() or cfg.mods())
-        what = (f"Write {modexport.mod_name(req['name'])} into {mod_dir}"
+        what = (f"Write {folder_name or modexport.mod_name(req['name'])} into {mod_dir}"
                 + (f" for {tag} (graphical culture {gfx})?" if mode == "normal" else
+                   f" as the graphical culture {gfx} (graphics only; nations take it with graphical_culture = {gfx})?"
+                   if mode == "culture_pack" else
                    f", re-dressing {gfx}'s {utype} at tier {req.get('tier', 1) if isinstance(tiers, int) else ', '.join(map(str, tiers))}"
                    " (graphics only)?"))
         if not self.window_.confirm("Add to mod", what):
@@ -796,11 +821,14 @@ class UnitDetail(QWidget):
         def work():
             from eu4unitgen.ref3d import importer
             return modexport.add_to_mod(folder / "preview" / "preview.json", req["name"], mode, tag, gfx, tiers,
-                                        mod_dir, cfg.eu4(), cfg.exports(), utype=utype, credits=importer.credits_for(req))
+                                        mod_dir, cfg.eu4(), cfg.exports(), utype=utype, credits=importer.credits_for(req),
+                                        folder=folder_name, display=display)
 
         def done(r) -> None:
             if r.notes and any(n.startswith("validation") for n in r.notes):
                 return self.show_message("It didn't pass the game checks: " + "; ".join(r.notes), error=True)
+            self._readme = r.readme
+            self.a_readme.setVisible(bool(r.readme))
             chk = ("No checksummed files: achievements stay." if not r.checksum_files else
                    f"{len(r.checksum_files)} files change the checksum (no achievements while it's on).")
             if r.staged_at:

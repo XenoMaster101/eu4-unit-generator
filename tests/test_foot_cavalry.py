@@ -31,3 +31,14 @@ def test_the_musketeer_set_is_the_base_games_and_names_come_from_naming():
     n = Naming()
     assert n.fresh_foot_cavalry_pdxmesh("tracen_academy", 2) == "hr_tracen_academy_fresh_cavalry_2_mesh"
     assert n.fresh_foot_cavalry_file("tracen_academy", 2).endswith("/hr_tracen_academy_fresh_cavalry_2.mesh")
+
+
+def test_an_export_breakdown_names_every_part_and_how_to_use_a_culture_pack(tmp_path):
+    from eu4unitgen.export import modexport
+    files = ["ta.mod", "ta/descriptor.mod", "ta/common/graphicalculturetype.txt", "ta/gfx/entities/x.asset",
+             "ta/gfx/sprite_packs/p.txt", "ta/gfx/models/units/a.mesh", "ta/gfx/models/units/a_diffuse.dds",
+             "ta/interface/assets/x.gfx"]
+    text = modexport.breakdown(files, "ta", "culture_pack", tmp_path, gfx="tagfx", display="TA")
+    assert "ta/gfx/models/  (2 files)" in text and "the unit definitions" in text
+    assert "graphical_culture = tagfx" in text and "delete it first" in text
+    assert "checksum" in modexport.breakdown(files, "ta", "normal", tmp_path, tag="BYZ")
