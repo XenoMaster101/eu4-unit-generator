@@ -230,12 +230,13 @@ def build_base_test_mod(project: Project, nation: Nation, game: GameFiles, idx: 
 
 def build_test_mod(project: Project, nation: Nation, game: GameFiles, idx: Index, mod_dir: Path,
                    name: str = TEST_MOD_NAME, test_sprite_techs: dict[int, int] | None = None,
-                   recipe=None, loadout=None, runner=None, part_cache: dict | None = None) -> TestMod:
+                   recipe=None, loadout=None, runner=None, part_cache: dict | None = None,
+                   display: str | None = None) -> TestMod:
     """``test_sprite_techs`` (e.g. {2: 2, 3: 3, 4: 4}) moves sprite levels 2-4 to early MIL techs in
     this test mod's mil.txt only, so every tier can be seen in minutes. ``recipe`` (texture recipe)
     and ``loadout`` (parts, built through ``runner``): the set as generate() would write it."""
     package = _main_package(project, nation, game, idx, test_sprite_techs, recipe, loadout, runner, part_cache)
-    return _wrap(project, nation, package, game, idx, mod_dir, name)
+    return _wrap(project, nation, package, game, idx, mod_dir, name, display=display)
 
 
 # --------------------------------------------------------------------------- test suite
