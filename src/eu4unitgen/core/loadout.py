@@ -71,6 +71,9 @@ STANCE_TYPES = {  # base-game animation types (1.37.5), same 28-bone skeleton as
     # rifleman's; the gun in Left_hand_node)
     "musketeer": {"idle": "musketeer_02_idle_animation", "walk": "musketeer_02_moving_animation",
                   "attack": "rifleman_attack_animation"},
+    # the rifleman set (read from 1.37: JAP_INFANTRY_2 and _3, Japan's matchlocks, asian_rifle_02 and _03)
+    "rifleman": {"idle": "rifleman_idle_animation", "walk": "rifleman_moving_animation",
+                 "attack": "rifleman_attack_animation"},
 }
 STANCES = ("auto", "base", *STANCE_TYPES)
 

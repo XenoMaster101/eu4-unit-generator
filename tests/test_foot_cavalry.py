@@ -26,6 +26,8 @@ def test_foot_cavalry_entries_name_their_stance_and_weapons():
 def test_the_musketeer_set_is_the_base_games_and_names_come_from_naming():
     assert STANCE_TYPES["musketeer"] == {"idle": "musketeer_02_idle_animation", "walk": "musketeer_02_moving_animation",
                                          "attack": "rifleman_attack_animation"}
+    assert STANCE_TYPES["rifleman"] == {"idle": "rifleman_idle_animation", "walk": "rifleman_moving_animation",
+                                        "attack": "rifleman_attack_animation"}
     n = Naming()
     assert n.fresh_foot_cavalry_pdxmesh("tracen_academy", 2) == "hr_tracen_academy_fresh_cavalry_2_mesh"
     assert n.fresh_foot_cavalry_file("tracen_academy", 2).endswith("/hr_tracen_academy_fresh_cavalry_2.mesh")
