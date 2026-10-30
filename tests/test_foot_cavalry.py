@@ -42,3 +42,14 @@ def test_an_export_breakdown_names_every_part_and_how_to_use_a_culture_pack(tmp_
     assert "ta/gfx/models/  (2 files)" in text and "the unit definitions" in text
     assert "graphical_culture = tagfx" in text and "delete it first" in text
     assert "checksum" in modexport.breakdown(files, "ta", "normal", tmp_path, tag="BYZ")
+
+
+def test_starter_units_and_extras_are_read_from_their_folders(tmp_path, monkeypatch):
+    from eu4unitgen.core import library
+    root = tmp_path / "starter"
+    library.write_unit(root / "units" / "byz", {"type": "cavalry", "tiers": {"1": {"horse": "starter:h"}}})
+    monkeypatch.setenv("EU4UNITGEN_WORKSPACE", str(tmp_path / "ws"))
+    us = library.starter_units(root)
+    assert [u["name"] for u in us] == ["byz"] and us[0]["starter"]
+    assert "mambo_import_test" not in library.STARTER and "mambo_import_test" in library.EXTRAS
+    assert "byzantine_cataphract_cavalry" in library.STARTER_UNITS and "tracen_academy" in library.EXTRA_UNITS

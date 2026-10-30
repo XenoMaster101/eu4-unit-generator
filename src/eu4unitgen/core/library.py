@@ -133,6 +133,20 @@ def starter_root() -> Path:
     return Path(__file__).resolve().parents[1] / "library" / "starter"
 
 
+def extras_root() -> Path | None:
+    """Extra starter parts and units added to one install by hand (Release 1.0: Mambo and Tracen Academy, kept out of
+    the installer): ``<install root>/extras``, else None."""
+    from eu4unitgen.core import layout
+    f = layout.folder("extras")
+    return f if f is not None and f.is_dir() else None
+
+
+def starter_roots(starter: Path | None = None) -> list[Path]:
+    if starter:
+        return [Path(starter)]
+    return [r for r in (starter_root(), extras_root()) if r is not None]
+
+
 def _json(p: Path) -> dict:
     try:
         return json.loads(Path(p).read_text(encoding="utf-8"))
@@ -176,9 +190,8 @@ def part_render(r: dict) -> str | None:
 
 
 def starter_parts(root: Path | None = None) -> list[Part]:
-    root = Path(root) if root else starter_root()
     out = []
-    for p in sorted(root.glob("*/part.json")):
+    for p in sorted(q for r in starter_roots(root) for q in r.glob("*/part.json")):
         d = _json(p)
         if d.get("kind") not in KINDS:
             continue
@@ -214,6 +227,54 @@ def units() -> list[dict]:
     """Every unit: the assemblies (kind ``unit``) and the older cavalry runs, newest first."""
     from eu4unitgen.ref3d import flow
     return [r for r in flow.runs() if r.get("kind") in ("unit", "cavalry", "rider")]
+
+
+# the starter units (Release 1.0): a worked example made from the starter parts on first use; ``pack_starters`` writes
+# each as ``units/<name>/unit.json`` beside the starter parts (the extras pack its own)
+STARTER_UNITS = {
+    "byzantine_cataphract_cavalry": {
+        "type": "cavalry", "country": "BYZ", "gfx": "", "country_colours": True,
+        "tiers": {"1": {"horse": "starter:cataphract_horse", "soldier": "starter:cataphract"}},
+        "about": "The worked example: the cataphract riding the cataphract horse, for Byzantium (BYZ), tier 1. Open it "
+                 "to see a finished unit, edit it, or add it to a mod (its README says what each file is for)."},
+}
+
+
+def starter_units(starter: Path | None = None) -> list[dict]:
+    """The starter units not yet made in this workspace: [{"name", "type", "tiers", "about", "thumb", ...}]."""
+    from eu4unitgen.ref3d import flow
+    out = []
+    for p in sorted(q for r in starter_roots(starter) for q in r.glob("units/*/unit.json")):
+        d = _json(p)
+        name = p.parent.name
+        if not d or flow.folder_of(name).exists():
+            continue
+        first = next(iter((d.get("tiers") or {}).values()), {})
+        ref = first.get("horse") or first.get("soldier") or first.get("gun")
+        pt = next((p for p in starter_parts(starter) if p.ref == ref), None) if ref else None  # (your own run of it
+        # hides the starter part from ``part``)
+        out.append({**d, "name": name, "starter": True, "thumb": (pt.thumb or pt.image) if pt else None})
+    return out
+
+
+def make_starter_unit(name: str, starter: Path | None = None) -> Path:
+    """A starter unit made in this workspace from its starter parts (they're fitted on first use: the unit waits for
+    them) and started. -> its folder (an existing one is used as it is)."""
+    from eu4unitgen.ref3d import flow
+    f = flow.folder_of(name)
+    if f.exists():
+        return f
+    src = next((q for r in starter_roots(starter) for q in r.glob(f"units/{name}/unit.json")), None)
+    if src is None:
+        raise FileNotFoundError(f"no starter unit called {name}")
+    d = _json(src)
+    f = new_unit(name, d["type"], {int(t): s for t, s in d["tiers"].items()}, d.get("country", ""), d.get("gfx", ""),
+                 country_colours=d.get("country_colours", True), on_foot=bool(d.get("on_foot")))
+    r = flow.request(f)
+    r["starter"] = True
+    (f / "request.json").write_text(json.dumps(r, indent=1), encoding="utf-8")
+    flow.start(f)
+    return f
 
 
 def ai_ready() -> tuple[bool, str]:
@@ -406,9 +467,20 @@ STARTER = {"bay_horse": {"style": "light", "regions": ["Western", "European"]},
            # "english_soldier": out until he's fixed (the user, 2026-10-28; rerun from the arms-out picture)
            "cataphract": {"regions": ["Byzantine", "Greek"]},
            "bombard": {"regions": ["European", "generic"]},
-           # the app's example of a stylised (exaggerated) imported model (the user, 2026-10-29: Mambo, a chibi; kept as
-           # an example of an overexaggerated model; the private mod's Tracen Academy cavalry)
-           "mambo_import_test": {"regions": ["stylised example", "Tracen Academy"], "example": "stylised"}}
+           }
+# kept out of the installer (Release 1.0, the user: "for mambo put all the files separate and we can add it back for
+# my build"): ``pack_extras`` packs them into an extras folder the user copies into an install
+EXTRAS = {"mambo_import_test": {"regions": ["stylised example", "Tracen Academy"], "example": "stylised"}}
+EXTRA_UNITS = {
+    "tracen_academy": {
+        "type": "cavalry", "country": "", "gfx": "tracenacademygfx", "country_colours": False, "on_foot": True,
+        "tiers": {"1": {"soldier": "starter:mambo_import_test", "weapon": "asian_spear_01"},
+                  "2": {"soldier": "starter:mambo_import_test", "weapon": "asian_rifle_02"},
+                  "3": {"soldier": "starter:mambo_import_test", "weapon": "asian_rifle_03"},
+                  "4": {"soldier": "starter:mambo_import_test", "weapon": "asian_rifle_03"}},
+        "about": "Tracen Academy's cavalry: Mambo on foot with Japan's weapons per tier; export it as a culture pack "
+                 "(tracen_academy, tracenacademygfx)."},
+}
 
 
 def pack_starters(dest: Path | None = None) -> dict[str, str]:
@@ -425,6 +497,50 @@ def pack_starters(dest: Path | None = None) -> dict[str, str]:
             continue
         pack(f, dest / name, tags=tags)
         out[name] = "packed"
+    for name, d in STARTER_UNITS.items():
+        write_unit(dest / "units" / name, d)
+        out[f"unit {name}"] = "written"
+    return out
+
+
+def write_unit(folder: Path, d: dict) -> None:
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "unit.json").write_text(json.dumps({"schema": 1, **d}, indent=1), encoding="utf-8")
+
+
+def pack_extras(dest: Path, pack_folder: Path | None = None) -> dict[str, str]:
+    """The extras (``EXTRAS`` parts, ``EXTRA_UNITS``) packed into ``dest`` like the starter library, with the built
+    mod (``pack_folder``: e.g. build/tracen_academy_mod) and a README: copy ``dest`` into an install's root as
+    ``extras`` and they show in its Library."""
+    from eu4unitgen.ref3d import flow
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    out = {}
+    for name, tags in EXTRAS.items():
+        f = flow.folder_of(name)
+        if not (flow.status(f) or {}).get("done"):
+            out[name] = "not finished: not packed"
+            continue
+        pack(f, dest / name, tags=tags)
+        out[name] = "packed"
+    for name, d in EXTRA_UNITS.items():
+        write_unit(dest / "units" / name, d)
+        out[f"unit {name}"] = "written"
+    if pack_folder and Path(pack_folder).is_dir():
+        if (dest / "mods").exists():
+            shutil.rmtree(dest / "mods")
+        shutil.copytree(pack_folder, dest / "mods")
+        out["mods"] = "copied"
+    (dest / "README.txt").write_text(
+        "EU4 Unit Generator: extras (kept out of the installer)\n\n"
+        "  mambo_import_test/      Mambo, an imported chibi model: the app's example of a stylised model\n"
+        "  units/tracen_academy/   Tracen Academy's cavalry: Mambo on foot with Japan's weapons per tier\n"
+        "  mods/                   the finished Tracen Academy mod (tracen_academy and tracen_academy.mod)\n\n"
+        "Add them to an install: copy this folder into the install's folder (e.g. D:\\EU4 Unit Generator) and name it\n"
+        "'extras'. Mambo and Tracen Academy then show in the Library (Starter), fitted on first use.\n"
+        "Use the mod: copy mods\\tracen_academy and mods\\tracen_academy.mod into your EU4 mod folder; give your\n"
+        "nation graphical_culture = tracenacademygfx.\n", encoding="utf-8")
     return out
 
 
@@ -492,7 +608,8 @@ def fit(name: str, starter: Path | None = None) -> Path:
         if not (flow.status(f) or {}).get("done") and (flow.status(f) or {}).get("state") != "running":
             flow.start(f)
         return f
-    src = Path(starter or starter_root()) / name
+    src = next((r / name for r in starter_roots(starter) if (r / name / "part.json").is_file()),
+               Path(starter or starter_root()) / name)
     d = _json(src / "part.json")
     if d.get("kind") not in KINDS:
         raise FileNotFoundError(f"no starter part called {name}")

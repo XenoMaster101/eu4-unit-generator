@@ -190,6 +190,16 @@ class MyUnitsScreen(Page):
             tile.clicked.connect(lambda _=False, f=r["folder"]: self.open(f))
             self.units_layout.addWidget(tile)
             shown["unit"] += 1
+        for u in (library.starter_units() if self.filter in ("all", "unit") else []):  # made on first open
+            chips = [library.TYPE_TEXT.get(u.get("type"), "Cavalry")] + [f"tier {t}" for t in sorted(u.get("tiers") or {})]
+            act = ("Build it", lambda n=u["name"]: self._make_starter_unit(n))
+            tile = Tile(library.display(u["name"]), thumb(u.get("thumb"), 300, Tile.PIC_H), chips,
+                        ("none", "Built on first use"), True, act,
+                        (u.get("about") or "A starter unit that comes with the app") + " Building it takes a few "
+                        "minutes, no AI.")
+            tile.clicked.connect(lambda _=False, n=u["name"]: self._make_starter_unit(n))
+            self.units_layout.addWidget(tile)
+            shown["unit"] += 1
         for key, (head_, w, _) in self.sections.items():
             vis = self.filter in ("all", key) and (shown[key] > 0 or self.filter == key)
             head_.setVisible(vis)
@@ -202,6 +212,17 @@ class MyUnitsScreen(Page):
     def open(self, folder: str) -> None:
         self.detail.show_unit(folder)
         self.stack.setCurrentWidget(self.detail)
+
+    def _make_starter_unit(self, name: str) -> None:
+        """A starter unit made from the starter parts (they're fitted first if they aren't), then opened."""
+        from eu4unitgen.core import library
+        try:
+            f = library.make_starter_unit(name)
+        except (OSError, ValueError) as exc:
+            return self.show_message(str(exc), error=True)
+        self.show_message(f"Building {library.display(name)} from the starter parts (a few minutes; the parts are fitted "
+                          "to the game first if they haven't been). Opening it.")
+        self.open(str(f))
 
     def _resume_run(self, folder: str) -> None:
         from eu4unitgen.ref3d import flow
