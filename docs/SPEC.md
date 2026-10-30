@@ -3392,6 +3392,14 @@ flag is the weapon through her head and hair (9, 7, 7, 2 poses), accepted for a 
 and the flow's `checks` stage (Mambo: stylised, everything passes, clipping accepted, folds open: idle 66 against the
 game's 8, walk 85 against 5; the English soldier: standard, clipping and folds open). T5 Mambo in `library.STARTER`
 (an imported part packs its import record, source and rights). In-game test: `build/tracen_dev/README.txt`.
+**Approved in game (the user, 2026-10-29), then:** Japan's base-game weapons per tech range (no katana outside DLC):
+1 `asian_spear_01` (polearm_twohanded), 2 `asian_rifle_02`, 3-4 `asian_rifle_03` (the `rifleman` stance, Japan's
+JAP_INFANTRY_2/3 set); tiers change at MIL 12, 21 and 26 (3 and 4 look the same, as Japan's). **In the app:** Build a
+unit's cavalry "On foot" switch (a soldier and a base-game weapon per tier, `library.WEAPONS`); the Library unit
+`assets_in/tracen_academy` (edit it there, Add to mod as a culture pack); tiers sharing a soldier share one model
+(the pack 16 MB -> 3.8 MB); every export writes and shows a breakdown (`README.txt`: each folder and file, what the
+game uses it for, how to install it); the pack: `build/tracen_academy_mod`. Also: drop-downs on parchment cards open
+in the card's colours (they opened navy).
 
 ### Dependency inventory (2026-10-25; generated from `core/inventory.py`, also on the About page)
 

@@ -288,6 +288,7 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
     from eu4unitgen.textures.dds import DDSFormat, full_mip_count, read_header, write_dds
 
     files, out, notes = [], {}, []
+    shared: dict = {}  # (geometry, textures, base) -> (file, texture paths): one model for every tier that shares it
     foot = kind == "foot_cavalry"  # Track T: a soldier as the cavalry itself, on the cavalry entity
     rider, soldier, gun = kind == "rider", kind in ("soldier", "foot_cavalry"), kind == "gun"
     body = rider or soldier
@@ -313,7 +314,9 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
         shape = summarize_mesh(parse_pdx_mesh(base))["shapes"][0]
         folder = rec["file"].rsplit("/", 1)[0]
         names, paths = {}, {}
-        for tex in ("diffuse", "specular", "normal"):
+        key = (str(h["geometry"]), tuple(sorted(h["textures"].items())), h["base"]) if foot else None
+        reuse = shared.get(key) if key else None
+        for tex in ("diffuse", "specular", "normal") if reuse is None else ():
             try:
                 img = loadout.image(h["textures"][tex]).convert("RGBA")
             except LoadoutError as exc:
@@ -333,17 +336,23 @@ def apply_horses(naming, set_name: str, owner: str, entities: dict, records: lis
             import json as _json
             raw = _json.loads(loadout.path(h["geometry"]).read_text(encoding="utf-8"))
             locs = raw.get("locators") or None
-        try:
-            data = write_fresh(base, geo, names, locators=locs)
-        except FreshMeshError as exc:
-            raise GenerationError(f"tier {tier}: fresh {kind}: {exc}") from exc
+        if reuse is None:
+            try:
+                data = write_fresh(base, geo, names, locators=locs)
+            except FreshMeshError as exc:
+                raise GenerationError(f"tier {tier}: fresh {kind}: {exc}") from exc
         file, name = ((naming.fresh_rider_file(set_name, tier), naming.fresh_rider_pdxmesh(set_name, tier)) if rider
                       else (naming.fresh_foot_cavalry_file(set_name, tier), naming.fresh_foot_cavalry_pdxmesh(set_name, tier))
                       if foot
                       else (naming.fresh_soldier_file(set_name, tier), naming.fresh_soldier_pdxmesh(set_name, tier))
                       if soldier else (naming.fresh_gun_file(set_name, tier), naming.fresh_gun_pdxmesh(set_name, tier))
                       if gun else (naming.fresh_horse_file(set_name, tier), naming.fresh_horse_pdxmesh(set_name, tier)))
-        files.append(GeneratedFile(file, data, OWNED, derived_from=rec["file"]))
+        if reuse is None:
+            files.append(GeneratedFile(file, data, OWNED, derived_from=rec["file"]))
+            if key:
+                shared[key] = (file, paths)
+        else:  # the same model as an earlier tier: its own pdxmesh (its animations) on that tier's file
+            file, paths = reuse
         anims = dict(rec.get("animations") or {})
         if soldier:  # the infantry's own ids (its stance pdxmesh's, or the culture's) over the body's
             worn = by_name.get(entity["pdxmesh"]) or idx.pdxmesh(entity["pdxmesh"]) or {}

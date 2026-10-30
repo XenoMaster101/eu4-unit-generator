@@ -63,6 +63,11 @@ class BuildUnitScreen(Page):
             self.type_cards[key] = c
             row.addWidget(c)
         left.addLayout(row)
+        self.on_foot = QCheckBox("On foot: the soldier is the cavalry, no horse (a weapon per tier)")
+        self.on_foot.setToolTip("Cavalry without a horse: each tier's soldier stands in as the cavalry, playing the "
+                                "infantry animations, with the base-game weapon you pick (Tracen Academy's way)")
+        self.on_foot.toggled.connect(lambda *_: self.refill())
+        left.addWidget(self.on_foot)
         top.addLayout(left, 3)
         right = QVBoxLayout()
         right.addWidget(label("2  For which country?  (optional)", "h2"))
@@ -165,6 +170,7 @@ class BuildUnitScreen(Page):
     def set_type(self, utype: str) -> None:
         self.utype = utype
         self.type_cards[utype].setChecked(True)
+        self.on_foot.setVisible(utype == "cavalry")
         self._suggest_name()
         self.refill()
 
@@ -225,9 +231,10 @@ class BuildUnitScreen(Page):
         self.slots, self.previews, self.captions = {}, {}, {}
         c = self.found
         gfx = self.gfx.currentData() or (c.gfx if c else None)
-        kinds = library.UNIT_TYPES[self.utype]
+        foot = self.foot()
+        kinds = ("soldier", "weapon") if foot else library.UNIT_TYPES[self.utype]
         ranked = {k: library.suggest(k, gfx, c.tech_group if c else None, c.culture if c else None,
-                                     c.culture_group if c else None) for k in kinds}
+                                     c.culture_group if c else None) for k in kinds if k != "weapon"}
         for t in range(1, 5):
             inner = QWidget()
             lay = QVBoxLayout(inner)
@@ -247,6 +254,22 @@ class BuildUnitScreen(Page):
             for k in kinds:
                 lay.addWidget(label(library.SLOT_TEXT[(self.utype, k)], "muted", wrap=False))
                 box = QComboBox()
+                if k == "weapon":  # the base game's weapons, by name (none from DLC)
+                    box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+                    box.setMinimumContentsLength(12)
+                    for entity, node, stance, text in library.WEAPONS:
+                        box.addItem(text, entity or None)
+                        box.setItemData(box.count() - 1, f"{entity or 'nothing'} in the {'right' if node == 'Right_hand_node' else 'left'} "
+                                        f"hand; {stance} animations" if entity else "its own animations, nothing held",
+                                        Qt.ToolTipRole)
+                    box.setToolTip(f"What the cavalry on foot holds at tier {t}: a base-game weapon, with the "
+                                   "animations that go with it")
+                    old = keep.get((t, k))
+                    if old:
+                        box.setCurrentIndex(max(0, box.findData(old)))
+                    lay.addWidget(box)
+                    self.slots[(t, k)] = box
+                    continue
                 # long part names mustn't widen the page: four columns fit the window, the full name is in the list
                 box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
                 box.setMinimumContentsLength(12)
@@ -267,7 +290,7 @@ class BuildUnitScreen(Page):
                 self.slots[(t, k)] = box
             self.tiers_box.addWidget(framed(inner), 0, t - 1)
             self._picked(t)
-        missing = [library.SLOT_TEXT[(self.utype, k)].lower() for k in kinds if not ranked[k]]
+        missing = [library.SLOT_TEXT[(self.utype, k)].lower() for k in kinds if k != "weapon" and not ranked[k]]
         ok, why = library.ai_ready()
         self.no_part.setText((f"Your library has no {' or '.join(missing)} yet. Make one with Make a part"
                               + ("." if ok else f": {why}") if missing else "") or ("" if ok else why))
@@ -282,7 +305,8 @@ class BuildUnitScreen(Page):
         pv, cap = self.previews.get(t), self.captions.get(t)
         if pv is None:
             return
-        slots = {k: b.currentData() for (tt, k), b in self.slots.items() if tt == t and b.currentData()}
+        slots = {k: b.currentData() for (tt, k), b in self.slots.items()
+                 if tt == t and b.currentData() and k != "weapon"}
         render, whole, shown = library.unit_preview(self.utype, slots)
         if not slots:
             pv.setPixmap(icon_pixmap({"infantry": "soldier", "cavalry": "horse", "artillery": "gun"}[self.utype],
@@ -310,6 +334,9 @@ class BuildUnitScreen(Page):
             if t > 1:
                 box.setCurrentIndex(0)
 
+    def foot(self) -> bool:
+        return self.utype == "cavalry" and hasattr(self, "on_foot") and self.on_foot.isChecked()
+
     def tiers(self) -> dict[int, dict[str, str]]:
         out: dict[int, dict[str, str]] = {}
         for (t, k), box in self.slots.items():
@@ -325,7 +352,8 @@ class BuildUnitScreen(Page):
         if not tiers:
             return "Pick the parts for at least one tier."
         for t, s in sorted(tiers.items()):
-            missing = [library.SLOT_TEXT[(self.utype, k)].lower() for k in library.needed(self.utype) if k not in s]
+            missing = [library.SLOT_TEXT[(self.utype, k)].lower() for k in library.needed(self.utype, self.foot())
+                       if k not in s]
             if missing:
                 return f"Tier {t} needs a {' and a '.join(missing)} too."
         return name_problem(self.name.text().strip())
@@ -343,7 +371,8 @@ class BuildUnitScreen(Page):
             return self.show_message(self._problem(), error=True)
         try:
             f = library.new_unit(self.name.text().strip(), self.utype, self.tiers(), self.tag.text().strip(),
-                                 self.gfx.currentData() or "", country_colours=self.own_colours.isChecked())
+                                 self.gfx.currentData() or "", country_colours=self.own_colours.isChecked(),
+                                 on_foot=self.foot())
         except (ValueError, FileExistsError, OSError) as exc:
             return self.show_message(str(exc), error=True)
         from eu4unitgen.ref3d import flow

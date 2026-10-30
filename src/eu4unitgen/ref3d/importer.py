@@ -128,8 +128,8 @@ def credits_for(req: dict) -> tuple[list[str], bool]:
     if req.get("kind") == "unit":
         from eu4unitgen.ref3d import assemble
         for slots in (req.get("tiers") or {}).values():
-            for ref in slots.values():
-                if ref:
+            for k, ref in slots.items():
+                if ref and k != "weapon":
                     try:
                         subjects.append((ref.split(":", 1)[1], assemble.part_dir(ref)[1]))
                     except (FileNotFoundError, ValueError, OSError):

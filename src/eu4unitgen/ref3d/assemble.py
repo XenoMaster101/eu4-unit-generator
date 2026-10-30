@@ -123,7 +123,16 @@ def spec(folder: Path, req: dict) -> dict:
     colours = test["unit_colours"]
     for t, slots in sorted(req["tiers"].items(), key=lambda kv: int(kv[0])):
         t = int(t)
-        if utype == "cavalry":
+        if utype == "cavalry" and req.get("on_foot"):  # Track T: the soldier is the cavalry, no horse
+            from eu4unitgen.core import library
+            sdir, ssub = part_dir(slots["soldier"])
+            se, _ = unitstage.rider_entry(sdir, ssub)
+            if not req.get("country_colours", True):
+                own_colours(se, [], _primary(sdir), Path(folder) / "assembled" / f"foot_{t}")
+            entity, node, stance, _ = library.weapon(slots.get("weapon"))
+            loadout.setdefault("foot_cavalry", {})[str(t)] = {**se, "stance": stance,
+                                                               "weapons": {node: entity} if entity else {}}
+        elif utype == "cavalry":
             hdir, hsub = part_dir(slots["horse"])
             he = unitstage.horse_entry(hdir, hsub)
             if not req.get("country_colours", True):

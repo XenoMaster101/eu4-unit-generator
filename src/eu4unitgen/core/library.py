@@ -28,11 +28,33 @@ UNIT_TYPES = {"infantry": ("soldier",), "cavalry": ("horse", "soldier"), "artill
 OPTIONAL = {"artillery": ("gun",)}
 
 
-def needed(utype: str) -> tuple[str, ...]:
+def needed(utype: str, on_foot: bool = False) -> tuple[str, ...]:
+    if on_foot and utype == "cavalry":  # cavalry on foot (Track T): the soldier is the cavalry, no horse
+        return ("soldier",)
     return tuple(k for k in UNIT_TYPES[utype] if k not in OPTIONAL.get(utype, ()))
+
+
+# the base game's hand weapons a soldier on foot can carry (referenced by name, never copied; none from DLC; read
+# from 1.37): (entity, hand node, animation set, what the app calls it)
+WEAPONS = (
+    ("", None, "base", "none (its own animations)"),
+    ("asian_spear_01", "Right_hand_node", "polearm_twohanded", "yari (Japanese spear)"),
+    ("asian_rifle_02", "Left_hand_node", "rifleman", "matchlock (Japanese)"),
+    ("asian_rifle_03", "Left_hand_node", "rifleman", "later matchlock (Japanese)"),
+    ("muslim_spear", "Right_hand_node", "polearm_twohanded", "spear"),
+    ("western_halbard", "Right_hand_node", "polearm_twohanded", "halberd"),
+    ("cavalry_saber", "Right_hand_node", "polearm_onehanded", "sabre"),
+    ("western_musket", "Left_hand_node", "musketeer", "musket"),
+    ("western_musket_2", "Left_hand_node", "musketeer", "later musket"),
+)
+
+
+def weapon(entity: str | None) -> tuple:
+    """A ``WEAPONS`` row by its entity (none: the first)."""
+    return next((w for w in WEAPONS if w[0] == (entity or "")), WEAPONS[0])
 # what each slot is called in a unit of that type
 SLOT_TEXT = {("infantry", "soldier"): "Soldier", ("cavalry", "horse"): "Horse", ("cavalry", "soldier"): "Rider",
-             ("artillery", "gun"): "Gun", ("artillery", "soldier"): "Crew"}
+             ("artillery", "gun"): "Gun", ("artillery", "soldier"): "Crew", ("cavalry", "weapon"): "Weapon"}
 TYPE_TEXT = {"infantry": "Infantry", "cavalry": "Cavalry", "artillery": "Artillery"}
 STYLES = ("light", "barded", "steppe", "arab")
 STYLE_TEXT = {"light": "light (unarmoured, saddle cloth)", "barded": "barded (armoured, caparison)",
@@ -289,17 +311,19 @@ def suggest(kind: str, gfx: str | None = None, tech_group: str | None = None, cu
 
 # ------------------------------------------------------------------ units
 def new_unit(name: str, utype: str, tiers: dict, country_tag: str = "", gfx: str = "",
-             country_colours: bool = True) -> Path:
+             country_colours: bool = True, on_foot: bool = False) -> Path:
     """A unit (kind ``unit``): ``tiers`` {1: {"horse": ref, "soldier": ref, "gun": ref}}; empty tiers are the game's
     own. Refused if the name is taken, the type is unknown, or no tier has its parts."""
     from eu4unitgen.ref3d import flow
     if utype not in UNIT_TYPES:
         raise ValueError(f"the type is one of {tuple(UNIT_TYPES)}")
     clean = {}
+    foot = bool(on_foot) and utype == "cavalry"
+    allowed = ("soldier", "weapon") if foot else UNIT_TYPES[utype]
     for t, slots in tiers.items():
-        s = {k: v for k, v in (slots or {}).items() if k in UNIT_TYPES[utype] and v}
+        s = {k: v for k, v in (slots or {}).items() if k in allowed and v}
         if s:
-            missing = [k for k in needed(utype) if k not in s]
+            missing = [k for k in needed(utype, foot) if k not in s]
             if missing:
                 raise ValueError(f"tier {t} needs a {' and a '.join(missing)} too")
             clean[str(int(t))] = s
@@ -310,16 +334,16 @@ def new_unit(name: str, utype: str, tiers: dict, country_tag: str = "", gfx: str
         raise FileExistsError(f"a unit or part called {name} exists already")
     f.mkdir(parents=True)
     rights = "; ".join(sorted({f"{ref.split(':', 1)[1]}: {(part(ref) or Part(ref, '', '', f)).rights}"
-                               for s in clean.values() for ref in s.values()}))
+                               for s in clean.values() for k, ref in s.items() if k != "weapon"}))
     for s in clean.values():
         for k, ref in list(s.items()):
-            if ref.startswith("starter:"):
+            if k != "weapon" and ref.startswith("starter:"):
                 fit(ref.split(":", 1)[1])
                 s[k] = "run:" + ref.split(":", 1)[1]
-    first = part(next(iter(clean[min(clean, key=int)].values())))
+    first = part(next(v for k, v in clean[min(clean, key=int)].items() if k != "weapon"))
     req = {"schema": 1, "name": name, "kind": "unit", "type": utype, "tiers": clean, "country": country_tag.upper(),
            "gfx": gfx, "rights": rights, "image": first.image if first else None, "tier": int(min(clean, key=int)),
-           "country_colours": bool(country_colours),
+           "country_colours": bool(country_colours), **({"on_foot": True} if foot else {}),
            "created": time.time()}
     (f / "request.json").write_text(json.dumps(req, indent=1), encoding="utf-8")
     return f

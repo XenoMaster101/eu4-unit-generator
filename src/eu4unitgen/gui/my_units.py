@@ -56,7 +56,9 @@ def unit_text(r: dict) -> str:
         return f"tier {r.get('tier', 1)}: {display(r.get('horse'))} + {display(r.get('soldier'))}"
     bits = []
     for t, s in sorted((r.get("tiers") or {}).items()):
-        bits.append(f"tier {t}: " + " + ".join(display(ref.split(":", 1)[1]) for ref in s.values()))
+        from eu4unitgen.core.library import weapon
+        bits.append(f"tier {t}: " + " + ".join(weapon(ref)[3] if k == "weapon" else display(ref.split(":", 1)[1])
+                                               for k, ref in s.items()))
     return "; ".join(bits)
 
 

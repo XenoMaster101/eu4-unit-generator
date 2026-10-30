@@ -505,7 +505,8 @@ def waiting_for(req: dict) -> list[str]:
     if req["kind"] == "cavalry":
         names = [req.get("horse"), req.get("soldier")]
     elif req["kind"] == "unit":
-        names = sorted({ref.split(":", 1)[1] for s in (req.get("tiers") or {}).values() for ref in s.values()})
+        names = sorted({ref.split(":", 1)[1] for s in (req.get("tiers") or {}).values() for k, ref in s.items()
+                        if k != "weapon"})  # a cavalry on foot's weapon is a base-game entity, not a part
     else:
         return []
     return [n for n in names if n and not (status(folder_of(n)) or {}).get("done")]

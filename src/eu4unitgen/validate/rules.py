@@ -588,6 +588,7 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
              + [(t, r, "gun") for t, r in sorted((getattr(res, "guns", None) or {}).items())]
              # Track T: a soldier as the cavalry itself (the same body as a soldier, worn by the cavalry entity)
              + [(t, r, "soldier") for t, r in sorted((getattr(res, "foot_cavalry", None) or {}).items())])
+    warned: set = set()
     for tier, rec, what in every:
         f = ctx.generated.files.get(rec.file)
         if f is None:
@@ -618,7 +619,8 @@ def fresh_mesh(ctx: Context) -> list[Issue]:
                     out.append(Issue(ERROR, "fresh_mesh", f"its {kind} texture {path} isn't generated", f.path))
         # a person (rider, soldier) up to the largest base-game infantry body's (an imported model keeps more detail)
         budget = GUN_TRIANGLES if what == "gun" else DERIVED_TRI_BUDGET if what in ("rider", "soldier") else HORSE_TRIANGLES
-        if rec.triangles > budget:
+        if rec.triangles > budget and f.path not in warned:  # once per model (tiers may share one)
+            warned.add(f.path)
             out.append(Issue(WARNING, "fresh_mesh", f"{rec.triangles} triangles (budget {budget})", f.path))
         if what == "gun":  # the muzzle locator on the gun (moved to our muzzle: UNVERIFIED in game until test 38)
             from eu4unitgen.core.fresh_mesh import base_arrays
