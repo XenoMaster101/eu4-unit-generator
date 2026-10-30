@@ -2,6 +2,12 @@
 
 Each version's section is the text of its GitHub release and what the app's Help → Check for updates shows.
 
+## 1.0.5
+
+- Check for updates: the update now keeps running after the app closes, writes its own log
+  (settings\logs\update.log), and leaves the Start-menu and Desktop shortcuts alone for a copy Windows doesn't list
+  as installed (a second copy). Tested end to end: downloaded from GitHub, checked, updated in place, restarted.
+
 ## 1.0.4
 
 - **Smart App Control:** on PCs with it turned on, Windows blocks the unsigned setup.exe with no way past it. Use the
