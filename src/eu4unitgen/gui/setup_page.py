@@ -197,8 +197,8 @@ class AboutPage(Page):
                        "Images you use must be yours or ones you may use; your rights statement is kept with each unit.")
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        from eu4unitgen.core import inventory
-        table = QLabel(licences.html() + "<h3>What is installed (inventory)</h3>" + inventory.html())
+        from eu4unitgen.core import setup
+        table = QLabel(licences.html() + "<h3>What setup downloads</h3>" + setup.downloads_html())
         table.setWordWrap(True)
         table.setTextFormat(Qt.RichText)
         table.setTextInteractionFlags(Qt.TextSelectableByMouse)

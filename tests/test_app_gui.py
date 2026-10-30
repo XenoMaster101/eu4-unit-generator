@@ -351,7 +351,8 @@ def test_example_walks_a_finished_cavalry(win, tmp_path, monkeypatch):
     (c / "preview" / "quality.json").write_text(json.dumps({"summary": "Usable; see the notes.", "measures": {
         "silhouette": {"verdict": "ok", "text": "Its outline overlaps the reference's by 60%."}}}), encoding="utf-8")
     s = example.steps(flow.root())
-    assert len(s) == 10 and s[0].images and "Usable" in s[7].lines[0] and "Add to mod" in s[9].title
+    assert len(s) == 11 and s[0].images and "Usable" in s[7].lines[0] and "Add to mod" in s[9].title
+    assert "Byzantine cataphract cavalry" in s[10].text  # the worked example in the Library (Release 1.0)
     from eu4unitgen.gui.help_page import ExampleDialog
     monkeypatch.setattr(example, "steps", lambda *a: s)
     d = ExampleDialog(win)

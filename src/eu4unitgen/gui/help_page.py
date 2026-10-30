@@ -16,6 +16,30 @@ FAQ = (
     ("Soldier, horse, cavalry: what's the difference?", "A soldier is one person: on foot it's your infantry and the "
      "crew of your guns. A horse is just the horse. Cavalry puts one of your soldiers on one of your horses; you can mix "
      "and reuse them."),
+    ("Can I use a 3D model instead of a picture?", "Yes: Make a part, then Import a 3D model (.glb preferred, or "
+     ".fbx). No AI is needed. Give its licence (your own work, CC0, or CC BY with the credit, which the app writes "
+     "into the mod) and pick the profile: standard for normal proportions, stylised for exaggerated ones (a big "
+     "chibi head is kept whole and rigid). Rigged models fit best; the app fits the limbs to the game's skeleton."),
+    ("What are “the checks before showing”?", "Every part is checked before you see it: the arms brought down from "
+     "a T-pose, the limbs on the skeleton, weapons and shields rigid and in the hand, clipping and folds in the "
+     "animations. It makes up to three passes, trying a fix between them, and tells you in plain words what's left."),
+    ("Cavalry without a horse?", "Build a unit → Cavalry → On foot: each tier's soldier stands in as the cavalry, "
+     "holding the base-game weapon you pick for that tier (a yari, a matchlock, a halberd, a sabre, a musket...) "
+     "and playing the infantry animations that go with it."),
+    ("What is a culture pack?", "A mod that adds a new graphical culture (e.g. mynationgfx) with your unit's whole "
+     "set. Give it to any nation with graphical_culture = mynationgfx in its country file. Add to mod → “A culture "
+     "pack”; the mod's README.txt lists every file and how to install it."),
+    ("What's in an exported mod?", "Every export writes a README.txt into the mod: each folder and file, what the "
+     "game uses it for, and how to install it. Add to mod shows the same text under “What's in it”."),
+    ("How do I update the app?", "Help → Check for updates. If there's a newer version it shows what changed, and "
+     "Download and install updates the app in place: your units, settings, library and downloads stay. No "
+     "uninstalling."),
+    ("Windows said “Windows protected your PC”.", "The installer isn't code-signed (that needs a paid yearly "
+     "certificate). Click More info → Run anyway. The release page's SHA256SUMS.txt lets you check the download. "
+     "Updates installed from inside the app don't show the warning."),
+    ("What does the app download?", "Setup's first page lists every download: what it is, why it's needed, its "
+     "size, licence, where it comes from and where it goes. Only Blender and io_pdx_mesh are required; the AI "
+     "(about 40 GB) is only for making parts from your own pictures."),
     ("What makes a good picture?", "One subject on a plain background, the whole of it in frame: a soldier from the "
      "front with the arms a little out, a horse from the side. The picture guide shows good and bad examples."),
     ("What does “achievement-safe” mean?", "EU4 turns achievements off when a mod changes the game's rules. An "
@@ -30,9 +54,9 @@ FAQ = (
      "protection."),
     ("A run stopped or failed.", "Open it in the Library: it says what happened and what to do, and Resume carries on "
      "from the last finished step. The 3D steps wait while EU4 is open (it holds the graphics card)."),
-    ("Which pictures may I use?", "Your own, ones you made with an AI tool whose output you own, or ones licensed for "
-     "this use. Don't use characters, uniforms or logos you don't have the rights to. Each unit keeps your rights "
-     "statement."),
+    ("Which pictures and models may I use?", "Your own, ones you made with an AI tool whose output you own, or ones "
+     "licensed for this use (CC0, or CC BY with its credit). Each part keeps its source, author and licence, and a "
+     "CC BY credit is written into the mod for you."),
     ("Where are my files?", "Everything is in the app's one folder (chosen at install): your units in work\\projects, "
      "your pictures in work\\references, result sheets in work\\result sheets. Nothing of the game is ever copied."),
 )

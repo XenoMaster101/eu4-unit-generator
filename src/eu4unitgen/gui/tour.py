@@ -60,8 +60,11 @@ def make(out: Path | None = None) -> list[tuple[str, str]]:
 
     try:
         w.go("home")
-        shot("Home: pick what to make. A soldier is one person from a front picture; cavalry is a horse with one of "
-             "your soldiers riding it. Or press “Show me an example” first.")
+        shot("Home: build a unit from your library, or make a new part from a picture or a 3D model. Or press "
+             "“Show me an example” first.")
+        w.go("build")
+        shot("Build a unit: infantry, cavalry or artillery, a part per tier. Cavalry can be on foot, with a "
+             "base-game weapon per tier. No AI needed.")
         pic = _picture(out)
         w.go("new", kind="soldier")
         shot("New unit, step 1: the picture. The guide on the right shows what works, with good and bad examples.")
@@ -87,10 +90,11 @@ def make(out: Path | None = None) -> list[tuple[str, str]]:
             shot("A unit's page: it turns round as the game draws it, with the quality report in plain words. Edit the "
                  "look, put a soldier on a horse, or add it to your mod from here.")
             w.my_units.detail.add_box.show()
-            shot("Add to mod: a normal mod for one country, or an achievement-safe one (graphics only). If Windows "
-                 "blocks the mod folder, the app tells you exactly what to copy.")
+            shot("Add to mod: a normal mod for one country, an achievement-safe one (graphics only), or a culture "
+                 "pack any nation can use. Every export writes a README saying what each file is for.")
         w.go("help")
-        shot("Help: this tour, the example, the picture guide, answers to common questions, and Check for updates.")
+        shot("Help: this tour, the example, the picture guide, answers to common questions, and Check for updates "
+             "(it installs a newer version in place).")
     finally:
         w.close()
         w.deleteLater()

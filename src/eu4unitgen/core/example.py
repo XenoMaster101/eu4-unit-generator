@@ -131,8 +131,15 @@ def steps(root: Path | None = None) -> list[Step] | None:
                     "The Library shows every finished unit turning round, as the game draws it.",
                     frames=[str(p) for p in flow.turntable_frames(f["cavalry"])]))
     out.append(Step("10. Add to mod",
-                    "Last, Add to mod writes the unit into a mod folder you choose: either a normal mod (a new unit for "
-                    "one country, with its own stats) or an achievement-safe one (graphics only: it re-dresses a "
-                    "graphical culture's unit and leaves the game's checksum alone). If Windows blocks the mod folder, "
-                    "the app saves it elsewhere and tells you exactly what to copy."))
+                    "Last, Add to mod writes the unit into a mod folder you choose: a normal mod (a new unit for one "
+                    "country, with its own stats), an achievement-safe one (graphics only: it re-dresses a graphical "
+                    "culture's unit and leaves the game's checksum alone), or a culture pack (a new graphical culture "
+                    "any nation can be given). Every export writes a README.txt listing each file, what the game uses "
+                    "it for and how to install it. If Windows blocks the mod folder, the app saves it elsewhere and "
+                    "tells you exactly what to copy."))
+    out.append(Step("11. Try it yourself",
+                    "This unit comes with the app: the Library's “Byzantine cataphract cavalry” is the cataphract "
+                    "riding the cataphract horse, for Byzantium, built from the default library on first open (a few "
+                    "minutes, no AI). Open it, change a tier or its colours, and press Add to mod to see the whole "
+                    "export and its README."))
     return out

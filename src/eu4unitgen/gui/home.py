@@ -15,10 +15,12 @@ CHOICES = (("build", "build", "Build a unit",
             "Infantry, cavalry or artillery, put together from your library tier by tier. The starter parts are "
             "already there, so this works without the AI.",
             "Pick the parts for each tier (e.g. tier 1 a light horse, tier 3 a barded one); a few minutes"),
-           ("new", "part", "Make a new part from a picture",
-            "A soldier from the front, a horse from the side, a gun from three-quarter. Made once, used in as many "
-            "units as you like. Needs the AI setup.",
-            "The guided steps: your picture, its name and rights, then the app builds it (15 to 30 minutes)"))
+           ("new", "part", "Make a new part",
+            "From a picture (a soldier from the front, a horse from the side, a gun from three-quarter; needs the AI "
+            "setup) or from a 3D model you import (.glb or .fbx; no AI needed). Made once, used in as many units as "
+            "you like.",
+            "The guided steps: your picture or model, its name and licence, then the app builds it and checks it "
+            "(a few minutes for a model, 15 to 30 for a picture)"))
 
 
 class HomeScreen(Page):
@@ -28,8 +30,8 @@ class HomeScreen(Page):
         col.setSpacing(14)
         h1 = label("What should your soldiers look like?", "h1")
         h1.setAlignment(Qt.AlignCenter)
-        sub = label("Make Europa Universalis IV units from your own pictures: build them from a library of parts, "
-                    "and add them to your mod.", "muted")
+        sub = label("Make Europa Universalis IV units from your own pictures and 3D models: build them from a library "
+                    "of parts, and add them to your mod.", "muted")
         sub.setAlignment(Qt.AlignCenter)
         col.addWidget(h1)
         col.addWidget(sub)

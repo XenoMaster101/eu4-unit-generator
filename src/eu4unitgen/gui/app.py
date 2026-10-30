@@ -25,7 +25,7 @@ from eu4unitgen.gui.theme import tokens
 NAV = (("home", "Home", "home", "The start: build a unit, make a part, or watch the example"),
        ("build", "Build a unit", "build", "Put a unit (infantry, cavalry, artillery) together from the parts in your "
                                           "library, tier by tier. No AI needed."),
-       ("new", "Make a part", "part", "Make a soldier, a horse or a gun from a picture, step by step (needs the AI)"),
+       ("new", "Make a part", "part", "Make a soldier, a horse or a gun from a picture (needs the AI) or from a 3D model you import (no AI)"),
        ("units", "Library", "library", "Your parts (horses, soldiers, guns) and units: previews, tags, edits, Add to mod"),
        ("setup", "Setup", "setup", "Paths, checks and the one-time setup of Blender and the AI"),
        ("help", "Help", "help", "The tour, the example, the picture guide, questions and answers, updates"))
