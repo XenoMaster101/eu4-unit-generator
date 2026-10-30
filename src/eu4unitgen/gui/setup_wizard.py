@@ -199,9 +199,9 @@ class SetupWizard(QDialog):
     def refresh(self):
         from eu4unitgen.core import setup
         try:
-            self.done = setup.state()
+            self.done_steps = setup.state()
         except Exception:  # noqa: BLE001 - shows as not done
-            self.done = {}
+            self.done_steps = {}
         cur = self.list.currentRow()
         self.list.blockSignals(True)
         self.list.clear()
@@ -219,7 +219,7 @@ class SetupWizard(QDialog):
                 continue
             n += 1
             indent = "      " if s.key in setup.AI_STEPS else ""
-            self.list.addItem(QListWidgetItem(f"{indent}{'✔' if self.done.get(s.key) else '○'}  {n}. {s.title}"))
+            self.list.addItem(QListWidgetItem(f"{indent}{'✔' if self.done_steps.get(s.key) else '○'}  {n}. {s.title}"))
         self.list.blockSignals(False)
         if cur >= 0:
             self.list.setCurrentRow(cur)
@@ -245,9 +245,9 @@ class SetupWizard(QDialog):
         self.bar.setVisible(not over)
         self.go.setText("Start with step 1" if s.key == "overview" else "Start the AI pack" if s.key == "ai_pack"
                         else "Use this folder" if s.key == "ai_folder"
-                        else ("Run again" if self.done.get(s.key) else "Download and run this step"))
-        self.state.setText("done" if self.done.get(s.key) else "")
-        if s.key == "blender" and self.done.get("blender"):
+                        else ("Run again" if self.done_steps.get(s.key) else "Download and run this step"))
+        self.state.setText("done" if self.done_steps.get(s.key) else "")
+        if s.key == "blender" and self.done_steps.get("blender"):
             self.state.setText("Blender 4.2 was found: nothing to install.")
 
     def _pick_folder(self):
@@ -261,7 +261,7 @@ class SetupWizard(QDialog):
         if s.key in ("overview", "ai_pack"):  # to the first step not done (of the AI pack, from its page)
             start = self.list.currentRow() + 1
             return self.list.setCurrentRow(next((i for i, t in enumerate(self.steps) if i >= start
-                                                 and t.key not in ("overview", "ai_pack") and not self.done.get(t.key)),
+                                                 and t.key not in ("overview", "ai_pack") and not self.done_steps.get(t.key)),
                                                 start))
         self.root = Path(self.folder.text().strip() or self.root)
         if s.key == "ai_folder":
@@ -269,10 +269,15 @@ class SetupWizard(QDialog):
             config.update(ai_root=str(self.root))
             self.log.appendPlainText(f"The AI parts go in {self.root}.")
             return self._after(True, "")
-        if s.key == "weights" and not self.token.text().strip() and not self.done.get("weights"):
+        if s.key == "weights" and not self.token.text().strip() and not self.done_steps.get("weights"):
             self.log.appendPlainText("DINOv3 needs a Hugging Face token: open its licence page, accept it, make a read "
                                      "token and paste it above. (The other weights download without one.)")
-        cmds = setup.plan(s.key, self.token.text().strip() or None, self.root)
+        try:
+            cmds = setup.plan(s.key, self.token.text().strip() or None, self.root)
+        except setup.SetupError as exc:
+            self.state.setText(str(exc))
+            self.log.appendPlainText(f"Can't run this step yet: {exc}")
+            return
         self.go.setEnabled(False)
         self.state.setText("running…")
         self.runner = StepRunner(cmds)

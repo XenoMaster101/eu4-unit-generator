@@ -43,14 +43,14 @@ def test_no_manifest_means_tick_by_hand(tmp_path):
 
 
 def test_f2_find_blender_prefers_the_pinned_series(tmp_path, monkeypatch):
-    """F2: of several Blenders, the pinned 4.2 series wins; others come with a warning; BLENDER_PATH wins."""
+    """F2: of several Blenders, the pinned 4.2 series wins; another version is never taken; BLENDER_PATH wins."""
     monkeypatch.delenv("BLENDER_PATH", raising=False)
     new, old = tmp_path / "5.2" / "blender.exe", tmp_path / "4.2" / "blender.exe"
     exe, note = find_blender([(new, "5.2.2"), (old, "4.2.23")], pinned="4.2")
     assert exe == old and note == "found Blender 4.2.23"
-    exe, note = find_blender([(new, "5.2.2")], pinned="4.2")
-    assert exe == new and "needs 4.2 LTS" in note
+    exe, note = find_blender([(new, "5.2.2")], pinned="4.2")  # never another version (1.0.3)
+    assert exe is None and "can't use" in note
     assert find_blender([], pinned="4.2")[0] is None
-    assert find_blender([(new, "4.20.1")], pinned="4.2")[0] == new and "only" in find_blender([(new, "4.20.1")], pinned="4.2")[1]
+    assert find_blender([(new, "4.20.1")], pinned="4.2")[0] is None
     monkeypatch.setenv("BLENDER_PATH", str(new))
     assert find_blender([(old, "4.2.23")])[0] == new

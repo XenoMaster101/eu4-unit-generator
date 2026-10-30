@@ -57,7 +57,7 @@ def test_a_release_without_an_installer_points_to_its_page():
 
 def test_this_copy_knows_its_repository_and_version():
     from eu4unitgen import __version__
-    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.2"
+    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.3"
     assert updates.expected_sha256(f"{'b' * 64} *a.exe\n", "a.exe") == "b" * 64
 
 
@@ -71,3 +71,34 @@ def test_every_setup_step_lists_its_downloads_before_it_runs():
     html = setup.downloads_html()
     assert "Needed for everything" in html and "the AI pack" in html and "DINOv3 License" in html
     assert "only to make parts" not in html  # said once, in the group's heading, not on every row
+
+
+def test_setup_never_takes_another_blender_version(tmp_path, monkeypatch):
+    monkeypatch.delenv("BLENDER_PATH", raising=False)
+    # 1.0.2 on the user's PC: Blender 5.2 was taken and saved; io_pdx_mesh can't run in it ("No module named 'imp'")
+    from pathlib import Path
+    from eu4unitgen.core import config, install
+    b52, b42 = tmp_path / "Blender 5.2" / "blender.exe", tmp_path / "Blender 4.2" / "blender.exe"
+    exe, note = install.find_blender([(b52, "5.2.2")])
+    assert exe is None and "5.2.2" in note and "can't use" in note
+    assert install.find_blender([(b52, "5.2.2"), (b42, "4.2.23")])[0] == b42
+    assert not config.blender_ok(b52) and config.blender_ok(b42)
+    assert config.blender_ok(Path(r"D:\EU4 Unit Generator\tools\blender\blender.exe"))  # the app's own
+
+
+def test_the_setup_wizard_closes(monkeypatch):
+    # 1.0.0-1.0.2: the wizard kept its steps' state in ``self.done``, hiding QDialog.done(): Close crashed
+    # ("'dict' object is not callable") on the user's PC
+    from PySide6.QtWidgets import QApplication
+    from eu4unitgen.core import setup
+    from eu4unitgen.gui.setup_wizard import SetupWizard
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(setup, "state", lambda: {"blender": True})
+    w = SetupWizard()
+    keys = [s.key for s in w.steps]
+    assert keys.index("ai_pack") < keys.index("wsl") and keys[:3] == ["overview", "blender", "io_pdx_mesh"]
+    w.list.setCurrentRow(keys.index("ai_pack"))
+    w.run_step()  # the AI pack's page goes to its first step not done
+    assert w.steps[w.list.currentRow()].key == "wsl"
+    w.accept()  # crashed
+    app.processEvents()

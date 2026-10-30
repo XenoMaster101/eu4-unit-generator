@@ -175,6 +175,8 @@ def test_fingerprints_change_only_for_units_an_edit_changed(session, tmp_path, m
 
 @pytest.mark.skipif(not os.environ.get("EU4_PATH"), reason="needs the real install (EU4_PATH) and Blender")
 def test_real_blender_gallery(tmp_path):
+    if not os.environ.get("BLENDER_PATH"):  # conftest sets it from the installed app's own Blender 4.2 only
+        pytest.skip("needs the installed app's Blender 4.2")
     from eu4unitgen.core.character import CharacterSpec
     from eu4unitgen.core.look import Look, compile_look
 

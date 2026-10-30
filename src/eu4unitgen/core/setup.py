@@ -152,6 +152,10 @@ ENV_NAME = "ai_env"
 NEED_GB = 60
 
 
+class SetupError(RuntimeError):
+    """A step that can't run yet, in plain words (shown in the wizard)."""
+
+
 @dataclass
 class Cmd:
     title: str
@@ -247,9 +251,11 @@ def app_python() -> str:
 
 
 def blender_installed() -> Path | None:
+    """The Blender 4.2 setup counts as installed: the app's own (with a root, only that one: the installed app always
+    uses its portable copy), else a 4.2 installed on this PC; never another version."""
     b = layout.blender_exe()
-    if b is not None and b.is_file():
-        return b
+    if b is not None:
+        return b if b.is_file() else None
     from eu4unitgen.core import install
     exe, _ = install.find_blender()
     return exe if exe and Path(exe).is_file() else None
@@ -288,7 +294,9 @@ def plan(key: str, token: str | None = None, root: Path | None = None) -> list[C
                     admin=True)]
     if key == "io_pdx_mesh":
         z = (top / "settings" / "tmp" if top is not None else tmp) / "blender-io_pdx_mesh.zip"
-        b = cfg.blender() or blender_installed()
+        b = blender_installed()
+        if b is None:
+            raise SetupError("Blender 4.2 isn't installed yet: run step 1 (Blender) first")
         return [Cmd("Download io_pdx_mesh 0.91", download=(IO_PDX_MESH, str(z))),
                 Cmd("Install it into Blender", [str(b), "--background", "--command", "extension", "install-file", "-r",
                                                  "user_default", "-e", str(z)])]
@@ -343,13 +351,14 @@ def state() -> dict[str, bool]:
     cfg = config.load()
     root = default_ai_root()
     out = {}
-    b = cfg.blender() or blender_installed()
-    out["blender"] = bool(b) and Path(b).is_file()
+    out["blender"] = blender_installed() is not None
     out["io_pdx_mesh"] = io_pdx_mesh_dir().is_dir()
     out["ai_folder"] = bool(cfg.ai_root) or layout.root() is not None
     wsl = checks.check_wsl()
     out["wsl"] = "isn't installed" not in wsl.what
-    out["ubuntu"] = wsl.ok or "environment isn't set up" in wsl.what
+    # the app's own distribution registered (WSL being there isn't enough: after an uninstall the distribution is
+    # gone while WSL stays, and Ubuntu showed as done)
+    out["ubuntu"] = out["wsl"] and _registered(distro())
     out["trellis_env"] = wsl.ok and (root / "TRELLIS.2" / "trellis2").is_dir()
     py = cfg.ai() or str(root / ENV_NAME / "Scripts" / "python.exe")
     out["ai_env"] = Path(py).is_file()
@@ -365,7 +374,7 @@ def adopt(root: Path) -> dict:
     if py.is_file() and not config.load().ai():
         found["ai_python"] = str(py)
     b = blender_installed()
-    if b and not config.load().blender_path:
+    if b and layout.root() is None and not config.load().blender_path:  # an installed app finds its own by itself
         found["blender_path"] = str(b)
     config.update(**found)
     if layout.root() is not None and not layout.marker().get("wsl_distro") and _registered(distro()):

@@ -172,8 +172,7 @@ def check_wsl() -> Check:
     rc, out = _run(cfg.wsl_base() + ["-e", "bash", "-lc", f"test -x {sh_python(cfg.wsl_python)} && echo ok"], 60)
     if "ok" not in out:
         return Check("wsl", False, "WSL is there, but the TRELLIS.2 environment isn't set up in it.",
-                     "Open the Setup screen and press \"Set up TRELLIS.2\" (about 40 minutes; it asks for your Linux "
-                     "password once).")
+                     "Open Setup and run the AI pack's steps from Ubuntu on (TRELLIS.2 takes about 40 minutes).")
     return Check("wsl", True, "WSL and the TRELLIS.2 environment are ready.")
 
 

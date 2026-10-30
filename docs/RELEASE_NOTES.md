@@ -2,6 +2,17 @@
 
 Each version's section is the text of its GitHub release and what the app's Help → Check for updates shows.
 
+## 1.0.3
+
+Setup fixes (found on a PC with another Blender installed and after an uninstall):
+- **Blender:** setup took any Blender it found (e.g. 5.2), saved it in the settings and skipped downloading its
+  own; io_pdx_mesh then failed ("No module named 'imp'"). The app now only uses Blender 4.2: its own copy, or a 4.2
+  installed on the PC. Another version saved in the settings is ignored, and io_pdx_mesh waits for step 1.
+- **Ubuntu:** showed as done whenever WSL was installed, even after an uninstall removed the app's Linux disk. It now
+  checks the app's own Linux (EU4UnitGen) is there, and the AI steps never run in another Linux of yours.
+- **The wizard's Close button** crashed ("'dict' object is not callable").
+- All download addresses and pinned package versions checked live.
+
 ## 1.0.2
 
 - Setup is in two groups: **Needed for everything** (Blender and io_pdx_mesh, about 640 MB) and **Optional: the AI

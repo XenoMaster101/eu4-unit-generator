@@ -234,10 +234,8 @@ def find_blender(candidates: list[tuple[Path, str | None]] | None = None,
     for exe, version in cands:
         if version and (version == series or version.startswith(series + ".")):
             return exe, f"found Blender {version}"
-    unknown = [c for c in cands if c[1] is None]
-    if unknown:
-        return unknown[0][0], f"found Blender (version unknown) at {unknown[0][0]}; the app needs {series} LTS"
-    if cands:
-        exe, version = cands[0]
-        return exe, f"found Blender {version} only; the app needs {series} LTS (3D parts may fail)"
-    return None, f"Blender {series} LTS not found: 3D parts and previews need it (set its path in 1. Settings)"
+    # never another version (1.0.2, the user's PC: Blender 5.2 was taken, saved in the settings, and io_pdx_mesh
+    # couldn't run in it, "No module named 'imp'"): setup downloads the app's own 4.2 instead
+    others = ", ".join(sorted({v or "unknown version" for _, v in cands}))
+    return None, (f"Blender {series} LTS not found" + (f" (this PC has Blender {others}, which the app can't use)"
+                                                       if cands else "") + ": Setup downloads the app's own")

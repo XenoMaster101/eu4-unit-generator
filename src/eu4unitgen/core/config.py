@@ -136,12 +136,12 @@ class Config:
         return layout.folder("ai")
 
     def blender(self) -> Path | None:
-        v = self._env("blender_path")
-        if v:
-            return Path(v)
         from eu4unitgen.core import layout
         b = layout.blender_exe()
-        if b is not None and b.is_file():
+        v = self._env("blender_path")
+        if v and blender_ok(Path(v)):
+            return Path(v)
+        if b is not None and b.is_file():  # the app's own portable 4.2
             return b
         from eu4unitgen.core.project import default_blender_path
         return default_blender_path()
@@ -152,10 +152,23 @@ class Config:
         return ["wsl.exe"] + (["-d", d] if d else [])
 
 
+def blender_ok(exe: Path) -> bool:
+    """Whether ``exe`` may be the app's Blender: the pinned series (4.2) by its folder's name, or a folder with no
+    version in its name (the app's own tools\\blender, a portable copy). Another version saved in the settings (1.0.2:
+    the user's Blender 5.2) is ignored."""
+    import re
+    from eu4unitgen.core.project import BLENDER_VERSION
+    series = ".".join(BLENDER_VERSION.split(".")[:2])
+    m = re.search(r"(\d+\.\d+)", Path(exe).parent.name)
+    return m is None or m.group(1) == series
+
+
 def layout_distro() -> str:
-    """The distribution the root's app registered (core.layout's marker), or "" (WSL's default one)."""
+    """The distribution the root's app uses (core.layout's marker, else the one its setup installs, layout.DISTRO),
+    or "" without a root (WSL's default one). Never WSL's default with a root: before the Ubuntu step that could be
+    another Linux of the user's."""
     from eu4unitgen.core import layout
-    return layout.marker().get("wsl_distro") or "" if layout.root() is not None else ""
+    return (layout.marker().get("wsl_distro") or layout.DISTRO) if layout.root() is not None else ""
 
 
 def load() -> Config:
