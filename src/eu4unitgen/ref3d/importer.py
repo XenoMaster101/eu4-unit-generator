@@ -17,7 +17,9 @@ import shutil
 from pathlib import Path
 
 FORMATS = (".glb", ".fbx")
-LICENCES = {"cc0": "CC0 (public domain)", "cc_by": "CC BY (credit the author)", "own": "My own work"}
+LICENCES = {"cc0": "CC0 (public domain)", "cc_by": "CC BY (credit the author)", "own": "My own work",
+            "private": "Private use (a private mod, not published)"}  # the user, 2026-10-29: rule 8's copyright part
+# dropped, the mod is private to the user's friend group
 MAX_MB = 300
 
 
@@ -68,6 +70,8 @@ def rights_text(licence: str, credit: str = "") -> str:
         return "3D model under CC0 (public domain)" + (f": {credit}" if credit else "")
     if licence == "cc_by":
         return f"3D model under CC BY, credit: {credit}"
+    if licence == "private":
+        return "3D model for private use (not published)" + (f": {credit}" if credit else "")
     return "3D model: my own work" + (f" ({credit})" if credit else "")
 
 

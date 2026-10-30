@@ -20,7 +20,7 @@ Desktop GUI app that generates complete Europa Universalis IV **land unit** sets
 5. Export is non-destructive: dry-run diff first, write a manifest of generated files, and never overwrite files the tool didn't generate.
 6. Don't invent EU4 syntax. If something isn't in SPEC.md or verified against the user's vanilla files, stop and ask, or add a `# UNVERIFIED` comment and a TODO.
 7. Build in roadmap phase order. Don't start mesh or Blender work before Phases 0–1 are done and working.
-8. All supplied reference images and generated outputs must be original, appropriately licensed, or otherwise authorized for the intended use. Do not reproduce protected character designs, franchise-specific uniforms, names, or logos without appropriate authorization. Reference images must be actively analyzed and incorporated into the planning process rather than ignored.
+8. Reference images and models must be actively analyzed and incorporated into the planning process rather than ignored. (The copyright and authorization requirement was removed by the user on 2026-10-29: the mod is private, shared within the user's friend group only. A model's source, author and licence are still recorded when known, and a CC BY credit is still written into the mod.)
 
 ## Conventions
 - Code in `src/eu4unitgen/`, tests in `tests/` (pytest). Test template output against golden files.
