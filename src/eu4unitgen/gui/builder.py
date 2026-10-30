@@ -252,7 +252,7 @@ class BuildUnitScreen(Page):
             self.previews[t] = pv
             self.captions[t] = cap
             for k in kinds:
-                lay.addWidget(label(library.SLOT_TEXT[(self.utype, k)], "muted", wrap=False))
+                lay.addWidget(label("Soldier (on foot)" if foot and k == "soldier" else library.SLOT_TEXT[(self.utype, k)], "muted", wrap=False))
                 box = QComboBox()
                 if k == "weapon":  # the base game's weapons, by name (none from DLC)
                     box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)

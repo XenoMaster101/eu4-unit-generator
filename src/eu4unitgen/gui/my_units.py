@@ -89,7 +89,7 @@ class MyUnitsScreen(Page):
         head.addWidget(primary("Build a unit", lambda: window.go("build"),
                                "Put a unit together from the parts here, tier by tier (no AI needed)"))
         gl.addLayout(head)
-        gl.addWidget(label("Parts are made once from a picture and used in as many units as you like: infantry is a "
+        gl.addWidget(label("Parts are made once from a picture or a 3D model and used in as many units as you like: infantry is a "
                            "soldier, cavalry a horse and a soldier riding it, artillery a gun and a soldier as its "
                            "crew.", "explain"))
         self.ai_note = label("", "explain")
