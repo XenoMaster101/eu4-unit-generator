@@ -2,6 +2,13 @@
 
 Each version's section is the text of its GitHub release and what the app's Help → Check for updates shows.
 
+## 1.0.4
+
+- **Smart App Control:** on PCs with it turned on, Windows blocks the unsigned setup.exe with no way past it. Use the
+  zip instead: right-click it → Properties → tick **Unblock** → OK, unzip it, and double-click **Install EU4 Unit
+  Generator** (it runs on the app's own Python, which is signed). It installs, or updates an installed copy in place.
+- Help → Check for updates now updates from the zip the same way, so it works with Smart App Control on.
+
 ## 1.0.3
 
 Setup fixes (found on a PC with another Blender installed and after an uninstall):
@@ -28,7 +35,7 @@ Setup fixes (found on a PC with another Blender installed and after an uninstall
 
 The first public release.
 
-**Installing:** download `eu4unitgen-1.0.0-setup.exe` and run it. The installer isn't code-signed, so Windows may show
+**Installing:** download `eu4unitgen-1.0.0-setup.exe` and run it (blocked by Smart App Control? use the zip: see 1.0.4). The installer isn't code-signed, so Windows may show
 "Windows protected your PC": click **More info → Run anyway**. (Signing costs a yearly certificate; the source is all
 here, and `SHA256SUMS.txt` lets you check the download.) Everything goes into one folder you choose (default
 `D:\EU4 Unit Generator`). On first start the app lists every extra download it needs (Blender, the AI models and

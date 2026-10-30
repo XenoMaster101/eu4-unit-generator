@@ -10,9 +10,9 @@ from eu4unitgen.core import updates
 
 def release(sha):
     return {"tag_name": "v1.0.1", "html_url": "https://x/rel", "body": "fixes",
-            "assets": [{"name": "eu4unitgen-1.0.1-setup.exe", "browser_download_url": "https://x/setup", "size": 5},
+            "assets": [{"name": "eu4unitgen-1.0.1-setup.exe", "browser_download_url": "https://x/exe"},
                        {"name": "SHA256SUMS.txt", "browser_download_url": "https://x/sums"},
-                       {"name": "eu4unitgen-1.0.1-windows.zip", "browser_download_url": "https://x/zip"}]}
+                       {"name": "eu4unitgen-1.0.1-windows.zip", "browser_download_url": "https://x/setup", "size": 5}]}
 
 
 class Resp(io.BytesIO):
@@ -29,20 +29,32 @@ def test_a_newer_release_with_an_installer_can_be_installed_in_place(tmp_path):
     data = b"SETUP"
     good = hashlib.sha256(data).hexdigest()
     u = updates.check("me/app", "1.0.0", fetch=lambda url: release(good))
-    assert u.newer and u.setup_name == "eu4unitgen-1.0.1-setup.exe" and u.sums_url and u.notes == "fixes"
+    assert u.newer and u.setup_name == "eu4unitgen-1.0.1-windows.zip" and u.sums_url and u.notes == "fixes"
     assert "in place" in u.text
-    files = {"https://x/sums": f"{good}  eu4unitgen-1.0.1-setup.exe\n{'0' * 64}  other\n".encode(),
+    files = {"https://x/sums": f"{good}  eu4unitgen-1.0.1-windows.zip\n{'0' * 64}  other\n".encode(),
              "https://x/setup": data}
     seen = []
     out = updates.download(u, tmp_path, progress=lambda d, t: seen.append(d), opener=lambda url: Resp(files[url]))
     assert out.read_bytes() == data and seen[-1] == len(data)
-    cmd = updates.install_command(out, tmp_path / "root")
-    assert cmd[0] == str(out) and "/SILENT" in cmd and "/RELAUNCH=1" in cmd and f"/DIR={tmp_path / 'root'}" in cmd
+    cmd = updates.install_command(tmp_path / "files", tmp_path / "root", 123, tmp_path / "pythonw.exe")
+    assert cmd[0] == "powershell" and "Wait-Process -Id 123" in cmd[-1] and "install.ps1" in cmd[-1]
+    assert f"-Root '{tmp_path / 'root'}'" in cmd[-1] and "Start-Process" in cmd[-1]
+
+
+def test_the_update_uses_the_zip_and_unpacks_its_installer(tmp_path):
+    # Smart App Control blocks an unsigned setup.exe; the zip's install.ps1 runs on the app's signed Python
+    import zipfile
+    u = updates.check("me/app", "1.0.0", fetch=lambda url: release("x"))
+    assert u.setup_name.endswith("-windows.zip")
+    z = tmp_path / "eu4unitgen-1.0.1-windows.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.writestr("EU4 Unit Generator/files/install.ps1", "# installer")
+    assert (updates.unpack(z) / "install.ps1").is_file()
 
 
 def test_a_download_that_doesnt_match_its_checksum_is_refused_and_deleted(tmp_path):
     u = updates.check("me/app", "1.0.0", fetch=lambda url: release("x"))
-    files = {"https://x/sums": f"{'a' * 64}  eu4unitgen-1.0.1-setup.exe\n".encode(), "https://x/setup": b"EVIL"}
+    files = {"https://x/sums": f"{'a' * 64}  eu4unitgen-1.0.1-windows.zip\n".encode(), "https://x/setup": b"EVIL"}
     with pytest.raises(ValueError, match="checksum"):
         updates.download(u, tmp_path, opener=lambda url: Resp(files[url]))
     assert not list(tmp_path.iterdir())
@@ -57,7 +69,7 @@ def test_a_release_without_an_installer_points_to_its_page():
 
 def test_this_copy_knows_its_repository_and_version():
     from eu4unitgen import __version__
-    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.3"
+    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.4"
     assert updates.expected_sha256(f"{'b' * 64} *a.exe\n", "a.exe") == "b" * 64
 
 

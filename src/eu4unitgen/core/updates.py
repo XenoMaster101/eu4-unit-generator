@@ -5,11 +5,11 @@ details).
 The repository is the settings file's ``update_repo`` ("owner/name"), else the one the release was built from
 (``release.json`` beside this package, written by packaging/windows/build_package.py), else ``REPO``.
 
-Installing an update: the release's ``eu4unitgen-<v>-setup.exe`` is downloaded into the app's temp folder, its SHA-256
-checked against the release's ``SHA256SUMS.txt`` (a damaged or changed download is refused), then run with the install
-folder given (``/DIR``) once the app has closed: it upgrades in place (the app replaced; settings, work, the library,
-Blender and the AI downloads kept) and starts the app again. Files downloaded this way carry no "from the internet"
-mark, so Windows doesn't show its unsigned-download warning for them (only the first download from a browser does)."""
+Installing an update: the release's ``eu4unitgen-<v>-windows.zip`` is downloaded into the app's temp folder, its
+SHA-256 checked against the release's ``SHA256SUMS.txt`` (a damaged or changed download is refused), unpacked, and
+its ``install.ps1`` run into this install's folder once the app has closed: it upgrades in place (the app replaced;
+settings, work, the library, Blender and the AI downloads kept) and starts the app again. Not setup.exe: Smart App
+Control blocks unsigned installers; install.ps1 runs on the app's own Python, which is signed."""
 from __future__ import annotations
 
 import hashlib
@@ -25,7 +25,9 @@ from pathlib import Path
 REPO = ""  # fallback "owner/name" (release.json normally gives it)
 API = "https://api.github.com/repos/{repo}/releases/latest"
 PAGE = "https://github.com/{repo}/releases"
-SETUP = re.compile(r"^eu4unitgen-[\d.]+-setup\.exe$")
+# the release's zip, not its setup.exe: Smart App Control blocks an unsigned setup.exe outright (1.0.3, the user's
+# PC), while the zip's install.ps1 runs on the app's own signed Python
+SETUP = re.compile(r"^eu4unitgen-[\d.]+-windows\.zip$")
 SUMS = "SHA256SUMS.txt"
 
 
@@ -161,25 +163,48 @@ def download(u: Update, dest: Path | None = None, progress=None, opener=_open) -
     return out
 
 
-def install_command(setup: Path, root: Path | None) -> list[str]:
-    """The installer run for an in-place update: its progress window only, into this install's folder, the app
-    started again afterwards."""
-    cmd = [str(setup), "/SILENT", "/NOCANCEL", "/RELAUNCH=1"]
-    if root:
-        cmd.append(f"/DIR={root}")
-    return cmd
+def unpack(package: Path) -> Path:
+    """The release zip unpacked beside itself -> its ``files`` folder (install.ps1, the wheel, Python)."""
+    import shutil
+    import zipfile
+    dest = package.with_suffix("")
+    shutil.rmtree(dest, ignore_errors=True)
+    with zipfile.ZipFile(package) as z:
+        z.extractall(dest)
+    files = next(dest.glob("*/files"), None)
+    if files is None or not (files / "install.ps1").is_file():
+        raise ValueError(f"{package.name} has no installer in it")
+    return files
 
 
-def launch(setup: Path) -> None:
-    """Start the installer detached (it waits for this app to close: the app quits right after)."""
+def install_command(files: Path, root: Path, pid: int, pythonw: Path) -> list[str]:
+    """PowerShell, hidden: wait for this app (``pid``) to close, run the release's install.ps1 into ``root`` (in
+    place: it sees its own app\\layout.json), then start the app again."""
+    q = lambda p: "'" + str(p).replace("'", "''") + "'"  # noqa: E731 - a PowerShell single-quoted string
+    script = (f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue; "
+              f"& powershell -NoProfile -ExecutionPolicy Bypass -File {q(files / 'install.ps1')} -Quiet -NoLaunch "
+              f"-Root {q(root)}; "
+              f"Start-Process -FilePath {q(pythonw)} -ArgumentList '-m','eu4unitgen.gui' -WorkingDirectory {q(root)}")
+    return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", script]
+
+
+def launch(package: Path) -> None:
+    """Unpack the release and start its installer detached; it waits for this app to close (the app quits right
+    after) and starts it again."""
+    import os
     from eu4unitgen.core import layout
     if sys.platform != "win32":
         raise OSError("updates install themselves on Windows only: download the new version from its page")
+    root = layout.root()
+    if root is None:
+        raise OSError("this copy isn't an installed app (no install folder): download the new version from its page")
+    files = unpack(Path(package))
+    pythonw = root / "app" / "python" / "pythonw.exe"
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen(install_command(setup, layout.root()), creationflags=flags, close_fds=True)  # noqa: S603
+    subprocess.Popen(install_command(files, root, os.getpid(), pythonw), creationflags=flags, close_fds=True)  # noqa: S603
 
 
-MUTEX = "eu4unitgen_running"  # held while the app runs; the installer waits for it to go (setup.iss)
+MUTEX = "eu4unitgen_running"  # held while the app runs; setup.exe waits for it to go (setup.iss)
 
 
 def hold_running_mutex():

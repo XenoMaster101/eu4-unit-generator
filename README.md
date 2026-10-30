@@ -24,7 +24,7 @@ Download **`eu4unitgen-1.0.0-setup.exe`** from the [Releases page](https://githu
    - **Optional, only to make parts from pictures** (about 40 GB): **Windows Subsystem for Linux** (Windows asks for permission, then restart), **Ubuntu in WSL**, **TRELLIS.2** (about 40 minutes), **the Windows AI environment**, and **the AI weights**. One of them, DINOv3, needs you to accept its licence on Hugging Face first: the step's buttons open its page and the token page; paste a read token in the box (it's used for that download only and never saved).
 3. On the **Setup** screen, check the **EU4 install** and the **EU4 mod folder** (usually found for you) and press **Save settings**.
 
-The release also has a zip (`eu4unitgen-1.0.0-windows.zip`) for PCs with **Smart App Control** turned on, which refuses unsigned installers outright. Unzip it and double-click **Install EU4 Unit Generator**.
+**Smart App Control** (Windows 11) blocks unsigned installers outright, with no Run anyway. On those PCs use the zip (`eu4unitgen-<version>-windows.zip`): right-click it → **Properties** → tick **Unblock** → **OK**, unzip it, and double-click **Install EU4 Unit Generator**. It runs on the app's own Python, which is signed, and installs or updates in place exactly like setup.exe.
 
 Everything lives in the folder you chose:
 
@@ -41,7 +41,7 @@ Outside that folder the app adds only its shortcuts and its entry in Windows' Ap
 
 ## Updating
 
-**Help > Check for updates** looks for a newer release, shows what changed, and **Download and install** updates the app in place: it downloads the new installer, checks it against the release's checksums, closes the app, updates it and starts it again. No uninstalling: your settings, units, library, Blender and AI downloads stay. Running a newer setup.exe yourself does the same: it finds the installed copy and updates it.
+**Help > Check for updates** looks for a newer release, shows what changed, and **Download and install** updates the app in place: it downloads the new version, checks it against the release's checksums, closes the app, updates it and starts it again (this works with Smart App Control on). No uninstalling: your settings, units, library, Blender and AI downloads stay. Running a newer setup.exe yourself does the same: it finds the installed copy and updates it.
 
 ## Uninstall
 

@@ -89,7 +89,7 @@ class HelpPage(Page):
         self.update_text.setOpenExternalLinks(True)
         lay.addWidget(self.update_text)
         self.update_btn = primary("Download and install the update", self.install_update,
-                                  "Downloads the new installer (its checksum is checked), closes the app, updates it in "
+                                  "Downloads the new version (its checksum is checked), closes the app, updates it in "
                                   "place and starts it again")
         self.update_btn.setVisible(False)
         lay.addWidget(self.update_btn, 0, Qt.AlignLeft)
