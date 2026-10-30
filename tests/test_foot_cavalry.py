@@ -53,3 +53,16 @@ def test_starter_units_and_extras_are_read_from_their_folders(tmp_path, monkeypa
     assert [u["name"] for u in us] == ["byz"] and us[0]["starter"]
     assert "mambo_import_test" not in library.STARTER and "mambo_import_test" in library.EXTRAS
     assert "byzantine_cataphract_cavalry" in library.STARTER_UNITS and "tracen_academy" in library.EXTRA_UNITS
+
+
+def test_a_starter_parts_own_candidate_is_used_in_place(tmp_path):
+    # the fresh-install test (Release 1.0 R5): a starter part's one candidate is its raw.glb; picking it copied the
+    # file onto itself (shutil.SameFileError) and the default library never fitted on a new PC
+    import json
+    from eu4unitgen.ref3d import flow
+    tr = tmp_path / "trellis"
+    tr.mkdir()
+    (tr / "raw.glb").write_bytes(b"glb")
+    (tr / "candidates.json").write_text(json.dumps({"candidates": [{"glb": str(tr / "raw.glb")}]}), encoding="utf-8")
+    flow.use_candidate(tmp_path, 0)
+    assert (tr / "raw.glb").read_bytes() == b"glb"

@@ -291,7 +291,10 @@ def use_candidate(folder: Path, index: int) -> None:
     c = candidates(folder)
     if c is None:
         return
-    shutil.copyfile(c["candidates"][index]["glb"], Path(folder) / "trellis" / "raw.glb")
+    src, dst = Path(c["candidates"][index]["glb"]), Path(folder) / "trellis" / "raw.glb"
+    if dst.is_file() and src.is_file() and src.samefile(dst):  # a starter part: its one candidate is raw.glb itself
+        return
+    shutil.copyfile(src, dst)
 
 
 def soldier_glb(req: dict) -> Path:
