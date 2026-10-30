@@ -34,7 +34,9 @@ if (-not $Root) { $Root = Default-Root }
 function Check-Root($root) {
     if (-not (Test-Path $root)) { return $null }
     if (Test-Path (Join-Path $root "app\layout.json")) { return $null }  # ours: an update
-    if (@(Get-ChildItem $root -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+    # ours after an uninstall that kept the user's work (its default): only our own folders are left
+    $other = @(Get-ChildItem $root -Force -ErrorAction SilentlyContinue | Where-Object { $Folders -notcontains $_.Name })
+    if ($other.Count -gt 0) {
         return "$root already has other files in it. Choose an empty folder or a new one."
     }
     return $null

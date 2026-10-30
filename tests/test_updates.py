@@ -57,7 +57,7 @@ def test_a_release_without_an_installer_points_to_its_page():
 
 def test_this_copy_knows_its_repository_and_version():
     from eu4unitgen import __version__
-    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.0"
+    assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.1"
     assert updates.expected_sha256(f"{'b' * 64} *a.exe\n", "a.exe") == "b" * 64
 
 

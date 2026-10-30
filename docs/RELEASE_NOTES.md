@@ -2,6 +2,11 @@
 
 Each version's section is the text of its GitHub release and what the app's Help → Check for updates shows.
 
+## 1.0.1
+
+- Reinstalling after an uninstall that kept your work: the installer refused the folder ("already has other files in
+  it"). It now installs there and your work is kept.
+
 ## 1.0.0
 
 The first public release.
