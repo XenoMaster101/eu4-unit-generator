@@ -37,9 +37,9 @@ def test_an_imported_part_records_its_licence_and_skips_the_ai(tmp_path, monkeyp
     assert req["image"] is None and req["source"]["licence"] == "cc_by" and req["source"]["file"] == "knight.glb"
     assert req["rights"] == "3D model under CC BY, credit: Knight by Jane Doe, example.org" == subj["rights"]
     assert subj["pipeline"] == "import" and subj["source"]["credit"] == "Knight by Jane Doe, example.org"
-    assert flow.stages_of("soldier", req) == ("import", "build", "finish", "preview")
+    assert flow.stages_of("soldier", req) == ("import", "build", "finish", "preview", "checks")
     assert flow.stages_of("soldier") == flow.STAGES  # a picture's run as before
-    assert set(flow.estimates("soldier", req)) == {"import", "build", "finish", "preview"}
+    assert set(flow.estimates("soldier", req)) == {"import", "build", "finish", "preview", "checks"}
     assert "import" in flow.RUN and "import" in flow.LABELS and "import" in flow.EXPLAIN
     with pytest.raises(ValueError, match="only a soldier, horse or gun"):
         flow.new_request("knights", None, "", "cavalry", model={"path": str(m), "licence": "own"})

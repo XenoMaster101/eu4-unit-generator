@@ -275,7 +275,7 @@ def report(manifest: dict, kind: str, reference_fg: Path | None, game_view: Path
     return {"measures": m, "summary": summary, "verdict": worst}
 
 
-TITLES = {"silhouette": "Outline vs the reference", "deformation": "Deformation vs vanilla", "parts": "Parts",
+TITLES = {"checks": "Checked before showing", "silhouette": "Outline vs the reference", "deformation": "Deformation vs vanilla", "parts": "Parts",
           "texture": "Texture", "map_zoom": "At map zoom", "seating": "Seated on the horse",
           "joints": "Joints inside the body", "animation": "In its animations", "muzzle": "The muzzle", "wheels": "The wheels", "budget": "Size"}  # the last three: a gun's (Track A)
 

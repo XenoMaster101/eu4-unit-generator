@@ -676,7 +676,7 @@ def joints_report(co, vanilla_co, bones):
             "legs_off": {s: [round(float(np.linalg.norm(v)), 3) for v in d] for s, d in offs.items()}}
 
 
-def free_hand(co, keep, bones, side):
+def free_hand(co, keep, bones, side, reach=9.0):
     """An empty hand: the arm's far end along vanilla's shoulder-to-hand direction (within 45 degrees of it, the
     farthest 3% of the arm's points), or None."""
     sh = np.array(bones[f"{side}_shoulder"])
@@ -685,7 +685,7 @@ def free_hand(co, keep, bones, side):
     rel = co - sh
     dist = np.linalg.norm(rel, axis=1)
     cos = (rel @ d) / np.maximum(dist, 1e-9)
-    arm = keep & (cos > np.cos(np.radians(45))) & (dist > 1.5) & (dist < 9.0)
+    arm = keep & (cos > np.cos(np.radians(45))) & (dist > 1.5) & (dist < reach)  # (prechecks widens it on a miss)
     if arm.sum() < 30:
         return None
     t = rel[arm] @ d
@@ -909,7 +909,7 @@ def main():
             continue
         # an empty hand to vanilla's hand too (the user, after T38: the English soldier's free arm hung about 20 degrees
         # under vanilla's, his forearm 0.19 from his side at the wrist against vanilla's 1.07)
-        grip = free_hand(co, ~lance & ~shield, bones, side)
+        grip = free_hand(co, ~lance & ~shield, bones, side, float(a.get("hand_reach", 9.0)))
         if grip is not None:
             target = np.array(bones[f"{side}_hand"], dtype=np.float64)
             if a.get("keep_length"):  # an imported model's arm keeps its own length (1:1): turned to point where the

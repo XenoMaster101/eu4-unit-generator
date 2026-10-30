@@ -32,10 +32,11 @@ import time
 import traceback
 from pathlib import Path
 
-STAGES = ("cutout", "trellis", "build", "finish", "preview")
+STAGES = ("cutout", "trellis", "build", "finish", "preview", "checks")
 LABELS = {"import": "Prepare your 3D model", "cutout": "Cut the subject out of the image", "trellis": "Make two 3D models (TRELLIS.2) and pick the better",
           "build": "Build the game model (shape, parts, textures, checks)", "finish": "Apply your edits",
-          "preview": "Stage it and draw the result sheet", "assemble": "Put the parts together and check them"}
+          "preview": "Stage it and draw the result sheet", "assemble": "Put the parts together and check them",
+          "checks": "Check it before showing it (up to 3 passes)"}
 # what each stage does and why, in plain words (the Make it step and the Library show these)
 EXPLAIN = {"import": "Your model is joined into one, stood up and turned to face the front, its colours put on one "
                      "texture, and drawn from the front as its reference picture. It takes the place of the AI's "
@@ -48,6 +49,9 @@ EXPLAIN = {"import": "Your model is joined into one, stood up and turned to face
            "finish": "Your edits (colour, brightness, plume and so on) are applied to a copy.",
            "preview": "The unit is put into a test copy of the game's files and drawn the way the game draws it, next to "
                       "the game's own unit, and checked.",
+           "checks": "The app checks what it built (arms down, limbs on the right bones, parts rigid, weapons in hand, "
+                     "clipping, folds). Anything it knows how to fix is fixed and rebuilt, up to 3 passes, before "
+                     "you see it.",
            "assemble": "Your parts are put together for each tier (the soldier seated on the horse, or on foot) and "
                        "checked against the game's rules. No AI is needed."}
 GPU = {"trellis", "build"}
@@ -57,9 +61,9 @@ NEED_RAM = {"cutout": 4.0, "trellis": 14.0, "build": 8.0}
 RAM_POLL = 30.0
 KIND_STAGES = {"cavalry": ("build", "finish", "preview"),  # the rest run every stage
                "unit": ("assemble", "preview")}  # a unit from library parts (ref3d.assemble): no AI
-IMPORTED = ("import", "build", "finish", "preview")  # a part from the user's own 3D model (ref3d.importer)
+IMPORTED = ("import", "build", "finish", "preview", "checks")  # a part from the user's own 3D model (ref3d.importer)
 # horse 2's and the cataphract rider's runs (2026-10-23/24) until this machine has its own
-DEFAULT_SECONDS = {"import": 60, "cutout": 45, "trellis": 910, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150,
+DEFAULT_SECONDS = {"checks": 15, "import": 60, "cutout": 45, "trellis": 910, "build_horse": 95, "build_rider": 380, "finish": 5, "preview": 150,
                    "assemble": 40}
 KINDS = ("horse", "soldier", "cavalry", "rider", "gun")
 FOOT_TYPE = {"horse": "cavalry", "soldier": "infantry", "cavalry": "cavalry", "rider": "cavalry",
@@ -332,6 +336,9 @@ def stage_build(folder: Path, req: dict, cfg) -> dict:
         soldier = req["kind"] == "soldier"
         from eu4unitgen.ref3d import base_body
         body = base_body.current() if soldier else None  # Track W: the outfit over the base body, once it passed
+        auto = (req.get("options") or {}).get("auto_fix") or {}  # prechecks' fixes for this run (ref3d.prechecks)
+        if auto:
+            opts["cfg"] = {**(opts.get("cfg") or {}), **auto}
         if "country_mask" not in opts:  # the request's choice (the soldier's build ignored it: always on)
             opts["country_mask"] = bool((req.get("options") or {}).get("country_mask", True))
         m = trellis.process_rider(glb, folder / "trellis" / "game", palette_from=horse_textures(req.get("horse")),
@@ -552,12 +559,57 @@ def quality_title(key: str) -> str:
     return TITLES.get(key, key)
 
 
+def stage_checks(folder: Path, req: dict, cfg) -> dict:
+    """The checks before presentation (``ref3d.prechecks``): measured; a failure with a known fix gets it (a build
+    option kept in the request's ``auto_fix``) and build, finish and preview run again; at most ``PASSES`` passes.
+    -> the record (also ``preview/checks.json`` and the quality report's "checks" line)."""
+    from eu4unitgen.ref3d import prechecks
+    folder = Path(folder)
+    if body_kind(req["kind"]) != "rider":
+        return {"skipped": f"no checks for a {req['kind']} yet"}
+
+    def measure() -> dict:
+        v = folder / "finished" if (folder / "finished" / "manifest.json").is_file() else _latest(folder / "trellis" / "game")
+        m = json.loads((Path(v) / "manifest.json").read_text(encoding="utf-8"))
+        foot = sorted((folder / "preview" / "foot").glob("deform_*/deform.json"))
+        if foot:  # its folds under the animations it plays on foot (the build's own check is the rider's)
+            d = json.loads(foot[0].read_text(encoding="utf-8"))
+            m["deform"] = {who: {a: {"flips": x.get("flips_visible", x["flips"])} for a, x in d[k]["anims"].items()}
+                           for who, k in (("ours", "ours"), ("vanilla", "vanilla")) if k in d}
+        rp = folder / "preview" / "review" / "review.json"
+        ip = folder / "trellis" / "import.json"
+        return prechecks.run(m, json.loads(rp.read_text(encoding="utf-8")) if rp.is_file() else None,
+                             json.loads(ip.read_text(encoding="utf-8")) if ip.is_file() else None)
+    passes, fixes = [measure()], []
+    while passes[-1]["fixable"] and len(passes) < prechecks.PASSES:
+        r = request(folder)
+        opts = (r.get("options") or {}).get("auto_fix") or {}
+        new = prechecks.next_options(dict(opts), passes[-1]["fixable"])
+        if new == opts:
+            break
+        r.setdefault("options", {})["auto_fix"] = new
+        (folder / "request.json").write_text(json.dumps(r, indent=1), encoding="utf-8")
+        fixes.append({"pass": len(passes) + 1, "fixed": ", ".join(passes[-1]["fixable"]), "options": new})
+        for s in ("build", "finish", "preview"):
+            RUN[s](folder, request(folder), cfg)
+        passes.append(measure())
+    sm = prechecks.summary(passes, fixes)
+    (folder / "preview" / "checks.json").write_text(json.dumps({"passes": passes, "fixes": fixes, "summary": sm},
+                                                               indent=1), encoding="utf-8")
+    qp = folder / "preview" / "quality.json"
+    if qp.is_file():  # the report gains the line
+        q = json.loads(qp.read_text(encoding="utf-8"))
+        q.setdefault("measures", {})["checks"] = {"verdict": sm["verdict"], "text": sm["text"]}
+        qp.write_text(json.dumps(q, indent=1), encoding="utf-8")
+    return {"passes": len(passes), "fixed": [f["fixed"] for f in fixes], "verdict": sm["verdict"]}
+
+
 def stage_import(folder: Path, req: dict, cfg) -> dict:
     from eu4unitgen.ref3d import importer
     return importer.stage_import(folder, req, cfg)
 
 
-RUN = {"import": stage_import, "cutout": stage_cutout, "trellis": stage_trellis, "build": stage_build, "finish": stage_finish,
+RUN = {"checks": stage_checks, "import": stage_import, "cutout": stage_cutout, "trellis": stage_trellis, "build": stage_build, "finish": stage_finish,
        "preview": stage_preview}
 
 
