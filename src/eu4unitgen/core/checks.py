@@ -169,10 +169,14 @@ def check_wsl() -> Check:
         return Check("wsl", False, "WSL isn't installed.",
                      "Open the Setup screen and press \"Install WSL\" (it asks for administrator rights; Windows then "
                      "needs a restart).")
-    rc, out = _run(cfg.wsl_base() + ["-e", "bash", "-lc", f"test -x {sh_python(cfg.wsl_python)} && echo ok"], 60)
+    # its GPU extensions load, not only its Python there (1.0.6, the user's PC: a TRELLIS.2 build that stopped half
+    # way showed as ready, and the first run failed on "No module named 'o_voxel'")
+    rc, out = _run(cfg.wsl_base() + ["-e", "bash", "-lc", f"cd /tmp && {sh_python(cfg.wsl_python)} -c "
+                                     "'import cumesh, flex_gemm, o_voxel' && echo ok"], 120)
     if "ok" not in out:
-        return Check("wsl", False, "WSL is there, but the TRELLIS.2 environment isn't set up in it.",
-                     "Open Setup and run the AI pack's steps from Ubuntu on (TRELLIS.2 takes about 40 minutes).")
+        return Check("wsl", False, "WSL is there, but TRELLIS.2 isn't set up in it, or its build didn't finish.",
+                     "Open Setup and run step 5, TRELLIS.2, again (it builds what's missing; about 40 minutes). "
+                     "Close games and browsers first: the build needs a lot of memory.")
     return Check("wsl", True, "WSL and the TRELLIS.2 environment are ready.")
 
 

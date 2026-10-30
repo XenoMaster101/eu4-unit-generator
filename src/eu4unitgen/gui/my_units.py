@@ -604,6 +604,11 @@ class UnitDetail(QWidget):
     def _delete(self) -> None:
         from eu4unitgen.ref3d import flow
         f = Path(self.folder)
+        if not (f / "request.json").is_file():  # already deleted (a second click, another window): back to the list
+            if f.is_dir() and flow.root().resolve() in f.resolve().parents and not any(f.glob("*/*")):
+                shutil.rmtree(f, ignore_errors=True)
+            self.show_message("It's already deleted.")
+            return self.screen.back()
         req = flow.request(f)
         if (flow.status(f) or {}).get("state") == "running":
             return self.show_message("It's being made right now; wait until it's finished (or paused).", error=True)
