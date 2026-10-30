@@ -59,3 +59,14 @@ def test_this_copy_knows_its_repository_and_version():
     from eu4unitgen import __version__
     assert updates.built_repo() == "XenoMaster101/eu4-unit-generator" and __version__ == "1.0.0"
     assert updates.expected_sha256(f"{'b' * 64} *a.exe\n", "a.exe") == "b" * 64
+
+
+def test_every_setup_step_lists_its_downloads_before_it_runs():
+    from eu4unitgen.core import setup
+    keys = {s.key for s in setup.steps()} - {"ai_folder"}
+    assert keys <= {d.step for d in setup.DOWNLOADS}
+    assert all(d.size_mb > 0 and d.licence and d.source and d.where for d in setup.DOWNLOADS)
+    required = {d.step for d in setup.DOWNLOADS if d.required}
+    assert required == {"installer", "blender", "io_pdx_mesh"}  # the AI is only for parts from pictures
+    html = setup.downloads_html()
+    assert "Total:" in html and "required" in html and "DINOv3 License" in html
